@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
-import { pollAiTask } from '../api/aiTask'
+import { pollAiTask, runAiTaskJob, type AiTaskProgress } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 import { useTranslation } from 'react-i18next'
@@ -24,6 +24,31 @@ import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
 const { Option } = Select
+
+/** 把后台任务的 progress 结构字段翻成界面文案（不直接用后端的中文 message） */
+function describeProgress(p: AiTaskProgress, t: (k: string, o?: any) => string): string {
+  switch (p.phase) {
+    case 'svg':
+      return t('pmProgSvg')
+    case 'image':
+      return t('pmProgImage', {
+        model: p.model || '-',
+        attempt: p.attempt ?? 1,
+        maxAttempts: p.max_attempts ?? 3,
+      })
+    case 'download':
+      return t('pmProgDownload')
+    case 'fallback':
+      return t('pmProgFallback')
+    case 'media':
+      if (p.total) return t('pmProgMedia', { done: p.done ?? 0, total: p.total })
+      return t('pmProgWorking')
+    case 'done':
+      return t('pmProgDone')
+    default:
+      return t('pmProgWorking')
+  }
+}
 
 const DIFFICULTY_COLORS: Record<string, string> = {
   easy: 'green',
@@ -289,43 +314,62 @@ const QuestionBankPage: React.FC = () => {
   // ── 配图管理（粒度 loading 状态） ──
   const [svgLoading, setSvgLoading] = useState(false)
   const [wanxiangLoading, setWanxiangLoading] = useState(false)
+  const [mediaProgress, setMediaProgress] = useState('')
 
   const handleManageMedia = (q: QuestionInfo) => {
     setMediaQuestion(q)
+    setMediaProgress('')
     setMediaModal(true)
+  }
+
+  /**
+   * 配图类动作统一走后台任务 + 轮询进度。
+   *
+   * 为什么不再是同步 HTTP：万相同步等待叠加"最多 3 个模型 × 3 次重试"能到几分钟，
+   * 前端那条 300s 的长连接在反代下必断；断连后教师看到"失败"，图其实已经生成并计费，
+   * 再点一次就是第二张图。改成任务后：连接只用于提交，进度可见，重复点击由后端
+   * dedupe_key 挡在同一张图上。
+   */
+  const runMediaTask = async (
+    url: string,
+    opts: { okKey: string; failKey: string; setUploading?: (v: boolean) => void },
+  ) => {
+    if (!mediaQuestion) return
+    const { okKey, failKey, setUploading } = opts
+    setUploading?.(true)
+    setMediaProgress(t('pmProgWorking'))
+    try {
+      await runAiTaskJob(url, null, (p) => setMediaProgress(describeProgress(p, t)))
+      message.success(t(okKey))
+      await loadQuestions()
+      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      if (e?.aiTaskTimeout) {
+        // 超时 ≠ 失败：后台还在生成，提示"失败"会诱导重复点击重复烧配额
+        message.warning(t('generateStillRunning'))
+        loadQuestions()
+      } else {
+        message.error(e?.response?.data?.detail || e?.message || t(failKey))
+      }
+    } finally {
+      setMediaProgress('')
+      setUploading?.(false)
+    }
   }
 
   const handleRegenerateSVG = async () => {
     if (!mediaQuestion) return
-    setSvgLoading(true)
-    try {
-      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-svg`, null, { timeout: 180000 })
-      message.success(t('svgRegenerated'))
-      await loadQuestions()
-      // 更新弹窗中的 mediaQuestion
-      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
-      setMediaQuestion(data)
-    } catch (e: any) {
-      message.error(e?.response?.data?.detail || t('svgGenFail'))
-    } finally {
-      setSvgLoading(false)
-    }
+    await runMediaTask(`/api/questions/${mediaQuestion.id}/generate-svg-async`, {
+      okKey: 'svgRegenerated', failKey: 'svgGenFail', setUploading: setSvgLoading,
+    })
   }
 
   const handleGenerateImage = async () => {
     if (!mediaQuestion) return
-    setWanxiangLoading(true)
-    try {
-      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-image`, null, { timeout: 300000 })
-      message.success(t('imageGenerated'))
-      await loadQuestions()
-      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
-      setMediaQuestion(data)
-    } catch (e: any) {
-      message.error(e?.response?.data?.detail || t('imageGenFail'))
-    } finally {
-      setWanxiangLoading(false)
-    }
+    await runMediaTask(`/api/questions/${mediaQuestion.id}/generate-image-async`, {
+      okKey: 'imageGenerated', failKey: 'imageGenFail', setUploading: setWanxiangLoading,
+    })
   }
 
   const handleDeleteSVG = async () => {
@@ -343,16 +387,10 @@ const QuestionBankPage: React.FC = () => {
 
   const handleGenerateMedia = async (key: string) => {
     if (!mediaQuestion) return
-    // PlaceholderManager 内部管理 per-key loading，父组件仅调用接口
-    try {
-      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-media/${key}`, null, { timeout: 320000 })
-      message.success(t('imageGenerated'))
-      await loadQuestions()
-      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
-      setMediaQuestion(data)
-    } catch (e: any) {
-      message.error(e?.response?.data?.detail || t('imageGenFail'))
-    }
+    // per-key loading 仍由 PlaceholderManager 内部管理，父组件只负责接口与进度文案
+    await runMediaTask(`/api/questions/${mediaQuestion.id}/generate-media/${key}/async`, {
+      okKey: 'imageGenerated', failKey: 'imageGenFail',
+    })
   }
 
   const handleUploadMedia = async (key: string, file: File) => {
@@ -1376,6 +1414,7 @@ const QuestionBankPage: React.FC = () => {
             onGenerateMedia={handleGenerateMedia}
             onUploadMedia={handleUploadMedia}
             onDeleteMedia={handleDeleteMedia}
+            progressText={mediaProgress}
           />
         )}
       </Modal>

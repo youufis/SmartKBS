@@ -5,6 +5,7 @@ AI 异步任务管理器
 避免同步阻塞 FastAPI 工作线程。
 """
 import asyncio
+import contextvars
 import json
 import time
 import uuid
@@ -55,7 +56,7 @@ class TooManyAITasks(RuntimeError):
 class AITask:
     """单个 AI 任务"""
     def __init__(self, task_id: str, description: str, owner_username: str = "",
-                 dedupe_key: str = ""):
+                 dedupe_key: str = "", progress: Optional[dict[str, Any]] = None):
         self.task_id = task_id
         self.description = description
         # 去重键: 同一用户的同键任务不重复调模型(见 create_task)
@@ -63,6 +64,9 @@ class AITask:
         # S5: 任务归属者(创建时自动取自请求上下文), 查询接口据此鉴权
         self.owner = owner_username or ""
         self.status = TaskStatus.PENDING
+        # 可选进度（长任务用，例如"配图 2/5"）。为 None 时 to_dict 里不出现这个键，
+        # 所以现有消费方（pollAiTask / resources / interaction 状态端点）的响应结构不变。
+        self.progress: Optional[dict[str, Any]] = dict(progress) if progress else None
         self.result: Any = None
         self.error: Optional[str] = None
         self.created_at = time.time()
@@ -77,6 +81,8 @@ class AITask:
             "error": self.error,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
+            # 仅当任务主动上报过进度才附带
+            **({"progress": dict(self.progress)} if self.progress else {}),
             # S5: 供查询端点做归属校验, 返回前会被 pop 掉, 不下发给客户端
             "owner": self.owner,
         }
@@ -180,6 +186,8 @@ class AITaskManager:
             return
 
         task.status = TaskStatus.RUNNING
+        # 把 task_id 放进上下文：任务体内 report_progress() 才知道往哪个任务上写
+        token = _current_task_id.set(task_id)
         try:
             result = await coro_factory()
             task.result = result
@@ -190,6 +198,7 @@ class AITaskManager:
             task.status = TaskStatus.FAILED
             logger.error(f"AI 后台任务失败: {task_id} - {e}")
         finally:
+            _current_task_id.reset(token)
             task.completed_at = time.time()
             # 延迟清理（捕获取消异常，避免 reload 时崩溃）
             try:
@@ -201,6 +210,20 @@ class AITaskManager:
                 # 服务器关闭/reload 时忽略清理任务取消
                 pass
 
+    def update_progress(self, task_id: str, fields: dict[str, Any]) -> None:
+        """合并写入任务进度。任务不存在（已按 TTL 清理）时静默忽略"""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        clean = {k: v for k, v in (fields or {}).items()
+                 if v is not None and isinstance(v, (int, float, str, bool, list, dict))}
+        if not clean:
+            return
+        if task.progress is None:
+            task.progress = {}
+        task.progress.update(clean)
+        task.progress["updated_at"] = time.time()
+
     def get_task(self, task_id: str) -> Optional[AITask]:
         """获取任务状态"""
         return self._tasks.get(task_id)
@@ -209,6 +232,29 @@ class AITaskManager:
         """获取任务状态字典"""
         task = self.get_task(task_id)
         return task.to_dict() if task else None
+
+
+# 当前后台任务的 task_id（任务体内可读，用于上报进度）
+_current_task_id: contextvars.ContextVar[str] = contextvars.ContextVar("ai_task_id", default="")
+
+
+def current_task_id() -> str:
+    """取当前后台任务的 task_id；不在任务上下文中调用返回空串"""
+    try:
+        return _current_task_id.get() or ""
+    except (LookupError, TypeError):
+        return ""
+
+
+def report_progress(**fields: Any) -> None:
+    """任务内上报进度。
+
+    同步端点（没有后台任务上下文）调用时是安全的空操作 —— 这样生图/批量配图这类
+    底层函数可以无条件上报进度，不必知道自己是被同步还是异步路径调用的。
+    """
+    tid = current_task_id()
+    if tid:
+        task_manager.update_progress(tid, fields)
 
 
 # 全局单例

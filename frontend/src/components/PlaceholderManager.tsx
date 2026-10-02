@@ -49,6 +49,8 @@ interface PlaceholderManagerProps {
   onDeleteMedia?: (key: string) => Promise<void>
   /** 万相生图（直接为试题生成配图） */
   onGenerateImage?: () => Promise<void>
+  /** 后台任务进度文案（异步生图时由父组件传入，空则不显示） */
+  progressText?: string
 }
 
 const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
@@ -64,6 +66,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
   onUploadMedia,
   onDeleteMedia,
   onGenerateImage,
+  progressText = '',
 }) => {
   const { t } = useTranslation('exam')
   const [uploadingKey, setUploadingKey] = useState<string | null>(null)
@@ -108,8 +111,25 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
   const showSvgSection = hasSvg === 1 || !!onRegenerateSVG
   const showImageSection = entries.length > 0
 
+  // 进度条：异步生图（后台任务）时显示，没有它教师只能盯着转圈猜进行到哪一步
+  const progressLine = progressText ? (
+    <div style={{
+      marginBottom: 10, padding: '6px 10px', borderRadius: 6,
+      background: '#e6f4ff', color: '#1677ff', fontSize: 13,
+      display: 'flex', alignItems: 'center', gap: 8,
+    }}>
+      <Spin size="small" />
+      <span>{progressText}</span>
+    </div>
+  ) : null
+
   if (!showSvgSection && !showImageSection) {
-    return <Empty description={t('pmNoFigure')} />
+    return (
+      <div>
+        {progressLine}
+        <Empty description={t('pmNoFigure')} />
+      </div>
+    )
   }
 
   /** 渲染单条配图条目 */
@@ -219,6 +239,8 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
 
   return (
     <div>
+      {progressLine}
+
       {/* SVG 配图区域 */}
       {showSvgSection && (
         <Card

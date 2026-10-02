@@ -341,9 +341,75 @@ class _InternalRequest:
         self.client = None
 
 
-async def _submit_ai_task(corps, description: str) -> str:
+async def _submit_ai_task(corps, description: str, owner: str | None = None,
+                          dedupe_key: str | None = None,
+                          reuse_completed: bool = True) -> str:
+    """提交 AI 后台任务。
+
+    新增的两个可选参数只在配图类端点使用，默认值保持旧行为：
+    - owner: 明确任务归属（后台执行时 request 上下文已经不在了）
+    - dedupe_key + reuse_completed=False: 同一个题目的同一个动作，进行中直接复用
+      同一个 task（挡住连点造成的重复生图计费），但已完成的旧任务不复用
+      —— 否则「再点一次重新生成」会拿到上一轮的回执，看起来生成了、实际没跑。
+    """
     from backend.ai_task_manager import task_manager
-    return await task_manager.create_task(description=description, coro_factory=corps)
+    return await task_manager.create_task(
+        description=description, coro_factory=corps,
+        owner_username=owner, dedupe_key=dedupe_key, reuse_completed=reuse_completed,
+    )
+
+
+def _precheck_media_action(question_id: int, username: str, role: int, kind: str,
+                           placeholder_key: str | None = None) -> None:
+    """异步端点的提交前校验：能在 HTTP 阶段判定的一律当场返回
+
+    异步化最容易制造的新问题就是把"参数错/权限错/功能没开"塞进后台任务里，
+    教师只能看到一条含义不明的「任务失败」。这里把可预判的分支前移：
+    题目归属、生图开关、占位符是否存在且描述完整、题干是否够长、API Key 是否配置。
+    """
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and role != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+
+    if kind == "svg":
+        api_key, _ = get_api_keys(username)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="API Key 未配置")
+        return
+
+    if not get_config_value("IMAGE_GEN_ENABLED", True):
+        raise HTTPException(status_code=400,
+                            detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
+
+    if kind == "image":
+        if len((row["question_text"] or "")[:200]) < 10:
+            raise HTTPException(status_code=400, detail="题干过短，无法生成配图")
+        return
+
+    if kind == "media":
+        placeholders, _files = _question_media_rows(row)
+        target = next((ph for ph in placeholders if ph.get("key") == placeholder_key), None)
+        if not target:
+            raise HTTPException(status_code=404, detail="占位符不存在")
+        if not str(target.get("description") or "").strip():
+            raise HTTPException(status_code=400,
+                                detail="该占位符缺少图片描述，请改用「万相生图」或直接上传图片")
+
+
+def _as_media_task(factory):
+    """把配图动作包成后台任务体：HTTPException 转成可读的失败原因
+
+    后台任务的 error 字段是直接展示给教师的，带 "502: " 这种状态码前缀既难读
+    也没法本地化，所以在这里统一降级成纯文案。
+    """
+    async def _run():
+        try:
+            return await factory()
+        except HTTPException as e:
+            raise RuntimeError(str(e.detail)) from None
+    return _run
 
 
 # ── AI 生成试题 ──
@@ -2049,19 +2115,22 @@ async def generate_questions_with_media_async(req: GenerateWithMediaRequest, req
     return {"task_id": task_id, "message": "AI 已开始出题，请稍候..."}
 
 
-@router.post("/{question_id}/generate-svg", summary="为指定试题生成/重新生成SVG配图")
-async def generate_svg_for_question(question_id: int, request: Request):
-    """为已有试题单独生成或重新生成SVG配图"""
-    user = get_current_user(request)
-    username = user["username"]
+async def _apply_generate_svg(question_id: int, username: str, role: int) -> dict[str, Any]:
+    """生成/重生成 SVG 配图的真实实现（同步端点与后台任务共用一份）
 
-    row = await _verify_question_owner(question_id, username, user.get("role", 2))
+    拆出来是为了让"改异步"不必复制第二份业务逻辑 —— 配图链路历史上正是因为它
+    有 7 份各写各的实现，才出现状态不回写、清洗不一致这类问题。
+    """
+    from backend.ai_task_manager import report_progress
+    from backend.prompts.chat import SVG_GENERATE_PROMPT
+
+    report_progress(phase="svg", message="AI 正在绘制 SVG 图示")
+    row = await _verify_question_owner(question_id, username, role)
 
     api_key, _ = get_api_keys(username)
     if not api_key:
         raise HTTPException(status_code=400, detail="API Key 未配置")
 
-    from backend.prompts.chat import SVG_GENERATE_PROMPT
     prompt = SVG_GENERATE_PROMPT.format(
         description=row["question_text"],
         subject=row["subject"]
@@ -2082,8 +2151,34 @@ async def generate_svg_for_question(question_id: int, request: Request):
         "UPDATE question_bank SET svg_content=?, has_svg=1, updated_at=? WHERE id=?",
         (svg_code, now, question_id),
     )
-
+    report_progress(phase="done", message="SVG 配图已写入")
     return {"message": "SVG 配图已生成", "svg_code": svg_code}
+
+
+@router.post("/{question_id}/generate-svg", summary="为指定试题生成/重新生成SVG配图")
+async def generate_svg_for_question(question_id: int, request: Request):
+    """为已有试题单独生成或重新生成SVG配图（同步版，保留兼容）"""
+    user = get_current_user(request)
+    return await _apply_generate_svg(question_id, user["username"], user.get("role", 2))
+
+
+@router.post("/{question_id}/generate-svg-async", summary="为试题生成SVG配图（异步任务版）")
+async def generate_svg_for_question_async(question_id: int, request: Request):
+    """generate-svg 的后台任务版：先校验权限再入队，避免鉴权失败被吞成一条难以理解的「任务失败」"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    _precheck_media_action(question_id, username, role, "svg")
+
+    task_id = await _submit_ai_task(
+        _as_media_task(lambda: _apply_generate_svg(question_id, username, role)),
+        f"教师 {username} 生成试题 SVG 配图 (id={question_id})",
+        owner=username,
+        dedupe_key=f"q_svg:{question_id}",
+        reuse_completed=False,
+    )
+    return {"task_id": task_id, "message": "SVG 配图生成中，请稍候...",
+            "poll_url": f"/api/interaction/ai-task/{task_id}"}
 
 
 def _extract_svg_code(text: str) -> str:
@@ -2092,13 +2187,9 @@ def _extract_svg_code(text: str) -> str:
     return svg_code if is_usable_svg(svg_code) else ""
 
 
-@router.post("/{question_id}/generate-media/{placeholder_key}", summary="为占位符调用AI生图")
-async def generate_media_for_placeholder(
-    question_id: int,
-    placeholder_key: str,
-    request: Request,
-):
-    """为指定占位符调用通义万相生成图片
+async def _apply_generate_media(question_id: int, placeholder_key: str,
+                                username: str, role: int) -> dict[str, Any]:
+    """为指定占位符调用通义万相生成图片（同步端点与后台任务共用）
 
     三条底线：
     - 畸形数据（缺 key/description、非 dict 项）不再抛 KeyError 变成 500；
@@ -2106,10 +2197,11 @@ async def generate_media_for_placeholder(
     - 失败时把真实原因（模型/状态码）回传给教师，并把该占位符标成 failed，
       这样"批量重试失败项"才会出现在面板上。
     """
-    user = get_current_user(request)
-    username = user["username"]
+    from backend.ai_task_manager import report_progress
+    from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+    from backend.api.image_gen_service import generate_and_save_image
 
-    row = await _verify_question_owner(question_id, username, user.get("role", 2))
+    row = await _verify_question_owner(question_id, username, role)
     if not get_config_value("IMAGE_GEN_ENABLED", True):
         raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
 
@@ -2123,9 +2215,6 @@ async def generate_media_for_placeholder(
         raise HTTPException(status_code=400,
                             detail="该占位符缺少图片描述，请改用「万相生图」或直接上传图片")
 
-    from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
-    from backend.api.image_gen_service import generate_and_save_image
-
     prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
         subject=row["subject"] or "通用",
         purpose=target.get("purpose") or "示意图",
@@ -2134,6 +2223,7 @@ async def generate_media_for_placeholder(
 
     media_dir = ensure_media_dir(SOURCE_BANK, question_id)
     errors: list[str] = []
+    report_progress(phase="image", total=1, done=0, message="万相正在生成配图")
     local_path = await generate_and_save_image(prompt, media_dir, error_sink=errors)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -2173,22 +2263,62 @@ async def generate_media_for_placeholder(
         "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
         (dump_json(placeholders), dump_json(media_files), now, question_id),
     )
-
+    report_progress(phase="done", done=1, message="配图已写入题库")
     return {"message": "图片已生成", "url": relative_url, "placeholder_key": placeholder_key,
             "status": "generated"}
 
 
-@router.post("/{question_id}/generate-image", summary="万相生图（直接为试题生成配图）")
-async def generate_image_for_question(question_id: int, request: Request):
-    """直接用通义万相为试题生成配图（不依赖占位符），作为 SVG 的补充/替换方案
+@router.post("/{question_id}/generate-media/{placeholder_key}", summary="为占位符调用AI生图")
+async def generate_media_for_placeholder(
+    question_id: int,
+    placeholder_key: str,
+    request: Request,
+):
+    """为指定占位符调用通义万相生成图片（同步版，保留兼容）"""
+    user = get_current_user(request)
+    return await _apply_generate_media(question_id, placeholder_key,
+                                       user["username"], user.get("role", 2))
+
+
+@router.post("/{question_id}/generate-media/{placeholder_key}/async",
+             summary="为占位符调用AI生图（异步任务版）")
+async def generate_media_for_placeholder_async(
+    question_id: int,
+    placeholder_key: str,
+    request: Request,
+):
+    """/generate-media/{key} 的后台任务版
+
+    为什么值得异步：万相同步等待 + 最多 3 模型 × 3 次重试，前端那条 320s 的 HTTP
+    长连接在反代/网关下必断；断连后教师看到"失败"，图却可能已经生成并计费。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    _precheck_media_action(question_id, username, role, "media", placeholder_key)
+
+    task_id = await _submit_ai_task(
+        _as_media_task(lambda: _apply_generate_media(question_id, placeholder_key, username, role)),
+        f"教师 {username} 生成试题配图 (id={question_id} 占位符={placeholder_key})",
+        owner=username,
+        dedupe_key=f"q_media:{question_id}:{placeholder_key}",
+        reuse_completed=False,
+    )
+    return {"task_id": task_id, "message": "配图生成中，请稍候...",
+            "poll_url": f"/api/interaction/ai-task/{task_id}"}
+
+
+async def _apply_generate_image(question_id: int, username: str, role: int) -> dict[str, Any]:
+    """万相直接生成配图（同步端点与后台任务共用一份实现）
 
     生成的条目固定 key="wanxiang"，重复点击替换旧图；配图管理面板会把它和占位符
     一起列出来（历史实现只回写 manifest，面板按占位符渲染，导致这张图永远看不见）。
     """
-    user = get_current_user(request)
-    username = user["username"]
+    from backend.ai_task_manager import report_progress
+    from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+    from backend.api.image_gen_service import generate_and_save_image
 
-    row = await _verify_question_owner(question_id, username, user.get("role", 2))
+    row = await _verify_question_owner(question_id, username, role)
 
     if not get_config_value("IMAGE_GEN_ENABLED", True):
         raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
@@ -2196,9 +2326,6 @@ async def generate_image_for_question(question_id: int, request: Request):
     q_text = (row["question_text"] or "")[:200]
     if len(q_text) < 10:
         raise HTTPException(status_code=400, detail="题干过短，无法生成配图")
-
-    from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
-    from backend.api.image_gen_service import generate_and_save_image
 
     subject = row["subject"] or "通用"
     prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
@@ -2209,6 +2336,7 @@ async def generate_image_for_question(question_id: int, request: Request):
 
     media_dir = ensure_media_dir(SOURCE_BANK, question_id)
     errors: list[str] = []
+    report_progress(phase="image", total=1, done=0, message="万相正在生成配图")
     local_path = await generate_and_save_image(prompt, media_dir, error_sink=errors)
     if not local_path:
         reason = (errors[0] if errors else "生图服务未返回图片")[:180]
@@ -2246,8 +2374,35 @@ async def generate_image_for_question(question_id: int, request: Request):
         (dump_json(placeholders), dump_json(media_files), now, question_id),
     )
 
+    report_progress(phase="done", done=1, message="配图已写入题库")
     return {"message": "配图已生成", "url": relative_url, "key": key,
             "media_summary": media_summary(placeholders, media_files)}
+
+
+@router.post("/{question_id}/generate-image", summary="万相生图（直接为试题生成配图）")
+async def generate_image_for_question(question_id: int, request: Request):
+    """直接用通义万相为试题生成配图（同步版，保留兼容）"""
+    user = get_current_user(request)
+    return await _apply_generate_image(question_id, user["username"], user.get("role", 2))
+
+
+@router.post("/{question_id}/generate-image-async", summary="万相生图（异步任务版）")
+async def generate_image_for_question_async(question_id: int, request: Request):
+    """generate-image 的后台任务版：权限先校验，生图在后台跑，前端轮询进度"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    _precheck_media_action(question_id, username, role, "image")
+
+    task_id = await _submit_ai_task(
+        _as_media_task(lambda: _apply_generate_image(question_id, username, role)),
+        f"教师 {username} 万相直接生图 (id={question_id})",
+        owner=username,
+        dedupe_key=f"q_image:{question_id}",
+        reuse_completed=False,
+    )
+    return {"task_id": task_id, "message": "配图生成中，请稍候...",
+            "poll_url": f"/api/interaction/ai-task/{task_id}"}
 
 
 @router.post("/{question_id}/upload-media/{placeholder_key}", summary="上传图片替换占位符")

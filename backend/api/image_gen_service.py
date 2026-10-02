@@ -23,6 +23,8 @@ from typing import Any
 
 import dashscope
 
+from backend.ai_task_manager import report_progress
+
 from backend.api.config_router import get_config_value
 from backend.logger import logger
 
@@ -316,12 +318,17 @@ async def generate_and_save_image(
         for model_idx, model in enumerate(model_chain):
             for attempt in range(1, max_retries + 1):
                 logger.info(f"生图尝试: model={model} attempt={attempt}/{max_retries} prompt={prompt[:50]}...")
+                report_progress(phase="image", model=model, attempt=attempt,
+                                max_attempts=max_retries,
+                                models_left=len(model_chain) - model_idx,
+                                message=f"{model} 第 {attempt}/{max_retries} 次尝试")
 
                 status_code, image_url, error_msg, terminal = await _call_dashscope_safe(
                     model=model, prompt=prompt, size=size, timeout=180,
                 )
 
                 if status_code == 200 and image_url:
+                    report_progress(phase="download", model=model, message="图片已生成，正在下载")
                     local_path = await _download_image(image_url, save_path, filename, timeout=60)
                     if local_path:
                         return local_path
@@ -344,6 +351,8 @@ async def generate_and_save_image(
 
             if model_idx < len(model_chain) - 1:
                 logger.warning(f"模型 {model} 失败，降级到 {model_chain[model_idx + 1]}")
+                report_progress(phase="fallback",
+                                message=f"{model} 失败，改用 {model_chain[model_idx + 1]}")
 
         logger.error(f"生图最终失败: prompt={prompt[:50]} 最后错误={last_error}")
         if error_sink is not None and last_error:
@@ -455,8 +464,18 @@ async def generate_placeholders_batch(
             "created_at": now,
         }
 
+    report_progress(phase="media", done=0, total=len(todo), message=f"配图 0/{len(todo)}")
+    done_count = {"n": 0}
+
+    async def _gen_one_tracked(index: int, item: dict[str, Any]):
+        outcome = await _gen_one(index, item)
+        done_count["n"] += 1
+        report_progress(done=done_count["n"], total=len(todo),
+                        message=f"配图 {done_count['n']}/{len(todo)}")
+        return outcome
+
     results = await asyncio.gather(
-        *[_gen_one(idx, ph) for idx, ph in todo],
+        *[_gen_one_tracked(idx, ph) for idx, ph in todo],
         return_exceptions=True,
     )
 
