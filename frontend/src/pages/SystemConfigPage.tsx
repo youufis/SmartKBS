@@ -21,7 +21,7 @@ import {
 } from '../api/skills'
 import {
   checkVersion, startUpgrade, getUpgradeStatus,
-  rollback as apiRollback, getHistory, deleteHistory,
+  rollback as apiRollback, getHistory, deleteHistory, deleteHistoryBatch,
   cancelUpgrade, createBackup, ackMigrations,
   type VersionInfo, type UpgradeProgress,
 } from '../api/upgrade'
@@ -888,6 +888,8 @@ const UpgradePanel: React.FC = () => {
   const [histTotal, setHistTotal] = useState(0)
   const [histPage, setHistPage] = useState(1)
   const [histPageSize, setHistPageSize] = useState(10)
+  const [histSel, setHistSel] = useState<string[]>([])   // 升级历史多选
+  const [histBatchDeleting, setHistBatchDeleting] = useState(false)
   const pollRef = useRef<number | undefined>(undefined)
   const [restarting, setRestarting] = useState(false)  // 服务重启中标记
   const [acking, setAcking] = useState('')             // 正在确认迁移的记录 task_id
@@ -909,6 +911,7 @@ const UpgradePanel: React.FC = () => {
       setHistList(res.history || [])
       setHistTotal(res.total)
       setHistPage(res.page)
+      setHistSel([])   // 换页/换页大小后清掉选择，避免"看不见的行被删"
     } catch { /* ignore */ }
   }, [])
 
@@ -1069,6 +1072,35 @@ const UpgradePanel: React.FC = () => {
           loadHistory(histPage, histPageSize)
         } catch (e: any) {
           message.error(t('upgradeDeleteFailed') + ': ' + (e?.response?.data?.detail || e.message))
+        }
+      },
+    })
+  }
+
+  const handleDeleteHistoryBatch = () => {
+    const ids = [...histSel]
+    if (!ids.length) return
+    Modal.confirm({
+      title: t('confirmDeleteHistoryBatch'),
+      icon: <ExclamationCircleOutlined />,
+      content: t('confirmDeleteHistoryBatchContent', { count: ids.length }),
+      okText: t('confirmUpgradeOk'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      onOk: async () => {
+        setHistBatchDeleting(true)
+        try {
+          const r = await deleteHistoryBatch(ids)
+          const parts = [t('histBatchRemoved', { count: r.removed })]
+          if (r.skipped_in_progress) parts.push(t('histBatchSkipped', { count: r.skipped_in_progress }))
+          if (r.missing) parts.push(t('histBatchMissing', { count: r.missing }))
+          message.success(parts.join(' · '))
+          setHistSel([])
+          loadHistory(histPage, histPageSize)
+        } catch (e: any) {
+          message.error(t('upgradeDeleteFailed') + ': ' + (e?.response?.data?.detail || e.message))
+        } finally {
+          setHistBatchDeleting(false)
         }
       },
     })
@@ -1274,7 +1306,26 @@ const UpgradePanel: React.FC = () => {
       )}
 
       {/* 升级历史 */}
-      <Card title={t('upgradeHistory')}>
+      <Card
+        title={t('upgradeHistory')}
+        extra={
+          <Space size={8}>
+            {histSel.length > 0 && (
+              <>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('histSelectedCount', { count: histSel.length })}</Text>
+                <Button size="small" type="text" onClick={() => setHistSel([])}>{t('histClearSelection')}</Button>
+              </>
+            )}
+            <Button
+              size="small" danger type="primary" icon={<DeleteOutlined />}
+              disabled={histSel.length === 0} loading={histBatchDeleting}
+              onClick={handleDeleteHistoryBatch}
+            >
+              {t('histDeleteSelected')}
+            </Button>
+          </Space>
+        }
+      >
         <Table
           dataSource={histList}
           columns={[
@@ -1402,6 +1453,12 @@ const UpgradePanel: React.FC = () => {
           }}
           size="small"
           rowKey="task_id"
+          rowSelection={{
+            selectedRowKeys: histSel,
+            onChange: (keys) => setHistSel(keys as string[]),
+            // 进行中的记录代表有一次升级还在跑/待对账，删掉会让状态页失去依据，禁止勾选
+            getCheckboxProps: (r: any) => ({ disabled: r?.status === 'in_progress' }),
+          }}
           locale={{ emptyText: t('noUpgradeHistory') }}
         />
       </Card>

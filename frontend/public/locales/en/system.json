@@ -1108,5 +1108,13 @@
   "sceneMapIncompatible": "Not applicable to this scene (never injected anyway)",
   "field_LOGIN_BLOCK_STUDENT": "Disable student sign-in",
   "field_LOGIN_BLOCK_TEACHER": "Disable teacher sign-in",
-  "field_LOGIN_BLOCK_desc": "When on, this kind of account cannot sign in: new logins are refused, and anyone already signed in is sent back to the login page on their next request. Admins are unaffected and are never blocked by these two switches. Intended for upgrades and maintenance."
+  "field_LOGIN_BLOCK_desc": "When on, this kind of account cannot sign in: new logins are refused, and anyone already signed in is sent back to the login page on their next request. Admins are unaffected and are never blocked by these two switches. Intended for upgrades and maintenance.",
+  "histSelectedCount": "{{count}} selected",
+  "histClearSelection": "Clear selection",
+  "histDeleteSelected": "Delete selected",
+  "confirmDeleteHistoryBatch": "Delete the selected upgrade records?",
+  "confirmDeleteHistoryBatchContent": "This deletes {{count}} history entries. Only the history list is affected — backup files and the ability to roll back to a version are untouched. In-progress records cannot be selected and are skipped even if requested. This cannot be undone.",
+  "histBatchRemoved": "Deleted {{count}}",
+  "histBatchSkipped": "skipped {{count}} in progress",
+  "histBatchMissing": "{{count}} already gone"
 }

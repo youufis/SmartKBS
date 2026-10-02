@@ -1951,6 +1951,56 @@ async def delete_history_item(task_id: str, request: Request):
     return {"status": "ok", "message": "已删除"}
 
 
+@router.delete("/history")
+async def delete_history_items(request: Request) -> dict[str, Any]:
+    """批量删除升级历史记录。
+
+    只删 .upgrade_state.json 里的记录条目，**不动任何备份文件**，
+    所以删掉历史不会让"回滚到某版本"的能力消失（回滚读的是备份目录，不是这张表）。
+
+    进行中的记录（status=in_progress）一律跳过不删：它代表有一次升级还在跑、
+    或被打断等待对账，删掉会让 /status 与孤儿对账失去依据。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+
+    body = await request.json() if request.headers.get("content-type") else {}
+    raw_ids = (body or {}).get("task_ids") or []
+    if not isinstance(raw_ids, list):
+        raise HTTPException(status_code=400, detail="task_ids 必须是数组")
+    wanted = {str(t) for t in raw_ids if str(t).strip()}
+    if not wanted:
+        raise HTTPException(status_code=400, detail="请先选择要删除的记录")
+
+    removed = 0
+    skipped: list[str] = []
+
+    def _m_batch_delete(st: dict[str, Any]) -> None:
+        nonlocal removed
+        kept: list[Any] = []
+        for h in st.get("history", []):
+            # 认不出的脏行原样留着（与单条删除同样的保守策略）
+            if isinstance(h, dict) and str(h.get("task_id")) in wanted:
+                if h.get("status") == "in_progress":
+                    skipped.append(str(h.get("task_id")))
+                    kept.append(h)
+                    continue
+                removed += 1
+                continue
+            kept.append(h)
+        st["history"] = kept
+
+    _mutate_state(_m_batch_delete)
+    # 选中的条数里，既没删成也没被跳过的，就是期间已被别处删掉的
+    missing = max(0, len(wanted) - removed - len(skipped))
+    return {
+        "status": "ok",
+        "removed": removed,
+        "skipped_in_progress": len(skipped),
+        "missing": missing,
+    }
+
+
 @router.post("/history/{task_id}/ack-migrations")
 async def ack_unverified_migrations(task_id: str, request: Request):
     """⑥b 确认"对账收口的成功记录已经人工核对过数据库迁移"

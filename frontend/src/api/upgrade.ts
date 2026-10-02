@@ -107,6 +107,14 @@ export async function deleteHistory(task_id: string): Promise<void> {
   await apiClient.delete(`/api/system/upgrade/history/${task_id}`)
 }
 
+/** 批量删除升级历史记录：只删记录条目，不动备份；进行中的记录由后端跳过 */
+export async function deleteHistoryBatch(taskIds: string[]): Promise<{
+  removed: number; skipped_in_progress: number; missing: number
+}> {
+  const { data } = await apiClient.delete('/api/system/upgrade/history', { data: { task_ids: taskIds } })
+  return data
+}
+
 /** 确认「对账收口的成功记录」已人工核对过数据库迁移 */
 export async function ackMigrations(task_id: string): Promise<{ status: string; message: string }> {
   const { data } = await apiClient.post(`/api/system/upgrade/history/${task_id}/ack-migrations`)

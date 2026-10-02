@@ -1108,5 +1108,13 @@
   "sceneMapIncompatible": "该技能不适用于此场景（本来就不会注入）",
   "field_LOGIN_BLOCK_STUDENT": "暂停学生登录",
   "field_LOGIN_BLOCK_TEACHER": "暂停教师登录",
-  "field_LOGIN_BLOCK_desc": "开启后该类账号暂停登录：既挡新登录，已在登录中的也会在下次请求时被请回登录页。管理员不受影响，也不会被这两个开关挡住。用于系统升级维护。"
+  "field_LOGIN_BLOCK_desc": "开启后该类账号暂停登录：既挡新登录，已在登录中的也会在下次请求时被请回登录页。管理员不受影响，也不会被这两个开关挡住。用于系统升级维护。",
+  "histSelectedCount": "已选 {{count}} 项",
+  "histClearSelection": "取消选择",
+  "histDeleteSelected": "删除所选",
+  "confirmDeleteHistoryBatch": "删除选中的升级记录？",
+  "confirmDeleteHistoryBatchContent": "将删除选中的 {{count}} 条历史记录。只删除记录条目，备份文件与\"回滚到某版本\"的能力不受影响；进行中的记录不可勾选，即使被请求也会自动跳过。此操作不可撤销。",
+  "histBatchRemoved": "已删除 {{count}} 条",
+  "histBatchSkipped": "跳过 {{count}} 条进行中",
+  "histBatchMissing": "{{count}} 条已不存在"
 }
