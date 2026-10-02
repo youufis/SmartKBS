@@ -28,7 +28,7 @@ _MESSAGES = {
     # 措辞保留"在其他地方登录"这个旧短语：老版本前端(缓存里的旧 bundle)按这句话识别被顶号
     AUTH_STALE: "账号已在其他地方登录或已退出，请重新登录",
     AUTH_NO_ACCOUNT: "账号不存在或已被删除，请重新登录",
-    AUTH_LOGIN_BLOCKED: "该角色已暂停登录，请稍后再试",
+    AUTH_LOGIN_BLOCKED: "已暂停登录，请稍后再试",
 }
 
 #: 需要前端"停轮询 + 跳登录"的 401（区别于登录接口自身报的"密码错误"）
@@ -42,6 +42,11 @@ _LOGIN_GATE_BY_ROLE = {
 }
 
 
+#: 来源闸门：不分角色，学生/教师从外网进来都挡（管理员同样不受此项影响）。
+LOGIN_BLOCK_EXTERNAL_KEY = "LOGIN_BLOCK_EXTERNAL"
+LOGIN_BLOCK_EXTERNAL_MSG_KEY = "messages.error.login_block_external"
+
+
 def _gate_flag(value: Any) -> bool:
     """容忍手改 JSON 时写成字符串 "true"/"1"；读不到配置一律按"允许"处理。"""
     if isinstance(value, str):
@@ -49,8 +54,16 @@ def _gate_flag(value: Any) -> bool:
     return bool(value)
 
 
-def login_block_message_key(role: Any) -> Optional[str]:
-    """该角色是否被"暂停登录"闸门挡住；命中则返回提示文案的 i18n 键，否则 None。
+def login_block_message_key(role: Any, ip: Optional[str] = None) -> Optional[str]:
+    """这次请求是否被登录闸门挡住；命中则返回提示文案的 i18n 键，否则 None。
+
+    两道闸门都只为学生/教师准备，管理员(role 0)任何一道都不受限制：
+      · 角色闸门 LOGIN_BLOCK_STUDENT / LOGIN_BLOCK_TEACHER：按角色挡，不看来源；
+      · 来源闸门 LOGIN_BLOCK_EXTERNAL：只挡外网地址，内网与本机照常。
+    先判角色、再判来源——角色被暂停时说"某类账号暂停登录"更准确，
+    来源闸门只在角色放行且这次确实从外网进来时才生效。
+    ip 由调用方用 security_guard.client_ip(request) 取（真实 TCP 对端，
+    客户端自己塞 X-Forwarded-For 不算数）；取不到一律按内网处理。
 
     登录接口与认证中间件共用这一份判定：前者挡新登录，后者挡已在途的会话，
     两处逻辑必须一致，所以只在这里写一次。配置异常时放行——
@@ -67,10 +80,15 @@ def login_block_message_key(role: Any) -> Optional[str]:
         return None
     cfg_key, msg_key = entry
     try:
-        on = _gate_flag(get_config_value(cfg_key, False))
+        if _gate_flag(get_config_value(cfg_key, False)):
+            return msg_key
+        if _gate_flag(get_config_value(LOGIN_BLOCK_EXTERNAL_KEY, False)):
+            from backend.security_guard import is_external_ip  # 局部导入，避开启动期循环依赖
+            if is_external_ip(ip or ""):
+                return LOGIN_BLOCK_EXTERNAL_MSG_KEY
     except Exception:
         return None
-    return msg_key if on else None
+    return None
 
 
 def auth_message(code: str) -> str:

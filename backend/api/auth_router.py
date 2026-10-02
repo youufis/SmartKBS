@@ -30,7 +30,7 @@ from backend.api.auth_guard import unauthorized
 from backend.auth_errors import login_block_message_key
 from backend.api.config_router import get_config_value
 from backend.i18n import T, resolve_lang_from_request
-from backend.security_guard import record_login_failure
+from backend.security_guard import client_ip, record_login_failure
 from backend.logger import logger
 
 router = APIRouter()
@@ -87,10 +87,10 @@ async def login(req: LoginRequest, fastapi_request: Request):
     if is_graduated(username):
         raise HTTPException(status_code=403, detail=T('messages.error.account_graduated', lang))
 
-    # ── 角色登录闸门（系统升级维护用）：挡新登录 ──
+    # ── 登录闸门（系统升级维护用）：挡新登录，按角色或按外网来源 ──
     # 与 middleware.py 的在途会话闸门共用 login_block_message_key() 一处判定；
     # 管理员(role 0)永不受限，防止把自己锁死。
-    _blocked_key = login_block_message_key(role_val)
+    _blocked_key = login_block_message_key(role_val, client_ip(fastapi_request))
     if _blocked_key:
         raise HTTPException(status_code=403, detail=T(_blocked_key, lang))
 
@@ -124,15 +124,9 @@ async def login(req: LoginRequest, fastapi_request: Request):
             (now_str, username),
         )
 
-        # 获取客户端 IP（用 fastapi_request 而非 req，因为 req 是 Pydantic 模型）
-        client_ip = fastapi_request.headers.get("x-forwarded-for", "")
-        if client_ip:
-            client_ip = client_ip.split(",")[0].strip()
-        else:
-            client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
-        # 去除可能附加的端口号 (如 192.168.1.1:8080 → 192.168.1.1)
-        if client_ip and client_ip.count(':') == 1 and client_ip.rsplit(':', 1)[1].isdigit():
-            client_ip = client_ip.rsplit(':', 1)[0]
+        # 来源 IP 与登录闸门同一个口径：只有明确信任反代时才看 XFF，
+        # 否则客户端自己塞一个头就能伪造登录日志里的来源地址
+        src_ip = client_ip(fastapi_request)
         user_agent = fastapi_request.headers.get("user-agent", "")[:200]
 
         # 角色名称映射
@@ -141,9 +135,9 @@ async def login(req: LoginRequest, fastapi_request: Request):
             """INSERT INTO login_logs (username, student_name, grade, class_name, login_time, login_ip, user_agent)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (username, f"{name_val or ''}({role_label})", grade_val or "", str(class_val) if class_val else "",
-             now_str, client_ip, user_agent),
+             now_str, src_ip, user_agent),
         )
-        logger.info(f"登录日志已记录: {username}({role_label}) @ {now_str} from {client_ip}")
+        logger.info(f"登录日志已记录: {username}({role_label}) @ {now_str} from {src_ip}")
     except Exception as e:
         logger.warning(f"记录登录日志失败: {e}")
         import traceback
@@ -252,14 +246,7 @@ async def get_current_user(request: Request):
             (username, f"{today}%"),
         )
         if existing and existing[0][0] == 0:
-            client_ip = request.headers.get("x-forwarded-for", "")
-            if client_ip:
-                client_ip = client_ip.split(",")[0].strip()
-            else:
-                client_ip = request.client.host if request.client else "unknown"
-            # 去除可能附加的端口号
-            if client_ip and client_ip.count(':') == 1 and client_ip.rsplit(':', 1)[1].isdigit():
-                client_ip = client_ip.rsplit(':', 1)[0]
+            src_ip = client_ip(request)   # 同上：统一走 security_guard.client_ip
             user_agent = request.headers.get("user-agent", "")[:200]
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             role_label = {0: "管理员", 1: "教师", 2: "学生"}.get(role_val, "未知")
@@ -267,7 +254,7 @@ async def get_current_user(request: Request):
                 """INSERT INTO login_logs (username, student_name, grade, class_name, login_time, login_ip, user_agent)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (username, f"{name_val or ''}({role_label})", grade_val or "", str(class_val) if class_val else "",
-                 now_str, client_ip, user_agent),
+                 now_str, src_ip, user_agent),
             )
             logger.info(f"会话恢复记录考勤: {username}({role_label}) @ {now_str}")
     except Exception as e:

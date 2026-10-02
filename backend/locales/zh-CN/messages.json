@@ -27,7 +27,8 @@
     "ip_rate_banned_retry": "访问过于频繁，请 {seconds} 秒后重试",
     "ip_denied": "访问被拒绝：来源地址在黑名单中",
     "login_block_student": "学生账号暂停登录",
-    "login_block_teacher": "教师账号暂停登录"
+    "login_block_teacher": "教师账号暂停登录",
+    "login_block_external": "外网暂停登录"
   },
   "success": {
     "login": "登录成功",

@@ -81,6 +81,22 @@ def client_ip(request: Request) -> str:
     return normalize_ip(peer)
 
 
+def is_external_ip(ip: str) -> bool:
+    """来源地址算不算"外网"——只有能在公网上路由的地址才算外网。
+
+    判据交给标准库（ipaddress 的 is_global），不自己列网段清单，换机器、
+    换组网都不用改配置：RFC1918（10/8、172.16/12、192.168/16）、回环
+    （127/8、::1）、链路本地（169.254/16、fe80::/10）、IPv6 ULA（fc00::/7）、
+    运营商级 NAT（100.64/10）和各类保留段一律按内网处理，不挡人。
+    认不出来的值（空、"unknown"、脏数据）同样按内网放行：
+    闸门宁可漏挡，也不能因为一个坏值把校内用户关在门外。
+    """
+    try:
+        return ipaddress.ip_address(normalize_ip(ip)).is_global
+    except ValueError:
+        return False
+
+
 def user_agent(request: Request, limit: int = 120) -> str:
     ua = request.headers.get("user-agent", "") or "-"
     return ua[:limit]

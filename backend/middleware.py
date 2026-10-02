@@ -26,7 +26,7 @@ from backend.auth_errors import (
     login_block_message_key,
 )
 from backend.i18n import T, resolve_lang_from_request
-from backend.security_guard import block_response
+from backend.security_guard import block_response, client_ip
 from backend.logger import logger
 from backend.request_ctx import set_current_user
 
@@ -103,10 +103,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if payload:
                 request.state.user = payload
                 set_current_user(payload)
-                # ── 角色登录闸门（系统升级维护用）：把已在途的会话也挡下 ──
+                # ── 登录闸门（系统升级维护用）：把已在途的会话也挡下，按角色或按外网来源 ──
                 # 与 auth_router 的"挡新登录"共用同一处判定，管理员(role 0)永不受限。
                 # 放在 update_active_token 之前：被挡的人不该再算进在线人数。
-                _blocked_key = login_block_message_key(payload.get("role"))
+                _blocked_key = login_block_message_key(payload.get("role"), client_ip(request))
                 if _blocked_key:
                     log_auth_reject(request, AUTH_LOGIN_BLOCKED, where="middleware_gate")
                     return auth_error_response(
