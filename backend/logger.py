@@ -1,13 +1,12 @@
 """
 统一日志配置
 - _SmartLogger: except 块内调用 logger.error 自动附带堆栈(exc_info), 全局免逐处改造
-- SizeRotatingHandler: 延迟打开 + 每 32 条抽样查大小 + 按日期归档轮转保留 5 份 + 轮转失败仅告警一次
+- SizeRotatingHandler: 延迟打开 + 每 32 条抽样查大小 + rename 轮转归档(.gz)保留 5 份 + 被多实例锁住时退避重试并告警(绝不复制)
 - 级别策略: logger=DEBUG, 控制台=INFO(现场不刷屏), 文件=DEBUG(排障可查)
 - uvicorn.access: 恢复 INFO(可见 4xx/5xx) + 内置噪音路径过滤器(统一配置, main.py 不再重复)
 """
 import logging
 import os
-import shutil
 import sys
 import time
 from datetime import datetime
@@ -102,18 +101,33 @@ class _PollAuthNoiseFilter(logging.Filter):
 
 
 class SizeRotatingHandler(logging.FileHandler):
-    """按大小轮转的日志处理器, 归档名带时间戳, 保留最近 N 份"""
+    """按大小轮转的日志处理器, 归档名带时间戳, 保留最近 N 份
+
+    多实例安全: 轮转只做 os.rename, 成功才截断新档; 其他进程持有句柄时 rename 直接失败
+    (WinError 32), 此时退避重试并一次性告警。旧版 shutil.move 在 Windows 锁文件时会退化为
+    "整体复制+删不掉原件", 曾把同一份日志复制出 5 个假归档而主文件永不截断(2026-10 事故)。
+
+    兜底: 连续 2 次被锁轮转失败后, 本进程自动"迁出"到 backend.<pid>.log 独立滚动,
+    保证任何共写环境下 5MB 自动重开都成立; 遗留文件由 log_retention 每日回收。
+    """
+
+    _ROTATE_BACKOFF = 300.0  # rename 失败后的重试间隔(秒)
+
     def __init__(self, filename, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUP_COUNT, encoding="utf-8"):
         self.maxBytes = maxBytes
         self.backupCount = backupCount
         self._emit_n = 0
         self._rotate_warned = False
+        self._next_rotate_at = 0.0
+        self._rotate_fail_streak = 0
         super().__init__(filename, encoding=encoding, delay=True)
 
     def emit(self, record):
         try:
             self._emit_n += 1
-            if self.stream is not None and self._emit_n % _CHECK_EVERY_N == 0:
+            if (self.stream is not None
+                    and self._emit_n % _CHECK_EVERY_N == 0
+                    and time.monotonic() >= self._next_rotate_at):
                 try:
                     if os.path.getsize(self.baseFilename) >= self.maxBytes:
                         self.do_rollover()
@@ -124,15 +138,78 @@ class SizeRotatingHandler(logging.FileHandler):
         super().emit(record)
 
     def do_rollover(self):
-        """轮转: 当前文件改名为带时间戳归档, 清理超额旧档; 失败只告警一次"""
+        """rename 轮转: 只认原子改名; 被其他活句柄锁住时原地续写、退避重试, 绝不复制"""
         self.close()
-        moved = False
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        archive = f"{self.baseFilename}.{stamp}"
+        rotated = False
         try:
-            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            shutil.move(self.baseFilename, f"{self.baseFilename}.{stamp}")
-            moved = True
+            os.rename(self.baseFilename, archive)
+            rotated = True
+        except OSError as e:
+            self._next_rotate_at = time.monotonic() + self._ROTATE_BACKOFF
+            self._rotate_fail_streak += 1
+            if not self._rotate_warned:
+                self._rotate_warned = True
+                print(
+                    f"[logger] backend.log 轮转失败(疑似多实例共写持有句柄, WinError 32): {e}; "
+                    f"退避 {int(self._ROTATE_BACKOFF)}s 后重试, 期间日志继续写原文件。"
+                    "请确认是否存在双实例(见 LogFiles/backend-instance.pid 与启动日志[实例守卫])",
+                    file=sys.stderr,
+                )
+        if rotated:
+            self._rotate_warned = False
+            self._next_rotate_at = 0.0
+            self._rotate_fail_streak = 0
+            self._compress_archive(archive)
+            self._prune_archives()
+        try:
+            self.stream = open(self.baseFilename, "a", encoding=self.encoding)
+        except Exception as e:
+            if not self._rotate_warned:
+                self._rotate_warned = True
+                print(f"[logger] 日志重开文件失败(已降级为仅控制台): {e}", file=sys.stderr)
+        if (not rotated and self._rotate_fail_streak >= 2
+                and os.path.basename(self.baseFilename) == "backend.log"):
+            self._move_out()
+
+    def _move_out(self):
+        """共享 backend.log 被其他实例长期锁死 -> 迁出为进程私有日志, 保住自身 5MB 自动轮转"""
+        new_name = "backend.%d.log" % os.getpid()
+        new_path = os.path.join(os.path.dirname(self.baseFilename), new_name)
+        try:
+            if self.stream is not None:                     # 关旧流(3.11 FileHandler 无 setBaseFilename, 手动切换)
+                try:
+                    self.stream.close()
+                except OSError:
+                    pass
+                self.stream = None
+            self.baseFilename = new_path
+            self.stream = open(self.baseFilename, "a", encoding=self.encoding)
+            self._rotate_fail_streak = 0
+            self._next_rotate_at = 0.0
+            self._rotate_fail_streak = 0
+            print(f"[logger] backend.log 被其他实例锁死, 本进程日志已迁出 -> {new_name}; "
+                  "迁出后轮转恢复正常, 遗留文件由保留任务定期回收", file=sys.stderr)
+            return True
+        except Exception as e:
+            print(f"[logger] 日志迁出失败: {e}", file=sys.stderr)
+            return False
+
+    def _compress_archive(self, archive):
+        """尽力把归档压成 .gz; 失败保留原始文件(超额清理两种都计数)"""
+        try:
+            import gzip
+            import shutil
+            gz = archive + ".gz"
+            with open(archive, "rb") as src, gzip.open(gz, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            os.remove(archive)
         except Exception:
-            moved = False
+            pass
+
+    def _prune_archives(self):
+        """按 mtime 保留最近 backupCount 份归档(含 .gz), 清理超额"""
         try:
             d = os.path.dirname(self.baseFilename) or "."
             base = os.path.basename(self.baseFilename)
@@ -148,13 +225,6 @@ class SizeRotatingHandler(logging.FileHandler):
                     pass
         except Exception:
             pass
-        try:
-            self.stream = open(self.baseFilename, "a", encoding=self.encoding)
-            self._rotate_warned = False if moved else self._rotate_warned
-        except Exception as e:
-            if not self._rotate_warned:
-                self._rotate_warned = True
-                print(f"[logger] 日志轮转/重开文件失败(已降级为仅控制台): {e}", file=sys.stderr)
 
 
 def setup_logger(name: str = "smartkb") -> logging.Logger:

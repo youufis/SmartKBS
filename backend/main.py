@@ -95,6 +95,7 @@ async def lifespan(app: FastAPI):
         from backend.question_select import rebuild_kp_map
         from backend.kp_link import ensure_table as ensure_kp_link_table
         from backend.reward_hygiene import normalize_reward_activity_keys
+        _no_fix = []
         for _repair in (normalize_reward_activity_keys, backfill_notification_sources,
                         dedupe_notifications, ensure_kp_link_table, rebuild_kp_map):
             try:
@@ -102,11 +103,21 @@ async def lifespan(app: FastAPI):
                 if _res.get("changed"):
                     logger.info(f"[启动自检] {_repair.__name__} 已修复数据口径: {_res}")
                 else:
-                    logger.debug(f"[启动自检] {_repair.__name__} 无需修复: {_res}")
+                    _no_fix.append(_repair.__name__)
             except Exception as repair_err:
                 logger.warning(f"[启动自检] {_repair.__name__} 失败(不阻断启动): {repair_err}")
+        if _no_fix:
+            logger.debug("[启动自检] 无需修复: " + ", ".join(_no_fix))
     except Exception as e:
         print(f"[main] 启动期数据治理加载失败: {e}", file=sys.stderr)
+    try:
+        # 实例守卫: 点名其他疑似存活实例(它们会锁住 backend.log 使轮转退避, 还会引发数据库锁重试)
+        from backend.instance_guard import enforce_log_writer_exclusion, warn_multi_instance
+        enforce_log_writer_exclusion()
+        warn_multi_instance()
+    except Exception as e:
+        print(f"[main] 实例守卫检查失败: {e}", file=sys.stderr)
+
     try:
         # 业务日志保留策略: 后台线程延迟清理, 防登录/浏览/通知等日志表无限增长
         from backend.log_retention import start as start_log_retention
