@@ -65,7 +65,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/scores/",
             "/api/rollcall/",
             "/api/downloads/",
-            "/api/files/question_media/",
             "/static/",
             "/docs",
             "/openapi.json",
@@ -73,6 +72,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         ]
         request_path = request.url.path
 
+        # 注：/api/files/question_media/ 以前在这里被列成公开路径，
+        # 意图是"试卷里的图要能显示"。但 <img> 请求会带 Cookie，中间件本来就能
+        # 认出用户；把它当公开路径只是留下"哪天静态挂载生效就匿名可下载"的隐患。
+        # 现在由 files_router 统一要求登录（并明确返回 401），这里不再放行。
         # 检查是否为公开路径
         is_public = any(request_path.startswith(p) for p in public_paths)
 

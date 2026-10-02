@@ -7,8 +7,8 @@ import asyncio
 import json
 import random
 import re
-import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query, UploadFile, File
@@ -19,12 +19,25 @@ from backend.database import execute_query, execute_query_dict, execute_insert_u
 from backend.permission_service import get_teacher_classes, get_teacher_grades, parse_legacy_teacher_grade_class
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_sync_direct
+from backend.api.config_router import get_config_value
 from backend.prompts.quest import (
     QUEST_GENERATE_PROMPT,
     PHONE_FRIEND_PROMPT,
     AUDIENCE_VOTE_PROMPT,
 )
 from backend.prompts.chat import SVG_GENERATE_PROMPT, IMAGE_GEN_PROMPT_TEMPLATE
+from backend.question_media import (
+    SOURCE_QUEST,
+    attach_media,
+    cleanup_quest_media,
+    delete_media_file,
+    dump_json,
+    ensure_media_dir,
+    media_summary,
+    normalize_media_files,
+    url_for,
+)
+from backend.svg_safety import extract_svg, is_usable_svg, sanitize_svg
 from backend.logger import logger
 from backend.reward_engine import award_participation, award_grade, update_student_total
 from backend.title_system import check_and_unlock_badges
@@ -136,10 +149,17 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         result.setdefault("media_files", "")
         result.setdefault("media_placeholders", "")
         svg = result.get("svg_content", "")
-        if svg and "<svg" not in svg:
-            logger.warning(f"AI 返回的 svg_content 格式异常，已忽略: {svg[:50]}")
-            result["svg_content"] = ""
-            result["has_svg"] = 0
+        if svg:
+            # 提取 + 清洗：AI 可能在 SVG 里带 <script>/onload=/javascript: href，
+            # 直接入库就会被学生端与导出的 HTML 原样渲染
+            cleaned = sanitize_svg(svg)
+            if not is_usable_svg(cleaned):
+                logger.warning(f"AI 返回的 svg_content 无效或不安全，已忽略: {svg[:50]}")
+                result["svg_content"] = ""
+                result["has_svg"] = 0
+            else:
+                result["svg_content"] = cleaned
+                result["has_svg"] = 1
         return result
     except Exception as e:
         logger.error(f"AI 出题失败: {e}，尝试从题库取备用题")
@@ -1587,8 +1607,9 @@ async def update_quest_bank_question(question_id: int, req: QuestBankUpdate, req
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可编辑")
 
+    # 带上 media_files：删除闯关题时要靠它精确清理"历史平铺目录"里的旧配图
     row = execute_query_one(
-        "SELECT id FROM quest_question_bank WHERE id=?",
+        "SELECT id, media_files FROM quest_question_bank WHERE id=?",
         (question_id,),
     )
     if not row:
@@ -1628,8 +1649,9 @@ async def delete_quest_bank_question(question_id: int, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可删除")
 
+    # 带上 media_files：删除闯关题时要靠它精确清理"历史平铺目录"里的旧配图
     row = execute_query_one(
-        "SELECT id FROM quest_question_bank WHERE id=?",
+        "SELECT id, media_files FROM quest_question_bank WHERE id=?",
         (question_id,),
     )
     if not row:
@@ -1640,15 +1662,15 @@ async def delete_quest_bank_question(question_id: int, request: Request):
         (question_id,),
     )
 
-    # 清理配图目录
+    # 清理配图：闯关自己的命名空间整目录删；历史平铺目录只删本题 manifest 记过的文件。
+    # 过去这里直接 rmtree(question_media/<quest_id>)，而 quest 与题库各自独立自增 id，
+    # 同号题库题的配图会被连带清空——这是必须堵掉的数据损坏路径。
     try:
-        from backend.config import BASE_DIR
-        from pathlib import Path
-        media_dir = BASE_DIR / "question_media" / str(question_id)
-        if media_dir.exists():
-            shutil.rmtree(media_dir)
-    except Exception:
-        pass
+        removed = cleanup_quest_media(question_id, row.get("media_files"))
+        if removed:
+            logger.info(f"闯关题 {question_id} 配图已清理: {removed} 项")
+    except Exception as e:
+        logger.warning(f"清理闯关题配图失败 (id={question_id}): {e}")
 
     return {"success": True, "message": "删除成功"}
 
@@ -1708,7 +1730,7 @@ def _get_quest_bank_question(question_id: int) -> dict[str, Any]:
 
 @router.post("/quest/admin/bank/{question_id}/generate-svg", summary="[教师] 生成SVG配图")
 async def quest_bank_generate_svg(question_id: int, request: Request):
-    """为闯关题库题目生成 SVG 配图"""
+    """为闯关题库题目生成 SVG 配图（统一安全清洗）"""
     user = get_current_user(request)
     role = user.get("role", 2)
     if role not in (0, 1):
@@ -1730,16 +1752,11 @@ async def quest_bank_generate_svg(question_id: int, request: Request):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成 SVG 失败: {str(e)}")
 
-    # 提取 SVG 代码
-    svg_match = re.search(r'<svg[\s\S]*?</svg>', text, re.IGNORECASE)
-    svg_code = svg_match.group() if svg_match else ""
-
-    if not svg_code:
+    # 提取 + 清洗（旧的两条正则会把 stop-opacity/stroke-opacity 当 on* 事件属性删掉，
+    # 渐变和描边直接报废；统一走 backend.svg_safety）
+    svg_code = sanitize_svg(extract_svg(text))
+    if not is_usable_svg(svg_code):
         raise HTTPException(status_code=502, detail="AI 未能生成有效的 SVG 代码")
-
-    # 安全过滤
-    svg_code = re.sub(r'<script[\s\S]*?</script>', '', svg_code, flags=re.IGNORECASE)
-    svg_code = re.sub(r'\bon\w+\s*=\s*["\'][\s\S]*?["\']', '', svg_code)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_insert_update(
@@ -1759,44 +1776,56 @@ async def quest_bank_generate_image(question_id: int, request: Request):
         raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
 
     row = _get_quest_bank_question(question_id)
-    q_text = (row["question_text"] or "")[:200]
+    if not get_config_value("IMAGE_GEN_ENABLED", True):
+        raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
+
+    q_text = (row.get("question_text") or "")[:200]
+    if len(q_text) < 10:
+        raise HTTPException(status_code=400, detail="题干过短，无法生成配图")
 
     prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-        subject=row.get("category", "百科"),
+        subject=row.get("category", "百科") or "通用",
         purpose="示意图",
         description=f"与「{q_text}」相关的教学插图",
     )
 
     from backend.api.image_gen_service import generate_and_save_image
-    from backend.config import BASE_DIR
-    from pathlib import Path
 
-    media_dir = BASE_DIR / "question_media" / str(question_id)
-    local_path = await generate_and_save_image(prompt, media_dir)
+    media_dir = ensure_media_dir(SOURCE_QUEST, question_id)
+    errors: list[str] = []
+    local_path = await generate_and_save_image(prompt, media_dir, error_sink=errors)
     if not local_path:
-        raise HTTPException(status_code=502, detail="AI 生图失败，请检查 API Key 或稍后重试")
+        reason = (errors[0] if errors else "生图服务未返回图片")[:180]
+        logger.warning(f"闯关配图失败 (id={question_id}): {reason}")
+        raise HTTPException(status_code=502, detail=f"AI 生图失败：{reason}")
 
-    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
+    relative_url = url_for(SOURCE_QUEST, question_id, Path(local_path).name)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    media_files = json.loads(row.get("media_files") or "[]")
+    media_files = normalize_media_files(row.get("media_files"))
+    placeholders = [ph for ph in _quest_rows(row.get("media_placeholders")) if isinstance(ph, dict)]
     key = "wanxiang"
     existing = next((f for f in media_files if f.get("key") == key), None)
     if existing:
-        existing["url"] = relative_url
-        existing["alt"] = q_text[:100]
-        existing["created_at"] = now
+        old_url = existing.get("url") or ""
+        if old_url and old_url != relative_url:
+            delete_media_file(old_url, SOURCE_QUEST, question_id)   # 新图已落盘，才清旧图
+        existing.update({"url": relative_url, "type": "image",
+                         "alt": q_text[:100], "created_at": now})
     else:
         media_files.append({
             "key": key, "type": "image", "url": relative_url,
             "alt": q_text[:100], "created_at": now,
         })
 
+    placeholders = attach_media(placeholders, media_files)
+
     execute_insert_update(
-        "UPDATE quest_question_bank SET media_files=? WHERE id=?",
-        (json.dumps(media_files, ensure_ascii=False), question_id),
+        "UPDATE quest_question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+        (dump_json(placeholders), dump_json(media_files), question_id),
     )
-    return {"message": "配图已生成", "url": relative_url, "key": key}
+    return {"message": "配图已生成", "url": relative_url, "key": key,
+            "media_summary": media_summary(placeholders, media_files)}
 
 
 @router.post("/quest/admin/bank/{question_id}/generate-media/{placeholder_key}", summary="[教师] 占位符生图")
@@ -1808,56 +1837,66 @@ async def quest_bank_generate_media(question_id: int, placeholder_key: str, requ
         raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
 
     row = _get_quest_bank_question(question_id)
-    placeholders = json.loads(row.get("media_placeholders") or "[]")
-    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    if not get_config_value("IMAGE_GEN_ENABLED", True):
+        raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
+
+    placeholders = [ph for ph in _quest_rows(row.get("media_placeholders")) if isinstance(ph, dict)]
+    target = next((ph for ph in placeholders if ph.get("key") == placeholder_key), None)
     if not target:
         raise HTTPException(status_code=404, detail="占位符不存在")
 
+    description = str(target.get("description") or "").strip()
+    if not description:
+        raise HTTPException(status_code=400,
+                            detail="该占位符缺少图片描述，请改用「万相生图」或直接上传图片")
+
     prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-        subject=row.get("category", "百科"),
-        purpose=target.get("purpose", "示意图"),
-        description=target["description"],
+        subject=row.get("category", "百科") or "通用",
+        purpose=target.get("purpose") or "示意图",
+        description=description,
     )
 
     from backend.api.image_gen_service import generate_and_save_image
-    from backend.config import BASE_DIR
-    from pathlib import Path
 
-    media_dir = BASE_DIR / "question_media" / str(question_id)
+    media_dir = ensure_media_dir(SOURCE_QUEST, question_id)
+    media_files = normalize_media_files(row.get("media_files"))
 
-    # 清理旧文件
-    media_files = json.loads(row.get("media_files") or "[]")
-    old_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
-    if old_entry and old_entry.get("url"):
-        old_filename = old_entry["url"].rstrip("/").split("/")[-1]
-        old_path = media_dir / old_filename
-        if old_path.exists():
-            old_path.unlink()
-
-    local_path = await generate_and_save_image(prompt, media_dir)
-    if not local_path:
-        raise HTTPException(status_code=502, detail="AI 生图失败")
-
-    target["status"] = "generated"
-    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
-
-    file_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    errors: list[str] = []
+    local_path = await generate_and_save_image(prompt, media_dir, error_sink=errors)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if file_entry:
-        file_entry["url"] = relative_url
-        file_entry["created_at"] = now
+
+    if not local_path:
+        target["status"] = "failed"
+        execute_insert_update(
+            "UPDATE quest_question_bank SET media_placeholders=? WHERE id=?",
+            (dump_json(placeholders), question_id),
+        )
+        reason = (errors[0] if errors else "生图服务未返回图片")[:180]
+        logger.warning(f"闯关占位符生图失败 (id={question_id} key={placeholder_key}): {reason}")
+        raise HTTPException(status_code=502, detail=f"AI 生图失败：{reason}")
+
+    relative_url = url_for(SOURCE_QUEST, question_id, Path(local_path).name)
+
+    old_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    if old_entry:
+        old_url = old_entry.get("url") or ""
+        if old_url and old_url != relative_url:
+            delete_media_file(old_url, SOURCE_QUEST, question_id)
+        old_entry.update({"url": relative_url, "type": "image",
+                          "alt": description[:300], "created_at": now})
     else:
         media_files.append({
             "key": placeholder_key, "type": "image", "url": relative_url,
-            "alt": target["description"], "created_at": now,
+            "alt": description[:300], "created_at": now,
         })
 
+    target["status"] = "generated"
     execute_insert_update(
         "UPDATE quest_question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-        (json.dumps(placeholders, ensure_ascii=False),
-         json.dumps(media_files, ensure_ascii=False), question_id),
+        (dump_json(placeholders), dump_json(media_files), question_id),
     )
-    return {"message": "图片已生成", "url": relative_url, "placeholder_key": placeholder_key}
+    return {"message": "图片已生成", "url": relative_url,
+            "placeholder_key": placeholder_key, "status": "generated"}
 
 
 @router.post("/quest/admin/bank/{question_id}/upload-media/{placeholder_key}", summary="[教师] 上传图片")
@@ -1873,54 +1912,67 @@ async def quest_bank_upload_media(
 
     row = _get_quest_bank_question(question_id)
 
-    _, ext = (file.filename or "").lower().rsplit(".", 1) if "." in (file.filename or "") else ("", ".jpg")
-    ext = f".{ext}" if not ext.startswith(".") else ext
+    name = file.filename or ""
+    declared_ext = ("." + name.rsplit(".", 1)[-1]).lower() if "." in name else ""
     allowed = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
-    if ext not in allowed:
-        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
+    if declared_ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {declared_ext or '（无扩展名）'}")
 
-    content = await file.read()
-    from backend.api.config_router import get_config_value
     max_size_mb = get_config_value("MAX_IMAGE_SIZE_MB", 5)
     max_size = max_size_mb * 1024 * 1024
+    content = await file.read()
     if len(content) > max_size:
         raise HTTPException(status_code=400, detail=f"图片大小超过 {max_size_mb}MB 限制")
 
-    from backend.config import BASE_DIR
-    from pathlib import Path
+    # 按字节魔数判定真实格式，改名成 .png 的非图片文件进不来
+    from backend.api.image_gen_service import _sniff_image_format
     import uuid
 
-    media_dir = BASE_DIR / "question_media" / str(question_id)
-    media_dir.mkdir(parents=True, exist_ok=True)
+    fmt = _sniff_image_format(content)
+    if not fmt:
+        raise HTTPException(status_code=400, detail="上传内容不是可识别的图片文件")
+    ext = ".jpg" if fmt == "jpg" else f".{fmt}"
+
+    media_dir = ensure_media_dir(SOURCE_QUEST, question_id)
     file_id = uuid.uuid4().hex
     save_path = media_dir / f"{file_id}{ext}"
-    save_path.write_bytes(content)
+    try:
+        save_path.write_bytes(content)
+    except OSError as e:
+        logger.warning(f"闯关配图上传写盘失败 (id={question_id}): {e}")
+        raise HTTPException(status_code=500, detail="配图保存失败，请稍后重试")
 
-    placeholders = json.loads(row.get("media_placeholders") or "[]")
-    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    placeholders = [ph for ph in _quest_rows(row.get("media_placeholders")) if isinstance(ph, dict)]
+    target = next((ph for ph in placeholders if ph.get("key") == placeholder_key), None)
     if target:
         target["status"] = "uploaded"
 
-    relative_url = f"/api/files/question_media/{question_id}/{file_id}{ext}"
-    media_files = json.loads(row.get("media_files") or "[]")
-    file_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    relative_url = url_for(SOURCE_QUEST, question_id, save_path.name)
+    alt_text = (target.get("description") if target else "") or (file.filename or "上传图片")
+    media_files = normalize_media_files(row.get("media_files"))
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    file_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
     if file_entry:
-        file_entry["url"] = relative_url
-        file_entry["created_at"] = now
+        old_url = file_entry.get("url") or ""
+        if old_url and old_url != relative_url:
+            delete_media_file(old_url, SOURCE_QUEST, question_id)
+        file_entry.update({"url": relative_url, "type": "image",
+                           "alt": str(alt_text)[:300], "created_at": now})
     else:
         media_files.append({
             "key": placeholder_key, "type": "image", "url": relative_url,
-            "alt": target["description"] if target else file.filename,
-            "created_at": now,
+            "alt": str(alt_text)[:300], "created_at": now,
         })
+
+    placeholders = attach_media(placeholders, media_files)
 
     execute_insert_update(
         "UPDATE quest_question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-        (json.dumps(placeholders, ensure_ascii=False),
-         json.dumps(media_files, ensure_ascii=False), question_id),
+        (dump_json(placeholders), dump_json(media_files), question_id),
     )
-    return {"message": "图片上传成功", "url": relative_url, "placeholder_key": placeholder_key}
+    return {"message": "图片上传成功", "url": relative_url,
+            "placeholder_key": placeholder_key, "status": "uploaded"}
 
 
 @router.delete("/quest/admin/bank/{question_id}/svg", summary="[教师] 删除SVG配图")
@@ -1940,7 +1992,7 @@ async def quest_bank_delete_svg(question_id: int, request: Request):
 
 @router.delete("/quest/admin/bank/{question_id}/media/{placeholder_key}", summary="[教师] 删除配图")
 async def quest_bank_delete_media(question_id: int, placeholder_key: str, request: Request):
-    """删除闯关题目的配图"""
+    """删除闯关题目的配图（先改库再删文件，避免 manifest 指向已消失的文件）"""
     user = get_current_user(request)
     role = user.get("role", 2)
     if role not in (0, 1):
@@ -1948,28 +2000,31 @@ async def quest_bank_delete_media(question_id: int, placeholder_key: str, reques
 
     row = _get_quest_bank_question(question_id)
 
-    placeholders = json.loads(row.get("media_placeholders") or "[]")
-    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    placeholders = [ph for ph in _quest_rows(row.get("media_placeholders")) if isinstance(ph, dict)]
+    target = next((ph for ph in placeholders if ph.get("key") == placeholder_key), None)
     if target:
         target["status"] = "pending"
 
-    media_files = json.loads(row.get("media_files") or "[]")
-    deleted_file = next((f for f in media_files if f.get("key") == placeholder_key), None)
-    if deleted_file and deleted_file.get("url"):
-        from backend.config import BASE_DIR
-        from pathlib import Path
-        filename = deleted_file["url"].rstrip("/").split("/")[-1]
-        file_path = BASE_DIR / "question_media" / str(question_id) / filename
-        if file_path.exists():
-            file_path.unlink()
-    media_files = [f for f in media_files if f.get("key") != placeholder_key]
+    old_files = normalize_media_files(row.get("media_files"))
+    media_files = [f for f in old_files if f.get("key") != placeholder_key]
 
     execute_insert_update(
         "UPDATE quest_question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-        (json.dumps(placeholders, ensure_ascii=False),
-         json.dumps(media_files, ensure_ascii=False), question_id),
+        (dump_json(placeholders), dump_json(media_files), question_id),
     )
-    return {"message": "配图已删除", "placeholder_key": placeholder_key}
+
+    deleted_file = next((f for f in old_files if f.get("key") == placeholder_key), None)
+    if deleted_file:
+        delete_media_file(deleted_file.get("url", ""), SOURCE_QUEST, question_id)
+
+    return {"message": "配图已删除", "placeholder_key": placeholder_key,
+            "media_summary": media_summary(placeholders, media_files)}
+
+
+def _quest_rows(raw: Any) -> list[Any]:
+    """读取闯关题的 media_placeholders（JSON 字符串或列表），脏数据不抛异常"""
+    from backend.question_media import _as_list
+    return _as_list(raw)
 
 
 # ── 内部辅助 ──

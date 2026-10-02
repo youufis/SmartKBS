@@ -1813,8 +1813,8 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
             import uuid
             from pathlib import Path
 
-            save_dir = Path("question_media") / "whiteboard_ai"
-            save_dir.mkdir(parents=True, exist_ok=True)
+            from backend.question_media import SOURCE_WHITEBOARD, ensure_media_dir, url_for
+            save_dir = ensure_media_dir(SOURCE_WHITEBOARD)
             filename = f"wb_{uuid.uuid4().hex}"
 
             # 图片生成也有超时控制
@@ -1830,7 +1830,7 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
                 if local_path:
                     yield _sse("result", {
                         "mode": "image",
-                        "image_url": f"/api/files/question_media/whiteboard_ai/{Path(local_path).name}",
+                        "image_url": url_for(SOURCE_WHITEBOARD, filename=Path(local_path).name),
                         "title": data.get("title", ""),
                     })
                     return

@@ -380,6 +380,8 @@
   "pmPhotoWithCount": "📷 Images ({{count}})",
   "pmRetryAll": "Retry all",
   "pmFigure": "Figure",
+  "pmMissing": "Image missing",
+  "pmMissingTip": "The record says the figure is generated, but the file is gone from disk (likely an interrupted write in an older version). Click Retry to regenerate it.",
   "xCorrect": "Correct",
   "xWrong": "Wrong",
   "qLabelIdx": "Q{{no}}",

@@ -143,9 +143,21 @@ const QuestionBankPage: React.FC = () => {
       setGeneratedQuestions(res.questions)
       setGenProgress({ step: 0, text: '', count: 0, total: 0 })
       message.success(res.message)
+      // note 里带的是"配图哪几张没成功/代码题不落题库"这类降级信息，
+      // 只显示"成功生成 N 道"会让教师以为图都齐了
+      if (res.note) message.warning(res.note, 10)
       loadQuestions()
       setGenerating(false)
     } catch (err: any) {
+      // 轮询超时 != 任务失败：后台还在出题+生图，此时提示"失败"会诱导教师重复提交，
+      // 结果是重复入库的题目 + 重复烧掉生图配额
+      if (err?.aiTaskTimeout) {
+        setGenError(t('generateStillRunning'))
+        setGenProgress({ step: -1, text: '', count: 0, total: 0 })
+        setGenerating(false)
+        loadQuestions()
+        return
+      }
       const errMsg = err?.response?.data?.detail || err?.message || t('generateFailedRetry')
       if (!err?.errorFields) {
         setGenError(errMsg)

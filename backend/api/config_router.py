@@ -112,6 +112,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
     "IMAGE_GEN_SIZE": "1024*1024",
+    "IMAGE_GEN_MAX_PLACEHOLDERS": 2,
     # 称号系统配置
     "ENABLE_BADGES": True,
     "ENABLE_SUBJECT_TITLES": True,
@@ -291,6 +292,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "LOGIN_FAIL_LIMIT": (1, 100000),
     "MAX_DOC_SIZE_MB": (1, 200),
     "MAX_IMAGE_SIZE_MB": (1, 200),
+    "IMAGE_GEN_MAX_PLACEHOLDERS": (0, 8),
     "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
     "MAX_ALLOWED_REQUESTS": (1, 10000),
     "AI_REQUEST_TIMEOUT": (5, 900),

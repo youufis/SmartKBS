@@ -14,4 +14,9 @@ PyPDF2>=3.0.0
 python-docx>=1.1.0
 latex2mathml>=3.80
 svglib>=1.6.0
+# 试卷/讲义导出 Word·PDF 时把 SVG 配图栅格化。缺它也能跑（自动降级到 svglib），
+# 但 svglib 对中文标注与渐变的还原度差很多，配图的自部署请务必装上：
+cairosvg>=2.7.0
+# 上传图片与 AI 配图入库前的格式校验（缺则只按扩展名判断，不阻断安装）
+pillow>=10.0.0
 feedparser>=6.0.0

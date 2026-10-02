@@ -380,6 +380,8 @@
   "pmPhotoWithCount": "📷 图片配图（{{count}} 个）",
   "pmRetryAll": "全部重试",
   "pmFigure": "配图",
+  "pmMissing": "图片已丢失",
+  "pmMissingTip": "数据库记录显示已配图，但图片文件已不在磁盘上（可能来自早年的写入中断）。点「重试」会重新生成一张。",
   "xCorrect": "正确",
   "xWrong": "错误",
   "qLabelIdx": "第{{no}}题",
@@ -478,3 +480,4 @@
   "exPendingTip": "本场还有 {{count}} 份答卷待批改",
   "exPendingHint": "{{count}} 场考试有待批改答卷"
 }
+

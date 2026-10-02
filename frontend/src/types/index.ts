@@ -117,7 +117,8 @@ export interface MediaPlaceholder {
   key: string;
   description: string;
   purpose?: string;
-  status: 'pending' | 'generated' | 'uploaded' | 'failed';
+  /** 历史数据里可能没有这个字段（出题自动生图只回写过 media_files），前端按 url 兜底推断 */
+  status?: 'pending' | 'generated' | 'uploaded' | 'failed';
 }
 
 /** 媒体文件记录 */
@@ -125,6 +126,8 @@ export interface MediaFile {
   key: string;
   type: 'image' | 'video' | 'audio';
   url: string;
+  /** 后端读接口附带：图片文件是否还在磁盘上（false = 记录在但文件已丢失） */
+  exists?: boolean;
   alt?: string;
   original_name?: string;
   size?: number;
@@ -157,6 +160,8 @@ export interface QuestionInfo {
   media_placeholders?: MediaPlaceholder[];
   /** 已上传/生成的媒体文件 */
   media_files?: MediaFile[];
+  /** 配图统计（出题/生图接口返回，用于提示哪些图没成功） */
+  media_summary?: { placeholders: number; media_files: number; done: number; pending: number; failed: number };
 }
 
 // ── AI 智能批改类型 ──
@@ -242,6 +247,8 @@ export interface QuestionGenerateResponse {
   message: string;
   questions: QuestionInfo[];
   total: number;
+  /** 降级提示：配图部分失败、代码题不入题库等（前端需要显式提示，不能只报"成功 N 道"） */
+  note?: string;
 }
 
 export interface QuestionListResponse {

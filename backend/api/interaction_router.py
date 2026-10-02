@@ -28,6 +28,7 @@ from backend.prompts import apply_skills, build_ai_role
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.utils import extract_json_from_text
+from backend.question_media import media_columns_for_insert
 from backend.question_db import (
     execute_query as qb_execute_query,
     execute_insert as qb_execute_insert,
@@ -296,10 +297,7 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
                             if q.get("type") == "true_false":
                                 opts_dict = {"A": "对", "B": "错"}
 
-                            svg_code = q.get("svg_code") or q.get("svg_content") or ""
-                            has_svg = 1 if svg_code.strip() else 0
-                            media_placeholders = json.dumps(
-                                q.get("media_placeholders") or [], ensure_ascii=False)
+                            svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
 
                             qid = qb_execute_insert(
                                 """INSERT INTO question_bank

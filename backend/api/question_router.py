@@ -8,8 +8,8 @@ import os
 import io
 import time
 import re
-import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request, Query, UploadFile, File, Form
@@ -26,6 +26,21 @@ from backend.question_db import (
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files
 from backend.logger import logger
+from backend.question_media import (
+    SOURCE_BANK,
+    archive_bank_dir,
+    attach_media,
+    delete_media_file,
+    dump_json,
+    ensure_media_dir,
+    infer_status,
+    media_columns_for_insert,
+    media_summary,
+    normalize_media_files,
+    resolve_media_path,
+    url_for,
+)
+from backend.svg_safety import extract_svg, is_usable_svg, sanitize_svg
 
 # 复用聊天模块的 API Key 获取函数
 from backend.api.chat_router import get_api_keys
@@ -139,21 +154,15 @@ async def import_question(req: ImportQuestion, request: Request):
         else:
             options_str = req.options
 
-    # 处理配图字段
-    svg_content = req.svg_content or ""
-    has_svg = req.has_svg if req.has_svg else (1 if svg_content.strip() else 0)
-    media_placeholders_str = ""
-    if req.media_placeholders:
-        if isinstance(req.media_placeholders, (dict, list)):
-            media_placeholders_str = json.dumps(req.media_placeholders, ensure_ascii=False)
-        else:
-            media_placeholders_str = req.media_placeholders
-    media_files_str = ""
-    if req.media_files:
-        if isinstance(req.media_files, (dict, list)):
-            media_files_str = json.dumps(req.media_files, ensure_ascii=False)
-        else:
-            media_files_str = req.media_files
+    # 处理配图字段（外部导入按不可信输入处理：SVG 清洗、占位符与清单规整）
+    # 导入不限占位符数量（教师可能一次搬 3 个描述进来），只有"自动生图"才受上限约束
+    svg_content, has_svg_computed, media_placeholders_str = _media_columns(
+        {"svg_code": req.svg_content, "media_placeholders": req.media_placeholders},
+        placeholder_limit=0,
+    )
+    has_svg = req.has_svg if req.has_svg else has_svg_computed
+    media_files_list = normalize_media_files(req.media_files)
+    media_files_str = dump_json(media_files_list) if media_files_list else ""
 
     qid = execute_insert(
         """INSERT INTO question_bank
@@ -173,8 +182,7 @@ async def import_question(req: ImportQuestion, request: Request):
 
 # ── 公共辅助函数 ──
 
-_MEDIA_ARCHIVE_DIR = ".archived"
-
+# 配图目录命名空间与归档规则统一在 backend/question_media.py，不在这里重复定义
 
 _LIKE_ESCAPE = "!"
 
@@ -219,17 +227,15 @@ def _format_refs(exam_refs: list, practice_refs: list) -> str:
 
 
 def _archive_media_dir(question_id: int) -> None:
-    """Q6: 题目软删时归档配图目录(可完整恢复), 由日志保留任务到期清理"""
+    """Q6: 题目软删时归档配图目录(可完整恢复), 由日志保留任务到期清理
+
+    只搬本题自己的目录；闯关（quest/）与白板（whiteboard_ai/）在同一根目录下，
+    它们的归属由 backend.question_media 判断，这里绝不越界。
+    """
     try:
-        from backend.config import BASE_DIR
-        src = BASE_DIR / "question_media" / str(question_id)
-        if not src.exists():
-            return
-        dst_root = BASE_DIR / "question_media" / _MEDIA_ARCHIVE_DIR
-        dst_root.mkdir(parents=True, exist_ok=True)
-        dst = dst_root / ("%s__%s" % (question_id, datetime.now().strftime("%Y%m%d%H%M%S")))
-        shutil.move(str(src), str(dst))
-        logger.info(f"试题配图已归档: question_media/{_MEDIA_ARCHIVE_DIR}/{dst.name}")
+        moved = archive_bank_dir(question_id)
+        if moved:
+            logger.info(f"试题配图已归档: {moved}")
     except Exception as e:
         logger.warning(f"归档试题配图目录失败 (id={question_id}): {e}")
 
@@ -248,16 +254,75 @@ async def _verify_question_owner(
 
 def _delete_physical_media(
     question_id: int, url: str | None,
-):
-    """删除指定 URL 对应的物理图片文件（静默忽略不存在的情况）"""
-    if not url:
+) -> bool:
+    """删除指定 URL 对应的物理图片文件（静默忽略不存在的情况）
+
+    URL 可能来自教师导入的数据，按不可信输入处理：只取最后一段文件名，
+    并且只在配图根目录内删除，``/../`` 之类的值一律拒绝。
+    """
+    try:
+        return delete_media_file(url, SOURCE_BANK, question_id)
+    except Exception as e:
+        logger.warning(f"删除配图文件失败 (id={question_id}, url={str(url)[:60]}): {e}")
+        return False
+
+
+def _hydrate_media_state(row: dict[str, Any]) -> None:
+    """给读接口补上配图状态（不改数据库，只在返回前推断一次）
+
+    两类历史脏数据都要能看出来，否则教师只能"删图重来"：
+    - 占位符没有 status（出题自动生图当年只回写了 media_files）→ 按 manifest 推断；
+    - manifest 有记录但磁盘上文件已不在（早年的覆盖写/目录回收）→ 标 missing，
+      前端显示"图片已丢失"并给出「重试」，而不是摆一张破图。
+    """
+    placeholders = row.get("media_placeholders")
+    files = row.get("media_files")
+    if not isinstance(placeholders, list):
         return
-    from backend.config import BASE_DIR
-    from pathlib import Path
-    filename = url.rstrip("/").split("/")[-1]
-    file_path = BASE_DIR / "question_media" / str(question_id) / filename
-    if file_path.exists():
-        file_path.unlink()
+
+    alive_keys: set[Any] = set()
+    if isinstance(files, list):
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            if not url:
+                continue
+            exists = resolve_media_path(url, row.get("id"))
+            item["exists"] = bool(exists)
+            if exists:
+                alive_keys.add(item.get("key"))
+
+    for ph in placeholders:
+        if not isinstance(ph, dict):
+            continue
+        status = infer_status(ph, files)
+        if status in ("generated", "uploaded") and ph.get("key") not in alive_keys:
+            status = "missing"
+        ph["status"] = status
+
+
+def _media_columns(q_data: dict[str, Any], placeholder_limit: int | None = 2) -> tuple[str, int, str]:
+    """配图字段入库前的统一清洗与规整（实现见 backend.question_media）"""
+    return media_columns_for_insert(q_data, placeholder_limit=placeholder_limit)
+
+
+def _question_media_rows(row) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """从数据库行里取出（占位符, 媒体清单）两份列表，缺字段/坏 JSON 都不会抛"""
+    placeholders = [p for p in normalize_media_rows(row["media_placeholders"])
+                    if isinstance(p, dict)]
+    files = normalize_media_files(row["media_files"])
+    return placeholders, files
+
+
+def normalize_media_rows(raw: Any) -> list[dict[str, Any]]:
+    """读取历史占位符列表：保留原有条目（含状态），只丢掉非 dict 的脏数据
+
+    注意与 ``normalize_placeholders`` 的区别：这个用于"读已有数据"，不做数量截断，
+    否则老题里第 3、4 个占位符会在下次保存时被静默删掉。
+    """
+    from backend.question_media import _as_list
+    return [item for item in _as_list(raw) if isinstance(item, dict)]
 
 
 class _InternalRequest:
@@ -340,9 +405,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
     for q_data in questions[:req.count]:
         q_type = q_data.get("type", req.question_type)
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code = q_data.get("svg_code") or ""
-        has_svg = 1 if svg_code.strip() else 0
-        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
+        svg_code, has_svg, media_placeholders = _media_columns(q_data)
         qid = execute_insert(
             """INSERT INTO question_bank
                (type, question_text, options, correct_answer, explanation,
@@ -586,6 +649,7 @@ async def list_questions(
                 row[field] = None
             else:
                 row[field] = [] if field != "options" else None
+        _hydrate_media_state(row)
 
     return {
         "questions": rows,
@@ -619,6 +683,7 @@ async def get_question(question_id: int, request: Request):
             row[field] = None
         else:
             row[field] = []
+    _hydrate_media_state(row)
 
     return row
 
@@ -1108,9 +1173,7 @@ def _persist_extracted_questions(questions: list[dict[str, Any]], subject: str,
     for q_data in questions:
         q_type = q_data.get("type", "single")
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code = q_data.get("svg_code") or ""
-        has_svg = 1 if svg_code.strip() else 0
-        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
+        svg_code, has_svg, media_placeholders = _media_columns(q_data)
         q_text0 = (q_data.get("question") or "").strip()
         if not q_text0:
             continue
@@ -1858,16 +1921,14 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     creator_name = user_row[0][0] if user_row and user_row[0][0] else username
 
     # 入库（含多媒体字段）
-    from backend.config import BASE_DIR
     saved_questions = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     code_note = ""
+    media_notes: list[str] = []
     for q_data in questions[:req.count]:
         q_type = q_data.get("type", req.question_type)
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code = q_data.get("svg_code") or ""
-        has_svg = 1 if svg_code.strip() else 0
-        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
+        svg_code, has_svg, media_placeholders = _media_columns(q_data)
 
         qid = execute_insert(
             """INSERT INTO question_bank
@@ -1899,48 +1960,38 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
         if q_type == "code":
             code_note = CODE_BANK_NOTE
 
-        # ── 自动配图（通义万相） ──
+        # ── 自动配图（通义万相）：统一走 generate_placeholders_batch ──
+        # 过去这里自己手写了一份并发版，最大的问题是**只回写 media_files、不回写
+        # media_placeholders**：generated/failed 状态留在内存里就丢了。配图管理面板
+        # 按 status 决定显不显示图片、给不给"AI 生成/上传替换"按钮，于是出题生成的
+        # 图在面板里既看不见也点不动，失败项连"批量重试"都不出现。
         placeholders = q_data.get("media_placeholders") or []
-        media_files = []
-        if get_config_value("IMAGE_GEN_ENABLED", True):
-            from backend.api.image_gen_service import generate_and_save_image
-            from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+        media_files: list[dict[str, Any]] = []
+        if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
+            from backend.api.image_gen_service import generate_placeholders_batch
 
-            media_dir = BASE_DIR / "question_media" / str(qid)
-
-            if placeholders:
-                # 策略 A：AI 指定了占位符 → 按描述**并发**生图
-                async def _gen_one(ph: dict[str, Any]) -> dict[str, Any] | None:
-                    ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-                        subject=req.subject,
-                        purpose=ph.get("purpose", "示意图"),
-                        description=ph["description"],
-                    )
-                    local_path = await generate_and_save_image(ph_prompt, media_dir)
-                    if local_path:
-                        from pathlib import Path as PPath
-                        ph["status"] = "generated"
-                        return {
-                            "key": ph["key"],
-                            "type": "image",
-                            "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
-                            "alt": ph["description"],
-                            "created_at": now,
-                        }
-                    else:
-                        ph["status"] = "failed"
-                        logger.warning(f"试题 {qid} 占位符 {ph['key']} 生图失败")
-                        return None
-
-                results = await asyncio.gather(*[_gen_one(ph) for ph in placeholders])
-                media_files = [r for r in results if r is not None]
-
-            # 更新 media_files 到数据库
-            if media_files:
-                execute_update(
-                    "UPDATE question_bank SET media_files=? WHERE id=?",
-                    (json.dumps(media_files, ensure_ascii=False), qid)
-                )
+            media_dir = ensure_media_dir(SOURCE_BANK, qid)
+            errors: list[str] = []
+            try:
+                media_files = await generate_placeholders_batch(
+                    placeholders=placeholders,
+                    subject=req.subject,
+                    media_dir=media_dir,
+                    qid=qid,
+                    now=now,
+                    error_sink=errors,
+                ) or []
+            except Exception as media_err:
+                # 配图失败只降级成"无图题"，不能让整次出题（题目已入库）报错
+                logger.warning(f"试题 {qid} 自动配图异常: {media_err}")
+                errors.append(str(media_err)[:120])
+            placeholders = attach_media(placeholders, media_files)
+            execute_update(
+                "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                (dump_json(placeholders), dump_json(media_files), qid),
+            )
+            if errors:
+                media_notes.append(f"第 {len(saved_questions) + 1} 题配图未成功：" + "；".join(errors[:1]))
 
         saved_questions.append({
             "id": qid,
@@ -1955,13 +2006,18 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
             "svg_content": svg_code if has_svg else None,
             "media_placeholders": placeholders,
             "media_files": media_files,
+            "media_summary": media_summary(placeholders, media_files),
         })
+
+    note = code_note
+    if media_notes:
+        note = (note + " " if note else "") + "配图情况：" + "；".join(media_notes[:3])
 
     return {
         "message": f"成功生成 {len(saved_questions)} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
-        "note": code_note,
+        "note": note,
     }
 
 
@@ -2031,18 +2087,9 @@ async def generate_svg_for_question(question_id: int, request: Request):
 
 
 def _extract_svg_code(text: str) -> str:
-    """从 AI 返回文本中提取标准 SVG 代码，并进行安全检查"""
-    import re
-    # 提取 <svg>...</svg>
-    match = re.search(r'<svg[\s\S]*?</svg>', text, re.IGNORECASE)
-    if match:
-        svg = match.group()
-        # 安全过滤
-        svg = re.sub(r'<script[\s\S]*?</script>', '', svg, flags=re.IGNORECASE)
-        svg = re.sub(r'\bon\w+\s*=\s*["\'][\s\S]*?["\']', '', svg)
-        svg = re.sub(r'href\s*=\s*["\']\s*javascript:[\s\S]*?["\']', '', svg, flags=re.IGNORECASE)
-        return svg
-    return ""
+    """从 AI 返回文本中提取并清洗 SVG（安全规则见 backend.svg_safety）"""
+    svg_code = sanitize_svg(extract_svg(text))
+    return svg_code if is_usable_svg(svg_code) else ""
 
 
 @router.post("/{question_id}/generate-media/{placeholder_key}", summary="为占位符调用AI生图")
@@ -2051,7 +2098,14 @@ async def generate_media_for_placeholder(
     placeholder_key: str,
     request: Request,
 ):
-    """为指定占位符调用通义万相生成图片"""
+    """为指定占位符调用通义万相生成图片
+
+    三条底线：
+    - 畸形数据（缺 key/description、非 dict 项）不再抛 KeyError 变成 500；
+    - **先出新图再删旧图**，历史实现是"先删旧的再生成"，生成失败就两头空；
+    - 失败时把真实原因（模型/状态码）回传给教师，并把该占位符标成 failed，
+      这样"批量重试失败项"才会出现在面板上。
+    """
     user = get_current_user(request)
     username = user["username"]
 
@@ -2059,74 +2113,83 @@ async def generate_media_for_placeholder(
     if not get_config_value("IMAGE_GEN_ENABLED", True):
         raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
 
-    # 查找占位符
-    placeholders = json.loads(row["media_placeholders"] or "[]")
-    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    placeholders, media_files = _question_media_rows(row)
+    target = next((p for p in placeholders if p.get("key") == placeholder_key), None)
     if not target:
         raise HTTPException(status_code=404, detail="占位符不存在")
 
-    # 构建生图 prompt
+    description = str(target.get("description") or "").strip()
+    if not description:
+        raise HTTPException(status_code=400,
+                            detail="该占位符缺少图片描述，请改用「万相生图」或直接上传图片")
+
     from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+    from backend.api.image_gen_service import generate_and_save_image
+
     prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-        subject=row["subject"],
-        purpose=target.get("purpose", "示意图"),
-        description=target["description"],
+        subject=row["subject"] or "通用",
+        purpose=target.get("purpose") or "示意图",
+        description=description,
     )
 
-    # 调用生图
-    from backend.api.image_gen_service import generate_and_save_image
-    from backend.config import BASE_DIR
-    from pathlib import Path
-
-    media_dir = BASE_DIR / "question_media" / str(question_id)
-
-    # 重新生成前先清理旧的物理文件
-    media_files = json.loads(row["media_files"] or "[]")
-    old_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
-    _delete_physical_media(question_id, old_entry.get("url", "") if old_entry else None)
-
-    local_path = await generate_and_save_image(prompt, media_dir)
+    media_dir = ensure_media_dir(SOURCE_BANK, question_id)
+    errors: list[str] = []
+    local_path = await generate_and_save_image(prompt, media_dir, error_sink=errors)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if not local_path:
-        raise HTTPException(status_code=502, detail="AI 生图失败，请检查 API Key 或稍后重试")
+        target["status"] = "failed"
+        execute_update(
+            "UPDATE question_bank SET media_placeholders=?, updated_at=? WHERE id=?",
+            (dump_json(placeholders), now, question_id),
+        )
+        reason = (errors[0] if errors else "生图服务未返回图片")[:180]
+        logger.warning(f"占位符生图失败 (qid={question_id} key={placeholder_key}): {reason}")
+        raise HTTPException(status_code=502, detail=f"AI 生图失败：{reason}")
 
-    # 更新占位符状态和 media_files
-    target["status"] = "generated"
-    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
+    relative_url = url_for(SOURCE_BANK, question_id, Path(local_path).name)
 
-    file_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
-    if file_entry:
-        file_entry["url"] = relative_url
-        file_entry["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 新图已落盘，才清理旧图
+    old_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    if old_entry:
+        old_url = old_entry.get("url") or ""
+        if old_url and old_url != relative_url:
+            _delete_physical_media(question_id, old_url)
+        old_entry["url"] = relative_url
+        old_entry["type"] = "image"
+        old_entry["alt"] = description
+        old_entry["created_at"] = now
     else:
         media_files.append({
             "key": placeholder_key,
             "type": "image",
             "url": relative_url,
-            "alt": target["description"],
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "alt": description,
+            "created_at": now,
         })
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    target["status"] = "generated"
     execute_update(
         "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
-        (json.dumps(placeholders, ensure_ascii=False),
-         json.dumps(media_files, ensure_ascii=False),
-         now, question_id)
+        (dump_json(placeholders), dump_json(media_files), now, question_id),
     )
 
-    return {"message": "图片已生成", "url": relative_url, "placeholder_key": placeholder_key}
+    return {"message": "图片已生成", "url": relative_url, "placeholder_key": placeholder_key,
+            "status": "generated"}
 
 
 @router.post("/{question_id}/generate-image", summary="万相生图（直接为试题生成配图）")
 async def generate_image_for_question(question_id: int, request: Request):
-    """直接用通义万相为试题生成配图（不依赖占位符），作为 SVG 的补充/替换方案"""
+    """直接用通义万相为试题生成配图（不依赖占位符），作为 SVG 的补充/替换方案
+
+    生成的条目固定 key="wanxiang"，重复点击替换旧图；配图管理面板会把它和占位符
+    一起列出来（历史实现只回写 manifest，面板按占位符渲染，导致这张图永远看不见）。
+    """
     user = get_current_user(request)
     username = user["username"]
 
     row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
-    # 用题干前 200 字作为生图描述
     if not get_config_value("IMAGE_GEN_ENABLED", True):
         raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
 
@@ -2135,38 +2198,35 @@ async def generate_image_for_question(question_id: int, request: Request):
         raise HTTPException(status_code=400, detail="题干过短，无法生成配图")
 
     from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+    from backend.api.image_gen_service import generate_and_save_image
+
+    subject = row["subject"] or "通用"
     prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-        subject=row["subject"],
+        subject=subject,
         purpose="示意图",
-        description=f"与「{q_text}」相关的教学插图，适合高中{row['subject']}课堂展示",
+        description=f"与「{q_text}」相关的教学插图，适合{subject}课堂展示",
     )
 
-    from backend.api.image_gen_service import generate_and_save_image
-    from backend.config import BASE_DIR
-    from pathlib import Path
-
-    media_dir = BASE_DIR / "question_media" / str(question_id)
-    local_path = await generate_and_save_image(prompt, media_dir)
-
+    media_dir = ensure_media_dir(SOURCE_BANK, question_id)
+    errors: list[str] = []
+    local_path = await generate_and_save_image(prompt, media_dir, error_sink=errors)
     if not local_path:
-        raise HTTPException(status_code=502, detail="AI 生图失败，请检查 API Key 或稍后重试")
+        reason = (errors[0] if errors else "生图服务未返回图片")[:180]
+        logger.warning(f"试题直接配图失败 (qid={question_id}): {reason}")
+        raise HTTPException(status_code=502, detail=f"AI 生图失败：{reason}")
 
-    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
+    relative_url = url_for(SOURCE_BANK, question_id, Path(local_path).name)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 追加/替换到 media_files（固定 key="wanxiang"，重复点击替换旧图）
-    media_files = json.loads(row["media_files"] or "[]")
+    placeholders, media_files = _question_media_rows(row)
     key = "wanxiang"
-    existing = next((f for f in media_files if f["key"] == key), None)
+    existing = next((f for f in media_files if f.get("key") == key), None)
     if existing:
-        # 删除旧图片文件
-        old_url = existing.get("url", "")
-        if old_url:
-            old_filename = old_url.rstrip("/").split("/")[-1]
-            old_path = media_dir / old_filename
-            if old_path.exists():
-                old_path.unlink()
+        old_url = existing.get("url") or ""
+        if old_url and old_url != relative_url:
+            _delete_physical_media(question_id, old_url)
         existing["url"] = relative_url
+        existing["type"] = "image"
         existing["alt"] = q_text[:100]
         existing["created_at"] = now
     else:
@@ -2178,12 +2238,16 @@ async def generate_image_for_question(question_id: int, request: Request):
             "created_at": now,
         })
 
+    # manifest 里有条目但没有占位符时补一条，面板才有"删除/再来一张"的落点
+    placeholders = attach_media(placeholders, media_files)
+
     execute_update(
-        "UPDATE question_bank SET media_files=?, updated_at=? WHERE id=?",
-        (json.dumps(media_files, ensure_ascii=False), now, question_id)
+        "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
+        (dump_json(placeholders), dump_json(media_files), now, question_id),
     )
 
-    return {"message": "配图已生成", "url": relative_url, "key": key}
+    return {"message": "配图已生成", "url": relative_url, "key": key,
+            "media_summary": media_summary(placeholders, media_files)}
 
 
 @router.post("/{question_id}/upload-media/{placeholder_key}", summary="上传图片替换占位符")
@@ -2199,62 +2263,73 @@ async def upload_media_for_placeholder(
 
     row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
-    # 校验文件类型
-    import os
-    _, ext = os.path.splitext((file.filename or "").lower())
-    allowed = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
-    if ext not in allowed:
-        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
+    # 只看扩展名不够：改名成 .png 的任意文件也能进来。这里按字节魔数判定真实格式
+    import uuid
 
-    content = await file.read()
+    from backend.api.image_gen_service import _sniff_image_format
+
+    _, declared_ext = os.path.splitext((file.filename or "").lower())
+    allowed = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+    if declared_ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {declared_ext}")
+
     max_size_mb = get_config_value("MAX_IMAGE_SIZE_MB", 5)
     max_size = max_size_mb * 1024 * 1024
+    content = await file.read()
     if len(content) > max_size:
         raise HTTPException(status_code=400, detail=f"图片大小超过 {max_size_mb}MB 限制")
 
-    # 保存文件
-    from backend.config import BASE_DIR
-    from pathlib import Path
-    import uuid
+    fmt = _sniff_image_format(content)
+    if not fmt:
+        raise HTTPException(status_code=400, detail="上传内容不是可识别的图片文件")
+    ext = ".jpg" if fmt == "jpg" else f".{fmt}"
 
-    media_dir = BASE_DIR / "question_media" / str(question_id)
-    media_dir.mkdir(parents=True, exist_ok=True)
+    # 先落盘，成功后才清理旧文件（反序时写盘失败会把原图一起弄丢）
+    media_dir = ensure_media_dir(SOURCE_BANK, question_id)
     file_id = uuid.uuid4().hex
     save_path = media_dir / f"{file_id}{ext}"
-    save_path.write_bytes(content)
+    try:
+        save_path.write_bytes(content)
+    except OSError as e:
+        logger.warning(f"配图上传写盘失败 (id={question_id}): {e}")
+        raise HTTPException(status_code=500, detail="配图保存失败，请稍后重试")
 
-    # 查找占位符
-    placeholders = json.loads(row["media_placeholders"] or "[]")
-    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    placeholders, media_files = _question_media_rows(row)
+    target = next((ph for ph in placeholders if ph.get("key") == placeholder_key), None)
     if target:
         target["status"] = "uploaded"
 
-    relative_url = f"/api/files/question_media/{question_id}/{file_id}{ext}"
-    media_files = json.loads(row["media_files"] or "[]")
-    file_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
+    relative_url = url_for(SOURCE_BANK, question_id, save_path.name)
+    alt_text = (target.get("description") if target else "") or (file.filename or "上传图片")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    file_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
     if file_entry:
-        # Q6: 覆盖前先删掉旧物理文件, 否则每次重传都在磁盘上留一份孤儿
-        _delete_physical_media(question_id, file_entry.get("url", ""))
+        old_url = file_entry.get("url") or ""
+        if old_url and old_url != relative_url:
+            # Q6: 覆盖后删掉旧物理文件, 否则每次重传都在磁盘上留一份孤儿
+            _delete_physical_media(question_id, old_url)
         file_entry["url"] = relative_url
-        file_entry["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        file_entry["type"] = "image"
+        file_entry["alt"] = str(alt_text)[:300]
+        file_entry["created_at"] = now
     else:
         media_files.append({
             "key": placeholder_key,
             "type": "image",
             "url": relative_url,
-            "alt": target["description"] if target else file.filename,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "alt": str(alt_text)[:300],
+            "created_at": now,
         })
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    placeholders = attach_media(placeholders, media_files)
     execute_update(
         "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
-        (json.dumps(placeholders, ensure_ascii=False),
-         json.dumps(media_files, ensure_ascii=False),
-         now, question_id)
+        (dump_json(placeholders), dump_json(media_files), now, question_id)
     )
 
-    return {"message": "图片上传成功", "url": relative_url, "placeholder_key": placeholder_key}
+    return {"message": "图片上传成功", "url": relative_url,
+            "placeholder_key": placeholder_key, "status": "uploaded"}
 
 
 @router.delete("/{question_id}/svg", summary="删除 SVG 配图")
@@ -2280,29 +2355,30 @@ async def delete_media_for_placeholder(
     placeholder_key: str,
     request: Request,
 ):
-    """删除指定占位符的配图，重置为未配图状态"""
+    """删除指定占位符的配图，重置为未配图状态
+
+    顺序：先更新数据库里的引用关系，再删物理文件 —— 反序时如果写库失败，
+    manifest 就会指向一个已经不存在的文件（图裂 + 无法恢复）。
+    """
     user = get_current_user(request)
     username = user["username"]
 
     row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
-    placeholders = json.loads(row["media_placeholders"] or "[]")
-    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    placeholders, old_files = _question_media_rows(row)
+    target = next((ph for ph in placeholders if ph.get("key") == placeholder_key), None)
     if target:
         target["status"] = "pending"
 
-    media_files = json.loads(row["media_files"] or "[]")
-    # 删除物理文件
-    deleted_file = next((f for f in media_files if f["key"] == placeholder_key), None)
-    _delete_physical_media(question_id, deleted_file.get("url", "") if deleted_file else None)
-    media_files = [f for f in media_files if f["key"] != placeholder_key]
-
+    remaining_files = [f for f in old_files if f.get("key") != placeholder_key]
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update(
         "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
-        (json.dumps(placeholders, ensure_ascii=False),
-         json.dumps(media_files, ensure_ascii=False),
-         now, question_id)
+        (dump_json(placeholders), dump_json(remaining_files), now, question_id)
     )
 
-    return {"message": "配图已删除", "placeholder_key": placeholder_key}
+    deleted_file = next((f for f in old_files if f.get("key") == placeholder_key), None)
+    _delete_physical_media(question_id, deleted_file.get("url", "") if deleted_file else "")
+
+    return {"message": "配图已删除", "placeholder_key": placeholder_key,
+            "media_summary": media_summary(placeholders, remaining_files)}

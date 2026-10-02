@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.question_db import execute_insert, execute_query, execute_query_one, execute_update
+from backend.question_media import media_columns_for_insert
 from backend.database import execute_query as db_execute_query, execute_insert_update as db_execute_update
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
@@ -411,9 +412,7 @@ async def _persist_generated_questions(questions: list[dict], req: PracticeGener
             continue
 
         opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-        svg_code = q.get("svg_code") or ""
-        has_svg = 1 if svg_code.strip() else 0
-        media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
+        svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
         qid = execute_insert(
             """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
                 knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,

@@ -165,6 +165,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen' },
   { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', type: 'text', group: 'imagegen' },
   { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'text', group: 'imagegen' },
+  { key: 'IMAGE_GEN_MAX_PLACEHOLDERS', labelKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS', descKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS_desc', type: 'number', group: 'imagegen', required: false, unitKey: 'unitCount' },
 
   // ══ ③ 文件与存储 ══
   // 上传限制与类型白名单

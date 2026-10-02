@@ -69,6 +69,7 @@
   "startGenerate": "Start Generate",
   "aiGenerating": "AI Generating...",
   "generateFailedRetry": "Generation failed, please retry",
+  "generateStillRunning": "The generation task is still running in the background (figures take a while). Do not resubmit; refresh the question bank later to see the questions already saved.",
   "extractFail": "Extraction failed, please retry",
   "editSuccess": "Updated",
   "deleteSuccess": "Deleted",

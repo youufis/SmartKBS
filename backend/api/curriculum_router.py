@@ -19,6 +19,10 @@ from backend.database import (
     get_transaction,
 )
 from backend.question_db import execute_query as q_execute_query
+from backend.question_media import (SOURCE_BANK, ensure_media_dir, media_columns_for_insert,
+                                      normalize_media_files)
+from backend.svg_safety import is_usable_svg, sanitize_svg
+from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.permission_service import (
     check_share_visibility,
@@ -3037,9 +3041,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
                             continue
 
                         opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-                        svg_code = q.get("svg_code") or ""
-                        has_svg = 1 if svg_code.strip() else 0
-                        media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
+                        svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
                         qid = q_insert(
                             """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
                                 knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
@@ -3065,10 +3067,10 @@ async def ai_generate_practice(kp_id: int, request: Request):
                         # 自动生图（有占位符时）
                         placeholders = q.get("media_placeholders") or []
                         media_files = []
-                        if placeholders:
+                        if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
                             try:
                                 from backend.api.image_gen_service import generate_placeholders_batch
-                                media_dir = BASE_DIR / "question_media" / str(qid)
+                                media_dir = ensure_media_dir(SOURCE_BANK, qid)
                                 media_files = await generate_placeholders_batch(
                                     placeholders=placeholders,
                                     subject=subject,
@@ -3261,10 +3263,21 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
 
     # G3: 页面数据里剔除答案, 学生端只能提交作答、由服务端判分(防止查看源码偷答案)
     _leak_keys = {"answer", "correct_answer"}
-    questions_json = json.dumps(
-        [{k: v for k, v in q.items() if k not in _leak_keys} for q in questions],
-        ensure_ascii=False,
-    )
+    # 出口兜底：老数据里的 svg_code 是当年"批量出题不清洗"留下的原样字符串，
+    # 而下面渲染走的是 ``innerHTML += q.svg_code``（这份 HTML 与站点同源，学生直接打开），
+    # 不在这里清洗就等于把存储型 XSS 打进导出页。media_files 的 url 同理要规整。
+    _safe_questions = []
+    for q in questions:
+        item = {k: v for k, v in q.items() if k not in _leak_keys}
+        raw_svg = item.get("svg_code") or item.get("svg_content") or ""
+        if raw_svg:
+            safe_svg = sanitize_svg(raw_svg)
+            item["svg_code"] = safe_svg if is_usable_svg(safe_svg) else ""
+        if isinstance(item.get("media_files"), list):
+            item["media_files"] = normalize_media_files(item["media_files"])
+        _safe_questions.append(item)
+
+    questions_json = json.dumps(_safe_questions, ensure_ascii=False)
 
     page = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -3504,6 +3517,17 @@ document.addEventListener('keydown', function (e) {{
     }}
 }});
 
+function escAttr(s) {{
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}}
+
+function mediaError(el) {{
+    var box = el && el.parentNode;
+    if (box) {{ box.textContent = '\u26a0\ufe0f 配图缺失，请告知老师'; }}
+}}
+
 function renderQuestions() {{
     const container = document.getElementById('questionsContainer');
     container.innerHTML = '';
@@ -3522,8 +3546,12 @@ function renderQuestions() {{
         if (q.media_files && q.media_files.length > 0) {{
             mediaHtml += '<div class="media-area">';
             q.media_files.forEach(f => {{
+                const u = escAttr(f && f.url);
+                const a = escAttr(f && f.alt);
+                if (!u) {{ return; }}
                 mediaHtml += '<div class="media-item" onclick="zoomMedia(this)" title="点击查看大图">'
-                    + '<img src="' + f.url + '" alt="' + (f.alt || '') + '" loading="lazy"></div>';
+                    + '<img src="' + u + '" alt="' + a + '" loading="lazy"'
+                    + ' onerror="mediaError(this)"></div>';
             }});
             mediaHtml += '<div class="media-hint">🔍 点击配图查看大图</div></div>';
         }}
@@ -4023,9 +4051,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
             continue
 
         opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-        svg_code = q.get("svg_code") or ""
-        has_svg = 1 if svg_code.strip() else 0
-        media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
+        svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
         qid = q_insert(
             """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
                 knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
@@ -4048,10 +4074,10 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         # 自动生图（有占位符时）
         placeholders = q.get("media_placeholders") or []
         media_files = []
-        if placeholders:
+        if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
             try:
                 from backend.api.image_gen_service import generate_placeholders_batch
-                media_dir = BASE_DIR / "question_media" / str(qid)
+                media_dir = ensure_media_dir(SOURCE_BANK, qid)
                 media_files = await generate_placeholders_batch(
                     placeholders=placeholders,
                     subject=subject,

@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from backend.config import SERVER_HOST, SERVER_PORT, FRONTEND_DIST_DIR, BASE_DIR
+from backend.config import SERVER_HOST, SERVER_PORT, FRONTEND_DIST_DIR
 from backend.database import init_db
 from backend.question_db import init_question_db
 from backend.logger import logger
@@ -299,11 +299,11 @@ from backend.api.sync_service import router as sync_service_router
 app.include_router(sync_service_router, prefix="/api", tags=[])
 
 
-# ── 试题多媒体静态文件服务 ──
-_question_media_dir = BASE_DIR / "question_media"
-if _question_media_dir.exists():
-    from fastapi.staticfiles import StaticFiles
-    app.mount("/api/files/question_media", StaticFiles(directory=str(_question_media_dir)), name="question_media")
+# ── 试题配图不做静态挂载 ──
+# 这里曾经 mount 了一个 StaticFiles("/api/files/question_media")。它被上面 files_router
+# 的 /api/files/{path:path} 完全遮蔽（Starlette 按注册顺序匹配），也就是说：现在是不生效
+# 的死代码，一旦有人调整注册顺序，就等价于"免登录下载全部教学配图"（中间件还把该路径
+# 列在 public_paths 里）。配图统一下走 files_router：登录校验 + 归属判断 + 访问审计。
 
 # ── 静态文件服务（前端构建产物） ──
 # 使用 catch-all 路由代替 mount，避免挂载点优先级高于 API 路由

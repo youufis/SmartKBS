@@ -94,6 +94,7 @@
   "startGenerate": "开始生成",
   "aiGenerating": "AI 生成中...",
   "generateFailedRetry": "生成失败，请重试",
+  "generateStillRunning": "生成任务仍在后台进行（含配图时耗时较长属正常），请勿重复提交；稍后刷新题库列表即可看到已入库的题目。",
   "extractFail": "提取失败，请重试",
   "editSuccess": "修改成功",
   "deleteSuccess": "已删除",

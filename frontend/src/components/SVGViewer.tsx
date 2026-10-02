@@ -43,9 +43,17 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
     const ctx = canvas.getContext('2d')
     const img = new window.Image()
     img.onload = () => {
-      canvas.width = img.width
-      canvas.height = img.height
-      ctx?.drawImage(img, 0, 0)
+      // AI 生成的 SVG 通常只写 viewBox、不写 width/height，浏览器给的固有尺寸是
+      // 300×150，直接拿来当画布会得到一张糊掉的小图。这里按 viewBox 反推尺寸。
+      const box = /viewBox\s*=\s*["']\s*[\d.+-]+\s+[\d.+-]+\s+([\d.]+)\s+([\d.]+)/i.exec(svgCode)
+      const vbW = box ? parseFloat(box[1]) : 0
+      const vbH = box ? parseFloat(box[2]) : 0
+      const scale = 2 // 2 倍导出，打印/插入课件更清晰
+      const width = (vbW || img.width || 600) * scale
+      const height = (vbH || img.height || 400) * scale
+      canvas.width = Math.round(width)
+      canvas.height = Math.round(height)
+      ctx?.drawImage(img, 0, 0, canvas.width, canvas.height)
       const link = document.createElement('a')
       link.download = `${description || 'svg_image'}.png`
       link.href = canvas.toDataURL('image/png')

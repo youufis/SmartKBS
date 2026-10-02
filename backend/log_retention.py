@@ -172,25 +172,38 @@ def _maintain_exam_attempts() -> None:
 
 def _maintain_question_media() -> None:
     """题库配图磁盘治理(Q6):
-    - question_media/.archived/ 里超过 30 天的归档目录物理清除(软删题目的图先归档保留 30 天以便恢复)
-    - 完全找不到对应题目的孤儿目录(存在超过 30 天)一并回收
+    - ``question_media/.archived/`` 里超过 30 天的归档目录物理清除(软删题目的图先归档保留 30 天以便恢复)
+    - 软删但仍留着配图目录的题，目录移入归档
+    - **孤儿回收只认「数字命名的题库目录」**：闯关（quest/）与白板（whiteboard_ai/）
+      不在题库 id 集合里，过去被当孤儿整目录删掉，属于静默数据损坏
+    - 补一层文件级对账：删掉 manifest 不再引用、且超过 30 天的残留图片
     """
     import os
     import shutil
     import time
+
     try:
-        from backend.config import BASE_DIR
         from backend.question_db import execute_query as q_exec
-        root = BASE_DIR / "question_media"
+        from backend.question_db import execute_update as q_update
+        from backend.question_media import (
+            archive_bank_dir,
+            dump_json,
+            media_root,
+            plan_salvage,
+            sweep_orphan_dirs,
+            sweep_stale_files,
+            _safe_token,
+        )
+        root = media_root()
         if not root.exists():
             return
         month_ago = time.time() - 30 * 86400
         freed = 0
         removed = 0
 
-        def _dir_size(p):
+        def _dir_size(path):
             total = 0
-            for dp, _dirs, files in os.walk(p):
+            for dp, _dirs, files in os.walk(path):
                 for f in files:
                     try:
                         total += os.path.getsize(os.path.join(dp, f))
@@ -211,38 +224,111 @@ def _maintain_question_media() -> None:
                     continue
 
         # 先收敛历史状态: 软删题若仍留着配图目录, 移入归档(新删除路径已在 delete 时归档)
-        archived.mkdir(parents=True, exist_ok=True)
         soft_deleted = [str(r["id"]) for r in q_exec("SELECT id FROM question_bank WHERE status <> 'active'")]
         for sid in soft_deleted:
-            p = root / sid
             try:
-                if p.is_dir():
-                    dst = archived / ("%s__legacy_%s" % (sid, datetime.now().strftime("%Y%m%d%H%M%S")))
-                    shutil.move(str(p), str(dst))
-                    freed += _dir_size(dst)
+                if archive_bank_dir(_safe_token(sid)):
                     removed += 1
             except OSError:
                 continue
 
-        known = {str(r["id"]) for r in q_exec("SELECT id FROM question_bank")}
-        for name in os.listdir(root):
-            p = root / name
+        rows = [dict(r) for r in q_exec(
+            "SELECT id, media_files, media_placeholders FROM question_bank")]
+        known = {str(r["id"]) for r in rows}
+        # 闯关题历史上也往 question_media/<数字id> 写过（现在改到 quest/ 下了）。
+        # 把这些 id 也算进"已知"，老数据才不会被孤儿回收误删。
+        known |= _quest_known_ids()
+
+        # 先把"图片在盘上、manifest 却丢了"的题救回来（历史上 media_files 被后续写库
+        # 覆盖成空数组的题就是这种），剩下的才允许进归档
+        salvaged = 0
+        for r in rows:
             try:
-                if not p.is_dir() or name == ".archived":
+                d = root / str(r["id"])
+                if not d.is_dir():
                     continue
-                if name in known:
-                    continue
-                if p.stat().st_mtime < month_ago:
-                    freed += _dir_size(p)
-                    shutil.rmtree(p, ignore_errors=True)
-                    removed += 1
-            except OSError:
+                names = sorted(f.name for f in d.iterdir() if f.is_file())
+                plan = plan_salvage(r["id"], r.get("media_placeholders"),
+                                    r.get("media_files"), names)
+                if plan:
+                    merged = _as_list_json(r.get("media_files")) + plan
+                    q_update("UPDATE question_bank SET media_files=? WHERE id=?",
+                             (dump_json(merged), r["id"]))
+                    r["media_files"] = dump_json(merged)
+                    salvaged += len(plan)
+            except Exception:
                 continue
+        if salvaged:
+            logger.info(f"题库配图对账: 重新挂接 {salvaged} 张丢失引用的配图")
+        orphan_dirs, orphan_bytes = sweep_orphan_dirs(known, older_than_days=30)
+        removed += orphan_dirs
+        freed += orphan_bytes
+
+        # 文件级对账（跨表引用也算引用：闯关/白板与题库历史上可能共用过同一目录）
+        extra_refs: set[str] = set(_quest_referenced_files())
+
+        stale_files, stale_bytes = sweep_stale_files(
+            rows, older_than_days=30, extra_referenced=extra_refs,
+        )
+        removed += stale_files
+        freed += stale_bytes
 
         if removed:
-            logger.info(f"[log_retention] 题库配图回收 {removed} 个目录, 释放 {round(freed / 1024, 1)} KB")
+            logger.info(f"题库配图治理: 清理 {removed} 项, 释放 {freed / 1048576:.1f}MB")
     except Exception as e:
-        logger.warning(f"[log_retention] 题库配图治理失败: {e}")
+        logger.warning(f"题库配图治理失败: {e}")
+
+
+def _as_list_json(raw):
+    """media_files 字段的 JSON 兼容层（字符串/列表 → 字典列表）"""
+    import json as _json
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if not raw:
+        return []
+    try:
+        parsed = _json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _quest_rows_raw():
+    """闯关题库的 media 字段（主库；读不到就返回空，宁可不清理也不能误删）"""
+    try:
+        from backend.database import execute_query as main_exec
+        return [dict(r) if not isinstance(r, dict) else r
+                for r in (main_exec("SELECT id, media_files FROM quest_question_bank") or [])]
+    except Exception:
+        return []
+
+
+def _quest_known_ids() -> set[str]:
+    return {str(r.get("id")) for r in _quest_rows_raw() if r.get("id") is not None}
+
+
+def _quest_referenced_files() -> set[str]:
+    out: set[str] = set()
+    for r in _quest_rows_raw():
+        for item in _json_rows(r.get("media_files")):
+            url = str(item.get("url", ""))
+            if url:
+                out.add(url.rstrip("/").split("/")[-1])
+    return out
+
+
+def _json_rows(raw):
+    """JSON 字段兼容层（字符串/列表都归一成列表）"""
+    import json as _json
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    try:
+        parsed = _json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
 
 
 def _check_question_references() -> None:
@@ -319,6 +405,51 @@ def _reconcile_points_and_badges() -> None:
         logger.warning(f"[log_retention] 徽章兜底检测失败: {e}")
 
 
+def _prune_log_files() -> None:
+    """日志文件兜底回收(随每日 purge 跑):
+    - 迁出产生的 backend.<pid>.log 及其归档: 进程已死且 7 天未更新 -> 删
+    - 除主文件 backend.log(永不自动删)外, backend* 家族按 mtime 只保留最新 8 个
+    """
+    import glob as _glob
+    import os as _os
+    try:
+        from backend.config import LOG_FILES_DIR
+        from backend.instance_guard import _process_alive
+        d = str(LOG_FILES_DIR)
+        now = _time.time()
+        entries = []
+        removed = 0
+        for path in _glob.glob(_os.path.join(d, "backend*.log*")):
+            name = _os.path.basename(path)
+            if name == "backend.log":
+                continue
+            try:
+                mt = _os.path.getmtime(path)
+            except OSError:
+                continue
+            parts = name.split(".")
+            pid = int(parts[1]) if len(parts) > 2 and parts[1].isdigit() else None
+            if pid is not None and pid != _os.getpid() and not _process_alive(pid) and mt < now - 7 * 86400:
+                try:
+                    _os.remove(path)
+                    removed += 1
+                    continue
+                except OSError:
+                    pass
+            entries.append((mt, path))
+        entries.sort(reverse=True)
+        for _mt, path in entries[8:]:
+            try:
+                _os.remove(path)
+                removed += 1
+            except OSError:
+                pass
+        if removed:
+            logger.info(f"[log_retention] 日志文件回收 {removed} 个")
+    except Exception as e:
+        logger.warning(f"[log_retention] 日志文件回收失败: {e}")
+
+
 def purge_once() -> None:
     _dedupe_view_logs()
     _repair_view_logs_provenance()
@@ -326,6 +457,7 @@ def purge_once() -> None:
     _maintain_question_media()
     _check_question_references()
     _reconcile_points_and_badges()
+    _prune_log_files()
     for table, cands, days, extra in _ITEMS:
         try:
             with get_connection() as conn:

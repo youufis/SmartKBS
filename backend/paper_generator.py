@@ -370,24 +370,23 @@ def _embed_media_files(paragraph, media_files: list | str | None, question_id: i
 
 
 def _resolve_media_path(url: str, question_id: int) -> Path | None:
-    """解析媒体文件 URL 为本地路径"""
-    from backend.config import BASE_DIR
+    """解析媒体文件 URL 为本地路径
 
-    # 如果已经是本地路径
-    url_clean = url.split("?")[0].rstrip("/")
-    filename = url_clean.split("/")[-1]
+    统一交给 backend.question_media：它会按题库目录、闯关新目录
+    （question_media/quest/&lt;id&gt;）与闯关历史平铺目录依次查找，并且只允许落在配图根目录
+    内。过去这里只认 ``question_media/<id>``，闯关换命名空间后导出就会丢图。
+    """
+    from backend.question_media import resolve_media_path
 
-    # 可能的位置：question_media/{id}/{filename}
-    candidates = [
-        BASE_DIR / "question_media" / str(question_id) / filename,
-        BASE_DIR / "question_media" / str(question_id) / url_clean,
-        Path(url_clean) if os.path.isabs(url_clean) else None,
-    ]
-
-    for path in candidates:
-        if path and path.exists():
+    found = resolve_media_path(url, question_id)
+    if found:
+        return found
+    # 兼容历史上直接写绝对路径进来的 media_files
+    url_clean = (url or "").split("?")[0].rstrip("/")
+    if os.path.isabs(url_clean):
+        path = Path(url_clean)
+        if path.is_file():
             return path
-
     return None
 
 
