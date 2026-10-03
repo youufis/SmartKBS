@@ -17,10 +17,14 @@ SVG 配图有三条入库路径（AI 批量出题返回的 ``svg_code``、单题
 """
 from __future__ import annotations
 
+import json
 import re
+import xml.etree.ElementTree as ET
 
 # 模型输出里 SVG 的常见包装：```svg ... ``` / 裸 <svg>...</svg>
 _FENCE_RE = re.compile(r"```(?:svg|xml|html)?\s*([\s\S]*?)```", re.IGNORECASE)
+# 解壳时要能认任意语言的围栏（```json 里装响应壳是最常见的一种）
+_ANY_FENCE_RE = re.compile(r"```[a-zA-Z0-9_-]*\s*([\s\S]*?)```")
 _SVG_BLOCK_RE = re.compile(r"<svg\b[\s\S]*?</svg\s*>", re.IGNORECASE)
 
 # 整块移除的元素（含内容）
@@ -41,19 +45,76 @@ _BAD_SCHEME_RE = re.compile(r"^\s*(?:javascript|vbscript|livescript|data:text/ht
 _STYLE_BAD_RE = re.compile(r"(?:javascript\s*:|expression\s*\(|@import|behavior\s*:|url\([^)]*(?:https?:|ftp:|//))", re.IGNORECASE)
 
 
-def extract_svg(text: str | None) -> str:
-    """从模型回复里取出第一段 SVG 源码；取不到返回空串"""
+#: 智能体/网关返回的响应壳字段（值里才是真正的 SVG 文本）
+_SHELL_KEYS = ("result", "content", "answer", "data", "text", "output", "message")
+
+
+def unwrap_ai_text(text: str) -> str:
+    """剥掉 ``{"code":0,"status":"success","result":"<svg ...>"}`` 这类响应壳
+
+    百炼智能体应用（以及 json_mode 兜底）有时会把模型输出包在 JSON 里返回。
+    这时**整段壳里能正则匹配到 ``<svg>``，但它是被 JSON 转义过的**
+    （引号变成 ``\"``、换行变成 ``\\n``），直接入库就是一张永远渲染不出来的空图。
+    所以提取 SVG 之前必须先把壳解开、拿到未转义的原文。
+    """
     if not text:
         return ""
-    block = _SVG_BLOCK_RE.search(text)
-    if block:
-        return block.group(0).strip()
-    # 带 ```svg 围栏但内部被截断时，先剥围栏再试一次
-    for fence in _FENCE_RE.finditer(text):
-        block = _SVG_BLOCK_RE.search(fence.group(1))
-        if block:
-            return block.group(0).strip()
-    return ""
+    body = text.strip()
+    # 常见形态：整个回复就是一段 JSON，或被 ```json 之类的围栏包着
+    candidate = body
+    if not candidate.startswith("{"):
+        for fence in _ANY_FENCE_RE.finditer(body):
+            inner = fence.group(1).strip()
+            if inner.startswith("{"):
+                candidate = inner
+                break
+    if not candidate.startswith("{"):
+        return text
+    if not candidate.startswith("{"):
+        return text
+    parsed: object
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return text
+    if not isinstance(parsed, dict):
+        return text
+    for key in _SHELL_KEYS:
+        value = parsed.get(key)
+        if isinstance(value, str) and "<svg" in value.lower():
+            return value
+        if isinstance(value, dict):                     # 再套一层 data.result 之类
+            inner = unwrap_ai_text(json.dumps(value, ensure_ascii=False))
+            if inner != json.dumps(value, ensure_ascii=False):
+                return inner
+    return text
+
+
+def _looks_double_escaped(svg: str) -> bool:
+    """识别"被 JSON 转义过却没解壳"的文本：字面 ``\\n`` / ``\\"`` 出现在标签里"""
+    if not svg:
+        return False
+    head = svg[:400]
+    return ("\\n" in head or '\\"' in head) and "<svg" in head.lower()
+
+
+def extract_svg(text: str | None) -> str:
+    """从模型回复里取出第一段 SVG 源码（自动解响应壳）；取不到返回空串"""
+    if not text:
+        return ""
+    payload = unwrap_ai_text(text)
+    block = _SVG_BLOCK_RE.search(payload)
+    if not block:
+        # 带 ```svg 围栏但内部被截断时，先剥围栏再试一次
+        for fence in _FENCE_RE.finditer(payload):
+            block = _SVG_BLOCK_RE.search(fence.group(1))
+            if block:
+                break
+    if not block:
+        return ""
+    svg = block.group(0).strip()
+    # 解壳失败（例如壳里还套了一层字符串）时宁可判失败，也别把转义串存进库
+    return "" if _looks_double_escaped(svg) else svg
 
 
 def sanitize_svg(svg: str | None) -> str:
@@ -128,12 +189,23 @@ def _clean_attr(match: re.Match) -> str:
 
 
 def is_usable_svg(svg: str | None, min_len: int = 40) -> bool:
-    """清洗后是否还是一张「能画出东西」的 SVG（防止把空壳存进 DB）"""
-    if not svg:
+    """清洗后是否还是一张「浏览器真能画出来」的 SVG。
+
+    必须做 XML 良构校验：``<img src="data:image/svg+xml,...">`` 走的是严格 XML 解析，
+    非良构（未闭合标签、未定义实体、残留 JSON 转义）不会报错提示，而是**直接空白**——
+    教师只会看到"生成成功但图是空的"。只判长度和 ``<svg`` 就是这次空图事故的漏口。
+    """
+    if not svg or len(svg) < min_len:
         return False
     if "<svg" not in svg.lower():
         return False
-    return len(svg) >= min_len
+    if _looks_double_escaped(svg):
+        return False
+    try:
+        ET.fromstring(svg)
+    except (ET.ParseError, ValueError, TypeError, SyntaxError):
+        return False
+    return True
 
 
 def sanitize_ai_svg_output(text: str | None) -> str:

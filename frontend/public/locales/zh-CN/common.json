@@ -251,6 +251,8 @@
   "ebRetry": "重试",
   "ebRefresh": "刷新页面",
   "svCopied": "SVG 代码已复制",
+  "svRenderFail": "配图渲染失败",
+  "svRenderFailTip": "内容不是合法 SVG，点「重新生成」重试",
   "svZoomTip": "点击放大预览",
   "svDefault": "SVG 配图",
   "svDownloadPng": "💾 下载为 PNG",

@@ -44,7 +44,7 @@ from backend.svg_safety import extract_svg, is_usable_svg, sanitize_svg
 
 # 复用聊天模块的 API Key 获取函数
 from backend.api.chat_router import get_api_keys
-from backend.prompts import apply_skills
+# 注：本模块不再注入技能 —— 出题要求纯 JSON、SVG 要求纯代码，技能段的"结构化输出"指令会破坏这两种格式
 
 router = APIRouter()
 
@@ -2135,7 +2135,10 @@ async def _apply_generate_svg(question_id: int, username: str, role: int) -> dic
         description=row["question_text"],
         subject=row["subject"]
     )
-    prompt = apply_skills(prompt, "quiz")
+    # 注意：不注入技能 —— 技能段带"结构化输出/展示过程"类指令，会让模型偶发把 SVG
+    # 包进 {"code":0,"result":"<svg …\n…"} 这种响应壳里返回。壳里的 SVG 是被 JSON
+    # 转义过的（引号变 \"、换行变 \\n），过去照原样入库，浏览器按严格 XML 解析必然
+    # 失败，表现就是"生成成功但配图是空的"（2026-10 事故）。闯关侧早已按同一口径处理。
 
     try:
         result = await _call_dashscope_agent(prompt, api_key)
@@ -2144,7 +2147,11 @@ async def _apply_generate_svg(question_id: int, username: str, role: int) -> dic
 
     svg_code = _extract_svg_code(result)
     if not svg_code:
-        raise HTTPException(status_code=502, detail="AI 未能生成有效的 SVG 代码")
+        logger.warning(f"SVG 生成结果不可用 (qid={question_id}): {str(result)[:160]}")
+        raise HTTPException(
+            status_code=502,
+            detail="AI 返回的内容不是可渲染的 SVG（可能被包裹成 JSON 或被截断），请重试一次",
+        )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update(

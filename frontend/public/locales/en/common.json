@@ -251,6 +251,8 @@
   "ebRetry": "Retry",
   "ebRefresh": "Refresh page",
   "svCopied": "SVG code copied",
+  "svRenderFail": "Figure failed to render",
+  "svRenderFailTip": "Content is not valid SVG - click Regenerate to retry",
   "svZoomTip": "Click to zoom",
   "svDefault": "SVG figure",
   "svDownloadPng": "💾 Download PNG",

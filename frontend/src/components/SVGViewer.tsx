@@ -8,7 +8,7 @@
  * - 复制 SVG 代码
  */
 import { useTranslation } from 'react-i18next'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Modal, Tooltip, message, Image } from 'antd'
 
 interface SVGViewerProps {
@@ -31,6 +31,13 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
   const { t } = useTranslation('common')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [imgError, setImgError] = useState(false)
+
+  // svgCode 变了必须清掉上一次的失败标记：否则"重新生成"已经拿到好图，
+  // 组件却还停在降级态（降级分支不挂 <img>，onError 再也不会触发），
+  // 教师只能看到一张永远空白的配图，非得关掉弹窗重开才恢复。
+  useEffect(() => {
+    setImgError(false)
+  }, [svgCode])
 
   if (!svgCode) return null
 
@@ -69,8 +76,11 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
 
   // 缩略图内容
   const thumbContent = imgError ? (
-    // 降级：直接渲染 SVG 源码
-    <div style={{ fontSize: 12, color: '#999', textAlign: 'center', padding: 4 }}>SVG</div>
+    // 降级：明确说"渲染失败"并给出可操作出口，而不是只留两个灰字让人猜
+    <div style={{ fontSize: 12, color: '#ff4d4f', textAlign: 'center', padding: 4, lineHeight: 1.6 }}>
+      ⚠️ {t('svRenderFail')}
+      <div style={{ color: '#999', fontSize: 11 }}>{t('svRenderFailTip')}</div>
+    </div>
   ) : (
     <img
       src={svgDataUri}
