@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, Table, Button, message, Space, Typography, Modal, Tag,
   Spin, Empty, Descriptions, Divider, Tooltip, Statistic, Row, Col,
-  Select, Tabs,
+  Select, Tabs, Input, DatePicker, Switch,
 } from 'antd'
 import {
   ReloadOutlined, DeleteOutlined, HistoryOutlined,
@@ -22,6 +22,21 @@ const { Text, Title } = Typography
 // ============================================================
 // 类型定义
 // ============================================================
+
+/** 登录历史（管理员）——后端 /attendance/login-logs 的行结构 */
+interface LoginLogRow {
+  id: number; username: string; name: string; role: string; role_value: number | null
+  account_exists: boolean; grade: string; class_name: string; login_time: string
+  logout_time: string; is_online: boolean; duration_seconds: number | null
+  login_ip: string; user_agent: string
+}
+interface LoginLogFilters {
+  page: number; pageSize: number; keyword?: string; role?: string; grade?: string
+  className?: string; from?: string; to?: string; onlyOnline?: boolean; orphanOnly?: boolean
+}
+interface LoginLogStats {
+  rows: number; users: number; online: number; time_from: string; time_to: string
+}
 
 interface Session {
   teacher: string
@@ -847,9 +862,116 @@ const AttendanceStats: React.FC = () => {
   const [onlineLoading, setOnlineLoading] = useState(false)
 
   // ── 教职工登录信息（管理员可见） ──
-  const [viewMode, setViewMode] = useState<'student' | 'staff'>('student')
+  const [viewMode, setViewMode] = useState<'student' | 'staff' | 'history'>('student')
   const [staffList, setStaffList] = useState<StaffLoginInfo[]>([])
   const [staffLoading, setStaffLoading] = useState(false)
+
+  // ── 登录历史（仅管理员）：跨用户翻查 / 筛选 / 分页 / 导出 / 批量删除 ──
+  const [logFilters, setLogFilters] = useState<LoginLogFilters>({ page: 1, pageSize: 20 })
+  const [logRows, setLogRows] = useState<LoginLogRow[]>([])
+  const [logTotal, setLogTotal] = useState(0)
+  const [logStats, setLogStats] = useState<LoginLogStats | null>(null)
+  // 命名避开上面明细弹窗已在用的 logLoading（同名会撞 block-scoped 报错）
+  const [histLoading, setHistLoading] = useState(false)
+  const [logSelected, setLogSelected] = useState<number[]>([])
+  const [logExporting, setLogExporting] = useState(false)
+  const [logDeleting, setLogDeleting] = useState(false)
+
+  const buildLogParams = useCallback(() => {
+    const f = logFilters
+    const q: Record<string, string | number> = { page: f.page, page_size: f.pageSize }
+    if (f.keyword) q.keyword = f.keyword
+    if (f.role) q.role = f.role
+    if (f.grade) q.grade = f.grade
+    if (f.className) q.class_name = f.className
+    if (f.from) q.login_from = f.from
+    if (f.to) q.login_to = f.to
+    if (f.onlyOnline) q.only_online = '1'
+    if (f.orphanOnly) q.orphan_only = '1'
+    return q
+  }, [logFilters])
+
+  const loadLoginLogs = useCallback(async (override?: Partial<LoginLogFilters>) => {
+    setHistLoading(true)
+    try {
+      const f = { ...logFilters, ...override }
+      const q: Record<string, string | number> = { page: f.page, page_size: f.pageSize }
+      if (f.keyword) q.keyword = f.keyword
+      if (f.role) q.role = f.role
+      if (f.grade) q.grade = f.grade
+      if (f.className) q.class_name = f.className
+      if (f.from) q.login_from = f.from
+      if (f.to) q.login_to = f.to
+      if (f.onlyOnline) q.only_online = '1'
+      if (f.orphanOnly) q.orphan_only = '1'
+      const { data } = await apiClient.get('/api/rollcall/attendance/login-logs', { params: q })
+      setLogRows(data.logs || [])
+      setLogTotal(data.total || 0)
+      setLogStats(data.stats || null)
+      setLogFilters(f)
+      setLogSelected([])
+    } catch (err) {
+      // 不给 retry：这里自引用会命中 react-hooks/immutability（协程声明尚未完成就被取用），
+      // 重试入口就是卡片右上角的「刷新数据」，history 模式已接进它的 onClick
+      reportLoadError(err, { key: 'Rollcall.loginLogs' })
+      setLogRows([])
+    } finally {
+      setHistLoading(false)
+    }
+  }, [logFilters])
+
+  const exportLoginLogs = async () => {
+    setLogExporting(true)
+    try {
+      // 与列表同一套筛选参数：导出必须所见即所得
+      const resp = await apiClient.get('/api/rollcall/attendance/login-logs/export', {
+        params: buildLogParams(), responseType: 'arraybuffer',
+      })
+      const disp = resp.headers['content-disposition'] || ''
+      const m = disp.match(/filename\*=(?:UTF-8'')?([^;\s]+)/i)
+      const name = m ? decodeURIComponent(m[1]) : 'login_logs.xlsx'
+      const blob = new Blob([resp.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = name
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(link.href)
+      message.success(t('exportStarted'))
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('exportFailed'))
+    } finally {
+      setLogExporting(false)
+    }
+  }
+
+  // 只按勾选 id 删：不提供"按当前筛选全删"，条件写错就能一键抹掉整段痕迹
+  const deleteSelectedLogs = () => {
+    if (!logSelected.length) return
+    Modal.confirm({
+      title: t('confirmDeleteLogsTitle'),
+      content: t('confirmDeleteLogsContent', { count: logSelected.length }),
+      okText: t('confirmDelete'), okType: 'danger', cancelText: t('cancel'),
+      onOk: async () => {
+        setLogDeleting(true)
+        try {
+          const { data } = await apiClient.delete('/api/rollcall/attendance/login-logs/batch', {
+            data: { ids: logSelected },
+          })
+          message.success(data?.message || t('deleteDone'))
+          if (data?.missing) message.warning(t('deleteMissing', { count: data.missing }))
+          await loadLoginLogs({ page: 1 })
+        } catch (err: any) {
+          message.error(err?.response?.data?.detail || t('deleteFailed'))
+        } finally {
+          setLogDeleting(false)
+        }
+      },
+    })
+  }
 
   // 默认加载全部在线学生
   const loadOnlineStudents = useCallback(async () => {
@@ -1116,6 +1238,13 @@ const AttendanceStats: React.FC = () => {
                 >
                   {t('staffLogin')}
                 </Button>
+                <Button
+                  type={viewMode === 'history' ? 'primary' : 'default'}
+                  icon={<HistoryOutlined />}
+                  onClick={() => { setViewMode('history'); loadLoginLogs({ page: 1, pageSize: logFilters.pageSize }) }}
+                >
+                  {t('loginHistory')}
+                </Button>
               </Space.Compact>
             )}
           </Space>
@@ -1146,10 +1275,11 @@ const AttendanceStats: React.FC = () => {
             <Button icon={<ReloadOutlined />}
               onClick={() => {
                 if (viewMode === 'staff') loadStaffLogins()
+                else if (viewMode === 'history') loadLoginLogs()
                 else if (grade && cls) handleClassChange(cls)
                 else loadOnlineStudents()
               }}
-              loading={loading || onlineLoading || staffLoading}>
+              loading={loading || onlineLoading || staffLoading || histLoading}>
               {t('refreshData')}
             </Button>
           </Space>
@@ -1157,6 +1287,122 @@ const AttendanceStats: React.FC = () => {
         style={{ marginBottom: 16 }}
       >
         <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+          {/* ── 登录历史模式（仅管理员）── */}
+          {viewMode === 'history' && (
+            <>
+              <Space wrap style={{ marginBottom: 12 }}>
+                <Input.Search
+                  allowClear
+                  style={{ width: 220 }}
+                  placeholder={t('logSearchPlaceholder')}
+                  onSearch={(v) => loadLoginLogs({ keyword: v.trim(), page: 1 })}
+                />
+                <Select
+                  allowClear
+                  style={{ width: 120 }}
+                  placeholder={t('logRoleLabel')}
+                  value={logFilters.role}
+                  onChange={(v) => loadLoginLogs({ role: v || '', page: 1 })}
+                  options={[
+                    { label: t('roleStudent'), value: '2' },
+                    { label: t('roleTeacher'), value: '1' },
+                    { label: t('roleAdmin'), value: '0' },
+                  ]}
+                />
+                <Select
+                  allowClear
+                  style={{ width: 140 }}
+                  placeholder={t('selectGradePlaceholder')}
+                  value={logFilters.grade}
+                  onChange={(v) => loadLoginLogs({ grade: v || '', page: 1 })}
+                  options={grades.map((g) => ({ label: g, value: g }))}
+                />
+                <DatePicker.RangePicker
+                  showTime={false}
+                  onChange={(_d, ds) => loadLoginLogs({
+                    from: (ds && ds[0]) ? String(ds[0]) : '',
+                    to: (ds && ds[1]) ? String(ds[1]) : '',
+                    page: 1,
+                  })}
+                />
+                <Space size={4}>
+                  <Switch size="small" checked={!!logFilters.onlyOnline}
+                    onChange={(c) => loadLoginLogs({ onlyOnline: c, page: 1 })} />
+                  <Text style={{ fontSize: 13 }}>{t('onlyOnline')}</Text>
+                </Space>
+                <Space size={4}>
+                  <Switch size="small" checked={!!logFilters.orphanOnly}
+                    onChange={(c) => loadLoginLogs({ orphanOnly: c, page: 1 })} />
+                  <Text style={{ fontSize: 13 }}>{t('onlyOrphan')}</Text>
+                </Space>
+                <Button onClick={() => loadLoginLogs({
+                  keyword: '', role: '', grade: '', className: '', from: '', to: '',
+                  onlyOnline: false, orphanOnly: false, page: 1,
+                })}>{t('resetFilters')}</Button>
+              </Space>
+
+              <Space wrap style={{ marginBottom: 12 }}>
+                <Button icon={<DownloadOutlined />} loading={logExporting} onClick={exportLoginLogs}>
+                  {t('exportExcel')}
+                </Button>
+                <Button danger icon={<DeleteOutlined />} loading={logDeleting}
+                  disabled={logSelected.length === 0} onClick={deleteSelectedLogs}>
+                  {t('deleteSelected')}{logSelected.length ? ` (${logSelected.length})` : ''}
+                </Button>
+                {logStats && (
+                  <Text type="secondary" style={{ fontSize: 13 }}>
+                    {t('logStats', {
+                      rows: logStats.rows, users: logStats.users, online: logStats.online,
+                    })}
+                  </Text>
+                )}
+              </Space>
+
+              <Table<LoginLogRow>
+                rowKey="id"
+                size="small"
+                dataSource={logRows}
+                columns={[
+                  { title: t('colName'), dataIndex: 'name', width: 110, render: (v, r) => (
+                    <Space size={4}>{v || '-'}{!r.account_exists && <Tag color="orange">{t('tagDeleted')}</Tag>}</Space>) },
+                  { title: t('colUsername'), dataIndex: 'username', width: 120 },
+                  { title: t('colRole'), dataIndex: 'role', width: 80, render: (v) => v || '-' },
+                  { title: t('colGradeClass'), width: 130, render: (_v, r) => [r.grade, r.class_name].filter(Boolean).join(' · ') || '-' },
+                  { title: t('colLoginTime'), dataIndex: 'login_time', width: 165,
+                    sorter: true, render: (v: string) => v || '-' },
+                  { title: t('colLogoutTime'), dataIndex: 'logout_time', width: 165,
+                    render: (v: string) => v || <Text type="secondary">-</Text> },
+                  { title: t('colDuration'), dataIndex: 'duration_seconds', width: 100, render: (v: number | null) => {
+                    if (v === null || v === undefined) return '-'
+                    const h = Math.floor(v / 3600), m = Math.floor((v % 3600) / 60)
+                    return h ? `${h}h${m}m` : m ? `${m}m` : `${v}s`
+                  } },
+                  { title: t('colStatus'), dataIndex: 'is_online', width: 90, render: (v: boolean) => (
+                    v ? <Tag color="success" icon={<LoginOutlined />}>{t('statusOnline')}</Tag>
+                      : <Tag>{t('statusOffline')}</Tag>) },
+                  { title: t('colIp'), dataIndex: 'login_ip', width: 130, render: (v: string) => v || '-' },
+                  { title: t('colUa'), dataIndex: 'user_agent', ellipsis: true,
+                    render: (v: string) => v ? <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v}</Text></Tooltip> : '-' },
+                ]}
+                loading={histLoading}
+                rowSelection={{
+                  selectedRowKeys: logSelected,
+                  onChange: (keys) => setLogSelected(keys as number[]),
+                }}
+                pagination={{
+                  current: logFilters.page, pageSize: logFilters.pageSize, total: logTotal,
+                  showSizeChanger: true, pageSizeOptions: [20, 50, 100, 200],
+                  showTotal: (n) => t('totalRecords', { count: n }),
+                  onChange: (page, pageSize) => loadLoginLogs({ page, pageSize }),
+                }}
+                scroll={{ x: 1200 }}
+              />
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+                {t('loginHistoryNote')}
+              </Text>
+            </>
+          )}
+
           {/* ── 学生考勤模式 ── */}
           {viewMode === 'student' && (
             <>

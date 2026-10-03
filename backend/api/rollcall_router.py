@@ -4,7 +4,9 @@
 import json, os, random, re, time
 from typing import Any
 
-from fastapi import APIRouter, Request, HTTPException
+from datetime import datetime
+
+from fastapi import APIRouter, Body, Request, HTTPException
 
 from backend.config import DATA_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
@@ -1110,6 +1112,362 @@ async def attendance_clear_login_logs(request: Request):
     except Exception as e:
         logger.error(f"清除登录日志失败: {e}")
         raise HTTPException(status_code=500, detail="清除登录日志失败")
+
+
+# ══════════════════════════════════════════════════════════════
+# 登录历史记录管理（考勤统计第三个子页，仅管理员）
+# ══════════════════════════════════════════════════════════════
+# 与上面两个只读视图的分工：/attendance/logs 回答"某个学生的全部历史"，
+# /attendance/staff-logins 回答"每个教职工的最近一次"，都答不了
+# "最近谁在哪个 IP 登录过、能否按条件翻出来并清理"。这里补的是这一段。
+#
+# 注意：login_logs 只记**成功登录**（登录失败仅进日志文件与内存封禁计数，
+# 不落库），前端文案也要照实说明，别让人以为失败尝试也在里面。
+
+LOGIN_LOG_MAX_PAGE_SIZE = 200
+LOGIN_LOG_EXPORT_CAP = 20000
+LOGIN_LOG_BATCH_CAP = 1000
+#: 排序字段白名单：拼进 ORDER BY 的列名绝不能来自未校验的用户输入
+LOGIN_LOG_SORT_FIELDS = {"id", "login_time", "logout_time", "username", "grade"}
+LOGIN_LOG_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+_ROLE_LABELS = {0: "管理员", 1: "教师", 2: "学生"}
+
+_LOGIN_LOG_SELECT = """SELECT l.id, l.username, l.student_name, l.grade, l.class_name,
+                              l.login_time, l.logout_time, l.login_ip, l.user_agent,
+                              u.name AS real_name, u.role AS role
+                       FROM login_logs l
+                       LEFT JOIN users u ON u.username = l.username"""
+
+
+def _like_esc(v: str) -> str:
+    """转义 LIKE 的通配符，用 ! 作 ESCAPE 字符。
+
+    不用反斜杠：SQL 字面量里 ESCAPE '\\' 会变成两个字符被 SQLite 拒绝；
+    不转义则用户搜 "100%.md" 这类文本时 % 会被当通配符，误伤其它行。
+    """
+    return re.sub(r"([%!_])", "!\\1", str(v or ""))
+
+
+def _require_login_log_admin(request: Request) -> dict:
+    """登录历史含 IP 与 UA 指纹，属个人信息：三个端点一律服务端硬限管理员。
+
+    前端隐藏入口只是体验，权限判定必须以这里为准。
+    """
+    user = get_current_user(request)
+    if user.get("role", 2) != ROLE_ADMIN:
+        raise HTTPException(status_code=403, detail="仅管理员可查看与管理登录历史")
+    return user
+
+
+def _norm_time_bound(raw: str, end_of_day: bool, label: str) -> str:
+    """把日期参数规范成与 login_time 同格式的本地时间串。
+
+    login_time 是用 datetime('now','localtime') 写的 'YYYY-MM-DD HH:MM:SS'，
+    所以比较值也必须是同格式本地串：只给日期却不补时分秒，字符串比较会让
+    "筛今天的记录" 直接落空（'2026-10-03' < '2026-10-03 08:00:00'）。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    date_only = len(text) <= 10
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if date_only:
+            dt = dt.replace(hour=23, minute=59, second=59) if end_of_day else dt.replace(
+                hour=0, minute=0, second=0)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    raise HTTPException(status_code=400,
+                        detail=f"{label} 格式应为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS")
+
+
+def _login_log_where(q: dict) -> tuple[str, list]:
+    """按筛选条件拼 WHERE（返回条件串与参数列表，值一律走占位符）"""
+    conds: list[str] = ["1=1"]
+    args: list[Any] = []
+
+    keyword = str(q.get("keyword") or "").strip()
+    if keyword:
+        like = f"%{_like_esc(keyword)}%"
+        conds.append("(l.username LIKE ? ESCAPE '!' OR COALESCE(u.name, l.student_name) LIKE ? ESCAPE '!'"
+                     " OR l.login_ip LIKE ? ESCAPE '!')")
+        args += [like, like, like]
+
+    username = str(q.get("username") or "").strip()
+    if username:
+        conds.append("l.username = ?")
+        args.append(username)
+
+    role = str(q.get("role") or "").strip()
+    if role and role != "all":
+        if role not in {"0", "1", "2"}:
+            raise HTTPException(status_code=400, detail="role 只能是 0/1/2 或 all")
+        conds.append("u.role = ?")
+        args.append(int(role))
+
+    grade = str(q.get("grade") or "").strip()
+    if grade:
+        conds.append("l.grade = ?")
+        args.append(grade)
+
+    cls = str(q.get("class_name") or "").strip()
+    if cls:
+        conds.append("l.class_name = ?")
+        args.append(cls)
+
+    if str(q.get("only_online") or "").strip().lower() in LOGIN_LOG_TRUE_VALUES:
+        conds.append("(l.logout_time IS NULL OR l.logout_time = '')")
+
+    # 已注销账号的历史：用 LEFT JOIN 才看得到，否则这类行永远留在库里没人清理
+    if str(q.get("orphan_only") or "").strip().lower() in LOGIN_LOG_TRUE_VALUES:
+        conds.append("u.username IS NULL")
+
+    start = _norm_time_bound(q.get("login_from", ""), False, "login_from")
+    if start:
+        conds.append("l.login_time >= ?")
+        args.append(start)
+    end = _norm_time_bound(q.get("login_to", ""), True, "login_to")
+    if end:
+        conds.append("l.login_time <= ?")
+        args.append(end)
+
+    return " AND ".join(conds), args
+
+
+def _login_log_row(r: dict) -> dict:
+    """统一出口结构：角色给中文标签、时长在 Python 侧算（SQLite 版本差异别带到比较逻辑里）"""
+    login_t = str(r.get("login_time") or "")
+    logout_t = str(r.get("logout_time") or "")
+    duration = None
+    if login_t and logout_t:
+        try:
+            duration = int((datetime.strptime(logout_t[:19], "%Y-%m-%d %H:%M:%S")
+                            - datetime.strptime(login_t[:19], "%Y-%m-%d %H:%M:%S")).total_seconds())
+            if duration < 0:
+                duration = None      # 历史脏数据里登出早于登录：宁可不显示，也不给负时长
+        except ValueError:
+            duration = None
+    role = r.get("role")
+    return {
+        "id": r.get("id"),
+        "username": r.get("username") or "",
+        "name": r.get("real_name") or r.get("student_name") or "",
+        "role": "" if role is None else _ROLE_LABELS.get(int(role), str(role)),
+        "role_value": role,
+        "account_exists": role is not None,
+        "grade": r.get("grade") or "",
+        "class_name": r.get("class_name") or "",
+        "login_time": login_t,
+        "logout_time": logout_t,
+        "is_online": not logout_t,
+        "duration_seconds": duration,
+        "login_ip": r.get("login_ip") or "",
+        "user_agent": r.get("user_agent") or "",
+    }
+
+
+@router.get("/attendance/login-logs", summary="登录历史记录查询（管理员专用）")
+async def attendance_login_logs(request: Request):
+    """跨用户翻查登录历史：筛选 + 服务端分页 + 命中集统计。"""
+    _require_login_log_admin(request)
+    q = request.query_params
+
+    try:
+        page = max(1, int(q.get("page") or 1))
+        page_size = int(q.get("page_size") or 20)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="page / page_size 必须是整数")
+    if page_size < 1 or page_size > LOGIN_LOG_MAX_PAGE_SIZE:
+        raise HTTPException(status_code=400,
+                            detail=f"page_size 范围为 1-{LOGIN_LOG_MAX_PAGE_SIZE}")
+
+    sort = str(q.get("sort") or "login_time").strip().lower()
+    if sort not in LOGIN_LOG_SORT_FIELDS:
+        raise HTTPException(status_code=400,
+                            detail="sort 只能是 " + "/".join(sorted(LOGIN_LOG_SORT_FIELDS)))
+    order = "ASC" if str(q.get("order") or "desc").strip().lower() == "asc" else "DESC"
+
+    where, args = _login_log_where({k: q.get(k, "") for k in (
+        "keyword", "username", "role", "grade", "class_name",
+        "only_online", "orphan_only", "login_from", "login_to")})
+
+    total_rows = execute_query_dict(
+        f"SELECT COUNT(*) AS c FROM login_logs l LEFT JOIN users u ON u.username = l.username WHERE {where}",
+        tuple(args)) or []
+    total = int(total_rows[0]["c"]) if total_rows else 0
+
+    stats_rows = execute_query_dict(
+        f"""SELECT COUNT(DISTINCT l.username) AS users_,
+                   SUM(CASE WHEN l.logout_time IS NULL OR l.logout_time = '' THEN 1 ELSE 0 END) AS online_,
+                   MIN(l.login_time) AS t_from, MAX(l.login_time) AS t_to
+            FROM login_logs l LEFT JOIN users u ON u.username = l.username WHERE {where}""",
+        tuple(args)) or []
+    st = stats_rows[0] if stats_rows else {}
+
+    rows = execute_query_dict(
+        f"{_LOGIN_LOG_SELECT} WHERE {where} ORDER BY l.{sort} {order}, l.id DESC LIMIT ? OFFSET ?",
+        tuple(args) + (page_size, (page - 1) * page_size)) or []
+
+    return {
+        "logs": [_login_log_row(r) for r in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "stats": {
+            "rows": total,
+            "users": int(st.get("users_") or 0),
+            "online": int(st.get("online_") or 0),
+            "time_from": st.get("t_from") or "",
+            "time_to": st.get("t_to") or "",
+        },
+    }
+
+
+@router.get("/attendance/login-logs/export", summary="导出登录历史 (Excel，管理员专用)")
+async def attendance_export_login_logs(request: Request):
+    """按当前筛选条件导出多表 Excel：明细 + 按用户汇总 + 导出说明。
+
+    筛选参数与列表端点完全一致（所见即所得），不分页但设硬上限：
+    管理员以为"导出成功"而实际只拿到截断结果，比直接报错更糟。
+    """
+    admin = _require_login_log_admin(request)
+    q = request.query_params
+    where, args = _login_log_where({k: q.get(k, "") for k in (
+        "keyword", "username", "role", "grade", "class_name",
+        "only_online", "orphan_only", "login_from", "login_to")})
+
+    rows = execute_query_dict(
+        f"{_LOGIN_LOG_SELECT} WHERE {where} ORDER BY l.login_time DESC, l.id DESC LIMIT ?",
+        tuple(args) + (LOGIN_LOG_EXPORT_CAP + 1,)) or []
+    if len(rows) > LOGIN_LOG_EXPORT_CAP:
+        raise HTTPException(status_code=400,
+                            detail=f"结果超过 {LOGIN_LOG_EXPORT_CAP} 行，请缩小时间范围或加筛选条件后重试")
+
+    from openpyxl import Workbook
+    from backend.api.export_router import (  # 复用既有 Excel 样式与响应范式
+        _auto_width, _excel_response, _guard_row_count, _style_cells, _style_header)
+
+    _guard_row_count(len(rows), "登录历史")
+    items = [_login_log_row(r) for r in rows]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "登录明细"
+    headers = ["序号", "姓名", "用户名", "角色", "年级", "班级", "登录时间", "登出时间",
+               "在线时长", "登录IP", "客户端 UA"]
+    ws.append(headers)
+    _style_header(ws, 1, len(headers))
+    for idx, it in enumerate(items, 1):
+        dur = ""
+        if it["duration_seconds"] is not None:
+            m, s = divmod(int(it["duration_seconds"]), 60)
+            h, m = divmod(m, 60)
+            dur = f"{h}小时{m}分{s}秒" if h else (f"{m}分{s}秒" if m else f"{s}秒")
+        ws.append([idx, it["name"], it["username"], it["role"] or "已注销", it["grade"],
+                   it["class_name"], it["login_time"], it["logout_time"] or "未登出",
+                   dur, it["login_ip"], it["user_agent"]])
+    _style_cells(ws, 2, max(2, len(items) + 1), len(headers))
+    _auto_width(ws, len(headers), max_width=46)
+    ws.freeze_panes = "A2"
+
+    # 按用户汇总：管理员最常问的是"谁登录得最多 / 最近一次是谁"
+    agg: dict[str, dict[str, Any]] = {}
+    for it in items:
+        a = agg.setdefault(it["username"], {"name": it["name"], "role": it["role"] or "已注销",
+                                            "grade": it["grade"], "class": it["class_name"],
+                                            "count": 0, "ips": set(), "last": "", "online": 0})
+        a["count"] += 1
+        if it["login_ip"]:
+            a["ips"].add(it["login_ip"])
+        a["last"] = max(a["last"], it["login_time"])
+        a["online"] += 1 if it["is_online"] else 0
+    ws2 = wb.create_sheet("按用户汇总")
+    h2 = ["序号", "姓名", "用户名", "角色", "年级", "班级", "登录次数", "未登出次数",
+          "最近登录时间", "涉及IP数"]
+    ws2.append(h2)
+    _style_header(ws2, 1, len(h2))
+    for i, (uname, a) in enumerate(sorted(agg.items(), key=lambda kv: (-kv[1]["count"], kv[0])), 1):
+        ws2.append([i, a["name"], uname, a["role"], a["grade"], a["class"], a["count"],
+                    a["online"], a["last"], len(a["ips"])])
+    _style_cells(ws2, 2, max(2, len(agg) + 1), len(h2))
+    _auto_width(ws2, len(h2))
+    ws2.freeze_panes = "A2"
+
+    ws3 = wb.create_sheet("导出说明")
+    ws3.append(["项目", "内容"])
+    _style_header(ws3, 1, 2)
+    for line in [
+        ["导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        ["操作人", admin.get("username", "")],
+        ["筛选条件", "; ".join(f"{k}={v}" for k, v in (
+            ("关键字", q.get("keyword", "")), ("用户名", q.get("username", "")),
+            ("角色", q.get("role", "")), ("年级", q.get("grade", "")),
+            ("班级", q.get("class_name", "")), ("登录起", q.get("login_from", "")),
+            ("登录止", q.get("login_to", "")),
+            ("仅在线", q.get("only_online", "")), ("仅已注销账号", q.get("orphan_only", "")))
+                              if v) or "无（全部）"],
+        ["记录条数", str(len(items))],
+        ["涉及账号数", str(len(agg))],
+        ["数据来源", "login_logs（系统自动保留最近 180 天）"],
+        ["口径说明", "仅记录登录成功的事件；登录失败不落库，只在服务端日志与 IP 封禁计数中体现。"],
+        ["隐私提示", "本表含 IP 与客户端指纹，仅限管理员在校内管理用途使用，勿外传。"],
+    ]:
+        ws3.append(line)
+    _style_cells(ws3, 2, 9, 2)
+    _auto_width(ws3, 2, max_width=90)
+
+    filename = f"登录历史_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    logger.info(f"[审计] 管理员 {admin.get('username', '')} 导出登录历史 {len(items)} 条，"
+                f"条件={dict(q)}")
+    return _excel_response(wb, filename)
+
+
+@router.delete("/attendance/login-logs/batch", summary="按记录批量删除登录历史（管理员专用）")
+async def attendance_delete_login_logs_batch(request: Request, body: dict = Body(...)):
+    """按勾选 id 精确删除。
+
+    刻意不提供"按当前筛选条件全删"：筛选条件写错就能一键抹掉整段审计痕迹，
+    粒度上限留给已有的三种粗粒度端点（整库 / 整用户 / 按保留天数），路径明确。
+    """
+    admin = _require_login_log_admin(request)
+    raw = (body or {}).get("ids")
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(status_code=400, detail="请先选择要删除的记录")
+    if len(raw) > LOGIN_LOG_BATCH_CAP:
+        raise HTTPException(status_code=400,
+                            detail=f"单次最多删除 {LOGIN_LOG_BATCH_CAP} 条，请分批操作")
+    ids: list[int] = []
+    for v in raw:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="ids 必须是记录 id 数组")
+        if n <= 0:
+            raise HTTPException(status_code=400, detail="ids 存在非法值")
+        ids.append(n)
+    ids = sorted(set(ids))
+
+    marks = ",".join("?" * len(ids))
+    doomed = execute_query_dict(
+        f"SELECT id, username, login_time FROM login_logs WHERE id IN ({marks})", tuple(ids)) or []
+    if not doomed:
+        return {"requested": len(ids), "deleted": 0, "missing": len(ids),
+                "message": "所选记录不存在或已被删除"}
+
+    # 占位符必须按**实际命中**的条数生成：用请求里的 ids 数拼模板、却传命中的 got，
+    # 一旦有不存在的 id 就会绑定数不匹配直接报错（第一次自测就踩中了）
+    got = [d["id"] for d in doomed]
+    got_marks = ",".join("?" * len(got))
+    execute_insert_update(f"DELETE FROM login_logs WHERE id IN ({got_marks})", tuple(got))
+    # 删除个人信息类记录必须可事后追溯：谁、删了谁的、哪些时间点的记录
+    logger.info(f"[审计] 管理员 {admin.get('username', '')} 批量删除登录历史 {len(got)} 条，"
+                f"涉及账号 {sorted({str(d['username']) for d in doomed})[:10]}，"
+                f"id 样例 {got[:20]}，未命中 {len(ids) - len(got)} 条")
+    return {"requested": len(ids), "deleted": len(got), "missing": len(ids) - len(got),
+            "message": f"已删除 {len(got)} 条登录记录"}
 
 
 def _normalize_grade_class(grade: str, cls: str) -> tuple[str, str]:
