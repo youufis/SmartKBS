@@ -180,6 +180,23 @@ def _require_room_member(room: dict[str, Any], username: str, role: int, doing: 
     raise HTTPException(status_code=403, detail=f"请先加入该抢答房间后再{doing}")
 
 
+def _require_student_player(room: dict[str, Any], username: str, role: int) -> None:
+    """作答动作只认真正入房的学生玩家。
+
+    _require_room_member 会放行创建者/管理员（他们要能看实时题面与排行做复盘），
+    但作答会写成绩、进排行榜、参与结算发分 —— 教师留在榜上会**直接显示给学生看**
+    （实测有教师在自己创建的房间里抢答拿了 87 分排第一）。查看类动作仍用前者。
+    """
+    if role != 2:
+        raise HTTPException(status_code=403, detail="仅学生可参与抢答作答")
+    joined = execute_query_one(
+        "SELECT id FROM quick_quiz_players WHERE room_id=? AND student_username=?",
+        (room["id"], username),
+    )
+    if not joined:
+        raise HTTPException(status_code=403, detail="请先加入该抢答房间后再作答")
+
+
 def _room_to_dict(room: dict[str, Any]) -> dict[str, Any]:
     """将房间数据库行转为返回字典"""
     return {
@@ -1230,7 +1247,7 @@ async def submit_answer(room_id: int, request: Request):
     if room["status"] != "playing":
         raise HTTPException(status_code=400, detail="活动未在进行中")
     # S7: 必须先通过房间码 join, 否则答案写进明细却进不了 players/排行, 数据自相矛盾
-    _require_room_member(room, username, user.get("role", 2), "作答")
+    _require_student_player(room, username, user.get("role", 2))
 
     state = game_manager.get_room(room_id)
     if not state or state["phase"] != "question":

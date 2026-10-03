@@ -1345,3 +1345,28 @@ def migrate_legacy_teacher(username: str):
                 assign_teacher(username, grade_id, class_id)
 
     logger.info(f"教师 '{username}' 旧格式数据已迁移到 teacher_assignments")
+
+
+# ══════════════════════════════════════════════════════════════
+# 「是不是学生」的唯一判据
+# ══════════════════════════════════════════════════════════════
+
+def is_student_account(username: str) -> bool:
+    """账号是否存在、是学生(role=2)且处于启用状态。
+
+    积分、称号、徽章、一周之星、荣耀殿堂这套「学生荣誉体系」只对真实学生开放，
+    判据必须只有一份：过去各榜单查询里 `u.role=2 AND IFNULL(u.status,'active')='active'`
+    抄了十几处，而发分的 20+ 个 award_* 调用点一处都没判 —— 于是教师/管理员真的攒了分、
+    长了称号，还挤进首页「一周之星」（2026-10 实测 youufis 教师排第 4）。
+
+    刻意不加缓存：账号可能刚建好就来答题，缓存会让新学生一段时间拿不到分；
+    本函数所在路径本来就要读写数据库，多一次 SELECT 的代价可以忽略。
+    """
+    if not username:
+        return False
+    rows = execute_query(
+        """SELECT 1 FROM users
+           WHERE username=? AND role=2 AND IFNULL(status,'active')='active'""",
+        (username,),
+    )
+    return bool(rows)

@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.database import execute_query, execute_query as _db_query, execute_insert_update
 from backend.logger import logger
+from backend.permission_service import is_student_account
 
 # ── 配置文件路径 ──
 _CONFIG_FILE = Path(__file__).resolve().parent / "system_config.json"
@@ -517,6 +518,10 @@ def check_and_unlock_badges(student_username: str, only_badge_ids: list[str] | N
 
     only_badge_ids: 增量检测时只判定相关徽章, None 表示全量。
     """
+    # 徽章属于学生荣誉体系：非学生（教师/管理员/幽灵账号）一律不解锁、不建行
+    if not is_student_account(student_username):
+        return []
+
     badges = _load_badge_config()
     if only_badge_ids:
         want = set(only_badge_ids)
@@ -682,6 +687,12 @@ def get_or_init_student_title(student_username: str) -> dict[str, Any]:
     )
     points = total_row[0][0] if total_row else 0
     title = get_main_title(points)
+
+    if not is_student_account(student_username):
+        # 教师/管理员打开自己的资料页时也要能渲染"称号"这块 UI，但绝不能因此
+        # 往 student_titles 里插一行 —— 那正是"管理员有称号"这类脏数据的来源。
+        # 这里只按当前积分返回一个不落库的展示值。
+        return {"level": title["level"], "name": title["name"], "virtual": True}
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_insert_update(

@@ -88,6 +88,17 @@ def _q_count(sql: str, params: tuple[Any, ...] = ()) -> int:
     return rows[0]['COUNT(*)'] if rows else 0
 
 
+def _rebind(alias: str, cond: str) -> str:
+    """把 scope 过滤条件里的裸列名换成带别名的列名。
+
+    activity_rewards 与 users 都有 student_username，JOIN 之后不指定别名 SQLite 会报
+    "ambiguous column name"。这里集中做重绑定，避免三处聚合各写一遍 SQL 拼法。
+    """
+    if not cond:
+        return ""
+    return cond.replace("student_username", f"{alias}.student_username")
+
+
 def _db_count(sql: str, params: tuple[Any, ...] = ()) -> int:
     """执行 database 的 COUNT 查询并返回数值（返回 tuple，按下标访问）"""
     rows = execute_query(sql, params)
@@ -831,10 +842,12 @@ async def learning_trend(request: Request, days: int = Query(7, ge=3, le=30)):
 
     cond, params = _in_cond("student_username")
     rows = _act_q(
-        f"""SELECT DATE(created_at) AS d, COALESCE(SUM(points), 0) AS p, COUNT(*) AS c
-            FROM activity_rewards
-            WHERE substr(created_at, 1, 10) >= ?{cond}
-            GROUP BY DATE(created_at)""",
+        f"""SELECT DATE(ar.created_at) AS d, COALESCE(SUM(ar.points), 0) AS p, COUNT(*) AS c
+            FROM activity_rewards ar
+            JOIN users u ON u.username = ar.student_username
+             AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
+            WHERE substr(ar.created_at, 1, 10) >= ?{_rebind('ar', cond)}
+            GROUP BY DATE(ar.created_at)""",
         (since, *params),
     )
     for r in rows:
@@ -1027,16 +1040,22 @@ async def teacher_todo(request: Request):
 
     # ── 今日活跃学生 / 一周积分之星 ──
     p_cond, p_params = _in_sql("student_username")
+    # 学生荣誉体系的三处聚合一律只算真实学生（role=2 且未停用）：
+    # 判据与 reward_engine / get_class_ranking 同源，避免"这里漏一个过滤"的老问题
     active_students_today = _db_count(
-        f"""SELECT COUNT(DISTINCT student_username) FROM activity_rewards
-            WHERE substr(created_at, 1, 10) = ?{p_cond}""",
+        f"""SELECT COUNT(DISTINCT ar.student_username) FROM activity_rewards ar
+            JOIN users u ON u.username = ar.student_username
+             AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
+            WHERE substr(ar.created_at, 1, 10) = ?{_rebind('ar', p_cond)}""",
         (today_str, *p_params),
     )
     week_ago = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
     top_rows = _act_q(
-        f"""SELECT student_username, SUM(points) AS pts FROM activity_rewards
-            WHERE substr(created_at, 1, 10) >= ?{p_cond}
-            GROUP BY student_username ORDER BY pts DESC LIMIT 5""",
+        f"""SELECT ar.student_username, SUM(ar.points) AS pts FROM activity_rewards ar
+            JOIN users u ON u.username = ar.student_username
+             AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
+            WHERE substr(ar.created_at, 1, 10) >= ?{_rebind('ar', p_cond)}
+            GROUP BY ar.student_username ORDER BY pts DESC LIMIT 5""",
         (week_ago, *p_params),
     )
     top_names = [r[0] for r in top_rows if r and r[0]]

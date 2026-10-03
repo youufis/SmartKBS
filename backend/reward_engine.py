@@ -8,7 +8,17 @@ import time
 
 from backend.database import execute_query, execute_insert_update
 from backend.logger import logger
+from backend.permission_service import is_student_account
 from backend.title_system import check_main_title_upgrade, check_and_unlock_badges
+
+
+def _skip_non_student(username: str, scene: str) -> bool:
+    """非学生账号不参与积分体系：返回 True 表示调用方应立即放弃发分/建号"""
+    if is_student_account(username):
+        return False
+    # DEBUG 级：教师用测试账号刷一遍活动是正常运维行为，不该刷 WARN 日志
+    logger.debug(f"[reward] 跳过非学生账号 {username} 的{scene}（积分/称号只属于学生）")
+    return True
 
 # ── 奖励配置 ──
 
@@ -87,6 +97,11 @@ def update_student_total(student_username: str, check_upgrade: bool = True):
     Returns:
         更新后的总积分
     """
+    # 守卫：这里是 student_total_points / 称号 / 徽章 唯一的写入口，
+    # 挡住非学生就不会再出现"管理员有称号、教师有徽章"的脏数据
+    if _skip_non_student(student_username, "总分汇总"):
+        return 0
+
     # 获取旧积分
     old_row = execute_query(
         "SELECT total_points FROM student_total_points WHERE student_username=?",
@@ -130,6 +145,8 @@ def update_student_total(student_username: str, check_upgrade: bool = True):
 
 def deduct_points(student_username: str, reason: str, points: int = 2) -> int:
     """扣除学生积分（记录为负数 reward），返回实际扣除的分数"""
+    if _skip_non_student(student_username, "扣分"):
+        return 0
     points = int(min(points, max(get_student_total(student_username), 0)))   # R7: 不为负
     if points <= 0:
         logger.info(f"积分扣除跳过: {student_username} 可用积分为 0 ({reason})")
@@ -149,6 +166,8 @@ def deduct_points(student_username: str, reason: str, points: int = 2) -> int:
 def award_participation(student_username: str, activity_type: str, activity_id: str,
                         activity_title: str = "", teacher_username: str = "") -> int:
     """发放参与基础分（2分）"""
+    if _skip_non_student(student_username, "参与奖"):
+        return 0
     config = REWARD_CONFIG.get(activity_type)
     if not config:
         logger.warning(f"未知活动类型: {activity_type}")
@@ -193,6 +212,8 @@ def award_grade(student_username: str, activity_type: str, activity_id: str,
     Returns:
         发放的积分，0 表示未达到任何等级或已发放过
     """
+    if _skip_non_student(student_username, "等级奖"):
+        return 0
     config = REWARD_CONFIG.get(activity_type)
     if not config or not config["has_grade"]:
         return 0
@@ -259,6 +280,9 @@ def award_daily_login(student_username: str) -> int:
     Returns:
         发放的积分，0 表示今日已领取
     """
+    # 登录奖励过去连"探测账号/不存在的账号"都照发（库里留下 __probe_login__ 等幽灵行）
+    if _skip_non_student(student_username, "每日登录奖"):
+        return 0
     today = datetime.now().strftime("%Y-%m-%d")
     # 检查今日是否已发放过登录奖励
     existing = execute_query(
@@ -293,6 +317,9 @@ def batch_award(records: list[dict[str, Any]]) -> list[int]:
     results = []
     now = _now()
     for rec in records:
+        if _skip_non_student(rec.get("student_username", ""), "批量发放"):
+            results.append(0)
+            continue
         # 检查是否已发放
         existing = execute_query(
             "SELECT id FROM activity_rewards WHERE student_username=? AND activity_type=? AND activity_id=? AND reward_type=?",

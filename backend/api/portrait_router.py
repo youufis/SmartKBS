@@ -545,8 +545,15 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     )
     charged = 0
     if existing:
-        if body.use_points:
-            # 用 100 积分兑换本周额外生成机会
+        if not body.use_points:
+            raise HTTPException(status_code=400, detail="本周画像已生成，消耗 100 积分可再生成一次 ✨")
+
+        # 用 100 积分兑换本周额外生成机会。
+        # 注意角色分支：教师/管理员不在积分体系内（恒为 0 分，也不该给他们建分），
+        # 若一律走"积分不足"就变成**永久无法再次生成画像**——那是守卫引入的新问题。
+        # 所以非学生仍需显式点"兑换额外生成"，只是不设积分门槛。
+        from backend.permission_service import is_student_account
+        if is_student_account(username):
             from backend.reward_engine import deduct_points, get_student_total
             total = get_student_total(username)
             if total < 100:
@@ -556,7 +563,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
                 raise HTTPException(status_code=400, detail="积分扣除未成功（可用积分不足），请刷新后重试")
             logger.info(f"学生 {username} 消耗 {charged} 积分兑换了本周额外画像生成")
         else:
-            raise HTTPException(status_code=400, detail="本周画像已生成，消耗 100 积分可再生成一次 ✨")
+            logger.info(f"非学生账号 {username} 免积分兑换本周额外画像生成（教师/管理员不参与积分体系）")
 
     # 确定风格
     style = body.style or "random"
