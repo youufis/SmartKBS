@@ -97,20 +97,17 @@ def _can_view_portrait(owner: str, is_shared: int, share_scope: str, viewer: str
 
 
 def _refund_points(username: str, points: int, reason: str) -> None:
-    """R2: 兑换型操作失败时冲正积分(写一条 refund 流水, 保持账目可追溯)"""
+    """R2: 兑换型操作失败时冲正积分(写一条 refund 流水, 保持账目可追溯)
+
+    改为调用 reward_engine.refund_points：这里原来是全仓唯一"绕过引擎直接 INSERT
+    activity_rewards"的地方，守卫、幂等索引、批量重算都管不到它。
+    """
     if points <= 0:
         return
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        execute_insert_update(
-            """INSERT INTO activity_rewards
-               (student_username, activity_type, activity_id, activity_title, reward_type, points, reason, created_at)
-               VALUES (?, 'portrait', ?, '自我画像', 'refund', ?, ?, ?)""",
-            (username, now, points, f"{reason}(+{points})", now),
-        )
-        from backend.reward_engine import update_student_total
-        update_student_total(username)
-        logger.info(f"画像积分退还: {username} +{points} ({reason})")
+        from backend.reward_engine import refund_points
+        refund_points(username, points, f"{reason}(+{points})",
+                      activity_id=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     except Exception as e:
         logger.error(f"画像积分退还失败({username}, {points}): {e}")
 

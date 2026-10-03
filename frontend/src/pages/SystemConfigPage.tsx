@@ -167,6 +167,11 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'text', group: 'imagegen' },
   { key: 'IMAGE_GEN_MAX_PLACEHOLDERS', labelKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS', descKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS_desc', type: 'number', group: 'imagegen', required: false, unitKey: 'unitCount' },
 
+  // 积分防刷：每日上限（0 = 不限制）
+  { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
+  { key: 'REWARD_DAILY_QUIZ_SESSIONS', labelKey: 'field_REWARD_DAILY_QUIZ_SESSIONS', descKey: 'field_REWARD_DAILY_QUIZ_SESSIONS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitSession' },
+  { key: 'REWARD_DAILY_TOTAL_POINTS', labelKey: 'field_REWARD_DAILY_TOTAL_POINTS', descKey: 'field_REWARD_DAILY_TOTAL_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' }, 
+
   // ══ ③ 文件与存储 ══
   // 上传限制与类型白名单
   { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', descKey: 'field_MAX_DOC_SIZE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB' },

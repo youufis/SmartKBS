@@ -2,6 +2,8 @@
 积分奖励引擎
 自动在学生参与活动后发放积分，支持参与基础分和成绩等级奖励
 """
+import contextlib
+import contextvars
 from datetime import datetime
 from typing import Any
 import time
@@ -46,6 +48,25 @@ REWARD_CONFIG = {
     "news_view": {"participation": 1, "has_grade": False},      # 热点新闻浏览
 }
 
+# ══════════════════════════════════════════════════════════════
+# 每日计分上限（防刷）—— 0 表示该维度不限制
+# ══════════════════════════════════════════════════════════════
+#: 按活动类型限制"每人每天从这类活动最多拿多少分"
+DAILY_POINTS_CAPS: dict[str, int] = {
+    "chat": 10,               # AI 对话/学伴：保留"每次对话都给分"，但每人每天封顶 10 分
+    "news_view": 3,           # 与 news_router 的 DAILY_POINTS_MAX 同口径（引擎再兜一道）
+    "daily_discovery": 5,     # 与每日精选的 DAILY_POINTS_MAX 同口径
+    "resource_view": 5,       # 资源浏览：每天最多 5 个新资源计分
+}
+#: 按活动类型限制"每人每天最多有几场计分"（抢答这种一场就 17 分的必须按场数控）
+DAILY_SESSION_CAPS: dict[str, int] = {
+    "quick_quiz": 3,
+}
+#: 全局每日封顶：只做"跨类型连刷"的兜底，刻意高于各分类上限之和的下界，
+#: 否则它会盖掉更具体的策略（抢答 3 场就有 51 分，若这里定 40 就等于把用户定的
+#: "每日 3 场"变成"每日 40 分"，两条规则互相遮蔽）
+DAILY_TOTAL_POINTS_CAP = 60
+
 GRADE_POINTS = {
     "excellent": 15,   # 优秀 >= 90%
     "good":      10,   # 良好 >= 75%
@@ -87,6 +108,120 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# 批处理上下文：非 None 时，update_student_total 只把学生记进名单，重算留到批尾
+_batch_pending: contextvars.ContextVar[set[str] | None] = contextvars.ContextVar(
+    "reward_batch_pending", default=None)
+
+
+@contextlib.contextmanager
+def batch_recompute():
+    """把一段批量发分的总分/称号/徽章结算合并成批尾一次。
+
+    抢答结算与考试批量批改是"一个班几十人 × 每人 2~3 次发放"，而每次发放默认都会
+    跑一遍 SUM 重算 + 称号升级 + 徽章 facts（约 10 条 SQL）。用这个上下文后，批内
+    只登记名单，批尾每人重算一次，热路径上的查询量降一个数量级。
+    """
+    token = _batch_pending.set(set())
+    try:
+        yield
+    finally:
+        pending = _batch_pending.get() or set()
+        _batch_pending.reset(token)
+        for stu in pending:
+            try:
+                update_student_total(stu)
+            except Exception as e:
+                logger.warning(f"[reward] 批量结算重算 {stu} 失败: {e}")
+
+
+def _cap_int(cfg_key: str, fallback: int) -> int:
+    """读上限配置；管理员可在系统配置里调，0=不限"""
+    try:
+        from backend.api.config_router import get_config_value
+        return int(get_config_value(cfg_key, fallback))
+    except Exception:
+        return fallback
+
+
+def daily_cap_reason(student_username: str, activity_type: str,
+                     activity_id: str, points: int) -> str | None:
+    """本次发放是否会突破当日上限；返回拒绝原因，None 表示可以发。
+
+    只用于**正向发放**：扣分/退还（points<=0）永远放行，否则上限会反过来挡住回收，
+    出现"活动都删了分还留着"的更坏结果。
+    """
+    if points <= 0:
+        return None
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    rows = execute_query(
+        """SELECT activity_type, activity_id, COALESCE(SUM(points), 0)
+           FROM activity_rewards
+           WHERE student_username=? AND substr(created_at, 1, 10) = ?
+           GROUP BY activity_type, activity_id""",
+        (student_username, today),
+    ) or []
+
+    per_type: dict[str, int] = {}
+    sessions: dict[str, set[str]] = {}
+    total_today = 0
+    for atype, aid, pts in rows:
+        pts = int(pts or 0)
+        per_type[atype] = per_type.get(atype, 0) + pts
+        sessions.setdefault(atype, set()).add(str(aid))
+        total_today += pts
+
+    cap_total = _cap_int("REWARD_DAILY_TOTAL_POINTS", DAILY_TOTAL_POINTS_CAP)
+    if cap_total > 0 and total_today + points > cap_total:
+        return f"今日累计积分已达上限 {cap_total} 分"
+
+    cap_points = DAILY_POINTS_CAPS.get(activity_type, 0)
+    if activity_type == "chat":
+        cap_points = _cap_int("REWARD_DAILY_CHAT_POINTS", DAILY_POINTS_CAPS["chat"])
+    if cap_points > 0 and per_type.get(activity_type, 0) + points > cap_points:
+        return f"「{ACTIVITY_TYPE_NAMES.get(activity_type, activity_type)}」今日已达上限 {cap_points} 分"
+
+    cap_sessions = DAILY_SESSION_CAPS.get(activity_type, 0)
+    if activity_type == "quick_quiz":
+        cap_sessions = _cap_int("REWARD_DAILY_QUIZ_SESSIONS", DAILY_SESSION_CAPS["quick_quiz"])
+    if cap_sessions > 0:
+        seen = sessions.get(activity_type, set())
+        if str(activity_id) not in seen and len(seen) >= cap_sessions:
+            return f"今日计分场次已达上限 {cap_sessions} 场"
+    return None
+
+
+def _purge_non_student_rows(username: str) -> None:
+    """清掉非学生账号在学生荣誉四表里的残留行（幂等，只在真的存在时才动手）"""
+    if not username:
+        return
+    tables = ("student_total_points", "student_titles", "student_badges",
+              "student_subject_titles")
+    hit = False
+    for table in tables:
+        try:
+            rows = execute_query(f"SELECT 1 FROM {table} WHERE student_username=? LIMIT 1",
+                                 (username,))
+            if rows:
+                execute_insert_update(f"DELETE FROM {table} WHERE student_username=?", (username,))
+                hit = True
+        except Exception as e:
+            logger.warning(f"[reward] 清理 {username} 在 {table} 的残留行失败: {e}")
+    if hit:
+        _cache_invalidate(username)
+        logger.info(f"[reward] 已清理非学生账号 {username} 在学生荣誉表里的残留行")
+
+
+def _skip_by_daily_cap(student_username: str, activity_type: str, activity_id: str,
+                       points: int, reward_type: str) -> bool:
+    reason = daily_cap_reason(student_username, activity_type, activity_id, points)
+    if reason:
+        # DEBUG：这是设计中的止损，不是故障；刷 WARN 会把日志淹掉
+        logger.debug(f"[reward] {student_username} {activity_type}/{activity_id} {reward_type} 未发放：{reason}")
+        return True
+    return False
+
+
 def update_student_total(student_username: str, check_upgrade: bool = True):
     """重新计算并更新学生的积分汇总，同时检测称号升级
 
@@ -98,9 +233,22 @@ def update_student_total(student_username: str, check_upgrade: bool = True):
         更新后的总积分
     """
     # 守卫：这里是 student_total_points / 称号 / 徽章 唯一的写入口，
-    # 挡住非学生就不会再出现"管理员有称号、教师有徽章"的脏数据
+    # 挡住非学生就不会再出现"管理员有称号、教师有徽章"的脏数据。
+    # 顺手自愈：把非学生账号在这些表里的历史残留行清掉，这样系统自己就能收敛，
+    # 不必每次靠人工跑 scripts/reset_non_student_rewards.py。
     if _skip_non_student(student_username, "总分汇总"):
+        _purge_non_student_rows(student_username)
         return 0
+
+    pending = _batch_pending.get()
+    if pending is not None:
+        # 批处理中：只登记，批尾统一重算（返回值用当前已知的汇总值）
+        pending.add(student_username)
+        row = execute_query(
+            "SELECT total_points FROM student_total_points WHERE student_username=?",
+            (student_username,),
+        )
+        return int(row[0][0] or 0) if row else 0
 
     # 获取旧积分
     old_row = execute_query(
@@ -163,6 +311,30 @@ def deduct_points(student_username: str, reason: str, points: int = 2) -> int:
     return points
 
 
+def refund_points(student_username: str, points: int, reason: str = "失败退还",
+                  activity_id: str = "") -> int:
+    """兑换类操作失败时的冲正：写一条正向 refund 流水，保持账目可追溯。
+
+    此前只有 portrait_router 直接 INSERT activity_rewards（绕过引擎），是唯一的
+    旁路写入口 —— 守卫、幂等、批量重算全都管不到它。收进来后统一走这条路。
+    """
+    if points <= 0:
+        return 0
+    if _skip_non_student(student_username, "积分退还"):
+        return 0
+    now = _now()
+    aid = activity_id or f"refund_{int(time.time() * 1000)}_{student_username}"
+    execute_insert_update(
+        """INSERT OR IGNORE INTO activity_rewards
+           (student_username, activity_type, activity_id, activity_title, reward_type, points, reason, created_at)
+           VALUES (?, 'refund', ?, '积分退还', 'refund', ?, ?, ?)""",
+        (student_username, aid, int(points), reason, now),
+    )
+    update_student_total(student_username)
+    logger.info(f"积分退还: {student_username} +{points} ({reason})")
+    return int(points)
+
+
 def award_participation(student_username: str, activity_type: str, activity_id: str,
                         activity_title: str = "", teacher_username: str = "") -> int:
     """发放参与基础分（2分）"""
@@ -185,9 +357,14 @@ def award_participation(student_username: str, activity_type: str, activity_id: 
     if existing:
         return 0
 
+    if _skip_by_daily_cap(student_username, activity_type, activity_id, points, "参与奖"):
+        return 0
+
     now = _now()
+    # 先查后插并非原子：并发双击/前端重试会插进两行。唯一索引
+    # uq_ar_student_key 是真正的兜底，这里配 OR IGNORE 让重复插入安静失败
     execute_insert_update(
-        """INSERT INTO activity_rewards
+        """INSERT OR IGNORE INTO activity_rewards
            (student_username, activity_type, activity_id, activity_title, reward_type, points, reason, teacher_username, created_at)
            VALUES (?, ?, ?, ?, 'participation', ?, ?, ?, ?)""",
         (student_username, activity_type, activity_id, activity_title,
@@ -252,13 +429,17 @@ def award_grade(student_username: str, activity_type: str, activity_id: str,
         if higher_exists:
             return 0
 
-    now = _now()
     pct = round(ratio * 100, 1)
     grade_name = REWARD_TYPE_NAMES.get(reward_type, reward_type)
     type_name = ACTIVITY_TYPE_NAMES.get(activity_type, activity_type)
 
+    if _skip_by_daily_cap(student_username, activity_type, activity_id, points, grade_name):
+        return 0
+
+    now = _now()
+
     execute_insert_update(
-        """INSERT INTO activity_rewards
+        """INSERT OR IGNORE INTO activity_rewards
            (student_username, activity_type, activity_id, activity_title, reward_type, points, reason, teacher_username, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (student_username, activity_type, activity_id, activity_title,
@@ -318,6 +499,11 @@ def batch_award(records: list[dict[str, Any]]) -> list[int]:
     now = _now()
     for rec in records:
         if _skip_non_student(rec.get("student_username", ""), "批量发放"):
+            results.append(0)
+            continue
+        if _skip_by_daily_cap(rec.get("student_username", ""), rec.get("activity_type", ""),
+                              str(rec.get("activity_id", "")), int(rec.get("points", 0) or 0),
+                              rec.get("reward_type", "participation")):
             results.append(0)
             continue
         # 检查是否已发放

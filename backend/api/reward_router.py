@@ -135,6 +135,66 @@ async def ranking(
     return ranking_list
 
 
+@router.get("/rewards/weekly-stars", summary="本周之星（学生可访问）")
+async def weekly_stars(request: Request):
+    """本周积分最高的学生 + 我自己的位置。
+
+    此前"一周之星"只存在于教师端 dashboard（/api/dashboard/teacher-todo 里 role!=2
+    直接 403），学生侧完全没有正反馈。这里单独开一个学生可访问的只读端点：
+    - 榜单口径与教师端一致（activity_rewards 近 7 天、role=2 且未停用）
+    - 只下发 姓名/年级班/积分，不下发任何答题明细或答案数据
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    from datetime import datetime, timedelta
+
+    since = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
+    rows = execute_query(
+        """SELECT ar.student_username, u.name, u.grade, u.class,
+                  COALESCE(SUM(ar.points), 0) AS pts
+           FROM activity_rewards ar
+           JOIN users u ON u.username = ar.student_username
+            AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
+           WHERE substr(ar.created_at, 1, 10) >= ?
+           GROUP BY ar.student_username
+           ORDER BY pts DESC, u.name ASC
+           LIMIT 5""",
+        (since,),
+    ) or []
+    stars = [
+        {"username": r[0], "name": r[1] or r[0], "grade": r[2] or "",
+         "class": r[3] or "", "points": int(r[4] or 0)}
+        for r in rows
+    ]
+
+    my_points = get_student_total(username)
+    my_week = execute_query(
+        """SELECT COALESCE(SUM(points), 0) FROM activity_rewards
+           WHERE student_username=? AND substr(created_at, 1, 10) >= ?""",
+        (username, since),
+    )
+    # 我的名次：本周分比我高的学生数 + 1（我自己不是学生时返回 None，不给教师刷榜位）
+    my_rank = None
+    if user.get("role", 2) == 2:
+        ahead = execute_query(
+            """SELECT COUNT(*) FROM (
+                 SELECT ar.student_username FROM activity_rewards ar
+                 JOIN users u ON u.username = ar.student_username
+                  AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
+                 WHERE substr(ar.created_at, 1, 10) >= ?
+                 GROUP BY ar.student_username
+                 HAVING COALESCE(SUM(ar.points), 0) > ?)""",
+            (since, int((my_week[0][0] if my_week else 0) or 0)),
+        )
+        my_rank = int(ahead[0][0] or 0) + 1 if ahead else None
+    return {
+        "stars": stars,
+        "my_points": int(my_points or 0),
+        "my_week_points": int((my_week[0][0] if my_week else 0) or 0),
+        "my_rank": my_rank,
+    }
+
+
 @router.get("/rewards/statistics", summary="获取积分统计")
 async def statistics(
     request: Request,

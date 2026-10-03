@@ -1009,17 +1009,21 @@ class NewsService:
             logger.warning(f"[新闻] 浏览记录写入失败(忽略): {e}")
             return 0
 
-        NewsService._update_daily_stats(username, today_str, POINTS_PER_VIEW)
-
-        # 发放积分
+        # 发放积分（引擎是总积分的唯一真相源）
+        awarded = 0
         try:
             from backend.reward_engine import award_participation
-            award_participation(username, "news_view",
-                              f"{today_str}_{news_id}", "热点新闻")
+            awarded = award_participation(username, "news_view",
+                                          f"{today_str}_{news_id}", "热点新闻")
         except Exception as e:
             logger.warning(f"新闻积分发放失败: {e}")
 
-        return POINTS_PER_VIEW
+        # 本地日统计只在引擎真的计了分之后累加：否则会出现"今日新闻已得 3 分"
+        # 而总积分一分没涨的双账本漂移（引擎侧当日上限/幂等都可能拒发）
+        if awarded > 0:
+            NewsService._update_daily_stats(username, today_str, POINTS_PER_VIEW)
+            return POINTS_PER_VIEW
+        return 0
 
     # ── 收藏 ──
 

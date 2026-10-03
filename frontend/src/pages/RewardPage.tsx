@@ -78,6 +78,10 @@ const COLOR_MAP: Record<string, string> = {
 
 interface MainTitle { level: number; name: string; emoji: string; color: string; desc: string; min_points?: number }
 interface TitleProgress { current: MainTitle; next: MainTitle | null; progress_percent: number; points_needed: number }
+
+/** 本周之星（学生侧正反馈：过去这份榜单只在教师端可见） */
+interface WeeklyStar { username: string; name: string; grade: string; class: string | number; points: number }
+interface WeeklyStars { stars: WeeklyStar[]; my_points: number; my_week_points: number; my_rank: number | null }
 interface SubjectTitle { subject: string; question_count: number; level: number; name: string; emoji: string; color: string }
 interface BadgeItem { badge_id: string; name: string; icon: string; desc: string; unlocked: boolean; unlocked_at?: string }
 interface TitleInfo {
@@ -351,6 +355,7 @@ const RewardPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('my')
   const [rulesOpen, setRulesOpen] = useState(false)
+  const [weekly, setWeekly] = useState<WeeklyStars | null>(null)
 
   // ── 积分规则（数值与 backend/reward_engine.py 的 REWARD_CONFIG 一致，改那边记得同步这里）──
   // 活动名一律走词典 reward.activityType.*，emoji 只是装饰；graded=是否还有成绩等级奖励
@@ -484,13 +489,15 @@ const RewardPage: React.FC = () => {
     const fetchData = async () => {
       setLoading(true)
       try {
-        const [pointsRes, historyRes] = await Promise.all([
+        const [pointsRes, historyRes, weeklyRes] = await Promise.all([
           apiClient.get('/api/rewards/my-points'),
           apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
+          apiClient.get('/api/rewards/weekly-stars').catch(() => null),   // 拉不到不影响主页面
         ])
         if (!ignore) {
           setMyPoints(pointsRes.data.total_points || 0)
           setMyHistory(Array.isArray(historyRes.data) ? historyRes.data : [])
+          if (weeklyRes?.data?.stars) setWeekly(weeklyRes.data)
         }
       } catch (err) { reportLoadError(err, { key: 'RewardPage.fetchData', retry: () => { void fetchData() } }) }
       if (!ignore) setLoading(false)
@@ -604,8 +611,43 @@ const RewardPage: React.FC = () => {
                       </Card>
                     </Col>
                   </Row>
+                  {weekly && (
+                    <Card size="small" style={{ marginBottom: 16 }}
+                      title={<Space><StarOutlined /> {t('reward.weeklyStars')}</Space>}
+                      extra={weekly.my_rank
+                        ? <Text type="secondary" style={{ fontSize: 12 }}>
+                            {t('reward.myWeekRank', { rank: weekly.my_rank, points: weekly.my_week_points })}
+                          </Text>
+                        : <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.weeklyOnlyStudent')}</Text>}>
+                      {weekly.stars.length === 0 ? (
+                        <Text type="secondary">{t('reward.weeklyEmpty')}</Text>
+                      ) : (
+                        <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                          {weekly.stars.map((st, idx) => (
+                            <div key={st.username} style={{
+                              display: 'flex', alignItems: 'center', gap: 8,
+                              padding: '2px 4px', borderRadius: 6,
+                              background: st.username === user?.username ? '#fffbe6' : undefined,
+                            }}>
+                              <span style={{ width: 22, textAlign: 'center' }}>{['🥇', '🥈', '🥉'][idx] || `${idx + 1}`}</span>
+                              <span style={{ flex: 1 }}>{st.name}</span>
+                              <Text type="secondary" style={{ fontSize: 12 }}>{st.grade} {String(st.class)}班</Text>
+                              <Text strong style={{ color: '#faad14' }}>{st.points} {t('points')}</Text>
+                            </div>
+                          ))}
+                        </Space>
+                      )}
+                    </Card>
+                  )}
                   {titleConfig.length > 0 && (
-                    <TitleDirectory titleConfig={titleConfig} currentLevel={titleInfo?.main_title?.level || 1} />
+                    <>
+                      <TitleDirectory titleConfig={titleConfig} currentLevel={titleInfo?.main_title?.level || 1} />
+                      {/* 称号只升不降是有意设计（活动重置会回收积分但荣誉不回退），
+                          不说清楚的话，家长会以为分数和称号对不上是 bug */}
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+                        {t('reward.titleNeverDown')}
+                      </Text>
+                    </>
                   )}
                   {titleInfo?.recent_upgrades && titleInfo.recent_upgrades.length > 0 && (
                     <Card size="small" title={<Space><HistoryOutlined /> {t('reward.upgradeHistory')}</Space>} style={{ marginTop: 12 }}>

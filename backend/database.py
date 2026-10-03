@@ -984,6 +984,44 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 积分幂等唯一索引（先归位重复行，再建索引） ──
+            # award_participation/award_grade 的幂等靠"先查后插"，并发双击或前端重试
+            # 会插进两行同键流水。这里用唯一索引把幂等交给数据库，失败必须留日志：
+            # 静默 pass 会让"约束其实没建成"这件事永远没人知道。
+            try:
+                dupes = c.execute(
+                    """SELECT student_username, activity_type, activity_id, reward_type,
+                              COUNT(*), MIN(id), GROUP_CONCAT(id)
+                       FROM activity_rewards
+                       GROUP BY 1, 2, 3, 4 HAVING COUNT(*) > 1"""
+                ).fetchall()
+                affected: set[str] = set()
+                if dupes:
+                    drop_ids: list[int] = []
+                    for stu, _t, _i, _r, _n, keep_id, ids in dupes:
+                        affected.add(stu)
+                        for i in str(ids).split(","):
+                            if int(i) != int(keep_id):     # 保留最早那条（首次真实发放）
+                                drop_ids.append(int(i))
+                    if drop_ids:
+                        c.executemany("DELETE FROM activity_rewards WHERE id=?",
+                                      [(i,) for i in drop_ids])
+                        for stu in affected:               # 删了流水必须同步回总分，否则榜虚高
+                            c.execute(
+                                """UPDATE student_total_points SET total_points =
+                                       (SELECT COALESCE(SUM(points), 0) FROM activity_rewards ar
+                                        WHERE ar.student_username = student_total_points.student_username)
+                                   WHERE student_username = ?""", (stu,))
+                        logger.warning(
+                            f"[db] activity_rewards 幂等键重复 {len(dupes)} 组，已删除多余 {len(drop_ids)} 行"
+                            f"（保留最早一条并重算 {len(affected)} 名学生总分）")
+                c.execute(
+                    """CREATE UNIQUE INDEX IF NOT EXISTS uq_ar_student_key
+                       ON activity_rewards(student_username, activity_type, activity_id, reward_type)"""
+                )
+            except sqlite3.OperationalError as e:
+                logger.error(f"[db] 积分幂等唯一索引创建失败（幂等仍只靠应用层先查后插）: {e}")
+
             # ── 学生积分汇总表（缓存，避免每次都 SUM） ──
             c.execute("""CREATE TABLE IF NOT EXISTS student_total_points (
                 student_username TEXT PRIMARY KEY,

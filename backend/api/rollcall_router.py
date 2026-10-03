@@ -482,7 +482,12 @@ async def api_mark(request: Request):
                 (student, grade, cls_num, f"{cls_num}班"),
             )
             if student_user:
-                award_participation(student_user[0][0], "rollcall", f"{grade}_{cls}_{student}", f"点名-{student}")
+                # activity_id 带日期 = 每人每天点名计一次分。
+                # 旧口径 f"{grade}_{cls}_{student}" 不含日期，学生被点名一万次也只有 2 分，
+                # 而"点名达人/全勤标兵"徽章又依赖点名记录，两边口径互相打架。
+                _roll_day = time.strftime("%Y-%m-%d")   # 本模块只 import 了 time，别用 datetime
+                award_participation(student_user[0][0], "rollcall",
+                                    f"{grade}_{cls}_{student}_{_roll_day}", f"点名-{student}")
     except Exception as e:
         logger.warning(f"点名积分奖励发放失败 (student={student}): {e}")
 

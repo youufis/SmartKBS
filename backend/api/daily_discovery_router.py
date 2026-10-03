@@ -623,20 +623,21 @@ class DiscoveryService:
             if not inserted:
                 return 0
 
-            # 更新日统计
+            # 更新日统计（浏览数照记；积分计数改到引擎确认之后再累加，见下方 awarded）
             execute_insert_update(
                 "INSERT OR REPLACE INTO discovery_daily_stats (username, date, view_count, refresh_count, points_earned) "
                 "VALUES (?, ?, COALESCE((SELECT view_count FROM discovery_daily_stats WHERE username=? AND date=?), 0) + 1, "
                 "COALESCE((SELECT refresh_count FROM discovery_daily_stats WHERE username=? AND date=?), 0), "
-                "COALESCE((SELECT points_earned FROM discovery_daily_stats WHERE username=? AND date=?), 0) + ?)",
-                (username, today_str, username, today_str, username, today_str, username, today_str, POINTS_PER_VIEW)
+                "COALESCE((SELECT points_earned FROM discovery_daily_stats WHERE username=? AND date=?), 0))",
+                (username, today_str, username, today_str, username, today_str, username, today_str)
             )
 
-            # 发放积分
+            # 发放积分（引擎是总积分的唯一真相源）
+            awarded = 0
             try:
                 from backend.reward_engine import award_participation
-                award_participation(username, "daily_discovery",
-                                  f"{today_str}_{card_id}", "每日精选")
+                awarded = award_participation(username, "daily_discovery",
+                                              f"{today_str}_{card_id}", "每日精选")
             except Exception as e:
                 logger.warning(f"每日精选积分发放失败: {e}")
 
@@ -645,7 +646,17 @@ class DiscoveryService:
                 "UPDATE discovery_pool SET view_count = view_count + 1 WHERE id=?",
                 (card_id,)
             )
-            return POINTS_PER_VIEW
+
+            # 与 news 同一口径：本地 points_earned 只在引擎确实计分后累加，
+            # 否则会出现"今日已得 5 分"而总积分没动的双账本漂移
+            if awarded > 0:
+                execute_insert_update(
+                    "UPDATE discovery_daily_stats SET points_earned = points_earned + ? "
+                    "WHERE username=? AND date=?",
+                    (POINTS_PER_VIEW, username, today_str),
+                )
+                return POINTS_PER_VIEW
+            return 0
 
         # 教师/管理员：记录浏览但不计分
         execute_insert_update(

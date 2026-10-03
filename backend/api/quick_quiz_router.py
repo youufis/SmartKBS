@@ -18,7 +18,7 @@ from backend.database import (
     execute_insert_update, execute_batch, get_connection as smartkb_conn,
 )
 from backend.logger import logger
-from backend.reward_engine import award_participation, award_grade, REWARD_CONFIG
+from backend.reward_engine import award_participation, award_grade, batch_recompute, REWARD_CONFIG
 from backend.title_system import check_and_unlock_badges
 from backend.question_db import execute_query as qb_execute_query, execute_query_one as qb_execute_query_one
 from backend.async_utils import spawn_bg
@@ -1890,39 +1890,39 @@ async def _award_rewards(room_id: int, room: dict[str, Any], ranking: list[dict[
     activity_id = str(room_id)
     title = room.get("title", "知识抢答")
 
-    for i, player in enumerate(ranking):
-        username = player["student_username"]
-        rank = i + 1
+    # 整场结算包进 batch_recompute：原来每人 2~3 次发放各跑一遍总分重算 + 称号升级 +
+    # 徽章 facts（约 10 条 SQL），一个班几十人就是几百条；现在批尾每人只算一次
+    with batch_recompute():
+        for i, player in enumerate(ranking):
+            username = player["student_username"]
+            rank = i + 1
 
-        # 参与基础分
-        award_participation(
-            username, "quick_quiz", activity_id,
-            activity_title=title,
-        )
+            # 参与基础分
+            award_participation(
+                username, "quick_quiz", activity_id,
+                activity_title=title,
+            )
 
-        # 排名奖励
-        if rank == 1:
-            award_grade(username, "quick_quiz", activity_id,
-                        score=100, total_score=100,  # 第一名=满分
-                        activity_title=title)
-        elif rank <= 3:
-            award_grade(username, "quick_quiz", activity_id,
-                        score=85, total_score=100,
-                        activity_title=title)
-        elif rank <= 5:
-            award_grade(username, "quick_quiz", activity_id,
-                        score=75, total_score=100,
-                        activity_title=title)
-        elif player["correct_count"] > 0 and player["total_score"] > 0:
-            award_grade(username, "quick_quiz", activity_id,
-                        score=60, total_score=100,
-                        activity_title=title)
+            # 排名奖励
+            if rank == 1:
+                award_grade(username, "quick_quiz", activity_id,
+                            score=100, total_score=100,  # 第一名=满分
+                            activity_title=title)
+            elif rank <= 3:
+                award_grade(username, "quick_quiz", activity_id,
+                            score=85, total_score=100,
+                            activity_title=title)
+            elif rank <= 5:
+                award_grade(username, "quick_quiz", activity_id,
+                            score=75, total_score=100,
+                            activity_title=title)
+            elif player["correct_count"] > 0 and player["total_score"] > 0:
+                award_grade(username, "quick_quiz", activity_id,
+                            score=60, total_score=100,
+                            activity_title=title)
 
-        # 检测徽章解锁
-        try:
-            check_and_unlock_badges(username)
-        except Exception:
-            pass
+            # 徽章解锁由批尾的统一结算负责（update_student_total 内部会检测），
+            # 这里不再每人多跑一遍 facts 查询
 
 
 async def _broadcast_player_list(room_id: int):

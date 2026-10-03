@@ -383,24 +383,35 @@ def _reconcile_points_and_badges() -> None:
 
     try:
         from backend.database import execute_query as dbq
-        from backend.title_system import check_and_unlock_badges
+        from backend.title_system import check_and_unlock_badges, update_subject_question_counts
         rows = dbq(
             """SELECT DISTINCT student_username FROM activity_rewards
                WHERE created_at >= datetime('now', '-7 day')"""
         ) or []
         students = [r[0] for r in rows if r[0]]
         unlocked = 0
+        subject_up = 0
         for stu in students[:800]:          # 单次上限, 避免凌晨任务跑太久
             try:
                 if check_and_unlock_badges(stu):
                     unlocked += 1
             except Exception:
+                pass
+            # 学科称号：update_subject_question_counts 此前全仓唯一的触发点是
+            # POST /api/rewards/update-subject-counts，而前端从来没调用过它 ——
+            # 结果 478 个用户里只有 2 行学科称号记录，这个功能实际是死的。
+            # 放到夜间兜底里跑，既不在答题热路径上加开销，也能让榜单有数。
+            try:
+                if update_subject_question_counts(stu):
+                    subject_up += 1
+            except Exception:
                 continue
         # 解锁数为 0 属正常巡检结果, 只写文件日志; 真的新解锁了才提示
-        if unlocked:
-            logger.info(f"[log_retention] 徽章兜底检测: 检查 {len(students)} 人, 新解锁 {unlocked} 人")
+        if unlocked or subject_up:
+            logger.info(f"[log_retention] 荣誉兜底: 检查 {len(students)} 人, "
+                        f"新解锁徽章 {unlocked} 人, 学科称号升级 {subject_up} 人")
         elif students:
-            logger.debug(f"[log_retention] 徽章兜底检测完成: {len(students)} 人, 无新解锁")
+            logger.debug(f"[log_retention] 荣誉兜底完成: {len(students)} 人, 无新解锁/升级")
     except Exception as e:
         logger.warning(f"[log_retention] 徽章兜底检测失败: {e}")
 

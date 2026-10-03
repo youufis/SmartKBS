@@ -31,14 +31,12 @@
 ---
 
 > 📌 **V8.5.0 Highlights**:
-> 📱 **Mobile adaptation lands**: works straight from a phone browser with no app to install; the sidebar becomes a bottom tab bar and a per-role route whitelist now covers 24 student pages and 17 teacher pages (homework, exams, practice, quests, quizzes and polls, notifications, resources and analytics), un-adapted features hide their entry behind a "use the desktop app" guide, and desktop and Electron stay pixel-identical
-> 💬 **Companion & assistant modes**: the header no longer collapses on narrow screens, "teaching data" becomes an overlay panel and the chat area now fits the phone viewport
-> ⚡ **Quick quiz end to end**: join a room, answer, and read the results on a phone - big touch targets, live countdown, auto-advance to the next question
-> 🔔 **Lists and tables**: notification rows reflow to content-over-actions, and wide tables scroll sideways instead of squashing their columns
-> 📝 **Exam taking**: the top bar wraps to two rows so the paper title, countdown and submit button stay readable
-> 🎓 **Assistant subtitle**: the teacher header now reads "Lesson prep · Questions · Grading · Insights" instead of repeating "AI Assistant"
-> 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
-> 🔗 **Same-day upgrade addendum**: multiple mirrors with a git fallback, a dead remote can no longer veto the upgrade, and `.git` fetch residue is swept automatically
+> 📱 **Mobile adaptation lands**: works straight from a phone browser with no app install; the sidebar becomes a bottom tab bar and each role gets its own allow-list (24 pages for students, 17 for teachers, covering homework, exams, quizzes, quests, polls, notifications and analytics), with a "use the desktop" hint for everything else — desktop and Electron layouts untouched
+> 🖼 **Question-figure pipeline fixed**: bank / quest / whiteboard figures get separate namespaces (deleting a quest question no longer wipes the bank figures sharing its id), auto-generated figures now persist their state so the figure manager works again, and every SVG is sanitised — no more "generated successfully but the figure is blank"
+> ⏱ **Figure actions moved to background jobs**: regenerate SVG / generate per placeholder / generate a photo now stream progress ("attempt 2 of 3 → downloading → saved"), repeated clicks reuse one job instead of paying twice, and a timeout no longer looks like a failure
+> 🏆 **Point farming closed, student honours back to students**: AI chat caps at 10 pts/day, quick quiz scores at most 3 sessions/day, 60 pts/day overall (all configurable, 0 = off), roll-call scores daily instead of once in a lifetime, idempotency is now enforced by a unique index; teachers and admins no longer appear in points, titles, badges or the weekly stars, and students get a new "This week stars" card
+> 🛡 **Operations**: pause-student / pause-teacher / pause-external-network login switches, bulk delete for upgrade history, multi-mirror version check with a git fallback
+> 🧠 **Skill system hardened**: per-scene injection no longer skews structured output, content-safety rules actually apply
 
 ---
 
@@ -1010,63 +1008,29 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-### v8.5.0 (2026-09-30)
+### v8.5.0 (2026-10-03)
 
-- 📱 **Mobile adaptation lands**: a `<768px` breakpoint system with a mobile shell (bottom tab bar + drawer menu), a per-role route whitelist, and a "use the desktop app" guide for everything not adapted yet
-- 🧒 **24 student pages open**: dashboard, companion, wrong questions, daily picks, news, notifications, announcements, classroom questions, quick quiz, to-dos, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction and polls, file centre, growth portfolio, showcase, my resources, resource centre, about
-- 👥 **17 teacher pages open**: dashboard, AI assistant, notifications, announcements, question management, class summary, learning analytics, homework grading confirmation, classroom points, weekly AI profile, file centre, growth portfolio, showcase, my resources, resource centre, resource management, about
-- ⚡ **Quick quiz and knowledge quests work end to end**: joining a room, answering, the leaderboard, quest battles and the review all verified at a 390px viewport
-- 🛠 **Narrow-screen layout fixes**: tables scroll sideways, dialog widths are clamped, iOS no longer zooms on focus; vertically stacked titles in notifications, the exam bar, the companion header, quest stats and the poll/question list cards are all resolved
-- 🛠 **Third pass (added 2026-10-01)**: a shared table-to-card component now renders exam results, announcements, quick quiz lists and homework as cards on narrow screens, and fixes collapsed column widths (the announcement title column had been squeezed to 72 px and was unreadable, exam scores wrapped onto three lines); the growth portfolio and showcase join mobile; desktop stays pixel-identical against the same-day baseline
-- 🔤 **Mobile copy i18n closed out**: the home banner row now wraps instead of stretching, the missing language keys behind the bottom bar, drawer and desktop-only notice were added, the today-list action buttons and portrait theme names now go through i18n, and two literal placeholder leftovers were fixed
-- 🛠 **Maintenance and ops (added 10-02)**: system settings gain "disable student login / disable teacher login / disable external login" switches (off by default, admins are never affected; the first two work by role - blocking new sign-ins and sending already-signed-in accounts of that role back to the login page - while the third works by origin, refusing routable public addresses and leaving the local network alone); the upgrade history now supports multi-select, select-all and batch delete (in-progress records cannot be deleted, and only the records are removed - backups stay)
-- 🔗 **Upgrade chain hardened**: multiple mirrors with the git truth as fallback, a broken remote no longer vetoes an update, stale `.git` fetch residue is cleaned automatically, and version lookups are cached for 60 s with their source reported
-- 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
-- 🗂 **Fourth pass (added 2026-10-01)**: my resources, resource centre, resource management and the about page join mobile; the resource group panel now starts collapsed to a 40 px rail on narrow screens (at 200 px it pushed the file cards off screen so names were unreadable), while desktop keeps it expanded
-- ⚠️ **Breaking changes**: none (every mobile change sits inside the breakpoint, so desktop and Electron are untouched; the upgrade work only adds backward-compatible fields)
+- 📱 **Mobile adaptation lands**: a new `<768px` breakpoint system plus a mobile shell (sidebar becomes a bottom tab bar with a drawer menu), with per-role allow-lists (24 pages for students, 17 for teachers); four follow-up batches brought quizzes, quests, exams and resources to phones, all verified at a 390px viewport, while desktop and Electron layouts stay pixel-identical
+- 🛠 **Narrow-screen fallbacks**: tables without horizontal scroll now scroll, modal widths are clamped, iOS no longer zooms on focus; a shared "table to cards" component fixed the vertical squeezing in notifications, announcements, the exam header, the companion header and the resource rail
+- 🔤 **Mobile copy i18n**: missing language keys for the bottom navigation, drawer and guide pages added, long banner lines can wrap, two literal placeholder leftovers removed
+- 🛡 **Operations**: system settings gained "pause student / teacher / external-network login" switches (admins are never blocked; the first two also sign existing sessions out, the third only rejects routable external addresses); upgrade history supports multi-select, select-all and bulk delete (in-progress records cannot be deleted and only records go, backups stay)
+- 🔗 **Upgrade hardening**: the remote version is resolved by trust order raw → github.com → git truth → public CDN fallback, a leftover broken remote no longer vetoes an upgrade, interrupted `.git` temp files are cleaned automatically, results are cached for 60s and the response states where the value came from
+- 🧠 **Skill system hardened**: JSON-emitting endpoints (question generation, grading) no longer inject skills, which fixes skewed output; scene x skill mappings and an injection allow-list make the content-safety checklist actually apply; the skill manager now shows usage stats and an injection preview
+- 🖼 **Question-figure pipeline fixed**: bank / quest / whiteboard figures now live in separate namespaces (deleting a quest question no longer wipes bank figures with the same id, and disk maintenance no longer reclaims quest or whiteboard folders); auto-generated figures write placeholder state and files together so the figure manager is usable again; all SVGs go through one sanitiser, and the old regex that deleted `stop-opacity` / `stroke-opacity` as if they were event attributes (breaking gradients and strokes) is gone
+- ⏱ **Figure actions as background jobs**: regenerate SVG, generate per placeholder and generate a photo now run as jobs with progress ("attempt 2 of 3 → downloading → saved"); repeated clicks reuse the same job instead of paying twice; polling no longer swallows auth errors, a timeout says "still running, do not resubmit", real failure reasons reach the UI and the per-question image quota is configurable
+- 🏆 **Point farming closed, student honours back to students**: AI chat caps at 10 points per student per day, quick quiz scores at most 3 sessions a day, with a 60-point daily backstop (all configurable, 0 disables them); roll-call now scores daily instead of once in a lifetime; award idempotency is enforced by a unique index, with historical duplicates folded away and totals recomputed at startup; teachers and admins no longer earn points, titles, badges or leaderboard spots, and the student rewards page gained a "This week stars" card
+- ⚠️ **Breaking changes**: none (only quest figures moved, legacy URLs still resolve; the new unique index folds duplicates automatically at startup; every cap can be switched off by setting it to 0)
 
-### v8.4.0 (2026-09-29)
+### v8.0 – v8.4 (2026-09-05 ~ 2026-09-29)
 
-- 📝 **Dialogue Homework** (was "Task Management"): renamed with step-by-step guidance for both roles; AI grading now splits the teacher requirements into checkpoints, finds evidence for each one and reports met/partial/missing to teachers and students; grade a single student without touching the others, draft homework from one sentence with AI, and read long requirements in a collapsible full-text view
-- 🧮 **Math rendering unified**: 23 surfaces - chat, companion, homework, analytics, class summary, lesson plans - render Markdown + LaTeX; `$$…$$` written inline and `\(\)` / `\[\]` are normalised, code blocks untouched
-- 🗂 **Chat history rebuilt**: the list shows a real title and message count instead of a timestamp filename, grouped by today / yesterday / this week / month, with title and content search, hover preview, a row menu (open, preview, copy, download, rename, delete) and a confirm before replacing the current chat; the index is reconciled against disk so previously invisible entries reappear
-- 📊 **Cross-activity summary export**: scores and completion across exams, quizzes, homework, practice, quick quizzes and quests, filtered by grade, class, student, activity type or date range, exported as a four-sheet Excel or CSV; admins cover the school, teachers only their own activities and students
-- 🧩 **Class management and details**: user management shows the headcount and teacher assignment per class and cleans up empty shell classes (protected when students or assignments remain); grade filters only list grades that really have students; CSV no longer carries stray invisible characters
-- 🧭 **Chapter ordering fixed**: dragging no longer flattens child chapters, cross-chapter gap drops work, and a batch is validated then applied atomically; a companion audit script renumbers legacy ordering and flags suspicious hierarchy (report-only by default, writes with `--apply`)
-- 🧠 **Skill system hardened**: skill injection removed from five JSON-output endpoints (question generation, grading and friends) so structured output can no longer be skewed; added per-scene skill mapping (Socratic guidance / step-by-step reasoning no longer injected into reports, daily cards, profiles or HTML pages) and an injected-section whitelist that finally activates the content-safety rules; repaired priority/dependency parsing that had never taken effect; the skill management page gained a usage-stats dialog and a per-scene injection preview
-- ⚠️ **Breaking changes**: none (data format upgrades automatically at startup)
-
-### v8.3.0 (2026-09-26)
-
-- 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with an automatic fallback; chat lists citations and the config page gained connectivity self-tests
-- 🤖 **Generation and grading hardened**: explicit output length caps with truncation recorded, tolerant JSON parsing and pre-save checks, normalised answers for grading and duplicate-aware imports
-- 🏠 **Dashboard and sharing centre rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home; resource browsing and Shared Files share one browser, and directory shares show as folders
-- 🌙 **Theme and copy closed out**: dark-mode palette completed and deprecated warnings cleared, the wrong-answer book can mark each question mastered, news gained paging, and the whiteboard assistant now reads the live board
-- ⚠️ **Breaking changes**: none
-
-### v8.2.0 (2026-09-14)
-
-- ⏱️ **AI calls fully async**: grading moved off the request path, idempotent `submit` receipts, per-endpoint timeouts; SSE streaming repaired with a real startup self-check
-- 🎯 **Classroom activity stability**: quick-quiz rooms advance once everyone has answered and restart safely; knowledge quests return immediately and fill remaining questions in the background; code problems moved to Code Practice
-- 📈 **Statistics and data integrity**: 7 same-named empty tables cleaned, quizzes counted by real answers, practice resets clear view counts, Hall of Fame uses live point totals
-- 📰 **News feeds self-heal**: sources re-validated with per-source circuit breaker and standby pool; daily brief cold start 57.2s -> 6.6s
-- 🔄 **Upgrade and auth trust**: upgrade records stuck in progress reconciled against the actual code version, state files written safely under a lock, repeated sign-out prompts from idle pages fixed
-- ⚠️ **Breaking changes**: none
-
-### v8.1.0 (2026-09-07)
-
-- 🔄 **Activity data reset**: 9 activity types can clear participation data while keeping the activity itself, with dry-run preview, name confirmation, rollback and a full audit trail; teachers limited to their own activities
-- 🧮 **Points immediacy**: affected students' totals recalculated right after a delete or reset; grading/deletion races no longer write orphan scores
-- 🌐 **Text and rules handled by the backend**: messages delivered as semantic codes and resolved against the bilingual dictionary; "needs confirmation / has data to delete" decided server-side
-- 🧹 **Text safety**: one shared text outlet (strip markdown and braces before truncating) replacing 9 index-based hard truncations
-- ⚠️ **Breaking changes**: none
-
-### v8.0.0 (2026-09-05)
-
-- 🔒 **Site-wide authorisation hardening**: 16 rounds of per-feature review closing anonymous reads and cross-teacher writes
-- 🎯 **Classroom and config governance**: roll-call and interaction ownership taken from the logged-in identity, publishing limited to taught classes, class analytics repaired; config writes atomic with backup, validation and secret masking
-- 📊 **Experience fixes**: export pagination, announcement scope, tokens leaking into URLs, duplicated dashboard activity, resource rename residue; untranslated keys completed in both languages
-- ⚠️ **Breaking changes**: roll-call write endpoints require login and are limited to taught classes; quizzes and polls can only target your own classes; config endpoints now return masked secrets
+- 🔒 **Auth and authorisation sweep**: 16 rounds of per-feature review closed anonymous reads and cross-teacher writes; roll-call and classroom interaction now trust the logged-in identity, activity and resource publishing is limited to a teacher's own classes, and config endpoints mask secrets
+- ⏱️ **AI calls fully asynchronous**: grading moved off the request thread, `submit` answers with an idempotent receipt, long-running endpoints got individual timeouts; SSE streaming fixed and a startup self-check added
+- 🎯 **Classroom activity stability**: quick quiz advances automatically once everyone has answered and can be safely reopened after a reset; quests start instantly with the remaining questions filled in the background; programming questions now belong to "Code Practice"
+- 🧮 **Points and data consistency**: nine activity types support "clear participation, keep content" resets (dry-run preview, name confirmation, rollback, full audit); totals are recomputed immediately after a delete or reset so no orphan scores remain; seven same-named empty shell tables were dropped from the main database and the hall of fame now reads live points
+- 📝 **Teaching flow**: "Task Management" became "Conversational Homework", graded point by point against the teacher's requirements; formula rendering unified across 23 places; chat history is grouped by session title with search, rename and automatic disk reconciliation; cross-activity scores export to a four-sheet Excel or CSV
+- 📚 **Knowledge base drives the AI chain**: question generation, lesson plans, grading, analytics and the whiteboard all retrieve then generate, degrading automatically when retrieval fails and showing citations in chat; generation and grading hardened (length caps with truncation logging, tolerant JSON parsing, normalised answers and duplicate checks before insert)
+- 📰 **News and dashboards**: RSS sources validated item by item with a per-source breaker and a backup pool, cold-starting the daily briefing from 57.2s to 6.6s; students got today's agenda, learning trend and ability profile, teachers a to-do driven dashboard; dark mode completed and theming and copy consolidated
+- ⚠️ **Breaking changes**: roll-call writes now require login and are limited to the teacher's classes; quizzes and polls may only target classes the teacher teaches; config endpoints mask secret values; "Task Management" renamed to "Conversational Homework"
 
 ### v7.x and earlier (H1 2026)
 
