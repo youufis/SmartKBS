@@ -481,6 +481,8 @@
   "group_curriculum": "Subjects & Question Types",
   "group_notify": "Notifications",
   "group_incentive": "Incentives & Quest",
+  "group_reward": "Point anti-farming",
+  "group_reward_desc": "Daily scoring caps for high-frequency activities such as AI chat and quick quiz, so leaderboards cannot be farmed; 0 disables a cap.",
   "group_credentials": "Service Access",
   "group_models": "Models & Endpoints",
   "group_chat": "AI Chat Access",

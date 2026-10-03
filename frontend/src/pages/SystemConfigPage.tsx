@@ -63,7 +63,7 @@ interface ConfigZone {
 }
 
 const CONFIG_ZONES: ConfigZone[] = [
-  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive'] },
+  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward'] },
   { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard', 'ratelimit'] },
@@ -75,6 +75,7 @@ const SECTION_TITLES: Record<string, string> = {
   curriculum: 'group_curriculum',
   notify: 'group_notify',
   incentive: 'group_incentive',
+  reward: 'group_reward',
   credentials: 'group_credentials',
   models: 'group_models',
   knowledgebase: 'group_knowledgebase',

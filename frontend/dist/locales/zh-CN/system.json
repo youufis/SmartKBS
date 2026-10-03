@@ -489,6 +489,8 @@
   "group_curriculum": "课程与题型",
   "group_notify": "消息通知",
   "group_incentive": "激励与闯关",
+  "group_reward": "积分防刷",
+  "group_reward_desc": "AI 对话、抢答等高频活动的每日计分上限，防止刷分把学生榜单刷穿；填 0 表示该项不限制。",
   "group_credentials": "服务接入",
   "group_models": "模型与端点",
   "group_chat": "AI 对话权限",
