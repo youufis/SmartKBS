@@ -1363,31 +1363,52 @@ const AttendanceStats: React.FC = () => {
                 size="small"
                 dataSource={logRows}
                 columns={[
-                  { title: t('colName'), dataIndex: 'name', width: 110, render: (v, r) => (
-                    <Space size={4}>{v || '-'}{!r.account_exists && <Tag color="orange">{t('tagDeleted')}</Tag>}</Space>) },
-                  { title: t('colUsername'), dataIndex: 'username', width: 120 },
-                  { title: t('colRole'), dataIndex: 'role', width: 80, render: (v) => v || '-' },
-                  { title: t('colGradeClass'), width: 130, render: (_v, r) => [r.grade, r.class_name].filter(Boolean).join(' · ') || '-' },
-                  { title: t('colLoginTime'), dataIndex: 'login_time', width: 165,
-                    sorter: true, render: (v: string) => v || '-' },
-                  { title: t('colLogoutTime'), dataIndex: 'logout_time', width: 165,
-                    render: (v: string) => v || <Text type="secondary">-</Text> },
-                  { title: t('colDuration'), dataIndex: 'duration_seconds', width: 100, render: (v: number | null) => {
-                    if (v === null || v === undefined) return '-'
-                    const h = Math.floor(v / 3600), m = Math.floor((v % 3600) / 60)
-                    return h ? `${h}h${m}m` : m ? `${m}m` : `${v}s`
-                  } },
-                  { title: t('colStatus'), dataIndex: 'is_online', width: 90, render: (v: boolean) => (
-                    v ? <Tag color="success" icon={<LoginOutlined />}>{t('statusOnline')}</Tag>
-                      : <Tag>{t('statusOffline')}</Tag>) },
-                  { title: t('colIp'), dataIndex: 'login_ip', width: 130, render: (v: string) => v || '-' },
-                  { title: t('colUa'), dataIndex: 'user_agent', ellipsis: true,
-                    render: (v: string) => v ? <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v}</Text></Tooltip> : '-' },
+                  { title: t('colPerson'), width: 156, render: (_v, r) => (
+                    <div style={{ lineHeight: 1.35 }}>
+                      <Space size={4}>
+                        <Text strong style={{ fontSize: 13 }}>{r.name || '-'}</Text>
+                        {!r.account_exists && <Tag color="orange" style={{ marginInlineEnd: 0 }}>{t('tagDeleted')}</Tag>}
+                      </Space>
+                      <div><Text type="secondary" style={{ fontSize: 12 }}>{r.username}</Text></div>
+                    </div>
+                  ) },
+                  { title: t('colRole'), dataIndex: 'role', width: 74,
+                    render: (v: string) => v ? <Tag>{v}</Tag> : '-' },
+                  { title: t('colGradeClass'), width: 104, ellipsis: true,
+                    render: (_v, r) => [r.grade, r.class_name].filter(Boolean).join('·') || '-' },
+                  { title: t('colLoginTime'), dataIndex: 'login_time', width: 176, sorter: true,
+                    render: (v: string, r) => (
+                      <Space size={4}>
+                        <span style={{ fontSize: 13 }}>{v || '-'}</span>
+                        {r.is_online && <Tag color="success" icon={<LoginOutlined />}>{t('statusOnline')}</Tag>}
+                      </Space>
+                    ) },
+                  { title: t('colDuration'), dataIndex: 'duration_seconds', width: 96,
+                    render: (v: number | null, r) => {
+                      if (!r.logout_time) return <Text type="secondary">{t('statusOnline')}</Text>
+                      if (v === null || v === undefined) return r.logout_time
+                      const h = Math.floor(v / 3600), m = Math.floor((v % 3600) / 60)
+                      const text = h ? `${h}h${m}m` : m ? `${m}m` : `${v}s`
+                      return <Tooltip title={`${t('colLogoutTime')}: ${r.logout_time}`}><span>{text}</span></Tooltip>
+                    } },
+                  { title: t('colIp'), dataIndex: 'login_ip', width: 122, ellipsis: true,
+                    render: (v: string) => v ? <Tooltip title={v}><span style={{ fontSize: 13 }}>{v}</span></Tooltip> : '-' },
                 ]}
                 loading={histLoading}
                 rowSelection={{
                   selectedRowKeys: logSelected,
                   onChange: (keys) => setLogSelected(keys as number[]),
+                }}
+                // 长文本（UA、登出时间、记录号）收进展开行：主表只留一眼要看的信息，
+                // 否则一行拉到 1200px 以上，管理员得横向滚动才能看完一条
+                expandable={{
+                  expandedRowRender: (r) => (
+                    <Descriptions size="small" column={1} labelStyle={{ width: 110 }}>
+                      <Descriptions.Item label={t('colLogoutTime')}>{r.logout_time || '-'}</Descriptions.Item>
+                      <Descriptions.Item label={t('colUa')}>{r.user_agent || '-'}</Descriptions.Item>
+                      <Descriptions.Item label={t('colRecordId')}>#{r.id}</Descriptions.Item>
+                    </Descriptions>
+                  ),
                 }}
                 pagination={{
                   current: logFilters.page, pageSize: logFilters.pageSize, total: logTotal,
@@ -1395,7 +1416,7 @@ const AttendanceStats: React.FC = () => {
                   showTotal: (n) => t('totalRecords', { count: n }),
                   onChange: (page, pageSize) => loadLoginLogs({ page, pageSize }),
                 }}
-                scroll={{ x: 1200 }}
+                scroll={{ x: 780 }}
               />
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
                 {t('loginHistoryNote')}

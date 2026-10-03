@@ -230,7 +230,7 @@
   "reward.titleRange": "Title Range",
   "reward.mainTitle": "Main Title",
   "reward.weeklyStars": "This week's stars",
-  "reward.myWeekRank": "{points} pts this week · rank #{rank}",
+  "reward.myWeekRank": "{{points}} pts this week · rank #{{rank}}",
   "reward.weeklyOnlyStudent": "Only student points are ranked",
   "reward.weeklyEmpty": "No points earned this week yet — be the first",
   "reward.titleNeverDown": "Note: titles never downgrade. Resetting an activity reclaims its points, but earned titles and badges stay.",

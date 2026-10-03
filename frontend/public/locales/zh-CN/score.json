@@ -230,7 +230,7 @@
   "reward.titleRange": "称号区间",
   "reward.mainTitle": "主称号",
   "reward.weeklyStars": "本周之星",
-  "reward.myWeekRank": "本周 {points} 分 · 第 {rank} 名",
+  "reward.myWeekRank": "本周 {{points}} 分 · 第 {{rank}} 名",
   "reward.weeklyOnlyStudent": "榜单仅统计学生积分",
   "reward.weeklyEmpty": "本周还没有人获得积分，第一个就是你",
   "reward.titleNeverDown": "说明：称号只升不降。活动重置会回收对应积分，但已获得的称号与徽章不会回退。",
