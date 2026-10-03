@@ -35,7 +35,8 @@ interface LoginLogFilters {
   className?: string; from?: string; to?: string; onlyOnline?: boolean; orphanOnly?: boolean
 }
 interface LoginLogStats {
-  rows: number; users: number; online: number; time_from: string; time_to: string
+  rows: number; users: number; online: number; never_logged_in?: number
+  time_from: string; time_to: string
 }
 
 interface Session {
@@ -832,18 +833,6 @@ interface AttendanceSummary {
   students: AttendanceStudent[]
 }
 
-interface StaffLoginInfo {
-  name: string
-  username: string
-  role: string
-  grade: string
-  class: string
-  is_online: boolean
-  last_login_time: string
-  last_login_ip: string
-  last_user_agent: string
-}
-
 const AttendanceStats: React.FC = () => {
   const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
@@ -861,10 +850,9 @@ const AttendanceStats: React.FC = () => {
   const [onlineStudents, setOnlineStudents] = useState<AttendanceStudent[]>([])
   const [onlineLoading, setOnlineLoading] = useState(false)
 
-  // ── 教职工登录信息（管理员可见） ──
-  const [viewMode, setViewMode] = useState<'student' | 'staff' | 'history'>('student')
-  const [staffList, setStaffList] = useState<StaffLoginInfo[]>([])
-  const [staffLoading, setStaffLoading] = useState(false)
+  // ── 考勤统计视图：学生考勤 / 登录历史（后者仅管理员） ──
+  // 原「教职工登录」子页已并入登录历史，视图枚举不再包含 'staff'
+  const [viewMode, setViewMode] = useState<'student' | 'history'>('student')
 
   // ── 登录历史（仅管理员）：跨用户翻查 / 筛选 / 分页 / 导出 / 批量删除 ──
   const [logFilters, setLogFilters] = useState<LoginLogFilters>({ page: 1, pageSize: 20 })
@@ -990,20 +978,6 @@ const AttendanceStats: React.FC = () => {
     loadOnlineStudents()
   }, [loadOnlineStudents])
 
-  // ── 加载教职工登录信息（管理员） ──
-  const loadStaffLogins = async () => {
-    setStaffLoading(true)
-    try {
-      const { data } = await apiClient.get('/api/rollcall/attendance/staff-logins')
-      setStaffList(data.staff || [])
-    } catch {
-      message.error(t('loadStaffFailed'))
-      setStaffList([])
-    } finally {
-      setStaffLoading(false)
-    }
-  }
-
   // 加载年级
   useEffect(() => {
     apiClient.get('/api/rollcall/attendance/grades')
@@ -1084,10 +1058,7 @@ const AttendanceStats: React.FC = () => {
           : t('clearLogSuccessUser', { username: clearTargetUsername })
       message.success(msg)
       setClearModalVisible(false)
-      // 刷新数据
-      if (viewMode === 'staff') {
-        loadStaffLogins()
-      }
+
     } catch {
       message.error(t('clearLogFailed'))
     } finally {
@@ -1168,51 +1139,6 @@ const AttendanceStats: React.FC = () => {
     },
   ]
 
-  // ── 教职工登录表格列 ──
-  const staffColumns = [
-    {
-      title: t('index'), key: 'index', width: 60,
-      render: (_: unknown, __: unknown, i: number) => i + 1,
-    },
-    {
-      title: t('name'), dataIndex: 'name', key: 'name',
-      render: (n: string) => n || <Text type="secondary">-</Text>,
-    },
-    {
-      title: t('role'), dataIndex: 'role', key: 'role',
-      render: (r: string) => r === '管理员'
-        ? <Tag color="red">{r}</Tag>
-        : <Tag color="blue">{r}</Tag>,
-    },
-    {
-      title: t('username'), dataIndex: 'username', key: 'username',
-      render: (u: string) => u ? <Text copyable={{ text: u }} style={{ fontSize: 12 }}>{u}</Text> : <Text type="secondary">-</Text>,
-    },
-    {
-      title: t('onlineStatus'), dataIndex: 'is_online', key: 'is_online',
-      render: (online: boolean) => online
-        ? <Tag icon={<LoginOutlined />} color="success">{t('online')}</Tag>
-        : <Tag icon={<StopOutlined />} color="default">{t('offline')}</Tag>,
-    },
-    {
-      title: t('lastLoginTime'), dataIndex: 'last_login_time', key: 'last_login_time',
-      render: (t: string) => t || <Text type="secondary">-</Text>,
-    },
-    {
-      title: t('loginIP'), dataIndex: 'last_login_ip', key: 'last_login_ip',
-      render: (ip: string) => ip || <Text type="secondary">-</Text>,
-    },
-    {
-      title: t('actions'), key: 'actions', width: 80,
-      render: (_: unknown, record: StaffLoginInfo) => (
-        <Button type="link" size="small" danger
-          onClick={() => showClearModal(false, record.username)}>
-          {t('clearRecord')}
-        </Button>
-      ),
-    },
-  ]
-
   const isAdmin = user?.role === 'admin'
 
   return (
@@ -1230,13 +1156,6 @@ const AttendanceStats: React.FC = () => {
                   onClick={() => { setViewMode('student'); setSummary(null); loadOnlineStudents() }}
                 >
                   {t('studentAttendance')}
-                </Button>
-                <Button
-                  type={viewMode === 'staff' ? 'primary' : 'default'}
-                  icon={<UserOutlined />}
-                  onClick={() => { setViewMode('staff'); loadStaffLogins() }}
-                >
-                  {t('staffLogin')}
                 </Button>
                 <Button
                   type={viewMode === 'history' ? 'primary' : 'default'}
@@ -1261,11 +1180,6 @@ const AttendanceStats: React.FC = () => {
                 {t('allOnline', { count: onlineStudents.length })}
               </Tag>
             )}
-            {viewMode === 'staff' && staffList.length > 0 && (
-              <Tag icon={<UserOutlined />} color="purple" style={{ fontSize: 13 }}>
-                {t('staffCount', { count: staffList.length })}
-              </Tag>
-            )}
             {isAdmin && (
               <Button icon={<DeleteOutlined />} danger
                 onClick={() => showClearModal(true)}>
@@ -1274,12 +1188,11 @@ const AttendanceStats: React.FC = () => {
             )}
             <Button icon={<ReloadOutlined />}
               onClick={() => {
-                if (viewMode === 'staff') loadStaffLogins()
-                else if (viewMode === 'history') loadLoginLogs()
+                if (viewMode === 'history') loadLoginLogs()
                 else if (grade && cls) handleClassChange(cls)
                 else loadOnlineStudents()
               }}
-              loading={loading || onlineLoading || staffLoading || histLoading}>
+              loading={loading || onlineLoading || histLoading}>
               {t('refreshData')}
             </Button>
           </Space>
@@ -1354,6 +1267,8 @@ const AttendanceStats: React.FC = () => {
                     {t('logStats', {
                       rows: logStats.rows, users: logStats.users, online: logStats.online,
                     })}
+                    {/* 「谁从没用过系统」原先只有教职工登录页能回答，合并后留在这里 */}
+                    {(logStats.never_logged_in ?? 0) > 0 && ` · ${t('neverLoggedIn', { count: logStats.never_logged_in ?? 0 })}`}
                   </Text>
                 )}
               </Space>
@@ -1407,6 +1322,14 @@ const AttendanceStats: React.FC = () => {
                       <Descriptions.Item label={t('colLogoutTime')}>{r.logout_time || '-'}</Descriptions.Item>
                       <Descriptions.Item label={t('colUa')}>{r.user_agent || '-'}</Descriptions.Item>
                       <Descriptions.Item label={t('colRecordId')}>#{r.id}</Descriptions.Item>
+                      <Descriptions.Item label={t('actions')}>
+                        {/* 原「教职工登录」页每行的"清除该用户记录"入口，删 tab 后挪到这里，
+                            能力不减；管理员此刻正看着这个账号，误删面比原来更小 */}
+                        <Button type="link" size="small" danger
+                          onClick={() => showClearModal(false, r.username)}>
+                          {t('clearUserRecords')}
+                        </Button>
+                      </Descriptions.Item>
                     </Descriptions>
                   ),
                 }}
@@ -1419,7 +1342,7 @@ const AttendanceStats: React.FC = () => {
                 scroll={{ x: 780 }}
               />
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-                {t('loginHistoryNote')}
+                {t('loginHistoryNote')} {t('onlineBySession')}
               </Text>
             </>
           )}
@@ -1523,28 +1446,6 @@ const AttendanceStats: React.FC = () => {
             </>
           )}
 
-          {/* ── 教职工登录模式 ── */}
-          {viewMode === 'staff' && (
-            <>
-              <Divider>{t('staffLoginInfo')}</Divider>
-              <Table
-                dataSource={staffList}
-                columns={staffColumns}
-                rowKey="username"
-                loading={staffLoading}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStaffCount', { count: total }) }}
-                size="middle"
-              />
-              {staffList.length === 0 && !staffLoading && (
-                <Empty description={t('noStaffRecords')} />
-              )}
-              {staffLoading && (
-                <div style={{ textAlign: 'center', padding: 40 }}>
-                  <Spin>{t('loadingStaffInfo')}</Spin>
-                </div>
-              )}
-            </>
-          )}
         </Space>
       </Card>
 

@@ -990,9 +990,17 @@ async def attendance_online_students(request: Request):
     return {"students": student_list, "total": len(student_list)}
 
 
-@router.get("/attendance/staff-logins", summary="获取教职工登录信息（管理员专用）")
+@router.get("/attendance/staff-logins", summary="获取教职工登录信息（已弃用，保留一个版本）",
+            deprecated=True)
 async def attendance_staff_logins(request: Request):
-    """获取所有教师和管理员的登录信息（仅管理员可查看）"""
+    """教职工登录信息 —— 能力已被 /attendance/login-logs 完全覆盖，保留一版做过渡。
+
+    它原先独有的两项都已并入登录历史：
+      - 在线判定统一用活跃会话（get_online_usernames），不再看 logout_time 是否留空
+      - "谁从没用过系统"由 stats.never_logged_in 回答（默认统计教职工）
+    暂不删除的原因：浏览器缓存的旧 bundle 仍会调它，直接下线会让老页面报错；
+    下个版本连同前端残留一起清掉。
+    """
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -1218,8 +1226,16 @@ def _login_log_where(q: dict) -> tuple[str, list]:
         conds.append("l.class_name = ?")
         args.append(cls)
 
+    # 「在线」一律以活跃会话为准（get_online_usernames），不要按 logout_time 是否为空判：
+    # 实测 5 条 logout_time 留空的行里 5 条都是假在线（关页面没点登出、九月的老记录、
+    # 甚至已注销的幽灵账号），照它显示"当前在线 5"会把管理员误导。
     if str(q.get("only_online") or "").strip().lower() in LOGIN_LOG_TRUE_VALUES:
-        conds.append("(l.logout_time IS NULL OR l.logout_time = '')")
+        _online = sorted(get_online_usernames())
+        if _online:
+            conds.append(f"l.username IN ({','.join('?' * len(_online))})")
+            args.extend(_online)
+        else:
+            conds.append("1=0")
 
     # 已注销账号的历史：用 LEFT JOIN 才看得到，否则这类行永远留在库里没人清理
     if str(q.get("orphan_only") or "").strip().lower() in LOGIN_LOG_TRUE_VALUES:
@@ -1237,7 +1253,7 @@ def _login_log_where(q: dict) -> tuple[str, list]:
     return " AND ".join(conds), args
 
 
-def _login_log_row(r: dict) -> dict:
+def _login_log_row(r: dict, online_users: set[str] | None = None) -> dict:
     """统一出口结构：角色给中文标签、时长在 Python 侧算（SQLite 版本差异别带到比较逻辑里）"""
     login_t = str(r.get("login_time") or "")
     logout_t = str(r.get("logout_time") or "")
@@ -1262,7 +1278,8 @@ def _login_log_row(r: dict) -> dict:
         "class_name": r.get("class_name") or "",
         "login_time": login_t,
         "logout_time": logout_t,
-        "is_online": not logout_t,
+        # 在线 = 该账号当前有活跃会话；登出时间留空只是"没点登出"，不代表在线
+        "is_online": (r.get("username") or "") in (online_users or set()),
         "duration_seconds": duration,
         "login_ip": r.get("login_ip") or "",
         "user_agent": r.get("user_agent") or "",
@@ -1307,19 +1324,42 @@ async def attendance_login_logs(request: Request):
         tuple(args)) or []
     st = stats_rows[0] if stats_rows else {}
 
+    online_users = set(get_online_usernames())
     rows = execute_query_dict(
         f"{_LOGIN_LOG_SELECT} WHERE {where} ORDER BY l.{sort} {order}, l.id DESC LIMIT ? OFFSET ?",
         tuple(args) + (page_size, (page - 1) * page_size)) or []
 
+    # 命中集里有多少账号当前真在线：取全部匹配用户（不分页）与活跃会话求交
+    # execute_query_dict 返回的是字典行，取值必须用列名（写成 r[0] 会 KeyError）
+    matched_users = {str(r["username"]) for r in (execute_query_dict(
+        f"SELECT DISTINCT l.username AS username FROM login_logs l LEFT JOIN users u ON u.username = l.username WHERE {where}",
+        tuple(args)) or [])}
+    # 「谁从没用过系统」原先只有教职工登录页能答，合并进来不能丢：
+    # 未加角色筛选时按教职工(0/1)统计 —— 上千个"未登录学生"没有管理意义
+    role_filter = str(q.get("role") or "").strip()
+    if role_filter in ("0", "1"):
+        nl_where, nl_params = "u.role = ? AND IFNULL(u.status,'active')='active'", [int(role_filter)]
+    elif role_filter == "2":
+        nl_where, nl_params = "u.role = 2 AND IFNULL(u.status,'active')='active'", []
+    else:
+        nl_where, nl_params = "u.role IN (0,1) AND IFNULL(u.status,'active')='active'", []
+    never_logged_in = int((execute_query_dict(
+        f"""SELECT COUNT(*) AS c FROM users u
+            WHERE {nl_where} AND NOT EXISTS
+              (SELECT 1 FROM login_logs l WHERE l.username = u.username)""",
+        tuple(nl_params)) or [{"c": 0}])[0]["c"])
+
     return {
-        "logs": [_login_log_row(r) for r in rows],
+        "logs": [_login_log_row(r, online_users) for r in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
         "stats": {
             "rows": total,
             "users": int(st.get("users_") or 0),
-            "online": int(st.get("online_") or 0),
+            # 不再用"logout_time 为空"的 SQL 口径，改为活跃会话交集
+            "online": len(matched_users & online_users),
+            "never_logged_in": never_logged_in,
             "time_from": st.get("t_from") or "",
             "time_to": st.get("t_to") or "",
         },
@@ -1351,7 +1391,7 @@ async def attendance_export_login_logs(request: Request):
         _auto_width, _excel_response, _guard_row_count, _style_cells, _style_header)
 
     _guard_row_count(len(rows), "登录历史")
-    items = [_login_log_row(r) for r in rows]
+    items = [_login_log_row(r, set(get_online_usernames())) for r in rows]
 
     wb = Workbook()
     ws = wb.active
@@ -1411,8 +1451,11 @@ async def attendance_export_login_logs(request: Request):
                               if v) or "无（全部）"],
         ["记录条数", str(len(items))],
         ["涉及账号数", str(len(agg))],
+        ["当前在线账号数", str(len({i["username"] for i in items if i["is_online"]}))],
         ["数据来源", "login_logs（系统自动保留最近 180 天）"],
         ["口径说明", "仅记录登录成功的事件；登录失败不落库，只在服务端日志与 IP 封禁计数中体现。"],
+        ["在线判定", "「在线」指该账号当前持有活跃会话（服务端令牌表），不是登出时间留空 —— "
+                     "关页面不点登出会留下大量「未登出」行，按它判在线会严重虚高。"],
         ["隐私提示", "本表含 IP 与客户端指纹，仅限管理员在校内管理用途使用，勿外传。"],
     ]:
         ws3.append(line)
