@@ -1,5 +1,6 @@
 /** 考试发布 API */
-import apiClient from './client';
+import apiClient from './client'
+import { runAiTaskJob, type AiTaskProgress } from './aiTask';
 import type {
   ExamInfo,
   ExamCreateRequest,
@@ -108,6 +109,17 @@ export async function removeQuestionsFromExam(
   return data;
 }
 
+/** 调整试卷题目顺序（sort_order 决定试卷/答案卷/答题卡的排版顺序） */
+export async function reorderExamQuestions(
+  examId: number,
+  questionIds: number[]
+): Promise<PaperMutationResult & { ordered_question_ids?: number[]; applied?: number }> {
+  const { data } = await apiClient.put(`/api/exams/${examId}/questions/order`, {
+    question_ids: questionIds,
+  });
+  return data;
+}
+
 /** 批量更新试题分值 */
 export async function batchUpdateScores(
   examId: number,
@@ -148,7 +160,18 @@ export async function autoSelectQuestions(
   return data;
 }
 
-/** AI 智能组卷（与「自动选题」共用后端组卷引擎） */
+export interface AiComposeResult extends PaperMutationResult {
+  recommended?: number; reason?: string; notice?: string;
+  type_stats?: Record<string, number>; difficulty_stats?: Record<string, number>;
+}
+
+/**
+ * AI 智能组卷（与「自动选题」共用后端组卷引擎）。
+ *
+ * 后端已改成异步任务：这一步要过一遍大模型，旧写法同步 await、前端把超时拉到 300 秒
+ * 挂长连接干等。这里提交后轮询任务进度，与站内其它 AI 功能同一套机制
+ * （连点与刷新重试由后端 dedupe_key 挡住，不会重复烧 token）。
+ */
 export async function aiComposeExam(
   examId: number,
   params: {
@@ -156,14 +179,10 @@ export async function aiComposeExam(
     knowledge_focus?: string;
     question_types?: string[];
     difficulty?: string;
-  }
-): Promise<PaperMutationResult & {
-  recommended?: number; reason?: string; notice?: string;
-  type_stats?: Record<string, number>; difficulty_stats?: Record<string, number>;
-}> {
-  // 主观题组卷要过一遍模型，可能远超全局 30s 超时
-  const { data } = await apiClient.post(`/api/exams/${examId}/ai-compose`, params, { timeout: 300000 });
-  return data;
+  },
+  onProgress?: (p: AiTaskProgress) => void,
+): Promise<AiComposeResult> {
+  return runAiTaskJob<AiComposeResult>(`/api/exams/${examId}/ai-compose`, params, onProgress, 300000);
 }
 
 /** 学生开始考试 */

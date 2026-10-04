@@ -189,14 +189,7 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
             difficulty_stats[q_diff] += 1
 
     # 配平后各题型每题的真实分值（让界面显示"实际落到卷面上的数"，而不是配置值）
-    type_scores = {
-        str(r["type"]): round(float(r["s"]), 1) for r in execute_query(
-            """SELECT q.type, MAX(eq.score) AS s FROM exam_questions eq
-               JOIN question_bank q ON q.id = eq.question_id
-               WHERE eq.exam_id = ? AND eq.question_id IN (%s)
-               GROUP BY q.type""" % ",".join("?" * len(inserted)),
-            (exam_id, *inserted)) or []
-    }
+    type_scores = exam_scoring.type_scores_of(exam_id, inserted)
 
     warnings: list[str] = []
     if abs(gap) > 0.05:

@@ -6,6 +6,7 @@ import {
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined, SafetyCertificateOutlined,
+  HolderOutlined,
   PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
@@ -16,6 +17,7 @@ import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
+import type { AiTaskProgress } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { ExamInfo, ExamAttempt } from '../types'
 
@@ -145,6 +147,7 @@ const ExamPage: React.FC = () => {
   const [aiComposeFocus, setAiComposeFocus] = useState('')
   const [aiComposeTypes, setAiComposeTypes] = useState<string[]>([])
   const [aiComposeDifficulty, setAiComposeDifficulty] = useState<string>()
+  const [aiComposeNote, setAiComposeNote] = useState('')
 
   // ── 成绩查看弹窗 ──
   const [resultModal, setResultModal] = useState(false)
@@ -441,6 +444,14 @@ const ExamPage: React.FC = () => {
     if (res?.submitted_attempts > 0) {
       message.warning(t("submittedImpact", { count: res.submitted_attempts }))
     }
+    // 配平后的真实每题分值：老师配的是"单选 3 分"，实际可能落成 3.4 分，
+    // 不显示出来就只有总分对了、没人知道每题到底几分
+    const ts = res?.type_scores as Record<string, number> | undefined
+    if (ts && Object.keys(ts).length) {
+      message.info(t("actualScores", {
+        scores: Object.entries(ts).map(([k, v]) => `${typeLabel(k)} ${v}`).join("、"),
+      }))
+    }
   }
 
   // ── 更新单题分值 ──
@@ -545,6 +556,31 @@ const ExamPage: React.FC = () => {
   }, [examQuestions])
 
   const [removeIds, setRemoveIds] = useState<number[]>([])
+  // ── 拖拽排序：sort_order 决定试卷/答案卷/答题卡的排版顺序，此前界面上没有入口能调 ──
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [orderSaving, setOrderSaving] = useState(false)
+
+  const handleRowDrop = async (toIdx: number) => {
+    if (dragIdx === null || dragIdx === toIdx || !questionExam) { setDragIdx(null); return }
+    const prev = examQuestions
+    const next = [...prev]
+    const [moved] = next.splice(dragIdx, 1)
+    next.splice(toIdx, 0, moved)
+    setDragIdx(null)
+    setExamQuestions(next)                 // 先乐观更新，失败再拿服务端真相回滚
+    setOrderSaving(true)
+    try {
+      const res = await examsApi.reorderExamQuestions(questionExam.id, next.map((q: any) => q.id))
+      message.success(res.message)
+      reportImpact(res)
+      await loadExamQuestions(questionExam.id)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('orderFailed'))
+      setExamQuestions(prev)
+    } finally {
+      setOrderSaving(false)
+    }
+  }
 
   const removeQuestions = async (ids: number[]) => {
     if (!questionExam || !ids.length) return
@@ -655,7 +691,7 @@ const ExamPage: React.FC = () => {
         knowledge_focus: aiComposeFocus,
         question_types: aiComposeTypes.length ? aiComposeTypes : undefined,
         difficulty: aiComposeDifficulty || undefined,
-      })
+      }, (p: AiTaskProgress) => setAiComposeNote(p?.message || ''))
       message.success(data.message || t('composeSuccess'))
       if (data.notice) message.info(data.notice)      // 题从哪来：兜底/放宽情况要说清楚
       reportImpact(data)
@@ -667,9 +703,14 @@ const ExamPage: React.FC = () => {
       }
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || t('composeFailed'))
+      // 超时不等于失败：后台还在跑。说"失败"会诱导老师重复点，结果是重复入卷
+      if (err?.aiTaskTimeout) message.warning(t('aiComposeTimeout'))
+      else if (err?.aiTaskFailed) message.error(err.message || t('composeFailed'))
+      else message.error(err?.response?.data?.detail || err?.message || t('composeFailed'))
+      await loadExamQuestions(questionExam.id)
     } finally {
       setAiComposing(false)
+      setAiComposeNote('')
     }
   }
 
@@ -1389,7 +1430,7 @@ const ExamPage: React.FC = () => {
               {t('selectedQuestions', { count: examQuestions.length })}
               {examQuestions.length > 0 && (
                 <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8, fontWeight: 'normal' }}>
-                  {t('editableScoreHint')} · {t('expandQuestionHint')}
+                  {t('editableScoreHint')} · {t('expandQuestionHint')} · {t('dragOrderHint')}
                 </Typography.Text>
               )}
             </Typography.Title>
@@ -1429,7 +1470,27 @@ const ExamPage: React.FC = () => {
           {examQuestions.length === 0 ? (
             <Empty description={t('noQuestionsHint')} />
           ) : (
+            <Spin spinning={orderSaving} tip={t('saving')}>
             <Table dataSource={examQuestions} rowKey="id" size="small" pagination={false}
+              onRow={(_: any, index?: number) => ({
+                draggable: examQuestions.length > 1,
+                onDragStart: (e: any) => {
+                  // 从分值输入框/下拉里起手时不要触发拖拽，否则老师没法选文字改数字
+                  const el = e.target as HTMLElement
+                  if (el?.closest?.('input, textarea, .ant-select, .ant-input-number')) {
+                    e.preventDefault()
+                    return
+                  }
+                  setDragIdx(index ?? null)
+                },
+                onDragOver: (e: any) => e.preventDefault(),
+                onDragEnd: () => setDragIdx(null),
+                onDrop: (e: any) => { e.preventDefault(); void handleRowDrop(index ?? 0) },
+                style: {
+                  cursor: examQuestions.length > 1 ? 'move' : 'default',
+                  opacity: dragIdx !== null && dragIdx === index ? 0.35 : 1,
+                },
+              })}
               rowSelection={{
                 selectedRowKeys: removeIds,
                 onChange: (keys) => setRemoveIds(keys as number[]),
@@ -1479,8 +1540,13 @@ const ExamPage: React.FC = () => {
                 },
               }}
               columns={[
-                { title: '#', key: 'index', width: 40,
-                  render: (_: any, __: any, idx: number) => idx + 1 },
+                { title: '#', key: 'index', width: 46,
+                  render: (_: any, __: any, idx: number) => (
+                    <Space size={2}>
+                      <HolderOutlined style={{ color: '#bbb' }} />
+                      <span>{idx + 1}</span>
+                    </Space>
+                  ) },
                 { title: t('questionType'), dataIndex: 'type', width: 70,
                   // 题型是后台可配的，硬编码四种会把填空/作文/编程一律显示成"简答"
                   render: (v: string) => <Tag>{typeLabel(v)}</Tag> },
@@ -1508,6 +1574,7 @@ const ExamPage: React.FC = () => {
                 },
               ]}
             />
+            </Spin>
           )}
 
           <Divider />
@@ -1594,6 +1661,11 @@ const ExamPage: React.FC = () => {
               <Input size="small" value={aiComposeFocus}
                 onChange={(e) => setAiComposeFocus(e.target.value)}
                 placeholder={t('aiComposePlaceholder')} style={{ width: 200 }} />
+              {aiComposing && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  <ThunderboltOutlined spin /> {aiComposeNote || t('aiComposing')}
+                </Typography.Text>
+              )}
             </Space>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
               {t('aiComposeHint')}

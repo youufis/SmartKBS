@@ -997,9 +997,56 @@ async def remove_questions_from_exam(
             "rebalanced": rebalanced, "target_total": exam["total_score"], **impact}
 
 
+class ExamQuestionOrder(BaseModel):
+    """试卷题目顺序请求（按新顺序给出全部题号）"""
+    question_ids: list[int]
+
+
 class BatchScoresUpdate(BaseModel):
     """批量更新题目分值请求"""
     scores: dict[str, float]  # {exam_question_id: score}
+
+
+@router.put("/{exam_id}/questions/order", summary="调整试卷题目顺序")
+async def reorder_exam_questions(exam_id: int, req: ExamQuestionOrder, request: Request):
+    """按提交的题号顺序重排 sort_order。
+
+    只动 sort_order，不动任何分值 —— 所以不会破坏"卷面合计 == 目标总分"。
+    但仍要走在途答卷守卫：学生看到的题序是按 (考试, 学生) 对**卷面顺序**做确定性
+    打乱得到的，输入顺序一变，输出排列就跟着变，正在作答的学生会突然换题序。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+    if not _can_manage_exam(username, exam):
+        raise HTTPException(status_code=403, detail="无权操作此考试")
+    impact = _require_paper_editable(exam, "调整题序")
+
+    if not req.question_ids:
+        raise HTTPException(status_code=400, detail="请提交完整的题目顺序")
+    want = [int(x) for x in req.question_ids]
+    if len(set(want)) != len(want):
+        raise HTTPException(status_code=400, detail="提交的题序里有重复题目")
+    current = [int(r["question_id"]) for r in execute_query(
+        "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []]
+    if set(want) != set(current):
+        missing = [x for x in current if x not in set(want)]
+        extra = [x for x in want if x not in set(current)]
+        raise HTTPException(
+            status_code=400,
+            detail="题序必须覆盖整份卷子（漏了 %d 道%s），请刷新后重试" % (
+                len(missing), "、多了 %d 道" % len(extra) if extra else ""),
+        )
+
+    applied = exam_scoring.set_sort_order(exam_id, want)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
+    logger.info(f"用户 {username} 调整考试{exam_id}题序: {want}")
+    return {"message": "题序已更新", "ordered_question_ids": want,
+            "applied": applied, "question_count": len(current), **impact}
 
 
 @router.put("/{exam_id}/questions/batch-scores")
@@ -1221,6 +1268,7 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
         "reason": reason,
         "type_stats": type_stats,
         "difficulty_stats": diff_stats,
+        "type_scores": exam_scoring.type_scores_of(exam_id, inserted),
         **impact,
     }
 
@@ -2826,14 +2874,14 @@ class AIComposeRequest(BaseModel):
     # （死参数）。现在由 difficulty 单档偏好 + 引擎默认 20:50:30 取代。
 
 
-@router.post("/{exam_id}/ai-compose", summary="AI 智能组卷")
+@router.post("/{exam_id}/ai-compose", summary="AI 智能组卷（后台任务）")
 async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request):
-    """AI 智能组卷：让模型在候选池里挑题，但结果不原样入库（配额校验 + 缺额补齐）。
+    """提交后台任务并返回 task_id，前端用 pollAiTaskWithProgress 看进度。
 
-    与「自动选题」共用 backend/paper_compose 引擎，区别只在最后一步由谁选题。
-    旧实现自带一套候选池 SQL：subject 精确等值（库里 信息技术 154 / 信息科技 96 题，
-    互相看不见）、ORDER BY difficulty LIMIT 50 —— 老师填的"知识点重点"对候选池零影响，
-    模型只能在"最容易的 50 道题"里挑，想挑相关题也没素材。
+    为什么改异步：这一步要过一遍大模型，旧实现同步 await，前端只能把超时拉到 300 秒
+    挂着长连接干等，而站内其它 AI 功能（错题讲解、生图、补配图）早就统一走
+    ai_task_manager + 进度轮询了。dedupe_key 挡住连点与刷新重试，不重复烧 token；
+    reuse_completed=False 保证"再生成一次"是真的再跑一遍，而不是拿上一轮的回执。
     """
     user = get_current_user(request)
     username = user["username"]
@@ -2849,10 +2897,41 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
+    # 提交前判得出来的问题一律当场报，别让老师等一个注定失败的任务
     impact = _require_paper_editable(exam, "AI 组卷")
     if float(exam["total_score"] or 0) <= 0:
         raise HTTPException(status_code=400, detail="请先在「编辑考试」里把目标总分设为大于 0 的数")
+    from backend.api.chat_router import get_api_keys
+    try:
+        _keys = get_api_keys(username)
+    except Exception:
+        _keys = []
+    if not (_keys and _keys[0]):
+        raise HTTPException(status_code=400, detail="未配置 API Key，无法使用 AI 生成；可改用「自动选题」")
 
+    from backend.ai_task_manager import task_manager
+
+    async def _do_compose() -> dict[str, Any]:
+        return await _run_ai_compose(exam_id, req, exam, username, impact)
+
+    task_id = await task_manager.create_task(
+        description=f"AI 组卷：{exam['title']}", coro_factory=_do_compose,
+        owner_username=username, dedupe_key=f"ai-compose:{exam_id}",
+        max_concurrent=4, reuse_completed=False,
+    )
+    return {"task_id": task_id, "accepted": True,
+            "message": "AI 组卷已开始，正在从题库选题…", **impact}
+
+
+async def _run_ai_compose(exam_id: int, req: AIComposeRequest, exam: dict[str, Any],
+                          username: str, impact: dict[str, Any]) -> dict[str, Any]:
+    """真正干活的部分：让模型在候选池里挑题，但结果不原样入库（配额校验 + 缺额补齐）。
+
+    与「自动选题」共用 backend/paper_compose 引擎，区别只在最后一步由谁选题。
+    旧实现自带一套候选池 SQL：subject 精确等值（库里 信息技术 154 / 信息科技 96 题，
+    互相看不见）、ORDER BY difficulty LIMIT 50 —— 老师填的"知识点重点"对候选池零影响，
+    模型只能在"最容易的 50 道题"里挑，想挑相关题也没素材。
+    """
     asked_types = tuple(req.question_types) if req.question_types else exam_scoring.GRADABLE_TYPES
     skipped_types = exam_scoring.ungradable_types(asked_types)
     q_types = tuple(x for x in asked_types if exam_scoring.is_gradable(x)) or exam_scoring.GRADABLE_TYPES
@@ -2860,8 +2939,8 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
     focus = [x for x in re.split(r"[,，、;；/|\s]+", req.knowledge_focus or "") if x]
     easy_r, medium_r, hard_r = difficulty_split(req.difficulty or "")
 
-    # 没配 API Key 就明确报错，而不是悄悄退化成规则选题 —— 按钮写的是「AI 生成」，
-    # 静默降级会让老师以为这套卷是模型挑的（智能组卷页有 use_ai 开关，这里没有）。
+    # 任务真正开跑时再确认一次 Key：没配就明确失败，而不是悄悄退化成规则选题 ——
+    # 按钮写的是「AI 生成」，静默降级会让老师以为这套卷是模型挑的
     from backend.api.chat_router import get_api_keys
     try:
         _keys = get_api_keys(username)
@@ -2924,6 +3003,7 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
         "rebalanced": abs(gap) <= 0.05,
         "type_stats": type_stats,
         "difficulty_stats": diff_stats,
+        "type_scores": exam_scoring.type_scores_of(exam_id, inserted),
         "notice": _pool_notice(audit),
         **impact,
     }

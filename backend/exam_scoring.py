@@ -175,6 +175,32 @@ def paper_total(exam_id: int) -> float:
     return round(float(row["s"] if row else 0), 1)
 
 
+def type_scores_of(exam_id: int, question_ids: Sequence[int]) -> dict[str, float]:
+    """配平后各题型每题的真实分值。
+
+    三个组卷入口都要回这个数：老师配的是"单选 3 分"，配平后可能变成 3.4 分，
+    不回传就只看见卷面总分对了、不知道每题到底几分（智能组卷页有、弹窗里两个
+    入口原先没有，同一件事两种说法）。
+    """
+    ids = [int(x) for x in question_ids or []]
+    if not ids:
+        return {}
+    out: dict[str, float] = {}
+    for part_idx in range(0, len(ids), 400):
+        part = ids[part_idx:part_idx + 400]
+        marks = ",".join("?" * len(part))
+        rows = execute_query(
+            f"""SELECT q.type AS type, MAX(eq.score) AS s
+                  FROM exam_questions eq
+                  JOIN question_bank q ON q.id = eq.question_id
+                  WHERE eq.exam_id = ? AND eq.question_id IN ({marks})
+                  GROUP BY q.type""",
+            (exam_id, *part)) or []
+        for r in rows:
+            out[str(r["type"])] = round(float(r["s"] or 0), 1)
+    return out
+
+
 def paper_gap(exam_id: int, target_total: float) -> float:
     """卷面合计与目标总分的差额（正=超出，负=还差）。"""
     return round(paper_total(exam_id) - float(target_total or 0), 1)
@@ -221,6 +247,29 @@ def insert_paper_questions(exam_id: int, items: Sequence[tuple[int, float]],
             conn.execute("ROLLBACK")
             raise
     return inserted
+
+
+def set_sort_order(exam_id: int, ordered_question_ids: Sequence[int]) -> int:
+    """按给定顺序把 sort_order 写成 0..n-1（一个事务）。返回覆盖到的行数。
+
+    sort_order 决定试卷/答案卷/答题卡的排版顺序。此前界面上没有任何入口能调，
+    老师想换题序只能"删了再加"，还会顺带触发重新配平。
+    """
+    applied = 0
+    with get_connection() as conn:
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for idx, qid in enumerate(ordered_question_ids):
+                cur = conn.execute(
+                    "UPDATE exam_questions SET sort_order = ? WHERE exam_id = ? AND question_id = ?",
+                    (int(idx), exam_id, int(qid)))
+                applied += int(cur.rowcount or 0)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return applied
 
 
 def set_scores(exam_id: int, mapping: dict[int, float]) -> int:
