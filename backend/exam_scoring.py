@@ -44,6 +44,12 @@ TYPE_WEIGHTS = {
 DEFAULT_WEIGHT = 1.0
 
 
+def gap_text(gap: float) -> str:
+    """把"卷面合计 - 目标总分"翻成给老师看的话（正=超出，负=还差）。"""
+    n = abs(round(float(gap), 1))
+    return f"卷面已超出目标总分 {n} 分" if gap > 0 else f"卷面还差 {n} 分到目标总分"
+
+
 def weight_of(q_type: Any) -> float:
     """题型 → 默认分值权重。未知题型按 1.0，不给 0（0 权重会让该题算出 0 分）。"""
     return TYPE_WEIGHTS.get(str(q_type or "").strip(), DEFAULT_WEIGHT)
@@ -279,6 +285,156 @@ def live_attempts(exam: dict, limit: int = 50) -> list[dict[str, Any]]:
         if dl is None or now <= dl:
             live.append(r)
     return live
+
+
+# ══════════════════════════════════════════════════════════════
+# 卷面诊断与存量修复（发布前体检与全站扫描共用这一份判定）
+# ══════════════════════════════════════════════════════════════
+
+def paper_rows(exam_id: int) -> list[dict[str, Any]]:
+    """这张卷子的每一行（含题型与题目状态）。LEFT JOIN：题目被硬删也不漏行。"""
+    return execute_query(
+        """SELECT eq.id AS eq_id, eq.question_id, eq.sort_order, eq.score,
+                  q.type, q.status
+           FROM exam_questions eq
+           LEFT JOIN question_bank q ON q.id = eq.question_id
+           WHERE eq.exam_id = ?
+           ORDER BY eq.sort_order, eq.id""",
+        (exam_id,),
+    ) or []
+
+
+def diagnose(exam: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """返回卷子的结构问题清单，每项 {code, message, fixable}。
+
+    code 是机器可读的，供发布拦截、存量扫描、一键修复三处共同判断；
+    message 是给老师看的一句可操作说明。fixable=False 的问题不能自动修
+    （删题、改及格线都是会动老师决策的事），只能报出来。
+    """
+    rows = rows if rows is not None else paper_rows(int(exam["id"]))
+    if not rows:
+        return [{"code": "empty_paper", "message": "试卷里一道题都没有", "fixable": False}]
+
+    target = float(exam.get("total_score") or 0)
+    pass_score = float(exam.get("pass_score") or 0)
+    active = [r for r in rows if str(r.get("status") or "") == "active"]
+    dead = [r for r in rows if str(r.get("status") or "") != "active"]
+    ungradable = sorted({str(r.get("type") or "") for r in active
+                         if not is_gradable(r.get("type"))})
+    zero = [r for r in rows if float(r.get("score") or 0) <= 0]
+    active_sum = round(sum(float(r["score"] or 0) for r in active), 1)
+    dead_sum = round(sum(float(r["score"] or 0) for r in dead), 1)
+
+    seen: set[int] = set()
+    dupes = 0
+    for r in rows:
+        qid = int(r["question_id"])
+        if qid in seen:
+            dupes += 1
+        seen.add(qid)
+
+    issues: list[dict[str, Any]] = []
+    if dupes:
+        issues.append({"code": "duplicate_question", "fixable": True,
+                       "message": f"有 {dupes} 道重复题（同一道题进了两次，分值被重复计算）"})
+    if dead:
+        issues.append({"code": "dead_question", "fixable": False,
+                       "message": f"有 {len(dead)} 道题已从题库删除但仍挂在卷面上"
+                                  f"（合计 {dead_sum} 分学生永远拿不到），请移除后重排分值"})
+    if ungradable:
+        issues.append({"code": "ungradable_type", "fixable": False,
+                       "message": "有题型暂不支持考试判分：" + "、".join(ungradable) + "，请换题"})
+    if zero:
+        issues.append({"code": "zero_score", "fixable": True,
+                       "message": f"有 {len(zero)} 道题分值为 0 或缺失，请重新分配分值"})
+    if target <= 0:
+        issues.append({"code": "no_target", "fixable": False,
+                       "message": "目标总分未设置，请在「编辑考试」里填写"})
+    elif abs(active_sum - target) > 0.5:
+        issues.append({"code": "total_mismatch", "fixable": True,
+                       "message": f"卷面合计 {active_sum} 分 ≠ 目标总分 {target} 分"
+                                  f"（{gap_text(round(active_sum - target, 1))}）"})
+    if target > 0 and pass_score > target:
+        issues.append({"code": "pass_above_total", "fixable": False,
+                       "message": f"及格分 {pass_score} 高于目标总分 {target}，没人能及格"})
+    return issues
+
+
+# 能自动修的就只有这三类：重复题、0 分题、卷面与目标不符（都是"重新分配分值"）
+REPAIRABLE = {"duplicate_question", "zero_score", "total_mismatch"}
+
+
+def repair(exam: dict[str, Any], *, dry_run: bool = True) -> dict[str, Any]:
+    """把一张卷子修到自洽：删重复题 → 按题型权重重新配平到目标总分。
+
+    默认 dry_run=True 只报告不写库 —— 改的是老师卷子上的分值，必须让他先看见要改什么。
+    删题、改及格线这类会动决策的问题不在这里做，只报出来。
+    """
+    exam_id = int(exam["id"])
+    rows = paper_rows(exam_id)
+    issues = diagnose(exam, rows)
+    fixable = [i for i in issues if i["code"] in REPAIRABLE]
+    target = float(exam.get("total_score") or 0)
+    before = round(sum(float(r["score"] or 0) for r in rows), 1)
+    result: dict[str, Any] = {
+        "exam_id": exam_id, "title": exam.get("title"), "dry_run": dry_run,
+        "before_total": before, "target": round(target, 1),
+        "fixed": [i["code"] for i in fixable], "remaining": [],
+        "removed_duplicates": 0, "after_total": before,
+    }
+    if not fixable:
+        result["remaining"] = [i["message"] for i in issues]
+        result["changed"] = False
+        return result
+    if target <= 0:
+        result["remaining"] = [i["message"] for i in issues]
+        result["changed"] = False
+        return result
+
+    keep_ids: list[int] = []
+    seen: set[int] = set()
+    for r in sorted(rows, key=lambda x: int(x["eq_id"])):
+        qid = int(r["question_id"])
+        if qid in seen:
+            continue
+        seen.add(qid)
+        keep_ids.append(int(r["eq_id"]))
+    dup_rows = len(rows) - len(keep_ids)
+    result["removed_duplicates"] = dup_rows
+
+    # 权重：有分值的按原值（保比例），0 分题按题型权重挤进同一量纲
+    by_eq = {int(r["eq_id"]): r for r in rows}
+    positives = [float(by_eq[i]["score"] or 0) for i in keep_ids if float(by_eq[i]["score"] or 0) > 0]
+    avg = (sum(positives) / len(positives)) if positives else 1.0
+    weights = []
+    for i in keep_ids:
+        s = float(by_eq[i]["score"] or 0)
+        weights.append(s if s > 0 else weight_of(by_eq[i].get("type")) * avg)
+    scores = distribute_scores(target, weights)
+    mapping = dict(zip(keep_ids, scores))
+    result["after_total"] = round(sum(mapping.values()), 1)
+    result["new_scores"] = {str(k): v for k, v in mapping.items()}
+
+    if not dry_run:
+        if dup_rows:
+            with get_connection() as conn:
+                conn.isolation_level = None
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute(
+                        f"DELETE FROM exam_questions WHERE exam_id = ? AND id NOT IN ({','.join('?' * len(keep_ids))})",
+                        (exam_id, *keep_ids))
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+        set_scores(exam_id, mapping)
+
+    left = [i["message"] for i in diagnose(
+        exam, [dict(by_eq[i], score=mapping[i]) for i in keep_ids]) if i["code"] not in REPAIRABLE]
+    result["remaining"] = left
+    result["changed"] = True
+    return result
 
 
 def submitted_count(exam_id: int) -> int:

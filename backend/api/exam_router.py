@@ -156,9 +156,8 @@ def _pool_notice(audit: dict[str, Any]) -> str:
 
 
 def _gap_text(gap: float) -> str:
-    """把"卷面合计 - 目标总分"翻成给老师看的话。"""
-    n = abs(round(float(gap), 1))
-    return f"卷面已超出目标总分 {n} 分" if gap > 0 else f"卷面还差 {n} 分到目标总分"
+    """委托给 exam_scoring.gap_text —— 发布拦截、存量扫描、选题回报必须说同一套话。"""
+    return exam_scoring.gap_text(gap)
 
 
 def _require_paper_editable(exam: dict[str, Any], action: str) -> dict[str, Any]:
@@ -182,44 +181,116 @@ def _require_paper_editable(exam: dict[str, Any], action: str) -> dict[str, Any]
 def _paper_preflight(exam: dict[str, Any]) -> list[str]:
     """发布前体检：卷面必须自洽，否则学生的满分不可达或能超过 100%。
 
-    判分用两个数：分母 exams.total_score、分子 exam_questions.score。历史上选题路径
-    会打破"两者相等"（实测考试 #8 目标 100 / 卷面 12），所以把校验钉在发布这一关。
+    判定复用 exam_scoring.diagnose —— 与"存量脏数据扫描/修复"是同一份规则，
+    不会出现"这里能发布、扫描里却报问题"的两套口径。
     """
-    exam_id = int(exam["id"])
-    problems: list[str] = []
-    rows = execute_query(
-        """SELECT eq.id, eq.score, q.type, q.status
-           FROM exam_questions eq
-           JOIN question_bank q ON q.id = eq.question_id
-           WHERE eq.exam_id = ?""",
-        (exam_id,),
-    ) or []
-    if not rows:
-        return ["试卷里一道题都没有"]
+    out: list[str] = []
+    for issue in exam_scoring.diagnose(exam):
+        msg = str(issue["message"])
+        if issue["code"] == "total_mismatch":
+            msg += "，可在「管理题目」点「自动均分」一键对齐，或在「编辑考试」里改目标总分"
+        out.append(msg)
+    return out
 
-    target = float(exam.get("total_score") or 0)
-    active_sum = round(sum(float(r["score"] or 0) for r in rows if r.get("status") == "active"), 1)
-    all_sum = round(sum(float(r["score"] or 0) for r in rows), 1)
-    dead = [r for r in rows if r.get("status") != "active"]
-    if dead:
-        problems.append(f"有 {len(dead)} 道题已从题库删除但仍挂在卷面上（合计 "
-                        f"{round(all_sum - active_sum, 1)} 分学生永远拿不到），请移除后重排分值")
-    bad_types = sorted({str(r.get("type") or "") for r in rows if not exam_scoring.is_gradable(r.get("type"))})
-    if bad_types:
-        problems.append("有题型暂不支持考试判分：" + "、".join(bad_types) + "，请换题")
-    zero = [r for r in rows if float(r.get("score") or 0) <= 0]
-    if zero:
-        problems.append(f"有 {len(zero)} 道题分值为 0，请点「自动均分」或手动补上分值")
-    if target <= 0:
-        problems.append("目标总分未设置，请在「编辑考试」里填写")
-    elif abs(active_sum - target) > 0.5:
-        problems.append(f"卷面合计 {active_sum} 分 ≠ 目标总分 {target} 分"
-                        f"（{_gap_text(round(active_sum - target, 1))}），"
-                        f"点「自动均分」一键对齐，或在「编辑考试」里改目标总分")
-    pass_score = float(exam.get("pass_score") or 0)
-    if target > 0 and pass_score > target:
-        problems.append(f"及格分 {pass_score} 高于目标总分 {target}，没人能及格")
-    return problems
+
+def _exam_manage_scope(user: dict[str, Any]) -> tuple[bool, str]:
+    """(是否管理员, 当前用户名)"""
+    return (user.get("role") == 0, str(user.get("username") or ""))
+
+
+@router.get("/paper-health", summary="扫描存量卷子的结构问题（只读）")
+async def scan_paper_health(request: Request):
+    """全站扫描每份卷子的"卷面合计 == 目标总分"等不变量，只报告不改数据。
+
+    为什么需要：发布前体检只能拦住新提交，历史上被旧选题逻辑改坏的卷子（实测
+    考试 #8 目标 100 / 卷面 12）还静静躺在库里，老师只有发布那一刻才会撞上。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+    is_admin, username = _exam_manage_scope(user)
+
+    rows = execute_query(
+        """SELECT e.id, e.title, e.status, e.creator_username, e.total_score, e.pass_score,
+                  COUNT(eq.id) AS n,
+                  ROUND(COALESCE(SUM(CASE WHEN q.status = 'active' THEN eq.score ELSE 0 END), 0), 1) AS paper_sum
+           FROM exams e
+           LEFT JOIN exam_questions eq ON eq.exam_id = e.id
+           LEFT JOIN question_bank q ON q.id = eq.question_id
+           GROUP BY e.id
+           ORDER BY e.id DESC""") or []
+
+    out = []
+    for r in rows:
+        if not is_admin and r["creator_username"] != username:
+            continue
+        issues = exam_scoring.diagnose(dict(r), exam_scoring.paper_rows(int(r["id"])))
+        if not issues:
+            continue
+        out.append({
+            "exam_id": int(r["id"]), "title": r["title"], "status": r["status"],
+            "question_count": int(r["n"] or 0), "target_total": float(r["total_score"] or 0),
+            "paper_total": float(r["paper_sum"] or 0),
+            "fixable": any(i["code"] in exam_scoring.REPAIRABLE for i in issues),
+            "problems": [{"code": i["code"], "message": i["message"], "fixable": i["fixable"]}
+                         for i in issues],
+        })
+    return {"total_scanned": len(rows), "flagged": len(out),
+            "fixable_count": sum(1 for o in out if o["fixable"]), "exams": out}
+
+
+class PaperRepairRequest(BaseModel):
+    """存量卷面修复请求"""
+    exam_ids: list[int] | None = None
+    dry_run: bool = True          # 默认只试算不写库：改的是老师卷子上的分值
+
+
+@router.post("/paper-health/repair", summary="修复存量卷面（默认 dry-run 试算）")
+async def repair_paper_health(request: Request, req: PaperRepairRequest):
+    """删重复题 + 按题型权重把卷面配平回目标总分。
+
+    dry_run 默认 True：先让老师看见"要改哪些卷子、改成什么分值"，确认了再真写。
+    有人在作答的考试一律跳过（与题目管理同一道闸）；删题、改及格线不自动做。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+    is_admin, username = _exam_manage_scope(user)
+
+    sql = "SELECT * FROM exams"
+    args: tuple = ()
+    if req.exam_ids:
+        ids = [int(x) for x in req.exam_ids][:200]
+        sql += " WHERE id IN (%s)" % ",".join("?" * len(ids))
+        args = tuple(ids)
+    exams = execute_query(sql + " ORDER BY id DESC", args) or []
+
+    results, skipped = [], []
+    for exam in exams:
+        if not is_admin and exam.get("creator_username") != username:
+            continue
+        issues = exam_scoring.diagnose(dict(exam))
+        if not any(i["code"] in exam_scoring.REPAIRABLE for i in issues):
+            continue
+        live = exam_scoring.live_attempts(dict(exam))
+        if live:
+            skipped.append({"exam_id": int(exam["id"]), "title": exam["title"],
+                            "reason": f"有 {len(live)} 份答卷正在作答中"})
+            continue
+        results.append(exam_scoring.repair(dict(exam), dry_run=req.dry_run))
+
+    return {
+        "dry_run": req.dry_run,
+        "repaired": len(results) if not req.dry_run else 0,
+        "planned": len(results),
+        "removed_duplicates": sum(r["removed_duplicates"] for r in results),
+        "results": results,
+        "skipped": skipped,
+        "message": ("试算完成：%d 份卷子可修复（未写库）" % len(results)) if req.dry_run
+                   else ("已修复 %d 份卷子" % len(results)),
+    }
 
 
 def _ordered_for_student(questions: list[dict[str, Any]], exam: dict[str, Any],

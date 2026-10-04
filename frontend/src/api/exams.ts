@@ -309,6 +309,40 @@ export interface PaperSupply {
   knowledge_point_total?: number;
 }
 
+/** 卷面体检：单个卷子的诊断结果 */
+export interface PaperHealthItem {
+  exam_id: number;
+  title: string;
+  status: string;
+  question_count: number;
+  target_total: number;
+  paper_total: number;
+  fixable: boolean;
+  problems: { code: string; message: string; fixable: boolean }[];
+}
+
+/** 扫描存量卷子的结构问题（只读，不改数据） */
+export async function scanPaperHealth(): Promise<{
+  total_scanned: number; flagged: number; fixable_count: number; exams: PaperHealthItem[];
+}> {
+  const { data } = await apiClient.get('/api/exams/paper-health');
+  return data;
+}
+
+/** 修复存量卷面。dry_run 默认 true：先让老师看清要改什么，再决定真写 */
+export async function repairPaperHealth(params: {
+  exam_ids?: number[]; dry_run?: boolean;
+}): Promise<{
+  dry_run: boolean; repaired: number; planned: number; removed_duplicates: number;
+  results: { exam_id: number; title: string; before_total: number; after_total: number;
+             target: number; removed_duplicates: number; fixed: string[]; remaining: string[] }[];
+  skipped: { exam_id: number; title: string; reason: string }[];
+  message: string;
+}> {
+  const { data } = await apiClient.post('/api/exams/paper-health/repair', params);
+  return data;
+}
+
 /** 获取默认组卷配置 */
 export async function getDefaultComposeConfig(
   examId: number

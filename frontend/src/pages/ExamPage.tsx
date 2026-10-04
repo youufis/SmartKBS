@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col,
-  Divider, Empty, Tabs, Spin, Statistic, Checkbox,
+  Divider, Empty, Tabs, Spin, Statistic, Checkbox, Alert,
 } from 'antd'
 import {
-  PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
+  PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined, SafetyCertificateOutlined,
   PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
@@ -561,6 +561,44 @@ const ExamPage: React.FC = () => {
 
   const handleClearPaper = () => removeQuestions(examQuestions.map((q: any) => q.id))
 
+  // ── 卷面体检 ──
+  const [healthModal, setHealthModal] = useState(false)
+  const [healthLoading, setHealthLoading] = useState(false)
+  const [repairing, setRepairing] = useState(false)
+  const [health, setHealth] = useState<any>(null)
+  const [repairReport, setRepairReport] = useState<any>(null)
+
+  const runHealthScan = useCallback(async () => {
+    setHealthLoading(true)
+    try {
+      setHealth(await examsApi.scanPaperHealth())
+      setRepairReport(null)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('paperHealthFailed'))
+    } finally {
+      setHealthLoading(false)
+    }
+  }, [t])
+
+  const openPaperHealth = () => { setHealthModal(true); void runHealthScan() }
+
+  const runRepair = async (dryRun: boolean) => {
+    setRepairing(true)
+    try {
+      const res = await examsApi.repairPaperHealth({ dry_run: dryRun })
+      setRepairReport(res)
+      if (!dryRun) {
+        message.success(res.message)
+        await runHealthScan()
+        loadExams()
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('paperHealthFailed'))
+    } finally {
+      setRepairing(false)
+    }
+  }
+
   const closeQModal = () => {
     closeWithDirtyGuard(scoreDirty, tc, () => setQuestionModal(false))
   }
@@ -996,6 +1034,12 @@ const ExamPage: React.FC = () => {
                   onClick={() => { setCreateModal(true); createForm.resetFields() }}>
                   {t('createExam')}
                 </Button>
+              )}
+              {isTeacherOrAdmin && (
+                <Tooltip title={t('paperHealthDesc')}>
+                  <Button icon={<SafetyCertificateOutlined />}
+                    onClick={openPaperHealth}>{t('paperHealth')}</Button>
+                </Tooltip>
               )}
               <Button icon={<ReloadOutlined />} onClick={loadExams} loading={loading}>
                 {t('refresh')}
@@ -1618,6 +1662,87 @@ const ExamPage: React.FC = () => {
               style: { opacity: existingQuestionIds.has(record.id) ? 0.5 : 1, cursor: existingQuestionIds.has(record.id) ? 'not-allowed' : 'pointer' },
             })}
           />
+        </Spin>
+      </Modal>
+
+      {/* ── 卷面体检弹窗 ── */}
+      <Modal title={<Space><SafetyCertificateOutlined />{t('paperHealth')}</Space>}
+        open={healthModal}
+        maskClosable={false}
+        onCancel={() => setHealthModal(false)}
+        width={860}
+        footer={[
+          <Button key="close" onClick={() => setHealthModal(false)}>{t('close')}</Button>,
+          <Button key="dry" icon={<ReloadOutlined />} loading={repairing || healthLoading}
+            onClick={() => runRepair(true)}>{t('phDryRun')}</Button>,
+          <Popconfirm key="apply" title={t('phApplyConfirm', { n: health?.fixable_count ?? 0 })}
+            disabled={!health?.fixable_count}
+            onConfirm={() => runRepair(false)} okText={t('confirm')} cancelText={t('cancel')}
+            okButtonProps={{ danger: true }}>
+            <Button type="primary" danger icon={<CheckCircleOutlined />}
+              loading={repairing} disabled={!health?.fixable_count}>
+              {t('phApply')}
+            </Button>
+          </Popconfirm>,
+        ]}>
+        <Spin spinning={healthLoading}>
+          {!health ? null : health.flagged === 0 ? (
+            <Alert type="success" showIcon message={t('phNone')} />
+          ) : (
+            <>
+              <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+                message={t('phFlagged', { flagged: health.flagged, total: health.total_scanned, fixable: health.fixable_count })}
+                description={t('phHint')} />
+              <Table dataSource={health.exams} rowKey="exam_id" size="small"
+                pagination={false}
+                columns={[
+                  { title: t('phExam'), dataIndex: 'title', ellipsis: true, width: 200,
+                    render: (v: string, r: any) => `#${r.exam_id} ${v}` },
+                  { title: t('status'), dataIndex: 'status', width: 80,
+                    render: (v: string) => <Tag>{v === 'draft' ? t('ecDraft') : v === 'published' ? t('ecPublished') : t('ecEnded')}</Tag> },
+                  { title: t('questionCount'), dataIndex: 'question_count', width: 70 },
+                  { title: t('targetScore'), dataIndex: 'target_total', width: 80 },
+                  { title: t('phPaperTotal'), dataIndex: 'paper_total', width: 90,
+                    render: (v: number, r: any) => (
+                      <Typography.Text type={Math.abs(v - r.target_total) > 0.5 ? 'danger' : undefined}>
+                        {v}
+                      </Typography.Text>
+                    ) },
+                  { title: t('phProblems'), dataIndex: 'problems',
+                    render: (ps: any[]) => (
+                      <Space orientation="vertical" size={2}>
+                        {ps.map((p) => (
+                          <Typography.Text key={p.code} type={p.fixable ? 'warning' : 'danger'}
+                            style={{ fontSize: 12 }}>
+                            {p.message}{p.fixable ? `（${t('phAutoFixable')}）` : `（${t('phManual')}）`}
+                          </Typography.Text>
+                        ))}
+                      </Space>
+                    ) },
+                ]}
+              />
+              {!!repairReport && (
+                <Alert style={{ marginTop: 12 }} type={repairReport.dry_run ? 'info' : 'success'}
+                  showIcon message={repairReport.message}
+                  description={
+                    <Space orientation="vertical" size={2}>
+                      {(repairReport.results || []).map((x: any) => (
+                        <Typography.Text key={x.exam_id} style={{ fontSize: 12 }}>
+                          #{x.exam_id} {x.title}: {x.before_total} → {x.after_total}
+                          {x.removed_duplicates > 0 ? ` （${t('phRemovedDupes', { n: x.removed_duplicates })}）` : ''}
+                        </Typography.Text>
+                      ))}
+                      {(repairReport.skipped || []).map((s: any) => (
+                        <Typography.Text key={s.exam_id} type="warning" style={{ fontSize: 12 }}>
+                          #{s.exam_id} {s.title}: {s.reason}
+                        </Typography.Text>
+                      ))}
+                    </Space>
+                  }
+                />
+              )}
+            </>
+          )}
         </Spin>
       </Modal>
 
