@@ -213,6 +213,8 @@ const ExamComposePage: React.FC = () => {
           subjects={subjects}
           grades={grades}
           existingCount={(exam.questions || []).length}
+          initialSchool={exam.school_name || ''}
+          initialSemester={exam.semester || ''}
           onClose={() => {
             setWizardVisible(false)
             loadExam() // 刷新

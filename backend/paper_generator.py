@@ -185,8 +185,12 @@ def _latex_to_unicode(latex_str: str) -> str:
     # 去除外层多余的 $（安全处理）
     text = text.strip('$')
 
-    # 处理 \underline{...} → 下划线文本
-    text = re.sub(r'\\underline\{([^}]*)\}', r'\1', text)
+    # 填空位 \underline{\quad} / \underline{\hspace{...}} 必须变成**看得见的下划线**：
+    # matplotlib mathtext 不认 \underline，会走这里的 Unicode 回退，旧写法把花括号内容
+    # 原样留下（\quad → 一个空格），结果" a = ____ "变成" a = "，学生没地方填。
+    text = re.sub(r"\\underline\s*\{(?:\\quad|\\hspace\s*\{[^}]*\}|\\;|\\:| )*\}",
+                  "______", text)
+    text = re.sub(r"\\underline\s*\{([^{}]*)\}", r"\1", text)
 
     # 处理 \quad, \qquad → 空格
     text = re.sub(r'\\quad|\\qquad', ' ', text)
@@ -451,7 +455,7 @@ def _prepare_svg(svg_content: str) -> str:
     return out
 
 
-def _svg_to_png(svg_content: str, width_cm: float = 6) -> io.BytesIO | None:
+def _svg_to_png(svg_content: str, width_cm: float = 6, question_id: Any = 0) -> io.BytesIO | None:
     """将 SVG 代码转换为 PNG 图片
 
     优先使用 cairosvg（质量好），备选 svglib，都不行则返回 None
@@ -473,7 +477,9 @@ def _svg_to_png(svg_content: str, width_cm: float = 6) -> io.BytesIO | None:
             buf.seek(0)
             return buf
     except Exception as e:
-        logger.warning(f"SVG 转 PNG 失败: {e}")
+        # 转换失败会**静默丢图**：卷面上那道题的配图直接消失。带上题号才查得出来，
+        # 否则老师拿到试卷才会发现"图呢？"
+        logger.warning(f"SVG 转 PNG 失败（该题配图将从试卷中缺失）question_id={question_id}: {e}")
     return None
 
 
@@ -895,7 +901,7 @@ def generate_exam_paper(
             if svg_content and (has_svg or str(has_svg) == "1"):
                 p_svg = _add_paragraph(doc, "", space_before=2, space_after=2)
                 p_svg.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                svg_png = _svg_to_png(svg_content, width_cm=10)
+                svg_png = _svg_to_png(svg_content, width_cm=10, question_id=q.get("id", 0))
                 if svg_png:
                     run = p_svg.add_run()
                     run.add_picture(svg_png, width=Cm(10))
@@ -988,8 +994,14 @@ def _add_page_number(doc):
 def generate_answer_sheet(
     exam_info: dict[str, Any],
     questions: list[dict[str, Any]],
+    school_name: str = "",
+    semester: str = "",
 ) -> io.BytesIO:
-    """生成答题卡（选择题填涂区域 + 简答题作答区）"""
+    """生成答题卡（选择题填涂区域 + 简答题作答区）
+
+    学校名与学期此前不收，导致答题卡页眉与试卷/答案卷对不上 ——
+    同一场考试三份文档抬头不一致，监考收发时容易混。
+    """
     doc = Document()
 
     section = doc.sections[0]
@@ -1006,7 +1018,9 @@ def generate_answer_sheet(
 
     title = _sanitize_text(exam_info.get("title", "试卷"))
 
-    _add_paragraph(doc, f"{title} — 答题卡", FONT_TITLE, SIZE_SUBTITLE,
+    _head = "  ".join(x for x in (_sanitize_text(school_name or ""), title,
+                                  _sanitize_text(semester or "")) if x)
+    _add_paragraph(doc, f"{_head} — 答题卡", FONT_TITLE, SIZE_SUBTITLE,
                    bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER, space_after=6)
 
     # 考生信息

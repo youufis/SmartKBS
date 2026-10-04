@@ -166,8 +166,17 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
     _actual_total = exam_scoring.paper_total(exam_id)
     if abs(_actual_total - target_total) > 0.05:
         logger.warning(f"智能组卷配平后卷面 {_actual_total} 仍不等于目标 {target_total}，请检查")
-    execute_update("UPDATE exams SET total_score = ?, updated_at = ? WHERE id = ?",
-                   (round(target_total, 1), now, exam_id))
+    # 抬头信息随组卷配置一起落库：老师填一次，之后从页面顶部"快捷导出"也能拿到
+    _sets = ["total_score = ?", "updated_at = ?"]
+    _args: list[Any] = [round(target_total, 1), now]
+    if (req.school_name or "").strip():
+        _sets.append("school_name = ?")
+        _args.append(req.school_name.strip())
+    if (req.semester or "").strip():
+        _sets.append("semester = ?")
+        _args.append(req.semester.strip())
+    _args.append(exam_id)
+    execute_update(f"UPDATE exams SET {', '.join(_sets)} WHERE id = ?", tuple(_args))
 
     # ── 统计 ──
     type_stats: dict[str, int] = {}
@@ -232,29 +241,23 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
     )
 
 
-@router.get("/{exam_id}/export-paper", summary="导出 Word 试卷")
-async def export_exam_paper(
-    exam_id: int,
-    request: Request,
-    school_name: str = Query("", description="学校名称"),
-    semester: str = Query("", description="学年学期"),
-):
-    """导出排版规范的 Word 试卷文档（学生用）"""
-    user = get_current_user(request)
-    username = user["username"]
+def _load_paper_for_export(exam_id: int, user: dict[str, Any],
+                           school_name: str = "", semester: str = ""):
+    """导出用的统一取数：权限校验 + 题目加载 + JSON 解析 + 抬头回落。
+    三个导出端点此前各自复制同一段 SQL 与同一段 options/media_files 解析，
+    而且三份并不一致（答题卡漏了 correct_answer/explanation）—— 改一处忘两处
+    是迟早的事。
+    school_name / semester 的回落顺序：请求参数 → 考试上存的值 → 空。
+    这样页面顶部的"快捷导出"（不传参数）也能拿到老师在组卷向导里填过的抬头。
+    """
     role = user.get("role", 2)
-
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
-
     exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
-
-    if not _can_manage_exam(username, exam):
+    if not _can_manage_exam(user.get("username", ""), exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
-
-    # 获取题目列表
     questions = execute_query(
         """SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
                   q.explanation, q.difficulty, q.knowledge_points,
@@ -265,44 +268,30 @@ async def export_exam_paper(
            WHERE eq.exam_id = ? AND q.status = 'active'
            ORDER BY eq.sort_order, eq.id""",
         (exam_id,),
-    )
-
+    ) or []
     if not questions:
         raise HTTPException(status_code=400, detail="考试中没有任何试题，请先添加试题")
-
-    # 解析 options / media_files JSON
     for q in questions:
-        if q.get("options") and isinstance(q["options"], str):
-            try:
-                q["options"] = json.loads(q["options"])
-            except (json.JSONDecodeError, TypeError):
-                q["options"] = None
-        if q.get("media_files") and isinstance(q["media_files"], str):
-            try:
-                q["media_files"] = json.loads(q["media_files"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    # 生成 Word 文档
-    from backend.paper_generator import generate_exam_paper
-
+        for field in ("options", "media_files"):
+            raw = q.get(field)
+            if raw and isinstance(raw, str):
+                try:
+                    q[field] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    q[field] = None if field == "options" else raw
     exam_info = dict(exam)
-    if school_name:
-        exam_info["school_name"] = school_name
-
-    try:
-        buf = generate_exam_paper(
-            exam_info=exam_info,
-            questions=questions,
-            school_name=school_name or "",
-            semester=semester or "",
-            show_answer_key=False,
-        )
-    except Exception as e:
-        logger.error(f"生成 Word 试卷失败: {e}")
-        raise HTTPException(status_code=500, detail=f"生成 Word 文档失败: {str(e)}")
-
-    filename = _safe_filename(f"{exam['title']}_试卷.docx")
+    # 绕过 FastAPI 直接调用端点函数时（测试、内部复用），参数会是需要求值的 Query 对象
+    # 而不是默认值 ""；只认 str，否则它的 repr 是真值，会把"回落到考试上存的抬头"整条兜底吃掉
+    def _pick(pushed: object, stored: object) -> str:
+        got = pushed.strip() if isinstance(pushed, str) else ""
+        return got or (str(stored) if stored else "")
+    school = _pick(school_name, exam.get("school_name"))
+    term = _pick(semester, exam.get("semester"))
+    exam_info["school_name"] = school
+    return exam, exam_info, questions, school, term
+def _docx_response(buf, exam, suffix: str):
+    """三份 Word 文档一样的下载响应头。"""
+    filename = _safe_filename(f"{exam['title']}_{suffix}.docx")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -311,137 +300,75 @@ async def export_exam_paper(
             "Access-Control-Expose-Headers": "Content-Disposition",
         },
     )
+
+
+@router.get("/{exam_id}/export-paper", summary="导出 Word 试卷")
+async def export_exam_paper(
+    exam_id: int,
+    request: Request,
+    school_name: str = Query("", description="学校名称（留空则用考试上存的值）"),
+    semester: str = Query("", description="学年学期（留空则用考试上存的值）"),
+):
+    """导出排版规范的 Word 试卷文档（学生用）"""
+    exam, exam_info, questions, school, term = _load_paper_for_export(
+        exam_id, get_current_user(request), school_name, semester)
+
+    from backend.paper_generator import generate_exam_paper
+
+    try:
+        buf = generate_exam_paper(exam_info=exam_info, questions=questions,
+                                  school_name=school, semester=term, show_answer_key=False)
+    except Exception as e:
+        logger.error(f"生成 Word 试卷失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生成 Word 文档失败: {str(e)}")
+    return _docx_response(buf, exam, "试卷")
 
 
 @router.get("/{exam_id}/export-answer-key", summary="导出 Word 答案卷")
 async def export_exam_answer_key(
     exam_id: int,
     request: Request,
-    school_name: str = Query("", description="学校名称"),
-    semester: str = Query("", description="学年学期"),
+    school_name: str = Query("", description="学校名称（留空则用考试上存的值）"),
+    semester: str = Query("", description="学年学期（留空则用考试上存的值）"),
 ):
-    """导出排版规范的 Word 答案卷（教师用，含答案和解析）"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
+    """导出 Word 答案卷（教师用，含答案和解析）"""
+    exam, exam_info, questions, school, term = _load_paper_for_export(
+        exam_id, get_current_user(request), school_name, semester)
 
-    if role not in (0, 1):
-        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    from backend.paper_generator import generate_answer_key
 
-    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
-
-    if not _can_manage_exam(username, exam):
-        raise HTTPException(status_code=403, detail="无权操作此考试")
-
-    questions = execute_query(
-        """SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
-                  q.explanation, q.difficulty, q.knowledge_points,
-                  q.svg_content, q.has_svg, q.media_files,
-                  eq.score as question_score
-           FROM exam_questions eq
-           JOIN question_bank q ON q.id = eq.question_id
-           WHERE eq.exam_id = ? AND q.status = 'active'
-           ORDER BY eq.sort_order, eq.id""",
-        (exam_id,),
-    )
-
-    if not questions:
-        raise HTTPException(status_code=400, detail="考试中没有任何试题")
-
-    for q in questions:
-        if q.get("options") and isinstance(q["options"], str):
-            try:
-                q["options"] = json.loads(q["options"])
-            except (json.JSONDecodeError, TypeError):
-                q["options"] = None
-        if q.get("media_files") and isinstance(q["media_files"], str):
-            try:
-                q["media_files"] = json.loads(q["media_files"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    from backend.paper_generator import generate_exam_paper
-
-    exam_info = dict(exam)
     try:
-        buf = generate_exam_paper(
-            exam_info=exam_info,
-            questions=questions,
-            school_name=school_name or "",
-            semester=semester or "",
-            show_answer_key=True,
-        )
+        buf = generate_answer_key(exam_info=exam_info, questions=questions,
+                                  school_name=school, semester=term)
     except Exception as e:
         logger.error(f"生成 Word 答案卷失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成 Word 文档失败: {str(e)}")
-
-    filename = _safe_filename(f"{exam['title']}_答案卷.docx")
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
-            "Access-Control-Expose-Headers": "Content-Disposition",
-        },
-    )
+    return _docx_response(buf, exam, "答案卷")
 
 
 @router.get("/{exam_id}/export-answer-sheet", summary="导出 Word 答题卡")
 async def export_exam_answer_sheet(
     exam_id: int,
     request: Request,
+    school_name: str = Query("", description="学校名称（留空则用考试上存的值）"),
+    semester: str = Query("", description="学年学期（留空则用考试上存的值）"),
 ):
-    """导出答题卡（选择题填涂区域 + 简答题作答区）"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
+    """导出答题卡（选择题填涂区域 + 简答题作答区）
 
-    if role not in (0, 1):
-        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
-
-    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
-
-    if not _can_manage_exam(username, exam):
-        raise HTTPException(status_code=403, detail="无权操作此考试")
-
-    questions = execute_query(
-        """SELECT q.id, q.type, q.question_text, q.options,
-                  q.svg_content, q.has_svg, q.media_files,
-                  eq.score as question_score
-           FROM exam_questions eq
-           JOIN question_bank q ON q.id = eq.question_id
-           WHERE eq.exam_id = ? AND q.status = 'active'
-           ORDER BY eq.sort_order, eq.id""",
-        (exam_id,),
-    )
-
-    if not questions:
-        raise HTTPException(status_code=400, detail="考试中没有任何试题")
+    此前不收学校名与学期，答题卡页眉和试卷/答案卷对不上。
+    """
+    exam, exam_info, questions, school, term = _load_paper_for_export(
+        exam_id, get_current_user(request), school_name, semester)
 
     from backend.paper_generator import generate_answer_sheet
 
     try:
-        buf = generate_answer_sheet(
-            exam_info=dict(exam),
-            questions=questions,
-        )
+        buf = generate_answer_sheet(exam_info=exam_info, questions=questions,
+                                    school_name=school, semester=term)
     except Exception as e:
         logger.error(f"生成答题卡失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成答题卡失败: {str(e)}")
-
-    filename = _safe_filename(f"{exam['title']}_答题卡.docx")
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
-            "Access-Control-Expose-Headers": "Content-Disposition",
-        },
-    )
+    return _docx_response(buf, exam, "答题卡")
 
 
 @router.get("/knowledge-points/list", summary="获取所有知识点标签")

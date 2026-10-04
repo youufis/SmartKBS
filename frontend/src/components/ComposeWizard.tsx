@@ -21,6 +21,9 @@ interface ComposeWizardProps {
   grades: string[]
   /** 当前卷子上已有几道题：选"替换"时要拿它做二次确认，防止一键删空 */
   existingCount?: number
+  /** 上次组卷填过的抬头，默认回填（此前每次导出都要重填一遍） */
+  initialSchool?: string
+  initialSemester?: string
   onClose: () => void
 }
 
@@ -30,6 +33,8 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   subjects,
   grades,
   existingCount = 0,
+  initialSchool = "",
+  initialSemester = "",
   onClose,
 }) => {
   const { t } = useTranslation('exam')
@@ -54,8 +59,8 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
 
   // 表单初始值
   const formInitialValues = {
-    school_name: '',
-    semester: '',
+    school_name: initialSchool,
+    semester: initialSemester,
     subject: subjects[0] || '',
     target_grade: [],
     duration: 45,

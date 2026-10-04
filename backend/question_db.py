@@ -77,8 +77,23 @@ def init_question_db():
                 creator_username TEXT NOT NULL,
                 creator_name TEXT DEFAULT '',
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                school_name TEXT DEFAULT '',
+                semester TEXT DEFAULT ''
             )""")
+
+            # ── 字段迁移：exams 新增试卷抬头信息（兼容旧表）──
+            # 学校名与学期此前只存在于导出请求的 query 参数里，从不落库：老师每次导出
+            # 都要重填，而页面顶部的"快捷导出"干脆不传 —— 同一份卷子从两个入口导出
+            # 会得到不同的页眉。
+            for col_def in [
+                ("school_name", "TEXT DEFAULT ''"),
+                ("semester", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE exams ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
 
             # ── 考试-试题关联表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS exam_questions (
