@@ -122,6 +122,21 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 同一份卷子不允许同一道题出现两次 ──
+            # 业务层已在事务里二次查重，这条唯一索引是并发下的最后一道闸：
+            # 两个请求同时点「自动选题」时，只靠"先 SELECT 再 INSERT"是会双双通过的。
+            # 老库若已有历史重复行，建唯一索引会失败 —— 降级为普通索引并记日志，
+            # 绝不在迁移里静默删教师卷子上的题（那是破坏性动作，需要人工确认）。
+            try:
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_eq_exam_question ON exam_questions(exam_id, question_id)")
+            except sqlite3.OperationalError:
+                logger.warning("exam_questions(exam_id,question_id) 存在历史重复题，唯一索引未建成；"
+                               "请在「管理题目」里移除重复题后重启")
+                try:
+                    c.execute("CREATE INDEX IF NOT EXISTS idx_eq_exam_question_qid ON exam_questions(exam_id, question_id)")
+                except sqlite3.OperationalError:
+                    pass
+
             # ── 字段迁移：exam_attempts 新增字段 ──
             for col_def in [
                 ("graded_by", "TEXT DEFAULT ''"),

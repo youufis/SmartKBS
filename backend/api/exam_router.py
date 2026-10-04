@@ -5,12 +5,13 @@
 import asyncio
 import json
 import traceback
+import math
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.grading_state import pending_grading_by_exam
 from backend.question_db import (
@@ -31,6 +32,8 @@ from backend.permission_service import check_activity_visibility
 # S-GRADING(P2): 主观题后台批量批改引擎(与同步练习/随堂测验共用)
 from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
 from backend.question_db import get_connection
+# 2026-10 走查: 分值分配 / 卷面守卫 / 原子写入统一收敛到 backend/exam_scoring.py
+from backend import exam_scoring
 
 router = APIRouter()
 
@@ -95,15 +98,9 @@ class AutoSelectRequest(BaseModel):
     question_types: list[str] | None = None
     difficulty: str | None = None
     knowledge_keyword: str | None = None
-    count: int = 10
+    # 旧写法是 `class Config: validate_schema`（Pydantic v1 风格），v2 下永不执行 —— 假校验
+    count: int = Field(default=10, ge=1, le=200)
     exclude_existing: bool = True
-
-    class Config:
-        @staticmethod
-        def validate_schema(v):
-            if v.get("count", 10) < 1 or v.get("count", 10) > 200:
-                raise ValueError("选题数量范围为 1-200")
-            return v
 
 
 # ── 辅助函数 ──
@@ -115,6 +112,73 @@ def _can_manage_exam(username: str, exam: dict[str, Any] | None = None) -> bool:
     if exam and exam.get("creator_username") == username:
         return True
     return False
+
+
+def _gap_text(gap: float) -> str:
+    """把"卷面合计 - 目标总分"翻成给老师看的话。"""
+    n = abs(round(float(gap), 1))
+    return f"卷面已超出目标总分 {n} 分" if gap > 0 else f"卷面还差 {n} 分到目标总分"
+
+
+def _require_paper_editable(exam: dict[str, Any], action: str) -> dict[str, Any]:
+    """改题/改分前的"有没有人正在作答"守卫，返回影响面供前端二次确认。
+
+    有人在线 → 409 直接拒绝。此时删题会让该题分值从可得分里凭空消失（判分只遍历
+    status='active' 的题），学生满分永久不可达；改分则让已判成绩与现行卷面脱节。
+    没人在线但已有提交 → 放行并返回 submitted_attempts，界面提示"历史成绩不会重算"。
+    """
+    live = exam_scoring.live_attempts(exam)
+    if live:
+        who = "、".join(str(r.get("student_username") or "") for r in live[:3])
+        raise HTTPException(
+            status_code=409,
+            detail=f"该考试有 {len(live)} 份答卷正在作答中（{who}），{action}会影响他们的判分；"
+                   f"请等学生交卷或先结束考试后再改",
+        )
+    return {"submitted_attempts": exam_scoring.submitted_count(int(exam["id"]))}
+
+
+def _paper_preflight(exam: dict[str, Any]) -> list[str]:
+    """发布前体检：卷面必须自洽，否则学生的满分不可达或能超过 100%。
+
+    判分用两个数：分母 exams.total_score、分子 exam_questions.score。历史上选题路径
+    会打破"两者相等"（实测考试 #8 目标 100 / 卷面 12），所以把校验钉在发布这一关。
+    """
+    exam_id = int(exam["id"])
+    problems: list[str] = []
+    rows = execute_query(
+        """SELECT eq.id, eq.score, q.type, q.status
+           FROM exam_questions eq
+           JOIN question_bank q ON q.id = eq.question_id
+           WHERE eq.exam_id = ?""",
+        (exam_id,),
+    ) or []
+    if not rows:
+        return ["试卷里一道题都没有"]
+
+    target = float(exam.get("total_score") or 0)
+    active_sum = round(sum(float(r["score"] or 0) for r in rows if r.get("status") == "active"), 1)
+    all_sum = round(sum(float(r["score"] or 0) for r in rows), 1)
+    dead = [r for r in rows if r.get("status") != "active"]
+    if dead:
+        problems.append(f"有 {len(dead)} 道题已从题库删除但仍挂在卷面上（合计 "
+                        f"{round(all_sum - active_sum, 1)} 分学生永远拿不到），请移除后重排分值")
+    bad_types = sorted({str(r.get("type") or "") for r in rows if not exam_scoring.is_gradable(r.get("type"))})
+    if bad_types:
+        problems.append("有题型暂不支持考试判分：" + "、".join(bad_types) + "，请换题")
+    zero = [r for r in rows if float(r.get("score") or 0) <= 0]
+    if zero:
+        problems.append(f"有 {len(zero)} 道题分值为 0，请点「自动均分」或手动补上分值")
+    if target <= 0:
+        problems.append("目标总分未设置，请在「编辑考试」里填写")
+    elif abs(active_sum - target) > 0.5:
+        problems.append(f"卷面合计 {active_sum} 分 ≠ 目标总分 {target} 分"
+                        f"（{_gap_text(round(active_sum - target, 1))}），"
+                        f"点「自动均分」一键对齐，或在「编辑考试」里改目标总分")
+    pass_score = float(exam.get("pass_score") or 0)
+    if target > 0 and pass_score > target:
+        problems.append(f"及格分 {pass_score} 高于目标总分 {target}，没人能及格")
+    return problems
 
 
 def _get_teacher_name(username: str) -> str:
@@ -533,13 +597,13 @@ async def publish_exam(exam_id: int, request: Request):
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权发布此考试")
 
-    # 检查是否有题目
-    q_count = execute_query_one(
-        "SELECT COUNT(*) as cnt FROM exam_questions WHERE exam_id = ?",
-        (exam_id,),
-    )
-    if not q_count or q_count["cnt"] == 0:
-        raise HTTPException(status_code=400, detail="考试中没有任何试题，请先添加试题")
+    # ── 发布前体检：卷面自洽才允许发布 ──
+    _issues = _paper_preflight(exam)
+    if _issues:
+        raise HTTPException(
+            status_code=400,
+            detail="发布前请先处理：" + "；".join(_issues),
+        )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update(
@@ -634,59 +698,96 @@ async def add_questions_to_exam(exam_id: int, req: ExamQuestionAdd, request: Req
 
     if not req.question_ids:
         raise HTTPException(status_code=400, detail="请选择要添加的试题")
+    if len(req.question_ids) > 500:
+        raise HTTPException(status_code=400, detail="单次最多添加 500 道试题")
 
-    # 获取当前最大排序序号
-    max_order = execute_query_one(
-        "SELECT COALESCE(MAX(sort_order), -1) as max_order FROM exam_questions WHERE exam_id = ?",
-        (exam_id,),
-    )
-    next_order = (max_order["max_order"] + 1) if max_order else 0
+    impact = _require_paper_editable(exam, "添加试题")
 
-    added = 0
-    skipped_existing = 0  # 因重复跳过
-    skipped_invalid = 0   # 因题目不存在跳过
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for i, qid in enumerate(req.question_ids):
-        # 检查题目是否存在且未删除
-        q = execute_query_one(
-            "SELECT id FROM question_bank WHERE id = ? AND status = 'active'",
-            (qid,),
-        )
-        if not q:
-            skipped_invalid += 1
+    # 一次性把题型查回来（旧写法在循环里逐题 SELECT + 逐条 INSERT，30 题 = 90 次往返）
+    ids = [int(x) for x in req.question_ids]
+    by_id: dict[int, str] = {}
+    for i in range(0, len(ids), 400):
+        part = ids[i:i + 400]
+        marks = ",".join("?" * len(part))
+        for r in execute_query(
+            f"SELECT id, type FROM question_bank WHERE status = 'active' AND id IN ({marks})",
+            tuple(part),
+        ) or []:
+            by_id[int(r["id"])] = str(r.get("type") or "")
+
+    already = {int(r["question_id"]) for r in execute_query(
+        "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []}
+
+    to_add: list[int] = []
+    skipped_existing = skipped_invalid = skipped_ungradable = 0
+    seen: set[int] = set()
+    for qid in ids:
+        if qid in seen:
+            skipped_existing += 1              # 本次提交里自带重复
             continue
-
-        # 检查是否已添加
-        existing = execute_query_one(
-            "SELECT id FROM exam_questions WHERE exam_id = ? AND question_id = ?",
-            (exam_id, qid),
-        )
-        if existing:
+        seen.add(qid)
+        q_type = by_id.get(qid)
+        if q_type is None:
+            skipped_invalid += 1               # 不存在或已删除
+            continue
+        if not exam_scoring.is_gradable(q_type):
+            skipped_ungradable += 1            # 没有判分分支的题型：入卷只会白占总分
+            continue
+        if qid in already:
             skipped_existing += 1
             continue
+        to_add.append(qid)
 
-        score = (req.scores[i] if req.scores and i < len(req.scores)
-                 else round(exam["total_score"] / max(len(req.question_ids), 1), 1))
-        score = round(max(score, 1), 1)
+    if not to_add:
+        if skipped_ungradable and len(to_add) == 0 and skipped_invalid + skipped_existing == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="这些题型暂不支持考试判分（" + "、".join(sorted(
+                    {t for t in by_id.values() if not exam_scoring.is_gradable(t)})) +
+                       "），请改用单选/多选/判断/简答/填空",
+            )
+        raise HTTPException(status_code=400, detail="所选试题都已在试卷中或已失效，没有可添加的题目")
 
-        execute_insert(
-            """INSERT INTO exam_questions (exam_id, question_id, sort_order, score)
-               VALUES (?, ?, ?, ?)""",
-            (exam_id, qid, next_order + i, score),
-        )
-        added += 1
+    # 分值：显式传的优先；没传的按"目标总分余额 + 题型权重"分配，不动已选题
+    explicit: dict[int, float] = {}
+    if req.scores:
+        for qid, s in zip(ids, req.scores):
+            if s is None:
+                continue
+            try:
+                explicit[int(qid)] = round(float(s), 1)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"题目 {qid} 的分值不是有效数字")
+    # 显式传了分值就照老师说的来（不配平，只如实报缺口）；没传就先插 0 分占位，
+    # 再由 rebalance_paper 按"原有比例 + 新题题型权重"把整份卷子配平回目标总分。
+    explicit_only = all(q in explicit for q in to_add)
+    if not explicit_only and float(exam["total_score"] or 0) <= 0:
+        raise HTTPException(status_code=400, detail="请先在「编辑考试」里把目标总分设为大于 0 的数")
 
-    # 更新考试时间
-    execute_update(
-        "UPDATE exams SET updated_at = ? WHERE id = ?",
-        (now, exam_id),
-    )
+    inserted = exam_scoring.insert_paper_questions(
+        exam_id, [(q, explicit.get(q, 0.0)) for q in to_add])
+    added = len(inserted)
 
+    rebalanced = False
+    if explicit_only:
+        gap = exam_scoring.paper_gap(exam_id, exam["total_score"])
+    else:
+        gap = exam_scoring.rebalance_paper(exam_id, exam["total_score"])
+        rebalanced = True
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
     parts = [f"成功添加 {added} 道试题"]
     if skipped_existing:
         parts.append(f"{skipped_existing} 道重复已跳过")
     if skipped_invalid:
-        parts.append(f"{skipped_invalid} 道不存在")
+        parts.append(f"{skipped_invalid} 道不存在或已删除")
+    if skipped_ungradable:
+        parts.append(f"{skipped_ungradable} 道题型不支持考试判分")
+    if rebalanced:
+        parts.append(f"已按目标总分 {round(float(exam['total_score'] or 0), 1)} 分重新配平全卷分值")
+    if abs(gap) > 0.05:
+        parts.append(_gap_text(gap))
     message = "，".join(parts)
 
     return {
@@ -694,6 +795,11 @@ async def add_questions_to_exam(exam_id: int, req: ExamQuestionAdd, request: Req
         "added": added,
         "skipped_existing": skipped_existing,
         "skipped_invalid": skipped_invalid,
+        "skipped_ungradable": skipped_ungradable,
+        "rebalanced": rebalanced,
+        "score_gap": gap,
+        "target_total": exam["total_score"],
+        **impact,
     }
 
 
@@ -714,21 +820,39 @@ async def remove_questions_from_exam(
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
-    ids = [int(x.strip()) for x in question_ids.split(",") if x.strip()]
+    try:
+        ids = [int(x.strip()) for x in question_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="题目 ID 格式不正确")
     if not ids:
         raise HTTPException(status_code=400, detail="请指定要移除的试题")
 
+    impact = _require_paper_editable(exam, "移除试题")
+
     placeholders = ",".join("?" * len(ids))
     params = [exam_id] + ids
-    execute_update(
+    deleted = execute_update(
         f"DELETE FROM exam_questions WHERE exam_id = ? AND question_id IN ({placeholders})",
         tuple(params),
     )
 
+    # 删题会在卷子上留一个洞（那部分分值凭空消失），按原比例配平回去
+    rebalanced = False
+    gap = exam_scoring.paper_gap(exam_id, exam["total_score"])
+    if deleted and gap < -0.05 and float(exam["total_score"] or 0) > 0:
+        gap = exam_scoring.rebalance_paper(exam_id, exam["total_score"])
+        rebalanced = abs(gap) <= 0.05
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
-    return {"message": f"已移除 {len(ids)} 道试题"}
+    message = f"已移除 {deleted} 道试题"
+    if rebalanced:
+        message += "，剩余题目已配平回目标总分"
+    elif abs(gap) > 0.05:
+        message += "，" + _gap_text(gap)
+    return {"message": message, "removed": deleted, "score_gap": gap,
+            "rebalanced": rebalanced, "target_total": exam["total_score"], **impact}
 
 
 class BatchScoresUpdate(BaseModel):
@@ -752,42 +876,65 @@ async def batch_update_scores(exam_id: int, req: BatchScoresUpdate, request: Req
     if not req.scores:
         raise HTTPException(status_code=400, detail="请提供分值数据")
 
+    impact = _require_paper_editable(exam, "改分")
+
+    # 分值合法性：必须是大题 0 的有限数字。旧写法 max(score, 0) 把"清空输入框"
+    # 静默变成 0 分题，0 分题白占总分（学生满分不可达）；NaN 会写成一读就炸的空分值。
+    cleaned: dict[int, float] = {}
+    bad: list[str] = []
+    for eq_id, score in req.scores.items():
+        try:
+            val = round(float(score), 1)
+        except (TypeError, ValueError):
+            bad.append(str(eq_id))
+            continue
+        if not math.isfinite(val) or val <= 0:
+            bad.append(str(eq_id))
+            continue
+        cleaned[int(eq_id)] = val
+    if bad:
+        raise HTTPException(status_code=400,
+                            detail="以下题目的分值无效（必须是大于 0 的数字）：" + "、".join(bad[:10]))
+
     # 获取当前所有题目
     existing = execute_query(
         "SELECT id, question_id, score FROM exam_questions WHERE exam_id = ?",
         (exam_id,),
     )
-    existing_ids = {str(row["id"]) for row in existing}
+    existing_ids = {int(row["id"]) for row in existing}
 
-    # 校验提交的 ID 是否合法
-    for eq_id in req.scores:
-        if eq_id not in existing_ids:
-            raise HTTPException(status_code=400, detail=f"题目 ID {eq_id} 不属于本考试")
-
-    # 更新分值
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for eq_id_str, score in req.scores.items():
-        score = round(max(float(score), 0), 1)
-        execute_update(
-            "UPDATE exam_questions SET score = ? WHERE id = ? AND exam_id = ?",
-            (score, int(eq_id_str), exam_id),
+    # 校验提交的 ID 是否合法（弹窗开着时别人改过卷子就会走到这里，给可操作的提示）
+    unknown = [str(k) for k in cleaned if int(k) not in existing_ids]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail="试卷已经变了（题目 " + "、".join(unknown[:10]) +
+                   " 不在本考试中），请关闭弹窗重新打开后再保存",
         )
 
-    # 可选：校验总分（仅警告，不强制阻断，因为可能有故意留白）
-    total = round(sum(float(v) for v in req.scores.values()), 1)
-    expected = exam["total_score"]
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    applied = exam_scoring.set_scores(exam_id, cleaned)
     execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
-    msg = f"已更新 {len(req.scores)} 道试题分值"
-    if abs(total - expected) > 0.1:
-        msg += f"，但当前总分 {total} ≠ 目标总分 {expected}"
+    # 总分以"库里实算的整份卷子"为准：旧写法只加本次提交的题，部分保存时报的是假总分
+    actual = round(float(execute_query_one(
+        "SELECT COALESCE(SUM(score), 0) AS s FROM exam_questions WHERE exam_id = ?",
+        (exam_id,))["s"]), 1)
+    expected = float(exam["total_score"] or 0)
+    balanced = abs(actual - expected) <= 0.1
+    msg = f"已更新 {applied} 道试题分值"
+    if not balanced:
+        msg += "，" + _gap_text(round(actual - expected, 1))
 
-    logger.info(f"用户 {username} 批量更新考试{exam_id}分值: {req.scores}")
+    logger.info(f"用户 {username} 批量更新考试{exam_id}分值: {cleaned}")
     return {
         "message": msg,
-        "current_total": total,
+        "current_total": actual,
         "expected_total": expected,
-        "balanced": abs(total - expected) <= 0.1,
+        "balanced": balanced,
+        "score_gap": round(actual - expected, 1),
+        "updated": applied,
+        **impact,
     }
 
 
@@ -804,32 +951,36 @@ async def auto_balance_scores(exam_id: int, request: Request):
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
+    impact = _require_paper_editable(exam, "重新分配分值")
+
+    total_score = float(exam["total_score"] or 0)
+    if total_score <= 0:
+        raise HTTPException(status_code=400, detail="请先在「编辑考试」里把目标总分设为大于 0 的数")
+
     questions = execute_query(
         "SELECT id FROM exam_questions WHERE exam_id = ? ORDER BY sort_order, id",
         (exam_id,),
     )
-    if not questions:
+    count = len(questions)
+    if not count:
         raise HTTPException(status_code=400, detail="考试中没有任何试题")
 
-    total_score = exam["total_score"]
-    count = len(questions)
-    base = round(total_score / count, 1)
-    remainder = round(total_score - base * count, 1)
+    # 「自动均分」按名字保持每题等值，但余数用最大余数法摊开。
+    # 旧写法 base + (remainder if i == 0 else 0) 把余数全压在第 1 题上，
+    # 实测 108 分 25 题出现 4.8 / 4.3 / 4.3 …
+    scores = exam_scoring.distribute_scores(total_score, [1.0] * count)
+    exam_scoring.set_scores(exam_id, {int(q["id"]): s for q, s in zip(questions, scores)})
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for i, q in enumerate(questions):
-        score = base + (remainder if i == 0 else 0)
-        execute_update(
-            "UPDATE exam_questions SET score = ? WHERE id = ?",
-            (score, q["id"]),
-        )
-
     execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
+    gap = exam_scoring.paper_gap(exam_id, total_score)
     return {
-        "message": f"已均衡分配 {count} 道试题，每题 {base} 分",
+        "message": f"已按目标总分 {round(total_score, 1)} 分重新分配 {count} 道试题",
         "count": count,
-        "score_per_question": base,
+        "score_per_question": scores[0],
+        "score_gap": gap,
+        **impact,
     }
 
 
@@ -846,102 +997,109 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
+    impact = _require_paper_editable(exam, "自动选题")
+
     # 统一分层召回（替代原先"单个关键词 LIKE 命中即等概率 + random.sample"的写法）：
     # 学科族内按 标签相等 > 标签子串 > 题干实词 > 同章节兄弟知识点 排序取题；
-    # 考试入口不会自动生成题目，因此允许"同学科族兜底"填满题量，但兜底数量会进审计日志，
-    # 老师能看到"这套卷里有几题不是本知识点的"。指定了学科则绝不跨学科给题。
+    # 考试入口不会自动生成题目，因此允许"同学科族兜底"填满题量。指定了学科则绝不跨学科给题。
+    # 兜底/放宽情况必须回给老师看（旧写法只写进服务端 INFO 日志，界面上一字未提，
+    # 与函数头注释的承诺不符）。
     from backend.question_select import log_audit, select_questions
 
     existing_ids: list[int] = []
     if req.exclude_existing:
         existing_ids = [r["question_id"] for r in execute_query(
             "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []]
-    q_types = tuple(req.question_types) if req.question_types else (
-        "single", "multiple", "true_false", "short", "fill")
+    asked_types = tuple(req.question_types) if req.question_types else exam_scoring.GRADABLE_TYPES
+    skipped_types = exam_scoring.ungradable_types(asked_types)     # 例如 code：进卷也没法判分
+    q_types = tuple(t for t in asked_types if exam_scoring.is_gradable(t)) or exam_scoring.GRADABLE_TYPES
     want = max(1, min(req.count, 200))
-    selected, _audit = select_questions(
+    selected, audit = select_questions(
         kp_name=req.knowledge_keyword or "", subject=req.subject or "",
         types=q_types, count=want, exclude_ids=existing_ids,
         difficulty=req.difficulty or "", allow_family_fallback=True,
         seed="exam:%s" % exam_id,
     )
-    log_audit("exam_auto_select(exam=%s)" % exam_id, _audit)
+    log_audit("exam_auto_select(exam=%s)" % exam_id, audit)
     if not selected:
         raise HTTPException(status_code=404,
                             detail="未找到符合条件的题目（学科/题型/知识点在题库里没有可用题）")
-    # 获取当前最大排序序号
-    max_order_row = execute_query_one(
-        "SELECT COALESCE(MAX(sort_order), -1) as max_order FROM exam_questions WHERE exam_id = ?",
-        (exam_id,),
-    )
-    next_order = (max_order_row["max_order"] + 1) if max_order_row else 0
 
-    # 等分总分
-    score_per_question = round(exam["total_score"] / len(selected), 1)
-    score_per_question = max(score_per_question, 1)
-    actual_total = round(score_per_question * len(selected), 1)
+    already = set(existing_ids)
+    picked = [q for q in selected if int(q["id"]) not in already]
+    if not picked:
+        raise HTTPException(status_code=400, detail="符合条件的题目都已在试卷中，请调整筛选条件或加大题量")
 
-    added = 0
-    added_questions = []
+    # 分值：新题先插 0 分占位，再按"原有比例 + 题型权重"配平回目标总分，
+    # **不改 exams.total_score**。旧写法用 total/新增题数 算分，还把 total_score
+    # 覆盖成"新增批次之和"—— 连点两次卷子就变成 200 分对 100 分目标，
+    # 及格线 60 的含义也被一起改掉（实测考试 #17 目标分被推到 108）。
+    if float(exam["total_score"] or 0) <= 0:
+        raise HTTPException(status_code=400, detail="请先在「编辑考试」里把目标总分设为大于 0 的数")
+    inserted = exam_scoring.insert_paper_questions(
+        exam_id, [(int(q["id"]), 0.0) for q in picked])
+
+    added_map = {int(q["id"]): q for q in picked}
+    added_questions = [{
+        "id": qid,
+        "type": added_map[qid]["type"],
+        "question_text": added_map[qid]["question_text"],
+        "difficulty": added_map[qid]["difficulty"],
+        "knowledge_points": added_map[qid]["knowledge_points"],
+    } for qid in inserted]
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
-    for i, q in enumerate(selected):
-        qid = q["id"]
-        existing = execute_query_one(
-            "SELECT id FROM exam_questions WHERE exam_id = ? AND question_id = ?",
-            (exam_id, qid),
-        )
-        if existing:
-            continue
-
-        execute_insert(
-            """INSERT INTO exam_questions (exam_id, question_id, sort_order, score)
-               VALUES (?, ?, ?, ?)""",
-            (exam_id, qid, next_order + i, score_per_question),
-        )
-        added += 1
-        added_questions.append({
-            "id": qid,
-            "type": q["type"],
-            "question_text": q["question_text"],
-            "difficulty": q["difficulty"],
-            "knowledge_points": q["knowledge_points"],
-        })
-
-    # 同步总分（确保与实际分配一致）
-    if abs(actual_total - exam["total_score"]) > 0.1:
-        execute_update(
-            "UPDATE exams SET total_score = ?, updated_at = ? WHERE id = ?",
-            (actual_total, now, exam_id),
-        )
-        logger.info(f"智能选题同步总分: {exam['total_score']} → {actual_total}")
+    gap = exam_scoring.rebalance_paper(exam_id, exam["total_score"])
+    short = int(audit.get("short_by") or 0)
+    parts = [f"智能选题完成，共添加 {len(inserted)} 道试题"]
+    if short:
+        parts.append(f"符合条件的题只有 {want - short} 道，还缺 {short} 道（题库可用量不足）")
+    if abs(gap) > 0.05:
+        parts.append(_gap_text(gap))
     else:
-        execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
+        parts.append(f"全卷分值已按目标总分 {round(float(exam['total_score'] or 0), 1)} 分配平")
+    if skipped_types:
+        parts.append("已忽略不支持判分的题型：" + "、".join(skipped_types))
 
-    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 选取={added}题")
+    # 给老师看的"题从哪来"说明：兜底题、学科隔离、重复折叠
+    _tiers = audit.get("tiers") or {}
+    _skip = audit.get("skipped") or {}
+    bits = []
+    if int(_tiers.get("T5_used") or 0):
+        bits.append(f"其中 {_tiers['T5_used']} 道是本学科其它内容的题（知识点命中不足）")
+    if _skip.get("family"):
+        bits.append("未限定学科，已放开到全部学科")
+    if audit.get("folded_duplicates"):
+        bits.append(f"已折叠 {audit['folded_duplicates']} 道重复题")
+    notice = "；".join(bits)
+
+    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 选取={len(inserted)}题 缺口={gap} {notice}")
 
     return {
-        "message": f"智能选题完成，共添加 {added} 道试题",
-        "added": added,
+        "message": "，".join(parts),
+        "added": len(inserted),
         "questions": added_questions,
+        "score_gap": gap,
+        "target_total": exam["total_score"],
+        "rebalanced": abs(gap) <= 0.05,
+        "short_by": short,
+        "notice": notice,
+        "fallback_only": bool(audit.get("fallback_only")),
+        **impact,
     }
 
 
 # ── 学生答题 ──
 
 def _attempt_deadline(attempt: dict, exam: dict):
-    """X1: 个人作答截止时间 = 开始时间 + 考试时长(+3 分钟宽限)；未设时长返回 None(仅受考试起止窗约束)"""
-    try:
-        dur = float(exam.get("duration") or 0)
-    except (TypeError, ValueError):
-        dur = 0
-    if dur <= 0:
-        return None
-    try:
-        started = datetime.strptime(attempt["started_at"], "%Y-%m-%d %H:%M:%S")
-    except (KeyError, TypeError, ValueError):
-        return None
-    return started + timedelta(minutes=dur, seconds=180)
+    """X1: 个人作答截止时间 = 开始时间 + 考试时长(+3 分钟宽限)；未设时长返回 None(仅受考试起止窗约束)
+
+    实现挪到 exam_scoring.attempt_deadline —— "还有没有人正在作答"的守卫必须与计时器
+    用同一个超时口径，否则会出现"计时说他早超时了、守卫却说他在答"的死锁式互斥。
+    """
+    return exam_scoring.attempt_deadline(attempt, exam)
 
 
 def _remaining_seconds(exam: dict, attempt: dict | None) -> int | None:
@@ -1469,13 +1627,16 @@ def _submitted_receipt(attempt_row: dict, exam: dict) -> dict:
     earned = attempt_row.get("score") or 0.0
     pass_score = exam.get("pass_score") or 0
     pend = len(pending_keys(graded if isinstance(graded, dict) else {}))
+    # 满分以"提交时写进答卷的那个数"为准（判分已改为按卷面实算）；
+    # 只有改规则之前提交的老答卷没写下 total_score，才回退到考试的设定总分
+    receipt_total = attempt_row.get("total_score") or exam["total_score"]
     if pend:
         # 主观题还在后台批改: 再次点击提交时看到的是临时分, 说清楚免得被当成判错
         return {
             "message": f"已提交，{pend} 道主观题正在批改中，成绩稍后自动更新",
             "attempt_id": attempt_row["id"],
             "score": earned,
-            "total_score": exam["total_score"],
+            "total_score": receipt_total,
             "passed": earned >= pass_score,
             "details": graded if exam.get("show_result_immediately") else None,
             "pending_ai": pend,
@@ -1484,7 +1645,7 @@ def _submitted_receipt(attempt_row: dict, exam: dict) -> dict:
         "message": "已提交，请勿重复提交",
         "attempt_id": attempt_row["id"],
         "score": earned,
-        "total_score": exam["total_score"],
+        "total_score": receipt_total,
         "passed": earned >= pass_score,
         "details": graded if exam.get("show_result_immediately") else None,
         "pending_ai": 0,
@@ -1578,7 +1739,13 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         deleted_count = total_in_exam["cnt"] - len(questions)
         logger.warning(f"考试 {exam_id} 有 {deleted_count} 道题已被删除，跳过评分")
 
-    total_score = exam["total_score"]
+    # 满分以"卷面实算"为准：exams.total_score 只是教师设的目标值，一旦与 Σ每题分值不一致
+    # （历史上选题路径会打破它），拿它当分母就让学生满分不可达、或得分超过 100%。
+    paper_total = round(sum(float(q["score"] or 0) for q in questions), 1)
+    total_score = paper_total if paper_total > 0 else float(exam["total_score"] or 0)
+    if paper_total > 0 and abs(paper_total - float(exam["total_score"] or 0)) > 0.5:
+        logger.warning(f"考试 {exam_id} 卷面合计 {paper_total} 与目标总分 "
+                       f"{exam['total_score']} 不一致，判分已按卷面实算")
     earned_score = 0.0
     graded_answers = {}       # 批改结果（含评语）
     grading_details = {}      # AI 详细批改数据（多维评分等，仅主观题/作文）
@@ -1691,15 +1858,17 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         """UPDATE exam_attempts
            SET status = 'submitted', submitted_at = ?, score = ?, answers = ?,
                auto_graded = 1, graded_by = ?,
-               grading_details = ?, ai_pending = ?,
+               grading_details = ?, ai_pending = ?, total_score = ?,
                settled_at = '', draft_answers = '', draft_saved_at = ''
-           WHERE id = ? AND status = 'grading'""",
+            WHERE id = ? AND status = 'grading'""",
         (now, earned_score,
          json.dumps(graded_answers, ensure_ascii=False),
          # 待批改的题也先占好 grading_details 的位, 多维评分判完直接回填
          json.dumps(grading_details, ensure_ascii=False) if grading_details else '',
          '' if pending_ai else 'ai',        # 还没判完就别先声称是 AI 定的分
          1 if pending_ai else 0,
+         # 满分以提交时实算的卷面为准，后台批改器与成绩通知都读这个数
+         total_score,
          attempt_id),
     )
     if rows == 0:
@@ -2532,17 +2701,21 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
-    # 获取候选题目（排除已添加的）
+    impact = _require_paper_editable(exam, "AI 组卷")
+
+    # 获取候选题目（排除已添加的；再排除没有判分分支的题型 —— 那种题进卷只会白占总分）
+    _gt = ",".join("?" * len(exam_scoring.GRADABLE_TYPES))
     candidates = execute_query(
         """SELECT q.id, q.type, q.question_text, q.difficulty,
                   q.knowledge_points, q.subject
            FROM question_bank q
            WHERE q.status = 'active'
            AND q.subject = ?
+           AND q.type IN (""" + _gt + """)
            AND q.id NOT IN (SELECT question_id FROM exam_questions WHERE exam_id = ?)
            ORDER BY q.difficulty
            LIMIT 50""",
-        (exam["subject"], exam_id),
+        (exam["subject"], *exam_scoring.GRADABLE_TYPES, exam_id),
     )
 
     if not candidates:
@@ -2611,41 +2784,44 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
     if not selected_ids:
         raise HTTPException(status_code=400, detail="AI 选择的题目无效，请重试")
 
-    # 添加题目到考试
-    max_order_row = execute_query_one(
-        "SELECT COALESCE(MAX(sort_order), -1) as max_order FROM exam_questions WHERE exam_id = ?",
-        (exam_id,),
-    )
-    next_order = (max_order_row["max_order"] + 1) if max_order_row else 0
+    # 添加题目到考试：分值与手动添加/自动选题同一口径（目标余额 + 题型权重，不改目标分）
+    already = {int(r["question_id"]) for r in execute_query(
+        "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []}
+    to_add = [int(s) for s in dict.fromkeys(selected_ids) if int(s) not in already]
+    if not to_add:
+        raise HTTPException(status_code=400, detail="AI 推荐的题目都已在试卷中，请调整知识点重点后重试")
 
-    score_per_question = round(exam["total_score"] / len(selected_ids), 1)
-    score_per_question = max(score_per_question, 1)
+    if float(exam["total_score"] or 0) <= 0:
+        raise HTTPException(status_code=400, detail="请先在「编辑考试」里把目标总分设为大于 0 的数")
+    inserted = exam_scoring.insert_paper_questions(exam_id, [(q, 0.0) for q in to_add])
+    added = len(inserted)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    added = 0
-    for i, qid in enumerate(selected_ids):
-        existing = execute_query_one(
-            "SELECT id FROM exam_questions WHERE exam_id = ? AND question_id = ?",
-            (exam_id, qid),
-        )
-        if existing:
-            continue
-        execute_insert(
-            """INSERT INTO exam_questions (exam_id, question_id, sort_order, score)
-               VALUES (?, ?, ?, ?)""",
-            (exam_id, qid, next_order + i, score_per_question),
-        )
-        added += 1
-
     execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
-    logger.info(f"AI 组卷: 考试{exam_id} by {username}, 推荐{len(selected_ids)}题, 实际添加{added}题")
+    # 与其它选题入口同一口径：插 0 分占位后按原比例配平回目标总分
+    gap = exam_scoring.rebalance_paper(exam_id, exam["total_score"])
+    parts = [f"AI 组卷完成，共添加 {added} 道试题"]
+    dropped = len(selected_ids) - added
+    if dropped:
+        parts.append(f"{dropped} 道已存在或无效被跳过")
+    if abs(gap) > 0.05:
+        parts.append(_gap_text(gap))
+    else:
+        parts.append(f"全卷分值已按目标总分 {round(float(exam['total_score'] or 0), 1)} 分配平")
+
+    logger.info(f"AI 组卷: 考试{exam_id} by {username}, 推荐{len(selected_ids)}题, "
+                f"实际添加{added}题, 缺口={gap}")
 
     return {
-        "message": f"AI 组卷完成，共添加 {added} 道试题",
+        "message": "，".join(parts),
         "added": added,
         "recommended": len(selected_ids),
         "reason": reason,
+        "score_gap": gap,
+        "target_total": exam["total_score"],
+        "rebalanced": abs(gap) <= 0.05,
+        **impact,
     }
 
 

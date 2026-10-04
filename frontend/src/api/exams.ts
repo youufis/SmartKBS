@@ -64,12 +64,32 @@ export async function endExam(examId: number): Promise<{ message: string }> {
   return data;
 }
 
+/**
+ * 会改动卷子的端点共同回报的字段（2026-10 分值修复后新增）：
+ *   score_gap          卷面合计 - 目标总分（正=超出，负=还差）
+ *   rebalanced         是否已按目标总分自动配平全卷分值
+ *   submitted_attempts 已提交份数：>0 时界面要提示"历史成绩不会重算"
+ *   有人在作答时这些端点一律 409，detail 里写明原因
+ */
+export interface PaperMutationResult {
+  message: string;
+  added?: number;
+  removed?: number;
+  updated?: number;
+  score_gap?: number;
+  target_total?: number;
+  rebalanced?: boolean;
+  submitted_attempts?: number;
+}
+
 /** 向考试添加试题 */
 export async function addQuestionsToExam(
   examId: number,
   questionIds: number[],
   scores?: number[]
-): Promise<{ message: string; added: number; skipped_existing?: number; skipped_invalid?: number }> {
+): Promise<PaperMutationResult & {
+    skipped_existing?: number; skipped_invalid?: number; skipped_ungradable?: number;
+  }> {
   const { data } = await apiClient.post(`/api/exams/${examId}/questions`, {
     question_ids: questionIds,
     scores,
@@ -81,7 +101,7 @@ export async function addQuestionsToExam(
 export async function removeQuestionsFromExam(
   examId: number,
   questionIds: number[]
-): Promise<{ message: string }> {
+): Promise<PaperMutationResult> {
   const { data } = await apiClient.delete(`/api/exams/${examId}/questions`, {
     params: { question_ids: questionIds.join(',') },
   });
@@ -92,7 +112,9 @@ export async function removeQuestionsFromExam(
 export async function batchUpdateScores(
   examId: number,
   scores: Record<string, number>
-): Promise<{ message: string; current_total: number; expected_total: number; balanced: boolean }> {
+): Promise<PaperMutationResult & {
+    current_total: number; expected_total: number; balanced: boolean;
+  }> {
   const { data } = await apiClient.put(`/api/exams/${examId}/questions/batch-scores`, { scores });
   return data;
 }
@@ -100,7 +122,7 @@ export async function batchUpdateScores(
 /** 自动均衡分配总分到所有题目 */
 export async function autoBalanceScores(
   examId: number
-): Promise<{ message: string; count: number; score_per_question: number }> {
+): Promise<PaperMutationResult & { count: number; score_per_question: number }> {
   const { data } = await apiClient.post(`/api/exams/${examId}/questions/auto-balance`);
   return data;
 }
@@ -116,7 +138,9 @@ export async function autoSelectQuestions(
     count?: number;
     exclude_existing?: boolean;
   }
-): Promise<{ message: string; added: number; questions: any[] }> {
+): Promise<PaperMutationResult & {
+    questions: any[]; short_by?: number; notice?: string; fallback_only?: boolean;
+  }> {
   const { data } = await apiClient.post(`/api/exams/${examId}/auto-select-questions`, params, { timeout: 300000 });
   return data;
 }

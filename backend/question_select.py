@@ -52,7 +52,11 @@ def family_members(subject: str) -> list[str]:
     fam = subject_family(subject)
     if not fam:
         return []
-    return [k for k, v in _SUBJECT_FAMILY.items() if v == fam]
+    members = [k for k, v in _SUBJECT_FAMILY.items() if v == fam]
+    # 族表只登记"同一门课的不同叫法"。物理/生物/校本课这些没登记的学科，
+    # 回落到原名本身 —— 否则返回空列表会让 SQL 变成 subject IN ()，一道题也召不回
+    # （实测：非族表学科的自动选题永远 0 候选，静默退化成"题库里没有可用题"）。
+    return members or [subject]
 
 
 # ── 文本规范化与词项处理 ────────────────────────────────────────────────

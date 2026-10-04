@@ -362,7 +362,9 @@ const ExamPage: React.FC = () => {
 
   // ── 管理题目 ──
   const [scoreInputs, setScoreInputs] = useState<Record<string, number>>({})  // eq_id -> score
+  const [scoreBaseline, setScoreBaseline] = useState<Record<string, number>>({})  // 已落库的对照
   const [savingScores, setSavingScores] = useState(false)
+  const [balancing, setBalancing] = useState(false)
 
   const handleManageQuestions = async (exam: ExamInfo) => {
     setQuestionExam(exam)
@@ -379,10 +381,13 @@ const ExamPage: React.FC = () => {
       const detail = await examsApi.getExam(examId)
       const questions = detail.questions || []
       setExamQuestions(questions)
-      // 初始化可编辑分值映射 (使用 eq_id)
+      // 目标总分要跟着详情走：智能组卷会改它，用打开弹窗时的列表快照会显示成旧值
+      if (detail && typeof detail.total_score === "number") setQuestionExam(detail)
+      // 初始化可编辑分值映射 (使用 eq_id)，并留一份基线用来判断"有没有没保存的改动"
       const scores: Record<string, number> = {}
       questions.forEach((q: any) => { scores[String(q.eq_id)] = q.question_score })
       setScoreInputs(scores)
+      setScoreBaseline(scores)
     } catch {
       setExamQuestions([])
     } finally {
@@ -422,6 +427,20 @@ const ExamPage: React.FC = () => {
   const currentTotal = Object.values(scoreInputs).reduce((s, v) => s + (Number(v) || 0), 0)
   const expectedTotal = questionExam?.total_score || 100
   const totalBalanced = Math.abs(currentTotal - expectedTotal) < 0.1
+  const scoreGap = Math.round((currentTotal - expectedTotal) * 10) / 10   // 正=超出，负=还差
+  const scoreSig = (m: Record<string, number>) =>
+    Object.keys(m).sort().map((k) => `${k}:${Number(m[k]) || 0}`).join("|")
+  const scoreDirty = scoreSig(scoreInputs) !== scoreSig(scoreBaseline)
+  // 提示语：超出与不足要说反话，旧写法直接打印负数（"分数差值 -12.0 分"）读不懂
+  const gapText = scoreGap > 0
+    ? t("scoreOverBy", { n: Math.abs(scoreGap).toFixed(1) })
+    : t("scoreShortBy", { n: Math.abs(scoreGap).toFixed(1) })
+  // 服务端回报的影响面：有人在作答会被 409 拦住；有历史提交要提醒"不会重算成绩"
+  const reportImpact = (res: any) => {
+    if (res?.submitted_attempts > 0) {
+      message.warning(t("submittedImpact", { count: res.submitted_attempts }))
+    }
+  }
 
   // ── 更新单题分值 ──
   const handleScoreChange = (eqId: string, value: number | null) => {
@@ -431,12 +450,16 @@ const ExamPage: React.FC = () => {
   // ── 自动均衡 ──
   const handleAutoBalance = async () => {
     if (!questionExam) return
+    setBalancing(true)
     try {
       const res = await examsApi.autoBalanceScores(questionExam.id)
       message.success(res.message)
+      reportImpact(res)
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('autoBalanceFailed'))
+    } finally {
+      setBalancing(false)
     }
   }
 
@@ -451,6 +474,7 @@ const ExamPage: React.FC = () => {
       } else {
         message.warning(t('scoreMismatch', { current: res.current_total, expected: res.expected_total }))
       }
+      reportImpact(res)
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('saveScoreFailed'))
@@ -484,11 +508,16 @@ const ExamPage: React.FC = () => {
       } else {
         message.success(res.message)
       }
+      reportImpact(res)
       setSelectedQIds([])
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('addFailed'))
     }
+  }
+
+  const closeQModal = () => {
+    closeWithDirtyGuard(scoreDirty, tc, () => setQuestionModal(false))
   }
 
   const handleRemoveQuestion = async (qId: number) => {
@@ -517,10 +546,15 @@ const ExamPage: React.FC = () => {
         exclude_existing: true,
       })
       message.success(res.message)
+      if (res.notice) message.info(res.notice)        // 兜底题/放宽条件必须让老师看见
+      reportImpact(res)
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail)
+      } else if (!err?.errorFields) {
+        // 表单校验失败交给 antd 自己标红字段，其余异常不能一声不吭
+        message.error(t('operationFailed'))
       }
     } finally {
       setAutoSelecting(false)
@@ -537,6 +571,7 @@ const ExamPage: React.FC = () => {
         knowledge_focus: aiComposeFocus,
       }, { timeout: 300000 })
       message.success(data.message || t('composeSuccess'))
+      reportImpact(data)
       if (data.reason) {
         Modal.info({
           title: t('cwPlanTitle'),
@@ -1216,10 +1251,17 @@ const ExamPage: React.FC = () => {
       {/* ── 题目管理弹窗 ── */}
       <Modal title={`${t('manageQuestions')} - ${questionExam?.title || ''}`}
         open={questionModal}
-        onCancel={() => setQuestionModal(false)}
+        maskClosable={false}
+        onCancel={() => closeQModal()}
         width={960}
         footer={[
-          <Button key="close" onClick={() => setQuestionModal(false)}>{t('close')}</Button>,
+          <span key="dirty" style={{ float: 'left', lineHeight: '32px' }}>
+            {scoreDirty && (
+              <Tag color="orange" style={{ marginRight: 8 }}>⚠️ {t('unsavedScores')}</Tag>
+            )}
+            {t('paperTotal', { total: currentTotal.toFixed(1), target: expectedTotal.toFixed(1) })}
+          </span>,
+          <Button key="close" onClick={() => closeQModal()}>{t('close')}</Button>,
         ]}>
         <Spin spinning={qLoading}>
           {/* ── 总分指示器 ── */}
@@ -1237,17 +1279,22 @@ const ExamPage: React.FC = () => {
                   {totalBalanced
                     ? <Tag color="green" style={{ marginLeft: 8 }}>✅ {t('scoreBalanced')}</Tag>
                     : <Tag color="orange" style={{ marginLeft: 8 }}>
-                        ⚠️ {t('scoreDiff')} {(expectedTotal - currentTotal).toFixed(1)} {t('points')}
+                        ⚠️ {t('scoreDiff')} {gapText}
                       </Tag>
                   }
+                  {scoreDirty && <Tag color="blue" style={{ marginLeft: 8 }}>{t('unsavedScores')}</Tag>}
                 </Space>
                 <Space>
-                  <Button size="small" icon={<ReloadOutlined />} onClick={handleAutoBalance}>
+                  {/* 旧写法在 disabled 里挂了一个永远求值为 false 的条件（把一个内置函数
+                      toString 成真值再取反），"分数不平衡就别保存"的本意一行都没生效。
+                      现在改为：不平衡也允许保存（服务端会回报缺口），但没改动时不给空点。 */}
+                  <Button size="small" icon={<ReloadOutlined />} loading={balancing}
+                    onClick={handleAutoBalance}>
                     {t('autoBalance')}
                   </Button>
                   <Button type="primary" size="small" icon={<SaveOutlined />}
                     loading={savingScores} onClick={handleSaveScores}
-                    disabled={!totalBalanced && !window.confirm?.toString()}>
+                    disabled={!scoreDirty}>
                     {t('saveScore')}
                   </Button>
                 </Space>
@@ -1271,13 +1318,14 @@ const ExamPage: React.FC = () => {
                 { title: '#', key: 'index', width: 40,
                   render: (_: any, __: any, idx: number) => idx + 1 },
                 { title: t('questionType'), dataIndex: 'type', width: 70,
-                  render: (v: string) => <Tag>{v === 'single' ? t('q_short_single') : v === 'multiple' ? t('q_short_multi') : v === 'true_false' ? t('q_short_tf') : t('q_short_short')}</Tag> },
+                  // 题型是后台可配的，硬编码四种会把填空/作文/编程一律显示成"简答"
+                  render: (v: string) => <Tag>{typeLabel(v)}</Tag> },
                 { title: t('questionText'), dataIndex: 'question_text', ellipsis: true },
                 { title: t('scorePerQuestion'), dataIndex: 'question_score', width: 100,
                   render: (_: any, rec: any) => (
                     <InputNumber
                       size="small"
-                      min={0}
+                      min={0.5}
                       max={expectedTotal}
                       step={0.5}
                       value={scoreInputs[String(rec.eq_id)]}

@@ -22,6 +22,7 @@ from backend.question_db import (
     execute_insert,
     execute_update,
 )
+from backend import exam_scoring
 from backend.database import execute_query as user_query
 
 router = APIRouter()
@@ -62,6 +63,8 @@ class ComposeResponse(BaseModel):
     difficulty_stats: dict[str, int]
     total_score: float
     reason: str = ""
+    # 已有提交份数：组卷不会重算历史成绩，界面据此提示"要不要先去成绩页复核"
+    submitted_attempts: int = 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -86,6 +89,18 @@ def _can_manage_exam(username: str, exam: dict[str, Any] | None = None) -> bool:
     if exam and exam.get("creator_username") == username:
         return True
     return False
+
+
+def exam_scoring_guard(exam: dict[str, Any], action: str) -> dict[str, Any]:
+    """在途答卷守卫（与 exam_router._require_paper_editable 同一口径，单独导出给组卷用）。"""
+    live = exam_scoring.live_attempts(exam)
+    if live:
+        raise HTTPException(
+            status_code=409,
+            detail=f"该考试有 {len(live)} 份答卷正在作答中，{action}会影响他们的判分；"
+                   f"请等学生交卷或先结束考试后再改",
+        )
+    return {"submitted_attempts": exam_scoring.submitted_count(int(exam["id"]))}
 
 
 def _get_question_pool(
@@ -435,6 +450,9 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
+    # ── 有人在作答时不许动这张卷子（与「管理题目」六个端点同一道闸）──
+    impact = exam_scoring_guard(exam, "智能组卷")
+
     # ── 校验配置 ──
     total_score, err_msg = _validate_compose_config(req)
     if err_msg:
@@ -570,6 +588,7 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
         difficulty_stats=difficulty_stats,
         total_score=final_total_score,
         reason=reason,
+        submitted_attempts=int(impact.get("submitted_attempts") or 0),
     )
 
 
