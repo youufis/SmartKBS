@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import React, { useState } from 'react'
-import { Steps, Button, Space, message, Form, Spin, Typography, Card } from 'antd'
+import { Steps, Button, Space, message, Modal, Form, Spin, Typography, Card, Tag } from 'antd'
 import {
   SettingOutlined,
   RobotOutlined,
@@ -11,7 +11,7 @@ import PaperConfigForm from './PaperConfigForm'
 import QuestionPreview from './QuestionPreview'
 import type { SelectedQuestion } from './QuestionPreview'
 import * as examsApi from '../api/exams'
-import type { ComposeResponse, TypeConfigItem } from '../api/exams'
+import type { ComposeResponse } from '../api/exams'
 import { reportLoadError } from '../utils/loadError'
 
 interface ComposeWizardProps {
@@ -19,6 +19,8 @@ interface ComposeWizardProps {
   examTitle: string
   subjects: string[]
   grades: string[]
+  /** 当前卷子上已有几道题：选"替换"时要拿它做二次确认，防止一键删空 */
+  existingCount?: number
   onClose: () => void
 }
 
@@ -27,6 +29,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   examTitle,
   subjects,
   grades,
+  existingCount = 0,
   onClose,
 }) => {
   const { t } = useTranslation('exam')
@@ -36,9 +39,6 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   const [selectedQuestions, setSelectedQuestions] = useState<SelectedQuestion[]>([])
   const [composeResult, setComposeResult] = useState<ComposeResponse | null>(null)
   const [knowledgePoints, setKnowledgePoints] = useState<string[]>([])
-
-  // 总分实时计算
-  const [totalScore, setTotalScore] = useState(100)
 
   // 加载知识点
   React.useEffect(() => {
@@ -65,25 +65,9 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
     difficulty_hard_ratio: 30,
     knowledge_points: [],
     total_score: 100,
-    replace_existing: true,
+    // 默认追加：旧默认 true 让「开始智能组卷」一键删空老师已有的卷子，且没有任何确认
+    replace_existing: false,
     use_ai: true,
-  }
-
-  // 计算总分
-  const _calcTotalScore = () => {
-    const configs: TypeConfigItem[] = form.getFieldValue('type_configs') || []
-    let total = 0
-    configs.forEach((tc) => {
-      total += (tc.count || 0) * (tc.score_per_question || 0)
-    })
-    setTotalScore(total || 100)
-  }
-
-  // 监听表单变化以更新总分
-  const handleValuesChange = (changedValues: any) => {
-    if (changedValues.type_configs || changedValues.total_score !== undefined) {
-      _calcTotalScore()
-    }
   }
 
   // ── 步骤定义 ──
@@ -103,8 +87,6 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
             subjects={subjects}
             grades={grades}
             knowledgePoints={knowledgePoints}
-            totalScore={totalScore}
-            onTotalScoreChange={setTotalScore}
           />
         </div>
       ),
@@ -144,6 +126,17 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
                   <Typography.Text type="secondary">
                     {composeResult.reason}
                   </Typography.Text>
+                  {composeResult.type_scores && Object.keys(composeResult.type_scores).length > 0 && (
+                    <Typography.Text style={{ fontSize: 13 }}>
+                      {t('cwActualScores')}：
+                      {Object.entries(composeResult.type_scores).map(([k, v]) => (
+                        <Tag key={k} color="blue">{t('pcType_' + k)} {v}{t('pcPointsEach')}</Tag>
+                      ))}
+                    </Typography.Text>
+                  )}
+                  {(composeResult.warnings || []).map((w) => (
+                    <Typography.Text key={w} type="warning" style={{ fontSize: 13 }}>⚠️ {w}</Typography.Text>
+                  ))}
                 </Space>
               </Card>
               <QuestionPreview
@@ -207,6 +200,21 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   async function handleCompose() {
     try {
       const values = await form.validateFields()
+      // 替换会删掉整份旧卷子，必须让老师看清"要删几题"再点头
+      if (values.replace_existing && existingCount > 0) {
+        const ok = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: t('cwReplaceConfirmTitle'),
+            content: t('cwReplaceConfirmContent', { count: existingCount }),
+            okText: t('cwReplaceConfirmOk'),
+            okButtonProps: { danger: true },
+            cancelText: t('cancelBtn'),
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          })
+        })
+        if (!ok) return
+      }
       setComposing(true)
       setComposeResult(null)
       setSelectedQuestions([])
@@ -224,7 +232,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
         difficulty_medium_ratio: values.difficulty_medium_ratio || 50,
         difficulty_hard_ratio: values.difficulty_hard_ratio || 30,
         knowledge_points: values.knowledge_points || [],
-        total_score: values.total_score || totalScore,
+        total_score: values.total_score || undefined,
         replace_existing: values.replace_existing !== false,
         use_ai: values.use_ai !== false,
       }
@@ -252,10 +260,10 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   }
 
   // ── 加载考试题目 ──
-  async function loadExamQuestions() {
+  async function loadExamQuestions(): Promise<SelectedQuestion[]> {
     try {
       const detail = await examsApi.getExam(examId)
-      const questions = (detail.questions || []).map((q: any) => ({
+      const questions: SelectedQuestion[] = (detail.questions || []).map((q: any) => ({
         id: q.id,
         type: q.type,
         question_text: q.question_text,
@@ -269,34 +277,44 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
         media_files: q.media_files,
       }))
       setSelectedQuestions(questions)
+      return questions
     } catch {
-      // ignore
+      // 拉取失败时保留界面上已有的列表，别把预览清空
+      return selectedQuestions
     }
   }
 
   // ── 移除题目 ──
+  // 后端移除后会按目标总分重新配平整份卷子，所以这里必须整份重算，
+  // 不能只在本地把 type_stats 减一（旧写法既不更新难度分布也不更新总分）
   async function handleRemoveQuestion(questionId: number) {
     try {
-      await examsApi.removeQuestionsFromExam(examId, [questionId])
-      message.success(t('cwRemoved'))
-      await loadExamQuestions()
-
-      // 更新统计
-      if (composeResult) {
-        const updatedStats = { ...composeResult.type_stats }
-        const removedQ = selectedQuestions.find((q) => q.id === questionId)
-        if (removedQ) {
-          updatedStats[removedQ.type] = (updatedStats[removedQ.type] || 1) - 1
-        }
-        setComposeResult({
-          ...composeResult,
-          added: composeResult.added - 1,
-          type_stats: updatedStats,
-        })
-      }
+      const res = await examsApi.removeQuestionsFromExam(examId, [questionId])
+      message.success(res.message || t('cwRemoved'))
+      await refreshStatsFromServer()
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('cwRemoveFailed'))
     }
+  }
+
+  async function refreshStatsFromServer() {
+    const fresh = await loadExamQuestions()
+    const typeStats: Record<string, number> = {}
+    const diffStats: Record<string, number> = { easy: 0, medium: 0, hard: 0 }
+    let total = 0
+    fresh.forEach((q) => {
+      typeStats[q.type] = (typeStats[q.type] || 0) + 1
+      if (q.difficulty in diffStats) diffStats[q.difficulty] += 1
+      total += Number(q.score) || 0
+    })
+    setComposeResult((prev) => (prev ? {
+      ...prev,
+      added: fresh.length,
+      total_questions: fresh.length,
+      type_stats: typeStats,
+      difficulty_stats: diffStats,
+      total_score: Math.round(total * 10) / 10,
+    } : prev))
   }
 
   // ── 导出 ──
@@ -360,7 +378,6 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
         form={form}
         layout="vertical"
         initialValues={formInitialValues}
-        onValuesChange={handleValuesChange}
         style={{ minHeight: 400 }}
       >
         {currentStep < steps.length && steps[currentStep].content}

@@ -12,8 +12,6 @@ interface PaperConfigFormProps {
   subjects: string[]
   grades: string[]
   knowledgePoints: string[]
-  totalScore: number
-  onTotalScoreChange: (score: number) => void
 }
 
 /** 小计计算子组件（必须独立以遵守 Hooks 规则） */
@@ -33,9 +31,19 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
   subjects,
   grades,
   knowledgePoints,
-  totalScore,
 }) => {
   const { t } = useTranslation('exam')
+  // 配置合计与目标总分都在本组件就地算。旧写法由父组件回传合计再写回"设定总分"
+  // 那个输入框（还留了一个从未使用的回调 prop），于是老师改任一题型，
+  // 自己填的目标总分就被静默覆盖成配置合计。
+  const configs = Form.useWatch('type_configs', undefined) as
+    { type?: string; count?: number; score_per_question?: number }[] | undefined
+  const targetScore = Form.useWatch('total_score', undefined) as number | undefined
+  const configTotal = useMemo(
+    () => (configs || []).reduce((s, c) => s + (Number(c?.count) || 0) * (Number(c?.score_per_question) || 0), 0),
+    [configs],
+  )
+  const totalScore = Number(targetScore) || 0
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size={16}>
       {/* 基本信息 */}
@@ -140,20 +148,29 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
         <Divider />
         <Row justify="space-between" align="middle">
           <Col>
-            <Space>
-              <Typography.Text strong>{t('pcTotalNow')}</Typography.Text>
+            <Space wrap>
+              <Typography.Text strong>{t('pcCfgTotal')}</Typography.Text>
               <Typography.Text style={{ fontSize: 18, fontWeight: 600, color: '#1677ff' }}>
-                {totalScore.toFixed(1)}
+                {configTotal.toFixed(1)}
               </Typography.Text>
               <Typography.Text type="secondary">{t('pcPoints')}</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                / {t('pcTargetTotal')} {totalScore.toFixed(1)}
+              </Typography.Text>
             </Space>
           </Col>
           <Col>
-            <Form.Item name="total_score" label={t('pcSetTotal')} style={{ margin: 0 }}>
+            <Form.Item name="total_score" label={t('pcSetTotal')} style={{ margin: 0 }}
+              tooltip={t('pcSetTotalTip')}>
               <InputNumber min={1} max={1000} style={{ width: 120 }} />
             </Form.Item>
           </Col>
         </Row>
+        {totalScore > 0 && Math.abs(configTotal - totalScore) > 0.05 && (
+          <Typography.Text type="warning" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+            ⚠️ {t('pcConflictHint', { config: configTotal.toFixed(1), target: totalScore.toFixed(1) })}
+          </Typography.Text>
+        )}
       </CardSection>
 
       {/* 难度分布 */}

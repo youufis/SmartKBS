@@ -61,7 +61,8 @@ class ComposeRequest(BaseModel):
     difficulty_medium_ratio: int = 50  # 中等题占比 %
     difficulty_hard_ratio: int = 30    # 困难题占比 %
     knowledge_points: list[str] = []   # 知识点范围（留空=全部）
-    total_score: float | None = None   # 总分（如不传则根据配置自动计算）
+    total_score: float | None = None   # 目标总分（留空则沿用考试已设定的总分）
+    # 默认追加而不是替换：旧默认 True 让「开始智能组卷」一键删空老师已有的卷子
     replace_existing: bool = False     # 是否替换考试中已有题目
     use_ai: bool = True                # 是否使用 AI 智能选择
 
@@ -73,10 +74,16 @@ class ComposeResponse(BaseModel):
     total_questions: int
     type_stats: dict[str, int]
     difficulty_stats: dict[str, int]
-    total_score: float
+    total_score: float                 # 库里实算的总分（= Σ每题分值），不再是老师填的那个数
     reason: str = ""
     # 已有提交份数：组卷不会重算历史成绩，界面据此提示"要不要先去成绩页复核"
     submitted_attempts: int = 0
+    # 组卷后卷面与目标总分的差额（配平成功时恒为 0）
+    score_gap: float = 0.0
+    config_total: float = 0.0          # 老师按"每题分值"配出来的合计
+    target_total: float = 0.0          # 本次实际配平到的目标总分
+    type_scores: dict[str, float] = {}  # 配平后各题型每题真实分值
+    warnings: list[str] = []
 
 
 DEFAULT_POOL_TYPES = ("single", "multiple", "true_false", "short", "fill")

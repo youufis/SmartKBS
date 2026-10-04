@@ -19,6 +19,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { fetchGrades } from '../api/gradeClass'
 import { reportLoadError } from '../utils/loadError'
+import { TYPE_LABELS } from '../constants/questionTypes'
 
 const ExamComposePage: React.FC = () => {
   const { t } = useTranslation('exam')
@@ -143,9 +144,11 @@ const ExamComposePage: React.FC = () => {
         </div>
       </div>
 
-      {/* 从题库中选择的题目统计 */}
+      {/* 从题库中选择的题目统计：直接用页面已加载的 exam.questions，组件内不再
+          自己发一次请求（旧写法既重复请求，又因依赖只有 examId 而在组卷成功后
+          仍显示"当前考试还没有题目"） */}
       <div style={{ marginBottom: 24 }}>
-        <ExamQuestionsSummary examId={Number(examId)} />
+        <ExamQuestionsSummary questions={exam.questions || []} />
       </div>
 
       {/* ── 主操作区 ── */}
@@ -209,6 +212,7 @@ const ExamComposePage: React.FC = () => {
           examTitle={exam.title}
           subjects={subjects}
           grades={grades}
+          existingCount={(exam.questions || []).length}
           onClose={() => {
             setWizardVisible(false)
             loadExam() // 刷新
@@ -219,19 +223,9 @@ const ExamComposePage: React.FC = () => {
   )
 }
 
-/** 考试现有题目统计组件 */
-const ExamQuestionsSummary: React.FC<{ examId: number }> = ({ examId }) => {
+/** 考试现有题目统计组件（纯展示，数据由页面下发） */
+const ExamQuestionsSummary: React.FC<{ questions: any[] }> = ({ questions }) => {
   const { t } = useTranslation('exam')
-  const [questions, setQuestions] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    examsApi.getExam(examId).then((data) => {
-      setQuestions(data.questions || [])
-    }).catch(() => {}).finally(() => setLoading(false))
-  }, [examId])
-
-  if (loading) return <Spin size="small" />
 
   if (questions.length === 0) {
     return (
@@ -253,7 +247,7 @@ const ExamQuestionsSummary: React.FC<{ examId: number }> = ({ examId }) => {
       <Typography.Text strong>{t('ecHaveQ')}</Typography.Text>
       {Object.entries(typeCount).map(([type, count]) => (
         <Tag key={type}>
-          {({single:t('q_short_single'),multiple:t('q_short_multi'),true_false:t('q_short_tf'),short:t('q_short_short'),fill:t('q_short_fill'),essay:t('q_short_essay'),subjective:t('q_short_subj')} as Record<string,string>)[type] || type}: {count}题
+          {TYPE_LABELS[type] || type}: {count} {t('pcPointsUnit')}
         </Tag>
       ))}
       <Tag color="blue">{t('ecTotalQ', { count: questions.length })}</Tag>

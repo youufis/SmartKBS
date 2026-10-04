@@ -279,6 +279,13 @@ export interface ComposeResponse {
   difficulty_stats: Record<string, number>;
   total_score: number;
   reason: string;
+  /** 以下由"总分单一事实源"改造新增 */
+  score_gap?: number;
+  config_total?: number;
+  target_total?: number;
+  type_scores?: Record<string, number>;
+  warnings?: string[];
+  submitted_attempts?: number;
 }
 
 /** 智能组卷：按配置从题库选题 */

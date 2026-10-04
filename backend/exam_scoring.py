@@ -162,12 +162,16 @@ def rebalance_paper(exam_id: int, target_total: float, *, equal: bool = False) -
     return paper_gap(exam_id, target)
 
 
-def paper_gap(exam_id: int, target_total: float) -> float:
-    """卷面合计与目标总分的差额（正=超出，负=还差）。"""
+def paper_total(exam_id: int) -> float:
+    """卷面实算合计（Σ每题分值）。判分的分子、试卷上印的满分都该读这个数。"""
     row = execute_query_one(
         "SELECT COALESCE(SUM(score), 0) AS s FROM exam_questions WHERE exam_id = ?", (exam_id,))
-    actual = round(float(row["s"] if row else 0), 1)
-    return round(actual - float(target_total or 0), 1)
+    return round(float(row["s"] if row else 0), 1)
+
+
+def paper_gap(exam_id: int, target_total: float) -> float:
+    """卷面合计与目标总分的差额（正=超出，负=还差）。"""
+    return round(paper_total(exam_id) - float(target_total or 0), 1)
 
 
 # ══════════════════════════════════════════════════════════════

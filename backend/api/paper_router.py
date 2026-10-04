@@ -15,7 +15,6 @@ from backend.logger import logger
 from backend.question_db import (
     execute_query,
     execute_query_one,
-    execute_insert,
     execute_update,
 )
 from backend import exam_scoring
@@ -81,15 +80,18 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
     impact = exam_scoring_guard(exam, "智能组卷")
 
     # ── 校验配置 ──
-    total_score, err_msg = validate_compose_config(req)
+    config_total, err_msg = validate_compose_config(req)
     if err_msg:
         raise HTTPException(status_code=400, detail=err_msg)
 
-    # ── 确定总分 ──
-    if req.total_score and req.total_score > 0:
-        final_total_score = req.total_score
-    else:
-        final_total_score = round(total_score, 1)
+    # ── 确定目标总分 ──
+    # 旧写法把"老师填的总分"和"配置算出的合计"当成两个数各用一半：响应回前者、
+    # 写库用后者，试卷上印的又是第三个数（实测 响应 999 / 库里 60 / 卷面 60）。
+    # 现在只有一个事实源：目标总分决定一切，每题分值按配置比例缩放到位。
+    target_total = float(req.total_score or 0) or float(exam["total_score"] or 0) \
+        or round(float(config_total), 1)
+    if target_total <= 0:
+        raise HTTPException(status_code=400, detail="目标总分必须大于 0，请先设定总分")
 
     # ── 获取候选题目 ──
     existing_qs = execute_query(
@@ -139,58 +141,32 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
         logger.info(f"智能组卷：已清除考试 {exam_id} 的 {len(existing_ids)} 道旧题目")
 
     # ── 添加题目到考试 ──
-    max_order_row = execute_query_one(
-        "SELECT COALESCE(MAX(sort_order), -1) as max_order FROM exam_questions WHERE exam_id = ?",
-        (exam_id,),
-    )
-    next_order = (max_order_row["max_order"] + 1) if max_order_row else 0
-
+    # 配置里的"每题分值"当作**权重**先写进去（体现"多选比判断贵"的意图），
+    # 再交给 rebalance_paper 按权重把整份卷子配平到目标总分：
+    #   · 替换模式 → 新题按比例精确凑成目标总分；
+    #   · 追加模式 → 存量题保持原有相对比例，新题按权重挤进同一量纲，
+    #                目标总分不动（旧写法是"新题按配置分值直接叠上去"，
+    #                实测把总分从 60 顶到 160，而及格线仍是 60）。
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    added = 0
-
-    # 构建 type -> score_per_question 映射
     type_score_map = {tc.type: tc.score_per_question for tc in req.type_configs}
-
-    for i, q in enumerate(selected_questions):
-        qid = q["id"]
-        # 检查是否已存在（防止因 replace_existing 关闭时重复添加）
-        existing = execute_query_one(
-            "SELECT id FROM exam_questions WHERE exam_id = ? AND question_id = ?",
-            (exam_id, qid),
-        )
-        if existing:
-            continue
-
-        # 确定分值
-        score = type_score_map.get(q["type"], 5.0)
-        execute_insert(
-            """INSERT INTO exam_questions (exam_id, question_id, sort_order, score)
-               VALUES (?, ?, ?, ?)""",
-            (exam_id, qid, next_order + i, score),
-        )
-        added += 1
+    inserted = exam_scoring.insert_paper_questions(
+        exam_id,
+        [(int(q["id"]), float(type_score_map.get(q["type"], 5.0) or 5.0))
+         for q in selected_questions],
+    )
+    added = len(inserted)
+    if not inserted:
+        raise HTTPException(status_code=400, detail="所选试题都已在试卷中，请调整配置或改用替换模式")
+    gap = exam_scoring.rebalance_paper(exam_id, target_total)
 
     # ── 更新考试信息 ──
-    update_fields = ["updated_at = ?"]
-    update_params: list[Any] = [now]
-
-    # 如果提供了新信息，更新考试元数据
-    if req.target_grade:
-        pass  # grade 字段在 exams 表中可能没有，暂不更新
-
-    # 总分同步：实际入卷分数合计与设定总分不一致时以实际为准（与考试自动选题同一口径）
-    _sum_row = execute_query_one(
-        "SELECT COALESCE(SUM(score), 0) AS s FROM exam_questions WHERE exam_id = ?", (exam_id,))
-    _actual_total = round(float(_sum_row["s"] if _sum_row else 0), 2)
-    if _actual_total > 0 and abs(_actual_total - float(exam["total_score"] or 0)) > 0.05:
-        update_fields.append("total_score = ?")
-        update_params.append(_actual_total)
-        logger.info(f"智能组卷同步总分: {exam['total_score']} → {_actual_total}")
-    update_params.append(exam_id)
-    execute_update(
-        f"UPDATE exams SET {', '.join(update_fields)} WHERE id = ?",
-        tuple(update_params),
-    )
+    # 总分不再由"实算合计"反向覆盖：配平已经保证 Σ == target_total，
+    # 总分只能由老师显式设定（编辑考试 / 本向导的"设定总分"）。
+    _actual_total = exam_scoring.paper_total(exam_id)
+    if abs(_actual_total - target_total) > 0.05:
+        logger.warning(f"智能组卷配平后卷面 {_actual_total} 仍不等于目标 {target_total}，请检查")
+    execute_update("UPDATE exams SET total_score = ?, updated_at = ? WHERE id = ?",
+                   (round(target_total, 1), now, exam_id))
 
     # ── 统计 ──
     type_stats: dict[str, int] = {}
@@ -202,20 +178,56 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
         if q_diff in difficulty_stats:
             difficulty_stats[q_diff] += 1
 
+    # 配平后各题型每题的真实分值（让界面显示"实际落到卷面上的数"，而不是配置值）
+    type_scores = {
+        str(r["type"]): round(float(r["s"]), 1) for r in execute_query(
+            """SELECT q.type, MAX(eq.score) AS s FROM exam_questions eq
+               JOIN question_bank q ON q.id = eq.question_id
+               WHERE eq.exam_id = ? AND eq.question_id IN (%s)
+               GROUP BY q.type""" % ",".join("?" * len(inserted)),
+            (exam_id, *inserted)) or []
+    }
+
+    warnings: list[str] = []
+    if abs(gap) > 0.05:
+        warnings.append(f"卷面合计 {round(_actual_total, 1)} 分与目标总分 {round(target_total, 1)} 分不一致")
+    if req.replace_existing and existing_ids:
+        warnings.append(f"已删除原有 {len(existing_ids)} 道题目")
+    _pass = float(exam["pass_score"] or 0)
+    if _pass > target_total:
+        warnings.append(f"及格分 {_pass} 高于新的目标总分 {round(target_total, 1)}，没人能及格，"
+                        f"请到「编辑考试」调整及格分")
+    elif abs(float(exam["total_score"] or 0) - target_total) > 0.05 and _pass > 0:
+        warnings.append(f"目标总分已变为 {round(target_total, 1)}，及格分 {_pass} 相当于 "
+                        f"{round(_pass / target_total * 100)}%，请确认是否合适")
+
+    parts = [f"智能组卷完成，共添加 {added} 道试题，卷面合计 {round(_actual_total, 1)} 分"]
+    if abs(float(exam["total_score"] or 0) - target_total) > 0.05:
+        parts.append(f"目标总分 {exam['total_score']} → {round(target_total, 1)}")
+    if abs(config_total - target_total) > 0.05:
+        parts.append(f"配置的每题分值已按比例配平（配置合计 {round(config_total, 1)}）")
+    if warnings:
+        parts.append("；".join(warnings))
+
     logger.info(
-        f"智能组卷完成: 考试{exam_id} by {username}, "
-        f"选题{added}道, 题型={type_stats}, 难度={difficulty_stats}"
+        f"智能组卷完成: 考试{exam_id} by {username}, 选题{added}道, "
+        f"目标总分={round(target_total, 1)}, 题型={type_stats}, 难度={difficulty_stats}"
     )
 
     return ComposeResponse(
-        message=f"智能组卷完成，共添加 {added} 道试题",
+        message="，".join(parts),
         added=added,
         total_questions=len(selected_questions),
         type_stats=type_stats,
         difficulty_stats=difficulty_stats,
-        total_score=final_total_score,
+        total_score=round(_actual_total, 1),
         reason=reason,
         submitted_attempts=int(impact.get("submitted_attempts") or 0),
+        score_gap=gap,
+        config_total=round(float(config_total), 1),
+        target_total=round(target_total, 1),
+        type_scores=type_scores,
+        warnings=warnings,
     )
 
 
