@@ -459,7 +459,8 @@ const DiscussionPage: React.FC = () => {
           <Title level={4} style={{ margin: 0 }}>{t('title')}</Title>
         </Space>
 
-        {isTeacherOrAdmin && (
+        {/* 手机端只用于进组与讨论：建组与 AI 方案是十几项的重表单，留在电脑上做 */}
+        {isTeacherOrAdmin && !isMobile && (
           <Space style={{ marginBottom: 16 }}>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
               {t('createDiscussion')}
