@@ -191,12 +191,29 @@ def _latex_to_unicode(latex_str: str) -> str:
     # 处理 \quad, \qquad → 空格
     text = re.sub(r'\\quad|\\qquad', ' ', text)
 
-    # 处理 \text{...}
-    text = re.sub(r'\\text\{([^}]*)\}', r'\1', text)
+    # 剥掉排版类命令的花括号：\mathrm{mA} / \textbf{甲} → mA / 甲
+    # （配图里常见 $I_C=2\mathrm{mA}$，不处理就会输出 "\mathrmmA" 这种粘连串）
+    _STYLE_CMD = (r"\\(?:mathrm|mathbf|mathbb|mathcal|mathit|mathsf|mathtt|operatorname"
+                  r"|textbf|textit|textsf|textrm|emph|text)")
+    for _ in range(8):
+        nxt = re.sub(_STYLE_CMD + r"\s*\{([^{}]*)\}", r"\1", text)
+        if nxt == text:
+            break
+        text = nxt
 
     # 处理 \frac{a}{b}
-    while '\\frac' in text:
-        text = re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', r'(\1)/(\2)', text, count=1)
+    # 用 [^{}]* 而不是 [^}]*：后者会把嵌套分式 \frac{\frac{a}{b}}{c} 从中间切错，
+    # 切完仍残留 \frac 且再也匹配不上 —— 旧写法 while '\\frac' in text 于是**死循环**，
+    # 导出请求永久挂住（实测卡死 >5 分钟，CPU 打满）。这里同时加"没变化就停"兜底。
+    text = re.sub(r"\\frac(\d)(\d)", r"(\1)/(\2)", text)          # \frac12 这类无括号写法
+    for _ in range(30):
+        nxt = re.sub(r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"(\1)/(\2)", text, count=1)
+        if nxt == text:
+            break
+        text = nxt
+    # 剩下匹配不上的（如库里 q835 的 "\fracR_b2R_b1+R_b2" 这种漏了花括号的写法）
+    # 只把命令名去掉，操作数留给后面的上下标规则处理，至少不会把源码印到卷面上
+    text = text.replace("\\frac", "")
 
     # 处理 \sqrt[n]{x} 和 \sqrt{x}
     text = re.sub(r'\\sqrt\[([^}]*)\]\{([^}]*)\}', r'√[\1](\2)', text)
@@ -238,7 +255,43 @@ def _latex_to_unicode(latex_str: str) -> str:
     return text.strip()
 
 
-def _render_latex_inline(paragraph, text: str, font_name: str, font_size, doc):
+def _style_run(run, font_name: str, font_size, color=None, bold: bool = False):
+    """统一给 run 上字体/字号/颜色 —— 之前三处各写一遍，加颜色时容易漏。"""
+    run.font.name = font_name
+    run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+    run.font.size = font_size
+    if bold:
+        run.bold = True
+    if color:
+        run.font.color.rgb = color
+
+
+# 末尾的 (?![A-Za-z]) 是必须的：符号表里有 \to，缺了词边界会把 "C:\tools" 咬成 "C:→ols"。
+# 命令名按长度倒序排列，保证 \theta 不被更短的前缀抢走。
+_BARE_LATEX_RE = re.compile(
+    "(?:" + "|".join(sorted((re.escape(k) for k in _LATEX_UNICODE_MAP), key=len, reverse=True))
+    + "|\\\\(?:mathrm|mathbf|mathbb|mathcal|textbf|textit|emph|textrm|mathsf|mathtt)"
+    + "(?:\\{([^{}]*)\\})?)(?![A-Za-z])")
+
+
+def _bare_latex_to_unicode(text: str) -> str:
+    r"""把**没有 $ 包裹**的裸 LaTeX 命令也转成可读字符。
+
+    题库与 AI 配图里常见 "电流 \mu A"、"\times 30%"、"\beta=50" 这种漏了 $ 的写法，
+    旧逻辑只在遇到 $...$ 时才走公式渲染，于是命令名被原样印到卷子上 —— 用户反馈的
+    "公式符号有些无法显示"有一半是这种情况。
+    只替换符号表里登记过的命令，且要求命令后不再跟字母，所以 "C:\tools" 不会被
+    误伤成 "C:→ols"（\to 命中但后面还有 ols）。
+    """
+    if not text or "\\" not in text:
+        return text
+    text = _BARE_LATEX_RE.sub(lambda m: (m.group(1) or "") if m.group(1) is not None
+                              else _LATEX_UNICODE_MAP.get(m.group(0), m.group(0)), text)
+    return re.sub(r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"(\1)/(\2)", text)
+
+
+def _render_latex_inline(paragraph, text: str, font_name: str, font_size, doc=None,
+                         color=None, bold: bool = False):
     """渲染包含 LaTeX 公式的文本到段落
 
     支持 $...$（行内公式）和 $$...$$（独立公式）
@@ -263,16 +316,15 @@ def _render_latex_inline(paragraph, text: str, font_name: str, font_size, doc):
                 # 回退到 Unicode
                 unicode_text = _latex_to_unicode(latex_content)
                 if unicode_text:
-                    run = paragraph.add_run(f" {unicode_text} ")
-                    run.font.name = font_name
-                    run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
-                    run.font.size = font_size
+                    _style_run(paragraph.add_run(f" {unicode_text} "),
+                               font_name, font_size, color, bold)
         else:
             # 处理行内 $...$
-            _render_latex_inline_inner(paragraph, part, font_name, font_size)
+            _render_latex_inline_inner(paragraph, part, font_name, font_size, color, bold)
 
 
-def _render_latex_inline_inner(paragraph, text: str, font_name: str, font_size):
+def _render_latex_inline_inner(paragraph, text: str, font_name: str, font_size,
+                               color=None, bold: bool = False):
     """渲染含行内公式 $...$ 的文本"""
     parts = re.split(r'(\$[^$]+\$)', text)
     for part in parts:
@@ -289,21 +341,115 @@ def _render_latex_inline_inner(paragraph, text: str, font_name: str, font_size):
                 # 回退到 Unicode
                 unicode_text = _latex_to_unicode(latex_content)
                 if unicode_text:
-                    run = paragraph.add_run(unicode_text)
-                    run.font.name = font_name
-                    run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
-                    run.font.size = font_size
+                    _style_run(paragraph.add_run(unicode_text), font_name, font_size, color, bold)
         else:
             if part.strip():
-                run = paragraph.add_run(part)
-                run.font.name = font_name
-                run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
-                run.font.size = font_size
+                _style_run(paragraph.add_run(_bare_latex_to_unicode(part)),
+                           font_name, font_size, color, bold)
 
 
 # ═══════════════════════════════════════════════════════════════
 # SVG / 媒体图片嵌入
 # ═══════════════════════════════════════════════════════════════
+
+_CJK_RE = re.compile(r'[\u3000-\u303f\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]')
+
+# 候选按"本机最可能有 + 中文覆盖最全"排序；真正用哪个由下面的探针实测决定
+_SVG_CJK_CANDIDATES = (
+    "Microsoft YaHei", "微软雅黑", "SimSun", "宋体", "SimHei", "黑体",
+    "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC",
+    "WenQuanYi Micro Hei", "Arial Unicode MS",
+)
+_SVG_CJK_FONT: str | None = None
+_SVG_CJK_FONT_PROBED = False
+
+
+def _png_ink(png_bytes: bytes) -> int:
+    """PNG 里有墨的像素数。用来判断字体到底画没画出字形 —— 豆腐块/空白的墨点很少。"""
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        return sum(1 for p in im.getdata() if p[3] > 40)
+    except Exception:
+        return -1
+
+
+def _svg_cjk_font() -> str | None:
+    """挑一个 cairosvg 在本机真能渲染出中文的字体族；挑不出来返回 None（保持原行为）。
+
+    为什么不硬编码：题库里的配图 SVG 大多不写 font-family，或写 sans-serif / Arial，
+    cairo 于是回落到只含拉丁字形的默认面 —— 中文全变成豆腐块（实测墨点 476，
+    而 Microsoft YaHei 2619、SimSun 1467）。但像 "Noto Sans CJK SC" 这种名字本机
+    根本没装，写上去照样回落。所以只能拿探针实测，而不是照抄一份字体清单。
+    """
+    global _SVG_CJK_FONT, _SVG_CJK_FONT_PROBED
+    if _SVG_CJK_FONT_PROBED:
+        return _SVG_CJK_FONT
+    _SVG_CJK_FONT_PROBED = True
+    if not _HAS_CAIROSVG:
+        return None
+    probe = ('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="48">'
+             '<text x="4" y="34" font-size="26" fill="black">泡沫导电</text></svg>')
+    try:
+        baseline = _png_ink(cairosvg.svg2png(bytestring=probe.encode("utf-8"), output_width=160))
+    except Exception as e:
+        logger.warning(f"[导出] SVG 字体探针失败，配图中文可能显示为方框: {e}")
+        return None
+    if baseline <= 0:
+        return None
+    for fam in _SVG_CJK_CANDIDATES:
+        try:
+            svg = probe.replace("<text ", f'<text font-family="{fam}" ', 1)
+            got = _png_ink(cairosvg.svg2png(bytestring=svg.encode("utf-8"), output_width=160))
+        except Exception:
+            continue
+        if got >= baseline * 1.5:          # 明显比"回落字体"画得多 ⇒ 真拿到中文字形
+            _SVG_CJK_FONT = fam
+            logger.info(f"[导出] SVG 配图中文改用字体 {fam}（默认字体渲染不出中文）")
+            return fam
+    logger.warning("[导出] 本机没有可渲染中文的字体可用于 SVG 转图，配图里的中文会显示为方框")
+    return None
+
+
+def _svg_text_unlatex(seg: str) -> str:
+    """把一段 SVG 文本里的 $...$ LaTeX 源码转成可读 Unicode。"""
+    if "$" not in seg:
+        return seg
+    conv = re.sub(r"\$([^$]+)\$", lambda m: _latex_to_unicode(m.group(1)), seg)
+    conv = _bare_latex_to_unicode(conv)
+    # 转换结果里若出现裸 &，要重新转义，否则 SVG 解析直接报错
+    return re.sub(r"&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)", "&amp;", conv)
+
+
+def _prepare_svg(svg_content: str) -> str:
+    """导出前修两处配图 SVG 的老毛病：
+
+      1) 文本节点里残留的 LaTeX 源码 —— AI 生成配图时常把 $I_B=40\\mu A$ 直接写进
+         <text>，导出后老师看到的就是这串源码；
+      2) 含中文却没有可渲染中文的字体 —— 注入探针挑出来的字体族。用 <style> 里的
+         CSS 规则，优先级高于 font-family 呈现属性，作者写的 sans-serif/Arial 一并盖掉
+         （中文字体本身带拉丁字形，拉丁部分不会变差）。
+    """
+    if not svg_content:
+        return svg_content
+    out = svg_content
+    if "$" in out:
+        out = re.sub(r">([^<>]*)<", lambda m: ">" + _svg_text_unlatex(m.group(1)) + "<", out)
+    if _CJK_RE.search(out):
+        fam = _svg_cjk_font()
+        if fam:
+            # 先把作者声明的字体全部去掉（呈现属性 + 内联 style 两种写法），再用
+            # **呈现属性**注入探针挑出来的字体族。
+            # 实测这里不能用 <style> CSS 规则：cairosvg 对 text 元素只认呈现属性，
+            # 注入 CSS 后中文墨点不升反降（606 → 427），等于白改。
+            out = re.sub(r'\s+font-family\s*=\s*"[^"]*"', "", out)
+            out = re.sub(r"\s+font-family\s*=\s*'[^']*'", "", out)
+            out = re.sub(r"font-family\s*:[^;\"\']+;?", "", out)
+            out = out.replace("<text ", f'<text font-family="{fam}" ')
+            out = re.sub(r"<text>", '<text font-family="%s">' % fam, out)
+            out = out.replace("<tspan ", f'<tspan font-family="{fam}" ')
+    return out
+
 
 def _svg_to_png(svg_content: str, width_cm: float = 6) -> io.BytesIO | None:
     """将 SVG 代码转换为 PNG 图片
@@ -312,6 +458,7 @@ def _svg_to_png(svg_content: str, width_cm: float = 6) -> io.BytesIO | None:
     """
     if not svg_content or not svg_content.strip():
         return None
+    svg_content = _prepare_svg(svg_content)
     try:
         if _HAS_CAIROSVG:
             png_data = cairosvg.svg2png(
@@ -521,8 +668,8 @@ def _render_options(paragraph, options_dict: dict[str, str] | None, doc=None):
             if i + j < len(keys):
                 k = keys[i + j]
                 opt_text = options_dict[k]
-                # 检查是否含 LaTeX
-                if '$' in opt_text and _HAS_MPL:
+                # 检查是否含公式：$...$ 包裹的，或没包裹的裸命令（"约 \mu A 级"）
+                if ('$' in str(opt_text) or "\\" in str(opt_text)) and _HAS_MPL:
                     run = paragraph.add_run("\n")
                     run.font.size = Pt(4)  # 微小的换行间隔
                     # 渲染选项标签
@@ -530,7 +677,7 @@ def _render_options(paragraph, options_dict: dict[str, str] | None, doc=None):
                     # 渲染选项文本（含公式）
                     _render_latex_inline_inner(paragraph, opt_text, FONT_BODY, SIZE_OPTION)
                 else:
-                    line_text += f"{k}. {opt_text}    "
+                    line_text += f"{k}. {_plain_text(opt_text)}    "
         if line_text:
             run = paragraph.add_run("\n" + line_text.strip())
             run.font.name = FONT_BODY
@@ -570,8 +717,9 @@ def _sanitize_text(text: str) -> str:
     return text
 
 
-def _render_question_text(paragraph, q_text: str, doc=None):
-    """渲染题目文本
+def _render_question_text(paragraph, q_text: str, doc=None, color=None,
+                          size=None, bold: bool = False):
+    """渲染题目文本（解析、答案也用这一套，别再退回纯文本 run）
 
     支持:
     - LaTeX 公式 $...$ 和 $$...$$（渲染为图片嵌入）
@@ -581,12 +729,13 @@ def _render_question_text(paragraph, q_text: str, doc=None):
     text = _sanitize_text(q_text)
     if not text:
         return
+    font_size = size or SIZE_QUESTION
 
-    # 检查是否包含 LaTeX 公式
-    has_latex = ('$' in text)
+    # 是否含公式：$...$ 包裹的，或没包裹的裸命令（\mu、\beta 等）
+    has_math = ('$' in text) or bool(re.search(r"\\[a-zA-Z]{2,}", text))
 
-    if has_latex and _HAS_MPL:
-        _render_latex_inline(paragraph, text, FONT_BODY, SIZE_QUESTION, doc)
+    if has_math and _HAS_MPL:
+        _render_latex_inline(paragraph, text, FONT_BODY, font_size, doc, color, bold)
     else:
         # 无 LaTeX 时，仅处理 **加粗**
         parts = re.split(r'(\*\*.*?\*\*)', text)
@@ -594,9 +743,18 @@ def _render_question_text(paragraph, q_text: str, doc=None):
             if not part:
                 continue
             if part.startswith('**') and part.endswith('**'):
-                _add_run(paragraph, part[2:-2], bold=True)
+                _add_run(paragraph, part[2:-2], FONT_BODY, font_size, True, color, bold)
             else:
-                _add_run(paragraph, part)
+                _add_run(paragraph, part, FONT_BODY, font_size, bold, color)
+
+
+def _plain_text(text: str) -> str:
+    """把 $...$ 与裸命令都转成可读 Unicode、去掉 ** 标记
+    —— 用于放不下公式图片的窄格子（如答题卡题号）。"""
+    out = _sanitize_text(text or "")
+    out = re.sub(r"\$([^$]+)\$", lambda m: _latex_to_unicode(m.group(1)), out)
+    out = _bare_latex_to_unicode(out)
+    return out.replace("**", "")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -714,8 +872,9 @@ def generate_exam_paper(
                 correct = _sanitize_text(q.get("correct_answer", ""))
                 _add_run(p_q, f"{question_number}. ", FONT_BODY, SIZE_QUESTION, bold=True)
                 _render_question_text(p_q, q_text)
-                _add_run(p_q, f"  【答案】{correct}", FONT_BODY, Pt(11),
-                         bold=True, color=COLOR_ANSWER)
+                _add_run(p_q, "  【答案】", FONT_BODY, Pt(11), bold=True, color=COLOR_ANSWER)
+                # 答案本身也可能带公式（填空尤其常见），不能再走纯文本 run
+                _render_question_text(p_q, correct, color=COLOR_ANSWER, size=Pt(11), bold=True)
                 _add_run(p_q, f"  ({q_score:.0f}分)", FONT_BODY, Pt(10),
                          color=COLOR_LIGHT_GRAY)
             else:
@@ -758,8 +917,10 @@ def generate_exam_paper(
                     p_exp = _add_paragraph(doc, "", space_before=1, space_after=2)
                     _add_run(p_exp, "【解析】", FONT_BODY, Pt(10),
                              bold=True, color=COLOR_EXPLANATION)
-                    _add_run(p_exp, explanation, FONT_BODY, Pt(10),
-                             color=COLOR_EXPLANATION)
+                    # 旧写法用 _add_run 直接塞纯文本，解析里的 $...$ 公式整串原样印在
+                    # 答案卷上（题干和选项都走公式渲染，只有解析漏了）
+                    _render_question_text(p_exp, explanation,
+                                          color=COLOR_EXPLANATION, size=Pt(10))
                 # 知识点
                 kp = _sanitize_text(q.get("knowledge_points", ""))
                 if kp:
@@ -896,10 +1057,17 @@ def generate_answer_sheet(
                         question_number += 1
                         num = question_number
                         cell = table.rows[r].cells[c]
-                        if type_key == "single":
-                            cell.text = f"{num}. [A] [B] [C] [D]"
-                        else:
-                            cell.text = f"{num}. [A] [B] [C] [D] [E]"
+                        # 选项个数按题目实际有几个来印（旧写法写死 4/5 个，
+                        # 三选项的题多印 [D]、六选项的题少印一格，学生无从填涂）
+                        _opts = q.get("options")
+                        if isinstance(_opts, str):
+                            try:
+                                _opts = json.loads(_opts)
+                            except (json.JSONDecodeError, TypeError):
+                                _opts = None
+                        _n = len(_opts) if isinstance(_opts, dict) and _opts else 4
+                        _marks = " ".join(f"[{chr(65 + i)}]" for i in range(min(max(_n, 2), 8)))
+                        cell.text = f"{num}. {_marks}"
                         for paragraph in cell.paragraphs:
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             for run in paragraph.runs:
@@ -919,7 +1087,8 @@ def generate_answer_sheet(
             _add_paragraph(doc, label, FONT_HEADING, SIZE_SECTION, bold=True, space_before=6, space_after=4)
             for q in group:
                 question_number += 1
-                q_text = _sanitize_text(q.get("question_text", ""))[:40]
+                # 答题卡格子里放不下公式图片，而且截断会把 $...$ 切成半边 —— 先转可读文本再截
+                q_text = _plain_text(q.get("question_text", ""))[:40]
                 _add_paragraph(doc, f"{question_number}. {q_text}", FONT_BODY, Pt(10),
                                space_before=2, space_after=1)
                 _render_short_answer_lines(doc, 4)
