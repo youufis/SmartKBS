@@ -21,6 +21,8 @@ import {
   type ActivityAggRow, type ClassAggRow, type StudentAggRow, type StudentLite,
   type SummaryMeta, type SummaryPreview, type SummaryRecord, type SummaryTypeMeta,
 } from '../api/summaryExport'
+import MobileCardTable from '../components/MobileCardTable'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const { Title, Text } = Typography
 const { RangePicker } = DatePicker
@@ -37,6 +39,7 @@ const rateOr = (v: number | null | undefined): React.ReactNode =>
 
 const SummaryExportPage: React.FC = () => {
   const { t } = useTranslation('summary')
+  const isMobile = useIsMobile()
 
   const [meta, setMeta] = useState<SummaryMeta | null>(null)
   const [metaLoading, setMetaLoading] = useState(false)
@@ -58,6 +61,7 @@ const SummaryExportPage: React.FC = () => {
   const [data, setData] = useState<SummaryPreview | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('records')
+  const [mPage, setMPage] = useState(1)
 
   const loadMeta = async () => {
     setMetaLoading(true)
@@ -244,6 +248,22 @@ const SummaryExportPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, meta])
 
+  // ── 窄屏卡片视图：只挑手机上看得过来的字段，动态类型列排在最后 ──
+  const MCARD = 10
+  const dynKeys = Object.keys(data?.types || {})
+  const pickCols = (cols: any[], keys: string[], withDyn = false) => [
+    ...keys.map((k) => cols.find((c) => String(c.dataIndex ?? c.key) === k)),
+    ...(withDyn ? dynKeys.map((k) => cols.find((c) => String(c.key) === k)) : []),
+  ].filter(Boolean) as any[]
+  const cardList = (rows: any[], cols: any[], rowKey: any) => (
+    <MobileCardTable
+      dataSource={(rows || []).slice((mPage - 1) * MCARD, mPage * MCARD)}
+      columns={cols}
+      rowKey={rowKey}
+      pagination={{ current: mPage, pageSize: MCARD, total: (rows || []).length, onChange: setMPage }}
+    />
+  )
+
   const scopeText = [
     grade || t('summaryExport.scope.allGrades'),
     cls,
@@ -335,6 +355,7 @@ const SummaryExportPage: React.FC = () => {
 
       {data && (
         <Card
+          className="se-scope-card"
           size="small"
           title={<Space><Text>{t('summaryExport.scopeLabel')}：{scopeText}</Text></Space>}
           extra={
@@ -348,13 +369,18 @@ const SummaryExportPage: React.FC = () => {
           }
         >
           <Tabs
+            className="se-tabs"
             activeKey={activeTab}
-            onChange={setActiveTab}
+            onChange={(k) => { setActiveTab(k); setMPage(1) }}
             items={[
               {
                 key: 'records',
                 label: t('summaryExport.tabs.records'),
                 children: (
+                  isMobile ?
+                    cardList(data.records, pickCols(recordColumns, ['student_name', 'type_label', 'activity_title', 'score', 'rate', 'time']),
+                      (r: SummaryRecord) => `${r.username}|${r.type}|${r.activity_id}|${r.time}`)
+                    :
                   <Table<SummaryRecord>
                     rowKey={(r) => `${r.username}|${r.type}|${r.activity_id}|${r.time}`}
                     size="small" columns={recordColumns} dataSource={data.records}
@@ -367,6 +393,8 @@ const SummaryExportPage: React.FC = () => {
                 key: 'student',
                 label: t('summaryExport.tabs.student'),
                 children: (
+                  isMobile ?
+                    cardList(data.by_student, pickCols(studentColumns, ['name', 'username', 'total_done', 'overall_avg_rate'], true), 'username') :
                   <Table<StudentAggRow>
                     rowKey="username" size="small" columns={studentColumns}
                     dataSource={data.by_student} scroll={{ x: 1600 }}
@@ -378,6 +406,9 @@ const SummaryExportPage: React.FC = () => {
                 key: 'activity',
                 label: t('summaryExport.tabs.activity'),
                 children: (
+                  isMobile ?
+                    cardList(data.by_activity, pickCols(activityColumns, ['type_label', 'activity_title', 'participants', 'participation_rate', 'avg_rate', 'pass_rate']),
+                      (r: ActivityAggRow) => `${r.type}|${r.activity_id}`) :
                   <Table<ActivityAggRow>
                     rowKey={(r) => `${r.type}|${r.activity_id}`} size="small"
                     columns={activityColumns} dataSource={data.by_activity} scroll={{ x: 1400 }}
@@ -389,6 +420,9 @@ const SummaryExportPage: React.FC = () => {
                 key: 'class',
                 label: t('summaryExport.tabs.class'),
                 children: (
+                  isMobile ?
+                    cardList(data.by_class, pickCols(classColumns, ['grade', 'class_name', 'students', 'total_done', 'overall_avg_rate', 'points_total'], true),
+                      (r: ClassAggRow) => `${r.grade}|${r.class_name}`) :
                   <Table<ClassAggRow>
                     rowKey={(r) => `${r.grade}|${r.class_name}`} size="small"
                     columns={classColumns} dataSource={data.by_class} scroll={{ x: 1500 }}

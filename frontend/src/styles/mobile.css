@@ -108,6 +108,16 @@
     gap: 4px 10px; margin-left: 0 !important; width: 100%;
     justify-content: flex-start;
   }
+
+  /* 汇总导出（教师窄屏）：Card 头部「当前范围 + 统计值」在 390px 挤成一行难读，让统计值换到第二行；
+     四个标签页收紧标签内边距，避免最后一个标签被挤出视口 */
+  .se-scope-card .ant-card-head-wrapper { flex-wrap: wrap; row-gap: 2px; }
+  /* 标题与统计值各占一行：并排时标题会被挤到截断 */
+  .se-scope-card .ant-card-head-title { flex: 0 0 100%; min-width: 0; }
+  .se-scope-card .ant-card-extra { flex: 0 0 100%; margin-inline-start: 0; }
+  .se-tabs .ant-tabs-tab { font-size: 13px; }
+  .se-tabs .ant-tabs-tab + .ant-tabs-tab { margin-inline-start: 14px; }
+
 }
 
 

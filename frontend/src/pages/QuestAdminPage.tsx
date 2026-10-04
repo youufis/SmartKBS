@@ -19,6 +19,8 @@ import apiClient from '../api/client'
 import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import PlaceholderManager from '../components/PlaceholderManager'
+import MobileCardTable from '../components/MobileCardTable'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { useTranslation } from 'react-i18next'
 
 const { Title, Text } = Typography
@@ -81,6 +83,7 @@ const SCORE_COLORS = ['#ff4d4f', '#fa8c16', '#fadb14', '#52c41a', '#1677ff', '#7
 // ════════════════════════════════════════════
 
 const QuestRecordsTab: React.FC = () => {
+  const isMobile = useIsMobile()
   const [records, setRecords] = useState<QuestRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -412,6 +415,16 @@ const QuestRecordsTab: React.FC = () => {
 
       {/* ── 表格 ── */}
       <Card style={{ borderRadius: 8, marginBottom: 0 }}>
+        {isMobile ? (
+          /* 窄屏：闯关记录改卡片，逐题明细与删除记录留在电脑上做 */
+          <MobileCardTable
+            dataSource={records}
+            columns={columns.filter((c: any) => ['student', 'class', 'status', 'count', 'score', 'wrong', 'time'].includes(String(c.key)))}
+            rowKey="id"
+            loading={loading}
+            pagination={{ current: page, pageSize, total, onChange: (p: number) => setPage(p) }}
+          />
+        ) : (
         <Table
           dataSource={records}
           columns={columns}
@@ -434,6 +447,7 @@ const QuestRecordsTab: React.FC = () => {
           }}
           scroll={{ x: 900 }}
         />
+        )}
       </Card>
     </div>
   )
@@ -947,6 +961,7 @@ const QuestBankTab: React.FC = () => {
 
 const QuestAdminPage: React.FC = () => {
   const { t } = useTranslation('questions')
+  const isMobile = useIsMobile()
   // 根据 URL 路径自动切换默认标签
   const [activeTab, setActiveTab] = useState('records')
 
@@ -958,13 +973,16 @@ const QuestAdminPage: React.FC = () => {
       ),
       children: <QuestRecordsTab />,
     },
-    {
-      key: 'bank',
-      label: (
-        <span><DatabaseOutlined /> {t('questBank')}</span>
-      ),
-      children: <QuestBankTab />,
-    },
+    // 题库管理是 CRUD 重页面：手机端连标签一起隐藏，只在电脑上开放
+    ...(isMobile ? [] : [
+      {
+        key: 'bank',
+        label: (
+          <span><DatabaseOutlined /> {t('questBank')}</span>
+        ),
+        children: <QuestBankTab />,
+      },
+    ]),
   ]
 
   return (

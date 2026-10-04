@@ -68,6 +68,9 @@ const STAFF_ALLOWED = [
   '/discussion',           // 分组讨论列表
   '/discussion-room',      // 讨论室
   '/discussion-monitor',   // 讨论监控与 AI 总结（只读）
+  // ── 第六批：教师移动只读补两项（题库编辑、删除记录、组卷等重操作仍留电脑） ──
+  '/quest-records',        // 闯关记录查看（窄屏隐藏「题库管理」标签与删除按钮）
+  '/summary-export',       // 汇总统计与导出（四张表窄屏改卡片，导出按钮保留）
 ]
 
 /**
