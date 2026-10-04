@@ -6,6 +6,7 @@ import asyncio
 import json
 import traceback
 import math
+import random
 import re
 from datetime import datetime
 from typing import Any
@@ -219,6 +220,33 @@ def _paper_preflight(exam: dict[str, Any]) -> list[str]:
     if target > 0 and pass_score > target:
         problems.append(f"及格分 {pass_score} 高于目标总分 {target}，没人能及格")
     return problems
+
+
+def _ordered_for_student(questions: list[dict[str, Any]], exam: dict[str, Any],
+                         username: str) -> list[dict[str, Any]]:
+    """学生端题序：按 (考试, 学生) 确定性打乱。
+
+    为什么确定性而不是每次随机：学生刷新页面、换设备、交卷前回看，看到的都必须是
+    同一套题序，否则答题卡题号会错位（"我刚才答的第 3 题怎么变成第 7 题了"）。
+    为什么按学生而不是按答卷：get_exam 在 start 之前也可能被调用，种子要始终可得。
+
+    判分与草稿都以 question_id 为键，所以打乱显示顺序不影响任何成绩。
+    这是 exams.shuffle_questions 这个开关**唯一真正生效**的地方 —— 该字段此前只在
+    创建/编辑表单里被读写、从未被应用，防作弊形同虚设。
+
+    选项乱序（shuffle_options）仍未实现，已从表单下线：它需要在 get_exam / submit /
+    草稿保存 / 答题详情 / 错题讲解 五处做字母重映射，任何一处漏掉就是"全班答案错位"，
+    风险与收益不匹配。要补的话请单独开一次改动，并把这五处一次性测完。
+    """
+    try:
+        enabled = int(exam.get("shuffle_questions") or 0)
+    except (TypeError, ValueError):
+        enabled = 0
+    if not enabled or len(questions) < 2:
+        return questions
+    ordered = list(questions)
+    random.Random("exam-order:%s:%s" % (exam.get("id"), username or "")).shuffle(ordered)
+    return ordered
 
 
 def _get_teacher_name(username: str) -> str:
@@ -483,6 +511,9 @@ async def get_exam(exam_id: int, request: Request):
         # 学生不返回正确答案
         if role == 2:
             q.pop("correct_answer", None)
+
+    if role == 2:
+        questions = _ordered_for_student(questions, exam, username)
 
     exam["questions"] = questions
 
@@ -2286,6 +2317,11 @@ async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request)
                 q["options"] = None
         else:
             q["options"] = None
+
+    # 学生回看自己的答卷时，题序与考试当时保持一致（教师/管理员仍按卷面顺序看）
+    if role == 2:
+        _ex = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,)) or {}
+        questions = _ordered_for_student(questions, _ex, attempt["student_username"])
 
     # 为每题补充 AI 批改详情
     enriched_questions = []

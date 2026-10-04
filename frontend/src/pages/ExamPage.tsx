@@ -262,7 +262,8 @@ const ExamPage: React.FC = () => {
         total_score: values.total_score,
         pass_score: values.pass_score,
         shuffle_questions: values.shuffle_questions !== false,
-        shuffle_options: values.shuffle_options !== false,
+        // shuffle_options 不再提交：选项乱序需要改动判分链路五处字母重映射，尚未实现；
+        // 不发送即后端保持原值，避免把存量卷子的 0 静默翻成 1
         show_result_immediately: values.show_result_immediately || false,
         max_attempts: values.max_attempts || 1,
         target_scope: scope.target_scope,
@@ -294,7 +295,6 @@ const ExamPage: React.FC = () => {
       total_score: exam.total_score,
       pass_score: exam.pass_score,
       shuffle_questions: exam.shuffle_questions === 1,
-      shuffle_options: exam.shuffle_options === 1,
       show_result_immediately: exam.show_result_immediately === 1,
       max_attempts: exam.max_attempts,
     })
@@ -314,7 +314,6 @@ const ExamPage: React.FC = () => {
         total_score: values.total_score,
         pass_score: values.pass_score,
         shuffle_questions: values.shuffle_questions !== false,
-        shuffle_options: values.shuffle_options !== false,
         show_result_immediately: values.show_result_immediately || false,
         max_attempts: values.max_attempts || 1,
       })
@@ -544,6 +543,23 @@ const ExamPage: React.FC = () => {
     })
     return { byType, byDiff }
   }, [examQuestions])
+
+  const [removeIds, setRemoveIds] = useState<number[]>([])
+
+  const removeQuestions = async (ids: number[]) => {
+    if (!questionExam || !ids.length) return
+    try {
+      const res = await examsApi.removeQuestionsFromExam(questionExam.id, ids)
+      message.success(res.message)
+      reportImpact(res)
+      setRemoveIds([])
+      await loadExamQuestions(questionExam.id)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('removeFailed'))
+    }
+  }
+
+  const handleClearPaper = () => removeQuestions(examQuestions.map((q: any) => q.id))
 
   const closeQModal = () => {
     closeWithDirtyGuard(scoreDirty, tc, () => setQuestionModal(false))
@@ -950,7 +966,6 @@ const ExamPage: React.FC = () => {
     total_score: 100,
     pass_score: 60,
     shuffle_questions: true,
-    shuffle_options: true,
     show_result_immediately: false,
     max_attempts: 1,
     activityScope: {
@@ -1181,15 +1196,10 @@ const ExamPage: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item label={t('shuffleQuestions')} name="shuffle_questions" valuePropName="checked">
-                <Select>
-                  <Option value={true}>{t('yes')}</Option>
-                  <Option value={false}>{t('no')}</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item label={t('shuffleOptions')} name="shuffle_options" valuePropName="checked">
+              {/* Select 上挂 valuePropName="checked" 是复制粘贴留下的错：Select 不认 checked，
+                  控件显示空值、提交时又因 !== false 一律落 true，开关形同虚设 */}
+              <Form.Item label={t('shuffleQuestions')} name="shuffle_questions"
+                tooltip={t('shuffleQuestionsTip')}>
                 <Select>
                   <Option value={true}>{t('yes')}</Option>
                   <Option value={false}>{t('no')}</Option>
@@ -1254,21 +1264,16 @@ const ExamPage: React.FC = () => {
           </Form.Item>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item label={t('shuffleQuestions')} name="shuffle_questions">
+              <Form.Item label={t('shuffleQuestions')} name="shuffle_questions"
+                tooltip={t('shuffleQuestionsTip')}>
                 <Select>
                   <Option value={true}>{t('yes')}</Option>
                   <Option value={false}>{t('no')}</Option>
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item label={t('shuffleOptions')} name="shuffle_options">
-                <Select>
-                  <Option value={true}>{t('yes')}</Option>
-                  <Option value={false}>{t('no')}</Option>
-                </Select>
-              </Form.Item>
-            </Col>
+            {/* 选项乱序开关已下线：该字段此前只被读写、从未被应用，
+                真正接入需要改动判分链路五处字母重映射（见后端 _ordered_for_student 注释） */}
             <Col span={8}>
               <Form.Item label={t('showResults')} name="show_result_immediately">
                 <Select>
@@ -1335,14 +1340,30 @@ const ExamPage: React.FC = () => {
             </Card>
           )}
 
-          <Typography.Title level={5} style={{ fontSize: 14, marginTop: 0 }}>
-            {t('selectedQuestions', { count: examQuestions.length })}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <Typography.Title level={5} style={{ fontSize: 14, margin: 0 }}>
+              {t('selectedQuestions', { count: examQuestions.length })}
+              {examQuestions.length > 0 && (
+                <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8, fontWeight: 'normal' }}>
+                  {t('editableScoreHint')} · {t('expandQuestionHint')}
+                </Typography.Text>
+              )}
+            </Typography.Title>
             {examQuestions.length > 0 && (
-              <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8, fontWeight: 'normal' }}>
-                {t('editableScoreHint')}
-              </Typography.Text>
+              <Space size={4}>
+                <Button size="small" danger icon={<DeleteOutlined />}
+                  disabled={!removeIds.length}
+                  onClick={() => removeQuestions(removeIds)}>
+                  {t('removeSelectedCount', { count: removeIds.length })}
+                </Button>
+                <Popconfirm title={t('clearWholePaperConfirm', { count: examQuestions.length })}
+                  onConfirm={handleClearPaper} okText={t('confirm')} cancelText={t('cancel')}
+                  okButtonProps={{ danger: true }}>
+                  <Button size="small" type="text" danger>{t('clearWholePaper')}</Button>
+                </Popconfirm>
+              </Space>
             )}
-          </Typography.Title>
+          </div>
           {examQuestions.length > 0 && (
             <Space wrap size={4} style={{ marginBottom: 8 }}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -1365,6 +1386,54 @@ const ExamPage: React.FC = () => {
             <Empty description={t('noQuestionsHint')} />
           ) : (
             <Table dataSource={examQuestions} rowKey="id" size="small" pagination={false}
+              rowSelection={{
+                selectedRowKeys: removeIds,
+                onChange: (keys) => setRemoveIds(keys as number[]),
+              }}
+              expandable={{
+                // 展开即预览：此前弹窗里看不到选项与答案，老师要判断题目好坏只能回题库找
+                expandedRowRender: (rec: any) => {
+                  const opts = rec.options && typeof rec.options === 'object' ? rec.options : null
+                  const correct = String(rec.correct_answer || '').split(',').map((s: string) => s.trim())
+                  return (
+                    <div style={{ padding: '4px 8px', background: '#fafafa' }}>
+                      <Typography.Paragraph style={{ marginBottom: 8 }}>
+                        <FormulaRenderer content={rec.question_text} />
+                      </Typography.Paragraph>
+                      <MediaDisplay svgContent={rec.svg_content} hasSvg={rec.has_svg}
+                        mediaFiles={rec.media_files} size="compact" />
+                      {opts ? (
+                        <div style={{ marginBottom: 8 }}>
+                          {Object.entries(opts).map(([k, v]) => (
+                            <div key={k} style={{ marginBottom: 2 }}>
+                              <strong>{k}.</strong>{' '}
+                              <FormulaRenderer content={String(v)} inline />
+                              {correct.includes(k) && (
+                                <Tag color="success" style={{ marginLeft: 6 }}>{t('xCorrect')}</Tag>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Typography.Text type="secondary">{t('noOptionsHint')}</Typography.Text>
+                      )}
+                      <Space wrap size={4}>
+                        {rec.correct_answer && (
+                          <Tag color="success">{t('correctAnsColon')}{rec.correct_answer}</Tag>
+                        )}
+                        {rec.difficulty && <Tag>{difficultyLabel(rec.difficulty)}</Tag>}
+                        {rec.knowledge_points && <Tag color="blue">{rec.knowledge_points}</Tag>}
+                      </Space>
+                      {!!rec.explanation && (
+                        <Typography.Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
+                          <strong>{t('explanationColon')}</strong>
+                          <FormulaRenderer content={rec.explanation} />
+                        </Typography.Paragraph>
+                      )}
+                    </div>
+                  )
+                },
+              }}
               columns={[
                 { title: '#', key: 'index', width: 40,
                   render: (_: any, __: any, idx: number) => idx + 1 },
