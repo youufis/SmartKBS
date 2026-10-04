@@ -39,13 +39,18 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   const [selectedQuestions, setSelectedQuestions] = useState<SelectedQuestion[]>([])
   const [composeResult, setComposeResult] = useState<ComposeResponse | null>(null)
   const [knowledgePoints, setKnowledgePoints] = useState<string[]>([])
+  // 题库供给量：让老师在配置阶段就知道每个题型有多少题可挑，而不是组完才在说明里发现缺题
+  const [supply, setSupply] = useState<examsApi.PaperSupply | null>(null)
 
-  // 加载知识点
+  // 加载题库供给量与该学科可用的知识点
+  // 旧写法调 /knowledge-points/list 且不带学科：通用技术/生物/人工智能的标签会混进
+  // 信息科技的组卷配置里；而带学科过滤的 compose-config/defaults 端点做好了却没人调用
   React.useEffect(() => {
-    examsApi.getKnowledgePoints().then((res) => {
-      setKnowledgePoints(res.knowledge_points)
-    }).catch((err) => { reportLoadError(err, { key: 'compose.knowledgePoints' }) })
-  }, [])
+    examsApi.getDefaultComposeConfig(examId).then((res) => {
+      setSupply(res)
+      setKnowledgePoints(res.available_knowledge_points || [])
+    }).catch((err) => { reportLoadError(err, { key: 'compose.defaults' }) })
+  }, [examId])
 
   // 表单初始值
   const formInitialValues = {
@@ -87,6 +92,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
             subjects={subjects}
             grades={grades}
             knowledgePoints={knowledgePoints}
+            supply={supply}
           />
         </div>
       ),

@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Form, Input, Select, InputNumber, Row, Col, Button, Space, Divider, Typography } from 'antd'
+import { Form, Input, Select, InputNumber, Row, Col, Button, Space, Divider, Typography, Tag } from 'antd'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import type * as examsApiTypes from '../api/exams'
 const { Option } = Select
 
 /** 组卷可选题型；显示名一律走 i18n 的 pcType_* 键，不再在这里硬编码中文标签 */
@@ -12,6 +13,8 @@ interface PaperConfigFormProps {
   subjects: string[]
   grades: string[]
   knowledgePoints: string[]
+  /** 题库供给量（来自 compose-config/defaults，与组卷引擎同口径） */
+  supply?: examsApiTypes.PaperSupply | null
 }
 
 /** 小计计算子组件（必须独立以遵守 Hooks 规则） */
@@ -31,6 +34,7 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
   subjects,
   grades,
   knowledgePoints,
+  supply,
 }) => {
   const { t } = useTranslation('exam')
   // 配置合计与目标总分都在本组件就地算。旧写法由父组件回传合计再写回"设定总分"
@@ -96,6 +100,12 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
 
       {/* 题型配置 */}
       <CardSection title={t('pcTypeCfg')} subtitle={t('pcTypeCfgSub')}>
+        {supply && (
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
+            {t('pcSupply', { total: supply.pool_size, writes: (supply.subject_writes || []).join(' / ') || supply.subject })}
+            {supply.already_in_paper > 0 && t('pcSupplyExcluded', { n: supply.already_in_paper })}
+          </Typography.Text>
+        )}
         <Form.List name="type_configs">
           {(fields, { add, remove }) => (
             <>
@@ -123,7 +133,10 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
                     </Form.Item>
                   </Col>
                   <Col span={6}>
-                    <TypeSubtotal name={name} />
+                    <Space size={6} wrap>
+                      <TypeSubtotal name={name} />
+                      <TypeAvail name={name} supply={supply} />
+                    </Space>
                   </Col>
                   <Col span={4}>
                     <Button
@@ -244,6 +257,26 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
     </Space>
   )
 }
+
+/** 该题型的题库供给量：配得比可选题还多就标红，别等组完才在说明里发现缺题 */
+const TypeAvail: React.FC<{
+  name: number
+  supply?: examsApiTypes.PaperSupply | null
+}> = ({ name, supply }) => {
+  const { t } = useTranslation('exam')
+  const type = Form.useWatch(['type_configs', name, 'type'], undefined) as string | undefined
+  const count = Number(Form.useWatch(['type_configs', name, 'count'], undefined) || 0)
+  if (!supply || !type) return null
+  const avail = supply.available_by_type?.[type] ?? 0
+  if (!avail) {
+    return <Tag color="error">{t('pcAvailNone')}</Tag>
+  }
+  if (count > avail) {
+    return <Tag color="error">{t('pcAvailShort', { want: count, avail })}</Tag>
+  }
+  return <Tag color="default">{t('pcAvailOf', { n: avail })}</Tag>
+}
+
 
 /** 带标题和可选副标题的卡片样式区块 */
 const CardSection: React.FC<{

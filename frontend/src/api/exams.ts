@@ -297,12 +297,23 @@ export async function composeExam(
   return data;
 }
 
+/** 题库供给量：与组卷引擎同口径（学科族归一 + 排除卷内已有 + 折叠近重复） */
+export interface PaperSupply {
+  subject: string;
+  subject_family?: string;
+  subject_writes?: string[];
+  pool_size: number;
+  already_in_paper: number;
+  available_by_type: Record<string, number>;
+  available_by_difficulty: Record<string, number>;
+  knowledge_point_total?: number;
+}
+
 /** 获取默认组卷配置 */
 export async function getDefaultComposeConfig(
   examId: number
-): Promise<{
-  subject: string;
-  question_stats: any[];
+): Promise<PaperSupply & {
+  question_stats: { type: string; difficulty: string; cnt: number }[];
   available_knowledge_points: string[];
   default_config: {
     type_configs: TypeConfigItem[];
@@ -317,12 +328,14 @@ export async function getDefaultComposeConfig(
   return data;
 }
 
-/** 获取知识点列表 */
-export async function getKnowledgePoints(): Promise<{
+/** 获取知识点列表（传 subject 则按学科族过滤，并按"挂了几道题"排序） */
+export async function getKnowledgePoints(subject = ""): Promise<{
   knowledge_points: string[];
   total: number;
 }> {
-  const { data } = await apiClient.get('/api/exams/knowledge-points/list');
+  const { data } = await apiClient.get('/api/exams/knowledge-points/list', {
+    params: subject ? { subject } : undefined,
+  });
   return data;
 }
 

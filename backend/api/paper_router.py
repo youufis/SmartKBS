@@ -20,6 +20,7 @@ from backend.question_db import (
 from backend import exam_scoring
 # 组卷选题引擎（题型配额 + 难度配比 + 分层召回 + AI 择优）已抽成共享模块，
 # 三个入口（智能组卷 / 管理题目-自动选题 / 管理题目-AI 生成）共用这一份实现。
+from backend.question_select import family_members, split_tags, subject_family
 from backend.paper_compose import (
     ComposeRequest,
     ComposeResponse,
@@ -444,8 +445,13 @@ async def export_exam_answer_sheet(
 
 
 @router.get("/knowledge-points/list", summary="获取所有知识点标签")
-async def list_knowledge_points(request: Request):
-    """获取题库中所有知识点标签（供组卷配置选择）"""
+async def list_knowledge_points(request: Request, subject: str = Query("", description="按学科过滤（含学科族归一）")):
+    """获取题库中的知识点标签（供组卷配置选择）
+
+    旧写法全库无过滤 + 自己一套分隔符逻辑：通用技术/生物/人工智能的标签会混进
+    信息科技的考卷配置里，且与 defaults 端点切出来的结果不一致。现在两处都走
+    question_select.split_tags，并支持按学科（含学科族）过滤。
+    """
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -453,24 +459,24 @@ async def list_knowledge_points(request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
+    where = "status = 'active' AND knowledge_points IS NOT NULL AND knowledge_points != ''"
+    params: tuple = ()
+    writes = family_members(subject) if subject else []
+    if writes:
+        where += " AND subject IN (%s)" % ",".join("?" * len(writes))
+        params = tuple(writes)
     rows = execute_query(
-        """SELECT DISTINCT knowledge_points FROM question_bank
-           WHERE status = 'active' AND knowledge_points IS NOT NULL AND knowledge_points != ''"""
-    )
+        f"SELECT knowledge_points, COUNT(*) AS n FROM question_bank WHERE {where}"
+        " GROUP BY knowledge_points", params) or []
 
-    # 提取所有知识点（逗号/分号/顿号分隔）
-    all_kps: set[str] = set()
+    counts: dict[str, int] = {}
     for row in rows:
-        kp_text = row["knowledge_points"]
-        if kp_text:
-            # 尝试多种分隔符
-            parts = kp_text.replace("；", ",").replace("、", ",").replace("，", ",").split(",")
-            for part in parts:
-                p = part.strip()
-                if p and len(p) <= 50:  # 过滤掉过长的"知识点"
-                    all_kps.add(p)
+        for tag in split_tags(row["knowledge_points"]):
+            tag = tag.strip()
+            if tag and len(tag) <= 50:          # 过长的整段题干不是知识点标签
+                counts[tag] = counts.get(tag, 0) + int(row["n"])
 
-    sorted_kps = sorted(all_kps)
+    sorted_kps = [k for k, _n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
     return {
         "knowledge_points": sorted_kps,
         "total": len(sorted_kps),
@@ -500,41 +506,53 @@ async def get_default_compose_config(
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
 
-    subject = exam["subject"]
+    subject = str(exam.get("subject") or "")
 
-    # 统计题库中各题型题数
-    stats = execute_query(
-        """SELECT type, difficulty, COUNT(*) as cnt
-           FROM question_bank
-           WHERE status = 'active' AND subject = ?
-           GROUP BY type, difficulty""",
-        (subject,),
+    # 供给量必须与组卷引擎**同一个口径**：走 get_question_pool（学科族归一 + 分层召回
+    # + 近重复折叠 + 排除已在卷子里的题）。旧写法自己写 SQL 且 subject 精确等值 ——
+    # 实测对"信息科技"的考试报 96 道，而组卷实际能召回 248 道（信息技术 154 +
+    # 信息科技 94），老师照这个数配题量只会得出"题库不足"的错误结论。
+    existing_ids = {int(r["question_id"]) for r in execute_query(
+        "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []}
+    pool = get_question_pool(
+        subject=subject, exclude_ids=existing_ids,
+        types=exam_scoring.GRADABLE_TYPES, seed="defaults",
     )
 
-    # 获取知识点
-    kp_rows = execute_query(
-        """SELECT DISTINCT knowledge_points FROM question_bank
-           WHERE status = 'active' AND subject = ? AND knowledge_points IS NOT NULL AND knowledge_points != ''""",
-        (subject,),
-    )
-    all_kps: set[str] = set()
-    for row in kp_rows:
-        for sep in ["；", "、", "，", ","]:
-            if sep in row["knowledge_points"]:
-                for p in row["knowledge_points"].split(sep):
-                    p = p.strip()
-                    if p and len(p) <= 50:
-                        all_kps.add(p)
-                break
-        else:
-            p = row["knowledge_points"].strip()
-            if p and len(p) <= 50:
-                all_kps.add(p)
+    stats: list[dict[str, Any]] = []
+    by_type: dict[str, int] = {}
+    by_difficulty: dict[str, int] = {"easy": 0, "medium": 0, "hard": 0}
+    for qtype in exam_scoring.GRADABLE_TYPES:
+        rows_t = [q for q in pool if str(q.get("type") or "") == qtype]
+        if not rows_t:
+            continue
+        by_type[qtype] = len(rows_t)
+        for d in ("easy", "medium", "hard"):
+            n = sum(1 for q in rows_t if str(q.get("difficulty") or "") == d)
+            if n:
+                stats.append({"type": qtype, "difficulty": d, "cnt": n})
+                by_difficulty[d] += n
+
+    kp_counts: dict[str, int] = {}
+    for q in pool:
+        for tag in split_tags(q.get("knowledge_points")):
+            tag = tag.strip()
+            if tag and len(tag) <= 50:
+                kp_counts[tag] = kp_counts.get(tag, 0) + 1
+    # 按"本学科有几道题挂着这个标签"排序，而不是字母序：排在前面的才是真出得了卷的知识点
+    ranked_kps = [k for k, _n in sorted(kp_counts.items(), key=lambda kv: (-kv[1], kv[0]))]
 
     return {
         "subject": subject,
+        "subject_family": subject_family(subject),
+        "subject_writes": family_members(subject),        # 让老师看见"信息技术≡信息科技"
+        "pool_size": len(pool),
+        "already_in_paper": len(existing_ids),
+        "available_by_type": by_type,
+        "available_by_difficulty": by_difficulty,
         "question_stats": stats,
-        "available_knowledge_points": sorted(all_kps),
+        "available_knowledge_points": ranked_kps[:80],
+        "knowledge_point_total": len(ranked_kps),
         "default_config": {
             "type_configs": [
                 {"type": "single", "count": 10, "score_per_question": 3},
