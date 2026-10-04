@@ -20,6 +20,8 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
+import MobileCardTable from '../components/MobileCardTable'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
@@ -56,6 +58,9 @@ const DiscussionPage: React.FC = () => {
   const [aiModal, setAiModal] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [detailModal, setDetailModal] = useState<any>(null)
+  const isMobile = useIsMobile()
+  const MOBILE_CARD_PAGE = 8            // 窄屏卡片列表每页条数
+  const [mPage, setMPage] = useState(1)
   const [activeTab, setActiveTab] = useState('all')
   const [createForm] = Form.useForm()
   const [aiForm] = Form.useForm()
@@ -359,6 +364,93 @@ const DiscussionPage: React.FC = () => {
     )
   }
 
+  // 列定义（桌面表格与窄屏卡片共用同一套）
+  const discColumns = [
+    {
+      title: t('discussionTopic'), dataIndex: 'title', key: 'title',
+      render: (title: string, disc: any) => {
+        const statusInfo = STATUS_MAP[disc.status] || { label: t('unknown'), color: 'default' }
+        return (
+          <Space wrap>
+            <div className="markdown-content" style={{ fontWeight: 600, cursor: 'pointer' }} onClick={() => handleDetail(disc.id)}>
+              <FormulaRenderer content={title} components={{ p: ({children}) => <>{children}</> }} />
+            </div>
+            <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+            {disc.subject && <Tag>{disc.subject}</Tag>}
+          </Space>
+        )
+      },
+    },
+    {
+      title: t('participation'), key: 'members', width: 110,
+      render: (_: any, disc: any) => (
+        <Text type="secondary">
+          <TeamOutlined /> {disc.total_members || 0}{t('people')} | <MessageOutlined /> {disc.total_messages || 0}
+        </Text>
+      ),
+    },
+    {
+      title: t('actions'), key: 'actions', width: 200,
+      render: (_: any, disc: any) => (
+        <Space size="small">
+          <Tooltip title={t('viewDetails')}>
+            <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleDetail(disc.id)} />
+          </Tooltip>
+          {isTeacherOrAdmin ? (
+            <>
+              <ResetActivityButton activityType="discussion" activityId={disc.id}
+                iconOnly stopPropagation onSuccess={loadDiscussions} />
+              {disc.status === 'pending' && (
+                <Button type="link" size="small" icon={<PlayCircleOutlined />}
+                  onClick={() => handleStart(disc.id)} style={{ color: '#52c41a' }}>{t('start')}</Button>
+              )}
+              {disc.status === 'active' && (
+                <Popconfirm title={t('confirmEnd')} onConfirm={() => handleEnd(disc.id)}>
+                  <Button type="link" size="small" icon={<StopOutlined />} danger>{t('end')}</Button>
+                </Popconfirm>
+              )}
+              {disc.status === 'ended' && (
+                <>
+                  <Button type="link" size="small" icon={<ReloadOutlined />}
+                    onClick={() => handleRestart(disc.id)} style={{ color: '#52c41a' }}>{t('restart')}</Button>
+                  <Popconfirm title={t('confirmDeleteDiscussion')} onConfirm={() => handleDelete(disc.id)}>
+                    <Button type="link" size="small" icon={<DeleteOutlined />} danger>{t('delete')}</Button>
+                  </Popconfirm>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {disc.has_joined && disc.status === 'active' && (
+                <Button type="link" size="small" icon={<TeamOutlined />}
+                  onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)}>
+                  {disc.group_mode === 'none' ? t('enterDiscussion') : `${t('enterGroup')}${disc.my_group ? `(${disc.my_group.name || t('groupN', { n: disc.my_group.group_index })})` : ''}`}
+                </Button>
+              )}
+              {disc.status === 'active' && !disc.has_joined && (
+                <Button type="link" size="small" icon={<MessageOutlined />}
+                  onClick={() => handleJoin(disc.id)}>{t('joinDiscussion')}</Button>
+              )}
+            </>
+          )}
+        </Space>
+      ),
+    },
+  ]
+
+  // 窄屏卡片：主题作标题，中间补一行「我的分组」（原本藏在展开行里）
+  const discCardColumns = [
+    discColumns[0],
+    discColumns[1],
+    {
+      title: t('myGroup'), key: 'myGroup',
+      render: (_: any, disc: any) => (disc.has_joined && disc.my_group ? (
+        <Tag color="blue">{disc.group_mode === 'none' ? t('joinedChat') : (disc.my_group.name || t('groupN', { n: disc.my_group.group_index }))}</Tag>
+      ) : null),
+    },
+    discColumns[2],
+  ]
+
   return (
     <div>
       <Card>
@@ -393,6 +485,15 @@ const DiscussionPage: React.FC = () => {
         <Spin spinning={loading}>
           {filtered.length === 0 ? (
             <Empty description={t('noDiscussions')} />
+          ) : isMobile ? (
+              /* 窄屏：讨论列表改卡片，主题完整可读、进入按钮不必横滚才点得到 */
+              <MobileCardTable
+                dataSource={filtered.slice((mPage - 1) * MOBILE_CARD_PAGE, mPage * MOBILE_CARD_PAGE)}
+                columns={discCardColumns}
+                rowKey="id"
+                pagination={{ current: mPage, pageSize: MOBILE_CARD_PAGE, total: filtered.length, onChange: setMPage }}
+                emptyText={<Empty description={t('noDiscussions')} />}
+              />
           ) : (
             <Table
               dataSource={filtered}
@@ -447,78 +548,7 @@ const DiscussionPage: React.FC = () => {
                 ),
                 rowExpandable: () => true,
               }}
-              columns={[
-                {
-                  title: t('discussionTopic'), dataIndex: 'title', key: 'title',
-                  render: (title: string, disc: any) => {
-                    const statusInfo = STATUS_MAP[disc.status] || { label: t('unknown'), color: 'default' }
-                    return (
-                      <Space>
-                        <div className="markdown-content" style={{ fontWeight: 600, cursor: 'pointer' }} onClick={() => handleDetail(disc.id)}>
-                          <FormulaRenderer content={title} components={{ p: ({children}) => <>{children}</> }} />
-                        </div>
-                        <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-                        {disc.subject && <Tag>{disc.subject}</Tag>}
-                      </Space>
-                    )
-                  },
-                },
-                {
-                  title: t('participation'), key: 'members', width: 110,
-                  render: (_: any, disc: any) => (
-                    <Text type="secondary">
-                      <TeamOutlined /> {disc.total_members || 0}{t('people')} | <MessageOutlined /> {disc.total_messages || 0}
-                    </Text>
-                  ),
-                },
-                {
-                  title: t('actions'), key: 'actions', width: 200,
-                  render: (_: any, disc: any) => (
-                    <Space size="small">
-                      <Tooltip title={t('viewDetails')}>
-                        <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleDetail(disc.id)} />
-                      </Tooltip>
-                      {isTeacherOrAdmin ? (
-                        <>
-                          <ResetActivityButton activityType="discussion" activityId={disc.id}
-                            iconOnly stopPropagation onSuccess={loadDiscussions} />
-                          {disc.status === 'pending' && (
-                            <Button type="link" size="small" icon={<PlayCircleOutlined />}
-                              onClick={() => handleStart(disc.id)} style={{ color: '#52c41a' }}>{t('start')}</Button>
-                          )}
-                          {disc.status === 'active' && (
-                            <Popconfirm title={t('confirmEnd')} onConfirm={() => handleEnd(disc.id)}>
-                              <Button type="link" size="small" icon={<StopOutlined />} danger>{t('end')}</Button>
-                            </Popconfirm>
-                          )}
-                          {disc.status === 'ended' && (
-                            <>
-                              <Button type="link" size="small" icon={<ReloadOutlined />}
-                                onClick={() => handleRestart(disc.id)} style={{ color: '#52c41a' }}>{t('restart')}</Button>
-                              <Popconfirm title={t('confirmDeleteDiscussion')} onConfirm={() => handleDelete(disc.id)}>
-                                <Button type="link" size="small" icon={<DeleteOutlined />} danger>{t('delete')}</Button>
-                              </Popconfirm>
-                            </>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          {disc.has_joined && disc.status === 'active' && (
-                            <Button type="link" size="small" icon={<TeamOutlined />}
-                              onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)}>
-                              {disc.group_mode === 'none' ? t('enterDiscussion') : `${t('enterGroup')}${disc.my_group ? `(${disc.my_group.name || t('groupN', { n: disc.my_group.group_index })})` : ''}`}
-                            </Button>
-                          )}
-                          {disc.status === 'active' && !disc.has_joined && (
-                            <Button type="link" size="small" icon={<MessageOutlined />}
-                              onClick={() => handleJoin(disc.id)}>{t('joinDiscussion')}</Button>
-                          )}
-                        </>
-                      )}
-                    </Space>
-                  ),
-                },
-              ]}
+              columns={discColumns}
             />
           )}
         </Spin>

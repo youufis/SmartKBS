@@ -32,10 +32,14 @@ const STUDENT_ALLOWED = [
   // ── 第二批 D 档：成长档案与风采 ──
   '/portfolio',            // 成长档案（/portfolio/:username 查看他人）
   '/showcase',             // 风采展示
-  // ── E 档：资源浏览与说明页（分组讨论因下级 /discussion-room 未开放、暂不列入） ──
+  // ── E 档：资源浏览与说明页 ──
   '/html-files',           // 我的 HTML 资源
   '/shared-center',        // 资源中心（HTML资源/文件中心/资源管理 三合一）
   '/about',                // 关于平台
+  // ── 第五批：漏开的学生作业入口 + 分组讨论（列表与讨论室一并放开，避免死胡同） ──
+  '/tasks',                // 对话作业：学生查看任务并提交（与 /exam /quest 同级的菜单入口）
+  '/discussion',           // 分组讨论列表（学生只看与进入，建组按钮仅教师/管理员可见）
+  '/discussion-room',      // 讨论室：WebSocket 消息流 + 输入框，聊天形态
 ]
 
 /** 教师/管理员端：首批仅轻场景（题库/组卷/用户管理等保持桌面专属） */
@@ -60,6 +64,10 @@ const STAFF_ALLOWED = [
   '/shared-center',
   '/resource-mgmt',        // 资源管理（无表格，浏览型）
   '/about',
+  // ── 第五批：分组讨论（建组与 AI 方案仍在电脑上做，手机只用于进组与讨论） ──
+  '/discussion',           // 分组讨论列表
+  '/discussion-room',      // 讨论室
+  '/discussion-monitor',   // 讨论监控与 AI 总结（只读）
 ]
 
 /**

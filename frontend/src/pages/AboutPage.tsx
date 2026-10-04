@@ -3,12 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { Typography, Alert, Button, message } from 'antd'
 import { LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { useIsMobile } from '../hooks/useIsMobile'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 const AboutPage: React.FC = () => {
   const { t, i18n } = useTranslation('system')
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const [content, setContent] = useState('')
   const [clickCount, setClickCount] = useState(0)
   const [showEntry, setShowEntry] = useState(false)
@@ -89,14 +91,17 @@ const AboutPage: React.FC = () => {
           title={
             <span>
               {t('updateAvailable')}
-              <Button
-                type="link"
-                size="small"
-                onClick={() => navigate('/console')}
-                style={{ marginLeft: 8 }}
-              >
-                {t('enter')} →
-              </Button>
+              {/* 作者面板保持桌面专属：窄屏不给入口，避免点了进"请用电脑端"引导页 */}
+              {!isMobile && (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => navigate('/console')}
+                  style={{ marginLeft: 8 }}
+                >
+                  {t('enter')} →
+                </Button>
+              )}
             </span>
           }
         />

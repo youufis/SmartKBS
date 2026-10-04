@@ -2,7 +2,7 @@ import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox, Alert,
-  Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select,
+  Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select, Empty,
 } from 'antd'
 import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
@@ -19,6 +19,8 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useChatStore, setTaskFilename } from '../stores/chatStore'
 import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
+import MobileCardTable from '../components/MobileCardTable'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const TaskPage: React.FC = () => {
   const { t } = useTranslation('system')
@@ -27,6 +29,7 @@ const TaskPage: React.FC = () => {
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const username = user?.username || ''
   const isStudent = user?.role === 'student'
+  const isMobile = useIsMobile()
 
   // ── 等级辅助函数 ──
   const getGradeLevel = (score: number): { label: string; color: string } => {
@@ -92,6 +95,8 @@ const TaskPage: React.FC = () => {
   }
   const visibleTasks = pendingOnly && !isStudent ? tasks.filter((x) => (x.pending_grade_count ?? 0) > 0) : tasks
   const [loading, setLoading] = useState(false)
+  const MOBILE_CARD_PAGE = 8            // 窄屏卡片列表每页条数
+  const [mPage, setMPage] = useState(1)
   const [createModal, setCreateModal] = useState(false)
   const [taskName, setTaskName] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
@@ -455,14 +460,14 @@ const TaskPage: React.FC = () => {
             <Tooltip title={t('submitAction')}>
               <Button size="small" type="primary" icon={<SendOutlined />}
                 onClick={() => { setSelectedTask(record); setSubmitModal(true) }}
-              />
+              >{isMobile ? t('submitAction') : null}</Button>
             </Tooltip>
           )}
           {isStudent && record.submissions?.includes(username) && (
             <Tooltip title={t('scoreAction')}>
               <Button size="small" icon={<BarChartOutlined />}
                 onClick={() => handleViewMyGrade(record)}
-              />
+              >{isMobile ? t('scoreAction') : null}</Button>
             </Tooltip>
           )}
           {isAdminOrTeacher && (
@@ -512,6 +517,12 @@ const TaskPage: React.FC = () => {
     },
   ]
 
+  // 窄屏卡片：把「作业名称」提到首位当卡片标题，其余列依次成行
+  const cardColumns = (() => {
+    const i = columns.findIndex((c: any) => c.key === 'name')
+    return i > 0 ? [columns[i], ...columns.slice(0, i), ...columns.slice(i + 1)] : columns
+  })()
+
   return (
     <div>
       <Card>
@@ -537,14 +548,25 @@ const TaskPage: React.FC = () => {
         </Space>
 
         <Spin spinning={loading}>
-          <Table className="nowrap-cells-table"
-            dataSource={visibleTasks}
-            columns={columns}
-            rowKey="id"
-            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalTasks', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
-            size="small"
-            locale={{ emptyText: t('noActiveTasks') }}
-          />
+          {isMobile && isStudent ? (
+            /* 窄屏：作业列表改卡片，「提交」按钮不必横向滚动才能点到（教师端保持表格） */
+            <MobileCardTable
+              dataSource={visibleTasks.slice((mPage - 1) * MOBILE_CARD_PAGE, mPage * MOBILE_CARD_PAGE)}
+              columns={cardColumns}
+              rowKey="id"
+              pagination={{ current: mPage, pageSize: MOBILE_CARD_PAGE, total: visibleTasks.length, onChange: setMPage }}
+              emptyText={<Empty description={t('noActiveTasks')} />}
+            />
+          ) : (
+            <Table className="nowrap-cells-table"
+              dataSource={visibleTasks}
+              columns={columns}
+              rowKey="id"
+              pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalTasks', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
+              size="small"
+              locale={{ emptyText: t('noActiveTasks') }}
+            />
+          )}
         </Spin>
       </Card>
 

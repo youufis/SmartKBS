@@ -335,13 +335,13 @@ const DiscussionRoomPage: React.FC = () => {
   }, [groupId])
 
   return (
-    <div style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-container)' }}>
+    <div className="chat-layout" style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-container)' }}>
       {/* 顶部栏 */}
       <Card
         style={{ marginBottom: 0, borderRadius: 0 }}
         styles={{ body: { padding: '12px 16px' } }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="page-header-flex" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack} />
             <div>

@@ -136,23 +136,24 @@ const DiscussionMonitorPage: React.FC = () => {
         </Space>
 
         {/* 统计概览 */}
+        {/* 窄屏两列一排，避免统计卡标题被挤成竖排（桌面 span 不变） */}
         <Row gutter={16} style={{ marginBottom: 24 }}>
-          <Col span={4}>
+          <Col span={4} xs={12}>
             <Card size="small">
               <Statistic title={t('totalGroups')} value={data.total_groups} prefix={<TeamOutlined />} />
             </Card>
           </Col>
-          <Col span={5}>
+          <Col span={5} xs={12}>
             <Card size="small">
               <Statistic title={t('totalMembers')} value={data.total_members} prefix={<TeamOutlined />} />
             </Card>
           </Col>
-          <Col span={5}>
+          <Col span={5} xs={12}>
             <Card size="small">
               <Statistic title={t('totalMessages')} value={data.total_messages} prefix={<MessageOutlined />} />
             </Card>
           </Col>
-          <Col span={5}>
+          <Col span={5} xs={12}>
             <Card size="small">
               <Statistic
                 title={t('onlineCount')}
@@ -162,7 +163,7 @@ const DiscussionMonitorPage: React.FC = () => {
               />
             </Card>
           </Col>
-          <Col span={5}>
+          <Col span={5} xs={12}>
             <Card size="small">
               <Statistic
                 title={t('coldGroups')}
@@ -179,7 +180,7 @@ const DiscussionMonitorPage: React.FC = () => {
         <Title level={5}>{t('groupStatus')}</Title>
         <Row gutter={[12, 12]}>
           {data.groups.map(g => (
-            <Col span={8} key={g.id}>
+            <Col span={8} xs={12} key={g.id}>
               <Card
                 size="small"
                 title={
