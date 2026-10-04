@@ -140,8 +140,29 @@ export async function autoSelectQuestions(
   }
 ): Promise<PaperMutationResult & {
     questions: any[]; short_by?: number; notice?: string; fallback_only?: boolean;
+    reason?: string;
+    type_stats?: Record<string, number>;
+    difficulty_stats?: Record<string, number>;
   }> {
   const { data } = await apiClient.post(`/api/exams/${examId}/auto-select-questions`, params, { timeout: 300000 });
+  return data;
+}
+
+/** AI 智能组卷（与「自动选题」共用后端组卷引擎） */
+export async function aiComposeExam(
+  examId: number,
+  params: {
+    target_count?: number;
+    knowledge_focus?: string;
+    question_types?: string[];
+    difficulty?: string;
+  }
+): Promise<PaperMutationResult & {
+  recommended?: number; reason?: string; notice?: string;
+  type_stats?: Record<string, number>; difficulty_stats?: Record<string, number>;
+}> {
+  // 主观题组卷要过一遍模型，可能远超全局 30s 超时
+  const { data } = await apiClient.post(`/api/exams/${examId}/ai-compose`, params, { timeout: 300000 });
   return data;
 }
 

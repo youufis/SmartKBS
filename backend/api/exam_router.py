@@ -27,13 +27,21 @@ from backend.logger import logger
 from backend.api.ai_service import call_ai_async
 from backend.prompts import apply_skills, build_ai_role
 from backend.async_utils import spawn_bg
-from backend.utils import extract_json_from_text
 from backend.permission_service import check_activity_visibility
 # S-GRADING(P2): 主观题后台批量批改引擎(与同步练习/随堂测验共用)
 from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
 from backend.question_db import get_connection
 # 2026-10 走查: 分值分配 / 卷面守卫 / 原子写入统一收敛到 backend/exam_scoring.py
 from backend import exam_scoring
+# 2026-10 走查第二批: 选题能力统一收敛到 backend/paper_compose.py（与智能组卷页同一引擎）
+from backend.paper_compose import (
+    difficulty_split,
+    get_question_pool,
+    select_questions_by_ai,
+    select_questions_by_rules,
+    split_count_by_types,
+    stats_of,
+)
 
 router = APIRouter()
 
@@ -112,6 +120,38 @@ def _can_manage_exam(username: str, exam: dict[str, Any] | None = None) -> bool:
     if exam and exam.get("creator_username") == username:
         return True
     return False
+
+
+def _avg_score(target_total: Any, count: int) -> float:
+    """目标总分 / 题量 —— 只用来给组卷 prompt 显示"每题大约几分"。"""
+    try:
+        n = max(int(count), 1)
+        return round(max(float(target_total or 0) / n, exam_scoring.MIN_SCORE), 1)
+    except (TypeError, ValueError):
+        return 5.0
+
+
+def _pool_notice(audit: dict[str, Any]) -> str:
+    """把候选池的审计翻成给老师看的一句"题从哪来"。
+
+    注意 audit 描述的是**候选池**（一次取满 1000 题），不是本次入卷的那几题，
+    所以这里只说池子的构成，不写成"本次有 N 题是兜底题"那种假精确。
+    """
+    _tiers = (audit or {}).get("tiers") or {}
+    _skip = (audit or {}).get("skipped") or {}
+    pool_n = int((audit or {}).get("pool") or 0)
+    t5_n = int(_tiers.get("T5") or 0)
+    bits = []
+    if pool_n and t5_n:
+        if t5_n >= pool_n:
+            bits.append("题库里没有命中该知识点的题，本次全部取自本学科其它内容")
+        else:
+            bits.append(f"题库中命中该知识点的题只有 {pool_n - t5_n} 道，不足部分取自本学科其它内容")
+    if _skip.get("family"):
+        bits.append("未限定学科，已放开到全部学科")
+    if (audit or {}).get("folded_duplicates"):
+        bits.append(f"已折叠 {audit['folded_duplicates']} 道重复题")
+    return "；".join(bits)
 
 
 def _gap_text(gap: float) -> str:
@@ -999,36 +1039,32 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
 
     impact = _require_paper_editable(exam, "自动选题")
 
-    # 统一分层召回（替代原先"单个关键词 LIKE 命中即等概率 + random.sample"的写法）：
-    # 学科族内按 标签相等 > 标签子串 > 题干实词 > 同章节兄弟知识点 排序取题；
-    # 考试入口不会自动生成题目，因此允许"同学科族兜底"填满题量。指定了学科则绝不跨学科给题。
-    # 兜底/放宽情况必须回给老师看（旧写法只写进服务端 INFO 日志，界面上一字未提，
-    # 与函数头注释的承诺不符）。
-    from backend.question_select import log_audit, select_questions
-
+    # 与智能组卷页共用一套引擎：先出池（统一分层召回，学科严格限族），再按题型配额
+    # + 难度配比拼卷。旧写法只给一个总数，题型分布全靠池子里的运气 —— 实测 10 道题
+    # 能清一色是单选；而且"兜底了几题"只写进服务端 INFO 日志，界面上一字未提。
     existing_ids: list[int] = []
     if req.exclude_existing:
         existing_ids = [r["question_id"] for r in execute_query(
             "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []]
     asked_types = tuple(req.question_types) if req.question_types else exam_scoring.GRADABLE_TYPES
     skipped_types = exam_scoring.ungradable_types(asked_types)     # 例如 code：进卷也没法判分
-    q_types = tuple(t for t in asked_types if exam_scoring.is_gradable(t)) or exam_scoring.GRADABLE_TYPES
+    q_types = tuple(x for x in asked_types if exam_scoring.is_gradable(x)) or exam_scoring.GRADABLE_TYPES
     want = max(1, min(req.count, 200))
-    selected, audit = select_questions(
-        kp_name=req.knowledge_keyword or "", subject=req.subject or "",
-        types=q_types, count=want, exclude_ids=existing_ids,
-        difficulty=req.difficulty or "", allow_family_fallback=True,
-        seed="exam:%s" % exam_id,
+    easy_r, medium_r, hard_r = difficulty_split(req.difficulty or "")
+    pool, audit = get_question_pool(
+        subject=req.subject or "",
+        exclude_ids=set(existing_ids),
+        knowledge_points=[req.knowledge_keyword] if req.knowledge_keyword else None,
+        types=q_types, seed="exam:%s" % exam_id, with_audit=True,
     )
-    log_audit("exam_auto_select(exam=%s)" % exam_id, audit)
-    if not selected:
+    if not pool:
         raise HTTPException(status_code=404,
                             detail="未找到符合条件的题目（学科/题型/知识点在题库里没有可用题）")
-
-    already = set(existing_ids)
-    picked = [q for q in selected if int(q["id"]) not in already]
+    type_configs = split_count_by_types(want, q_types,
+                                        _avg_score(exam["total_score"], want), pool=pool)
+    picked, reason = select_questions_by_rules(pool, type_configs, easy_r, medium_r, hard_r)
     if not picked:
-        raise HTTPException(status_code=400, detail="符合条件的题目都已在试卷中，请调整筛选条件或加大题量")
+        raise HTTPException(status_code=400, detail=reason or "符合条件的题目都已在试卷中，请调整筛选条件")
 
     # 分值：新题先插 0 分占位，再按"原有比例 + 题型权重"配平回目标总分，
     # **不改 exams.total_score**。旧写法用 total/新增题数 算分，还把 total_score
@@ -1052,10 +1088,10 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
     execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
     gap = exam_scoring.rebalance_paper(exam_id, exam["total_score"])
-    short = int(audit.get("short_by") or 0)
+    short = max(want - len(picked), 0)
     parts = [f"智能选题完成，共添加 {len(inserted)} 道试题"]
     if short:
-        parts.append(f"符合条件的题只有 {want - short} 道，还缺 {short} 道（题库可用量不足）")
+        parts.append(f"目标 {want} 道，题库只凑到 {len(picked)} 道（还缺 {short} 道）")
     if abs(gap) > 0.05:
         parts.append(_gap_text(gap))
     else:
@@ -1064,18 +1100,11 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
         parts.append("已忽略不支持判分的题型：" + "、".join(skipped_types))
 
     # 给老师看的"题从哪来"说明：兜底题、学科隔离、重复折叠
-    _tiers = audit.get("tiers") or {}
-    _skip = audit.get("skipped") or {}
-    bits = []
-    if int(_tiers.get("T5_used") or 0):
-        bits.append(f"其中 {_tiers['T5_used']} 道是本学科其它内容的题（知识点命中不足）")
-    if _skip.get("family"):
-        bits.append("未限定学科，已放开到全部学科")
-    if audit.get("folded_duplicates"):
-        bits.append(f"已折叠 {audit['folded_duplicates']} 道重复题")
-    notice = "；".join(bits)
+    notice = _pool_notice(audit)
 
-    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 选取={len(inserted)}题 缺口={gap} {notice}")
+    type_stats, diff_stats = stats_of(picked)
+    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 选取={len(inserted)}题 缺口={gap} "
+                f"题型={type_stats} 难度={diff_stats} {notice} | {reason}")
 
     return {
         "message": "，".join(parts),
@@ -1087,6 +1116,9 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
         "short_by": short,
         "notice": notice,
         "fallback_only": bool(audit.get("fallback_only")),
+        "reason": reason,
+        "type_stats": type_stats,
+        "difficulty_stats": diff_stats,
         **impact,
     }
 
@@ -2678,15 +2710,24 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
 # ═══════════════════════════════════════════════════════════
 
 class AIComposeRequest(BaseModel):
-    """AI 智能组卷请求"""
-    target_count: int = 10
+    """AI 智能组卷请求（与「自动选题」同一套筛选条件，只是最后一步多让模型挑一遍）"""
+    target_count: int = Field(default=10, ge=1, le=100)
     knowledge_focus: str = ""
-    difficulty_distribution: str = "easy:medium:hard = 2:5:3"
+    question_types: list[str] | None = None
+    difficulty: str | None = None
+    # 旧字段 difficulty_distribution: str = "easy:medium:hard = 2:5:3" 声明了却从没被读过
+    # （死参数）。现在由 difficulty 单档偏好 + 引擎默认 20:50:30 取代。
 
 
 @router.post("/{exam_id}/ai-compose", summary="AI 智能组卷")
 async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request):
-    """AI 智能组卷：根据考试目标从题库自动选择最优试题组合"""
+    """AI 智能组卷：让模型在候选池里挑题，但结果不原样入库（配额校验 + 缺额补齐）。
+
+    与「自动选题」共用 backend/paper_compose 引擎，区别只在最后一步由谁选题。
+    旧实现自带一套候选池 SQL：subject 精确等值（库里 信息技术 154 / 信息科技 96 题，
+    互相看不见）、ORDER BY difficulty LIMIT 50 —— 老师填的"知识点重点"对候选池零影响，
+    模型只能在"最容易的 50 道题"里挑，想挑相关题也没素材。
+    """
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -2702,125 +2743,81 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
     impact = _require_paper_editable(exam, "AI 组卷")
-
-    # 获取候选题目（排除已添加的；再排除没有判分分支的题型 —— 那种题进卷只会白占总分）
-    _gt = ",".join("?" * len(exam_scoring.GRADABLE_TYPES))
-    candidates = execute_query(
-        """SELECT q.id, q.type, q.question_text, q.difficulty,
-                  q.knowledge_points, q.subject
-           FROM question_bank q
-           WHERE q.status = 'active'
-           AND q.subject = ?
-           AND q.type IN (""" + _gt + """)
-           AND q.id NOT IN (SELECT question_id FROM exam_questions WHERE exam_id = ?)
-           ORDER BY q.difficulty
-           LIMIT 50""",
-        (exam["subject"], *exam_scoring.GRADABLE_TYPES, exam_id),
-    )
-
-    if not candidates:
-        raise HTTPException(status_code=400, detail="题库中没有可选的题目，请先导入试题")
-
-    # 构建候选题目文本
-    type_map = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
-                 "fill": "填空题", "essay": "作文", "subjective": "主观题"}
-    diff_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
-
-    candidate_text = ""
-    for i, q in enumerate(candidates, 1):
-        q_type = type_map.get(q["type"], q["type"])
-        q_diff = diff_map.get(q["difficulty"], q["difficulty"])
-        q_text = q["question_text"][:80]
-        q_kp = q.get("knowledge_points", "") or "无"
-        candidate_text += f"{i}. [{q_type}][{q_diff}] {q_text} (知识点: {q_kp})\n"
-
-    from backend.prompts.exam import AI_EXAM_COMPOSE_PROMPT
-    from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_async
-
-    keys = get_api_keys(username)
-    api_key = keys[0] if keys and keys[0] else ""
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 API Key")
-
-    def _safe(s):
-        return str(s).replace('{', '{{').replace('}', '}}')
-
-    ai_role = build_ai_role(subject=exam["subject"], grade=exam.get("target_grade", ""))
-    prompt = f"{ai_role}" + AI_EXAM_COMPOSE_PROMPT.format(
-        exam_title=_safe(exam["title"]),
-        subject=_safe(exam["subject"]),
-        total_score=_safe(exam["total_score"]),
-        target_count=_safe(req.target_count),
-        knowledge_focus=_safe(req.knowledge_focus or "无特定要求"),
-        candidate_questions=_safe(candidate_text),
-    )
-    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
-
-    try:
-        ai_response = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False)
-    except Exception as e:
-        logger.error(f"AI 组卷调用失败: {e}")
-        raise HTTPException(status_code=500, detail=f"AI 组卷失败: {str(e)}")
-
-    # 解析 AI 返回的 JSON
-    result = extract_json_from_text(ai_response)
-    if not result or not isinstance(result, dict):
-        raise HTTPException(status_code=500, detail="AI 返回格式异常，请重试")
-
-    try:
-        selected_ids = result.get("selected_ids", [])
-        reason = result.get("reason", "")
-    except (json.JSONDecodeError, TypeError):
-        raise HTTPException(status_code=500, detail="AI 返回格式解析失败")
-
-    if not selected_ids:
-        raise HTTPException(status_code=400, detail="AI 未选择任何题目，请调整条件后重试")
-
-    # 验证选中的题目是否都在候选列表中
-    valid_ids = {q["id"] for q in candidates}
-    selected_ids = [sid for sid in selected_ids if sid in valid_ids]
-
-    if not selected_ids:
-        raise HTTPException(status_code=400, detail="AI 选择的题目无效，请重试")
-
-    # 添加题目到考试：分值与手动添加/自动选题同一口径（目标余额 + 题型权重，不改目标分）
-    already = {int(r["question_id"]) for r in execute_query(
-        "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []}
-    to_add = [int(s) for s in dict.fromkeys(selected_ids) if int(s) not in already]
-    if not to_add:
-        raise HTTPException(status_code=400, detail="AI 推荐的题目都已在试卷中，请调整知识点重点后重试")
-
     if float(exam["total_score"] or 0) <= 0:
         raise HTTPException(status_code=400, detail="请先在「编辑考试」里把目标总分设为大于 0 的数")
-    inserted = exam_scoring.insert_paper_questions(exam_id, [(q, 0.0) for q in to_add])
-    added = len(inserted)
 
+    asked_types = tuple(req.question_types) if req.question_types else exam_scoring.GRADABLE_TYPES
+    skipped_types = exam_scoring.ungradable_types(asked_types)
+    q_types = tuple(x for x in asked_types if exam_scoring.is_gradable(x)) or exam_scoring.GRADABLE_TYPES
+    want = max(1, min(int(req.target_count or 10), 100))
+    focus = [x for x in re.split(r"[,，、;；/|\s]+", req.knowledge_focus or "") if x]
+    easy_r, medium_r, hard_r = difficulty_split(req.difficulty or "")
+
+    # 没配 API Key 就明确报错，而不是悄悄退化成规则选题 —— 按钮写的是「AI 生成」，
+    # 静默降级会让老师以为这套卷是模型挑的（智能组卷页有 use_ai 开关，这里没有）。
+    from backend.api.chat_router import get_api_keys
+    try:
+        _keys = get_api_keys(username)
+    except Exception:
+        _keys = []
+    if not (_keys and _keys[0]):
+        raise HTTPException(status_code=400, detail="未配置 API Key，无法使用 AI 生成；可改用「自动选题」")
+
+    pool, audit = get_question_pool(
+        subject=str(exam.get("subject") or ""),
+        exclude_ids={r["question_id"] for r in execute_query(
+            "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []},
+        knowledge_points=focus or None,
+        types=q_types, seed="exam_ai:%s" % exam_id, with_audit=True,
+    )
+    if not pool:
+        raise HTTPException(
+            status_code=400,
+            detail="题库里没有该学科的可用题目，请先在题库补题或调整考试学科"
+                   "（题目标签与考试学科写法不一致时，题会互相看不见）")
+
+    type_configs = split_count_by_types(want, q_types, _avg_score(exam["total_score"], want), pool=pool)
+    selected_questions, reason = await select_questions_by_ai(
+        pool=pool, type_configs=type_configs,
+        easy_ratio=easy_r, medium_ratio=medium_r, hard_ratio=hard_r,
+        knowledge_points=focus, exam_info=exam, username=username,
+    )
+    if not selected_questions:
+        raise HTTPException(status_code=400, detail=reason or "AI 未能选出合适的题目，请调整条件后重试")
+
+    inserted = exam_scoring.insert_paper_questions(
+        exam_id, [(int(q["id"]), 0.0) for q in selected_questions])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
-
-    # 与其它选题入口同一口径：插 0 分占位后按原比例配平回目标总分
+    # 与其它选题入口同一口径：插 0 分占位后按原比例配平回目标总分，不改 exams.total_score
     gap = exam_scoring.rebalance_paper(exam_id, exam["total_score"])
-    parts = [f"AI 组卷完成，共添加 {added} 道试题"]
-    dropped = len(selected_ids) - added
-    if dropped:
-        parts.append(f"{dropped} 道已存在或无效被跳过")
+
+    type_stats, diff_stats = stats_of(selected_questions)
+    short = max(want - len(inserted), 0)
+    parts = [f"AI 组卷完成，共添加 {len(inserted)} 道试题"]
+    if short:
+        parts.append(f"目标 {want} 道，实际凑到 {len(inserted)} 道（还缺 {short} 道）")
+    if skipped_types:
+        parts.append("已忽略不支持判分的题型：" + "、".join(skipped_types))
     if abs(gap) > 0.05:
         parts.append(_gap_text(gap))
     else:
         parts.append(f"全卷分值已按目标总分 {round(float(exam['total_score'] or 0), 1)} 分配平")
 
-    logger.info(f"AI 组卷: 考试{exam_id} by {username}, 推荐{len(selected_ids)}题, "
-                f"实际添加{added}题, 缺口={gap}")
+    logger.info(f"AI 组卷: 考试{exam_id} by {username}, 入卷={len(inserted)}题, "
+                f"题型={type_stats} 难度={diff_stats}, 缺口={gap} | {reason}")
 
     return {
         "message": "，".join(parts),
-        "added": added,
-        "recommended": len(selected_ids),
+        "added": len(inserted),
+        "recommended": len(selected_questions),
         "reason": reason,
         "score_gap": gap,
         "target_total": exam["total_score"],
         "rebalanced": abs(gap) <= 0.05,
+        "type_stats": type_stats,
+        "difficulty_stats": diff_stats,
+        "notice": _pool_notice(audit),
         **impact,
     }
 

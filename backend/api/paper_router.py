@@ -3,19 +3,15 @@
 支持：智能组卷配置、AI 选题、Word 试卷导出、答案卷导出
 """
 import json
-import math
-import random
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.logger import logger
-from backend.prompts import build_ai_role
 from backend.question_db import (
     execute_query,
     execute_query_one,
@@ -23,64 +19,23 @@ from backend.question_db import (
     execute_update,
 )
 from backend import exam_scoring
-from backend.database import execute_query as user_query
+# 组卷选题引擎（题型配额 + 难度配比 + 分层召回 + AI 择优）已抽成共享模块，
+# 三个入口（智能组卷 / 管理题目-自动选题 / 管理题目-AI 生成）共用这一份实现。
+from backend.paper_compose import (
+    ComposeRequest,
+    ComposeResponse,
+    get_question_pool,
+    select_questions_by_ai,
+    select_questions_by_rules,
+    validate_compose_config,
+)
 
 router = APIRouter()
 
 
 # ═══════════════════════════════════════════════════════════════
-# 请求/响应模型
-# ═══════════════════════════════════════════════════════════════
-
-class TypeConfigItem(BaseModel):
-    """题型配置项"""
-    type: str                          # single | multiple | true_false | short
-    count: int = 0                     # 题数
-    score_per_question: float = 5.0    # 每题分值
-
-
-class ComposeRequest(BaseModel):
-    """智能组卷请求"""
-    school_name: str = ""              # 学校名称
-    semester: str = ""                 # 学年学期
-    target_grade: str = ""             # 考试年级
-    type_configs: list[TypeConfigItem] = []  # 题型配置列表
-    difficulty_easy_ratio: int = 20    # 简单题占比 %
-    difficulty_medium_ratio: int = 50  # 中等题占比 %
-    difficulty_hard_ratio: int = 30    # 困难题占比 %
-    knowledge_points: list[str] = []   # 知识点范围（留空=全部）
-    total_score: float | None = None   # 总分（如不传则根据配置自动计算）
-    replace_existing: bool = False     # 是否替换考试中已有题目
-    use_ai: bool = True                # 是否使用 AI 智能选择
-
-
-class ComposeResponse(BaseModel):
-    """组卷响应"""
-    message: str
-    added: int
-    total_questions: int
-    type_stats: dict[str, int]
-    difficulty_stats: dict[str, int]
-    total_score: float
-    reason: str = ""
-    # 已有提交份数：组卷不会重算历史成绩，界面据此提示"要不要先去成绩页复核"
-    submitted_attempts: int = 0
-
-
-# ═══════════════════════════════════════════════════════════════
 # 辅助函数
 # ═══════════════════════════════════════════════════════════════
-
-TYPE_LABELS = {
-    "single": "单选题",
-    "multiple": "多选题",
-    "true_false": "判断题",
-    "short": "简答题",
-    "fill": "填空题",
-    "essay": "作文",
-    "subjective": "主观题",
-}
-
 
 def _can_manage_exam(username: str, exam: dict[str, Any] | None = None) -> bool:
     """检查是否有管理考试的权限"""
@@ -102,334 +57,6 @@ def exam_scoring_guard(exam: dict[str, Any], action: str) -> dict[str, Any]:
         )
     return {"submitted_attempts": exam_scoring.submitted_count(int(exam["id"]))}
 
-
-def _get_question_pool(
-    subject: str,
-    exclude_ids: set[int],
-    knowledge_points: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """获取候选题目池
-
-    Args:
-        subject: 科目
-        exclude_ids: 需要排除的题目 ID 集合
-        knowledge_points: 知识点列表（为空则全部）
-
-    Returns:
-        候选题目列表
-    """
-    from backend.question_select import log_audit, select_questions
-    # 组卷是"先出池、后按配额拼卷"，因此取满池并允许同学科族兜底（兜底题在池子末尾，
-    # 命中知识点的题排在前面），但仍严格限制在指定学科族内，绝不跨学科。
-    rows, _audit = select_questions(
-        kp_name="、".join(knowledge_points or []), subject=subject,
-        types=("single", "multiple", "true_false", "short", "fill"),
-        count=1000, exclude_ids=list(exclude_ids or []),
-        allow_family_fallback=True, seed="paper",
-    )
-    log_audit("paper_pool", _audit)
-    # 解析 options JSON
-    for row in rows:
-        if row.get("options") and isinstance(row["options"], str):
-            try:
-                row["options"] = json.loads(row["options"])
-            except (json.JSONDecodeError, TypeError):
-                row["options"] = None
-
-    return rows
-
-
-def _validate_compose_config(req: ComposeRequest) -> tuple[float, str]:
-    """验证组卷配置，返回 (计算总分, 错误信息)"""
-    if not req.type_configs:
-        return 0, "请配置至少一种题型"
-
-    total = 0.0
-    for tc in req.type_configs:
-        if tc.count < 0:
-            return 0, f"题型 {TYPE_LABELS.get(tc.type, tc.type)} 的题数不能为负"
-        if tc.score_per_question <= 0:
-            return 0, f"题型 {TYPE_LABELS.get(tc.type, tc.type)} 的分值必须大于 0"
-        total += tc.count * tc.score_per_question
-
-    if total <= 0:
-        return 0, "试卷总分必须大于 0"
-
-    total_ratio = req.difficulty_easy_ratio + req.difficulty_medium_ratio + req.difficulty_hard_ratio
-    if total_ratio != 100:
-        return 0, "难度分布比例之和必须为 100"
-
-    return total, ""
-
-
-def _select_questions_by_rules(
-    pool: list[dict[str, Any]],
-    type_configs: list[TypeConfigItem],
-    easy_ratio: int,
-    medium_ratio: int,
-    hard_ratio: int,
-) -> tuple[list[dict[str, Any]], str]:
-    """基于规则从候选池中选题（非 AI 模式）
-
-    Returns:
-        (选中的题目列表, 说明文字)
-    """
-    selected: list[dict[str, Any]] = []
-    reason_parts = []
-
-    # 按题型分组
-    type_pool: dict[str, list[dict[str, Any]]] = {}
-    for q in pool:
-        q_type = q["type"]
-        if q_type not in type_pool:
-            type_pool[q_type] = []
-        type_pool[q_type].append(q)
-
-    # 按题型配置选题
-    for tc in type_configs:
-        q_type = tc.type
-        target_count = tc.count
-        if target_count == 0:
-            continue
-
-        candidates = type_pool.get(q_type, [])
-        if not candidates:
-            reason_parts.append(f"{TYPE_LABELS.get(q_type, q_type)}：题库中无候选题目")
-            continue
-
-        if len(candidates) < target_count:
-            reason_parts.append(
-                f"{TYPE_LABELS.get(q_type, q_type)}：需要{target_count}题，候选仅{len(candidates)}题，已全部选取"
-            )
-            selected.extend(candidates)
-            continue
-
-        # 按难度比例从候选池中分层抽样
-        easy_pool = [q for q in candidates if q["difficulty"] == "easy"]
-        medium_pool = [q for q in candidates if q["difficulty"] == "medium"]
-        hard_pool = [q for q in candidates if q["difficulty"] == "hard"]
-
-        # 计算每种难度应选题数 —— 最大余数法，三档之和恒等于 target_count。
-        # （旧写法 max(1, round(...)) 在比例含 0 时会让计划总数超过题数：
-        #   实测 target=3、难度比 0/90/10 会抽出 4 题，卷面题量与总分双双错位）
-        _raw = {"easy": target_count * easy_ratio / 100,
-                "medium": target_count * medium_ratio / 100,
-                "hard": target_count * hard_ratio / 100}
-        _quota = {d: int(v) for d, v in _raw.items()}
-        _rem = target_count - sum(_quota.values())
-        for d in sorted(_raw, key=lambda x: (_raw[x] - _quota[x], _raw[x]), reverse=True):
-            if _rem <= 0:
-                break
-            if _raw[d] > 0:
-                _quota[d] += 1
-                _rem -= 1
-        target_easy, target_medium, target_hard = _quota["easy"], _quota["medium"], _quota["hard"]
-
-        # 调整：如果某种难度的题不够，均分给其他难度
-        chosen: list[dict[str, Any]] = []
-
-        def _pick_from(pool_list: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
-            # 按候选池顺序取前 n：池子由 select_questions 生成——层级按相关度排序(T0 最前)、
-            # 层内已按每次调用的随机种子打乱。旧写法 random.sample 等概率抽样，
-            # 会让 T5 同学科兜底题和 T1 命中题同率入卷；切片既保相关度优先又每次换一批。
-            if not pool_list or n <= 0:
-                return []
-            return pool_list[:n]
-
-        chosen.extend(_pick_from(easy_pool, target_easy))
-        chosen.extend(_pick_from(medium_pool, target_medium))
-        chosen.extend(_pick_from(hard_pool, target_hard))
-
-        # 如果还不够，从剩余中随机补足
-        if len(chosen) < target_count:
-            _chosen_ids = {q["id"] for q in chosen}
-            remaining = [q for q in candidates if q["id"] not in _chosen_ids]
-            additional = _pick_from(remaining, target_count - len(chosen))
-            chosen.extend(additional)
-
-        # 打乱顺序
-        random.shuffle(chosen)
-        selected.extend(chosen)
-
-    if not selected:
-        return [], "未能从题库中选出任何题目，请检查题库是否为空或筛选条件是否过于严格"
-
-    # 统计
-    type_stats_str = ", ".join(
-        f"{TYPE_LABELS.get(tc.type, tc.type)}{tc.count}题"
-        for tc in type_configs if tc.count > 0
-    )
-    reason_parts.insert(0, f"共选题 {len(selected)} 道（{type_stats_str}）")
-    reason = "；".join(reason_parts)
-
-    return selected, reason
-
-
-async def _select_questions_by_ai(
-    pool: list[dict[str, Any]],
-    type_configs: list[TypeConfigItem],
-    easy_ratio: int,
-    medium_ratio: int,
-    hard_ratio: int,
-    knowledge_points: list[str],
-    exam_info: dict[str, Any],
-    username: str,
-) -> tuple[list[dict[str, Any]], str]:
-    """使用 AI 从候选池中智能选题"""
-    from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_async
-    from backend.prompts.paper import AI_PAPER_COMPOSE_PROMPT
-
-    keys = get_api_keys(username)
-    api_key = keys[0] if keys and keys[0] else ""
-    if not api_key:
-        logger.warning("AI 组卷：未配置 API Key，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
-
-    # 构建题型配置文本
-    type_config_lines = []
-    for tc in type_configs:
-        if tc.count > 0:
-            label = TYPE_LABELS.get(tc.type, tc.type)
-            type_config_lines.append(f"- {label}：{tc.count} 题，每题 {tc.score_per_question:.0f} 分")
-    type_config_text = "\n".join(type_config_lines)
-
-    # 构建候选题目文本
-    type_map = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
-                 "fill": "填空题", "essay": "作文", "subjective": "主观题"}
-    diff_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
-
-    # 候选池按题型截断后再进 prompt（池子本身已按相关度分层排序，取每型前若干题）：
-    # 整池上千题全量塞给模型会推高成本/超时并拉低选题质量。
-    _quota_types = [tc.type for tc in type_configs if tc.count > 0]
-    _per_type_cap = max(20, 120 // max(1, len(_quota_types)))
-    _ai_cnt: dict[str, int] = {}
-    ai_pool = []
-    for q in pool:
-        if _ai_cnt.get(q["type"], 0) < _per_type_cap:
-            ai_pool.append(q)
-            _ai_cnt[q["type"]] = _ai_cnt.get(q["type"], 0) + 1
-
-    candidate_lines = []
-    for i, q in enumerate(ai_pool, 1):
-        q_type = type_map.get(q["type"], q["type"])
-        q_diff = diff_map.get(q["difficulty"], q["difficulty"])
-        q_text = q["question_text"][:100]
-        q_kp = q.get("knowledge_points", "") or "无"
-        # 为每道题加一个预设分值
-        matching_config = next((tc for tc in type_configs if tc.type == q["type"]), None)
-        q_score = matching_config.score_per_question if matching_config else 5
-        candidate_lines.append(
-            f"{i}. [ID:{q['id']}] [{q_type}][{q_diff}] {q_text} (知识点: {q_kp}, 预设分值: {q_score:.0f}分)"
-        )
-    candidate_text = "\n".join(candidate_lines)
-
-    knowledge_focus = "、".join(knowledge_points) if knowledge_points else "无特定要求，覆盖广泛"
-
-    def _safe(s):
-        return str(s).replace('{', '{{').replace('}', '}}')
-
-    ai_role = build_ai_role(subject=exam_info.get("subject", ""), grade=exam_info.get("target_grade", ""))
-    prompt = f"{ai_role}" + AI_PAPER_COMPOSE_PROMPT.format(
-        subject=_safe(exam_info.get("subject", "")),
-        exam_title=_safe(exam_info.get("title", "")),
-        total_score=_safe(exam_info.get("total_score", 100)),
-        grade=_safe(exam_info.get("target_grade", "")),
-        type_config=_safe(type_config_text),
-        easy_ratio=easy_ratio,
-        medium_ratio=medium_ratio,
-        hard_ratio=hard_ratio,
-        knowledge_focus=_safe(knowledge_focus),
-        candidate_questions=_safe(candidate_text),
-    )
-    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
-
-    try:
-        ai_response = await call_ai_async(prompt, api_key, json_mode=True, kb_query=knowledge_focus)
-        logger.info(f"AI 组卷返回: {str(ai_response)[:300]}")
-    except Exception as e:
-        logger.error(f"AI 组卷调用失败: {e}")
-        logger.warning("AI 组卷失败，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
-
-    # 解析 AI 返回的 JSON（支持嵌套对象）
-    import re
-    text = str(ai_response).strip()
-
-    # 1) 先尝试提取 ```json ... ``` 中的内容
-    json_str = None
-    code_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
-    if code_match:
-        json_str = code_match.group(1).strip()
-    else:
-        # 2) 从第一个 { 到最后一个 } 截取
-        start = text.find('{')
-        end = text.rfind('}')
-        if start >= 0 and end > start:
-            json_str = text[start:end + 1]
-
-    if not json_str:
-        logger.warning("AI 组卷返回中未找到 JSON，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
-
-    try:
-        result = json.loads(json_str)
-        selected_ids = result.get("selected_ids", [])
-        reason = result.get("reason", "AI 智能组卷")
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.warning(f"AI 组卷 JSON 解析失败: {e}，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
-
-    if not selected_ids:
-        logger.warning("AI 未选择任何题目，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
-
-    # 匹配选中的题目：按配置配额校验（去重、丢配置外题型、超配额截断），
-    # 缺额按候选池顺序（相关度优先）补同题型题 —— AI 结果不再原样入库。
-    pool_map = {q["id"]: q for q in pool}
-    quota_by_type = {tc.type: tc.count for tc in type_configs if tc.count > 0}
-    seen: set[int] = set()
-    selected: list[dict[str, Any]] = []
-    dropped_dup = dropped_offquota = 0
-    for sid in selected_ids:
-        q = pool_map.get(sid)
-        if not q:
-            continue
-        if q["id"] in seen:
-            dropped_dup += 1
-            continue
-        t_type = q["type"]
-        if t_type not in quota_by_type or sum(1 for x in selected if x["type"] == t_type) >= quota_by_type[t_type]:
-            dropped_offquota += 1
-            continue
-        seen.add(q["id"])
-        selected.append(q)
-
-    if not selected:
-        logger.warning("AI 组卷结果经配额校验后为空，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
-
-    filled = 0
-    for t_type, want in quota_by_type.items():
-        for q in pool:
-            if sum(1 for x in selected if x["type"] == t_type) >= want:
-                break
-            if q["type"] == t_type and q["id"] not in seen:
-                seen.add(q["id"])
-                selected.append(q)
-                filled += 1
-    notes = []
-    if filled:
-        notes.append(f"AI 选题不足，已按题库相关度补齐 {filled} 题")
-    if dropped_dup or dropped_offquota:
-        notes.append(f"AI 结果中 {dropped_dup} 题重复、{dropped_offquota} 题超出题型配额，已剔除")
-    if notes:
-        reason = reason + "（" + "；".join(notes) + "）"
-
-    return selected, reason
-
-
-# ═══════════════════════════════════════════════════════════════
 # API 端点
 # ═══════════════════════════════════════════════════════════════
 
@@ -454,7 +81,7 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
     impact = exam_scoring_guard(exam, "智能组卷")
 
     # ── 校验配置 ──
-    total_score, err_msg = _validate_compose_config(req)
+    total_score, err_msg = validate_compose_config(req)
     if err_msg:
         raise HTTPException(status_code=400, detail=err_msg)
 
@@ -473,7 +100,7 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
     # 如果不替换已有题目，排除它们
     exclude_ids = set() if req.replace_existing else existing_ids
 
-    pool = _get_question_pool(
+    pool = get_question_pool(
         subject=exam["subject"],
         exclude_ids=exclude_ids,
         knowledge_points=req.knowledge_points if req.knowledge_points else None,
@@ -484,7 +111,7 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
 
     # ── 选题 ──
     if req.use_ai and pool:
-        selected_questions, reason = await _select_questions_by_ai(
+        selected_questions, reason = await select_questions_by_ai(
             pool=pool,
             type_configs=req.type_configs,
             easy_ratio=req.difficulty_easy_ratio,
@@ -495,7 +122,7 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
             username=username,
         )
     else:
-        selected_questions, reason = _select_questions_by_rules(
+        selected_questions, reason = select_questions_by_rules(
             pool=pool,
             type_configs=req.type_configs,
             easy_ratio=req.difficulty_easy_ratio,

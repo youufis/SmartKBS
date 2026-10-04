@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col,
@@ -143,6 +143,8 @@ const ExamPage: React.FC = () => {
   const [aiComposing, setAiComposing] = useState(false)
   const [aiComposeCount, setAiComposeCount] = useState(10)
   const [aiComposeFocus, setAiComposeFocus] = useState('')
+  const [aiComposeTypes, setAiComposeTypes] = useState<string[]>([])
+  const [aiComposeDifficulty, setAiComposeDifficulty] = useState<string>()
 
   // ── 成绩查看弹窗 ──
   const [resultModal, setResultModal] = useState(false)
@@ -516,6 +518,33 @@ const ExamPage: React.FC = () => {
     }
   }
 
+  // 组卷说明 + 本次入卷结构（题型×题数、难度分布），只回一个 reason 老师看不出卷面长什么样
+  const composePlanText = (res: any) => {
+    const parts: string[] = [String(res?.reason || '')]
+    const ts = res?.type_stats as Record<string, number> | undefined
+    const ds = res?.difficulty_stats as Record<string, number> | undefined
+    if (ts && Object.keys(ts).length) {
+      parts.push(t('typeStatsLine', { stats: Object.entries(ts)
+        .map(([k, v]) => `${typeLabel(k)} ${v}`).join('、') }))
+    }
+    if (ds && Object.keys(ds).length) {
+      parts.push(t('difficultyStatsLine', { stats: Object.entries(ds)
+        .filter(([, v]) => v > 0).map(([k, v]) => `${difficultyLabel(k)} ${v}`).join('、') }))
+    }
+    return parts.filter(Boolean).join('\n')
+  }
+
+  // 卷面结构：题型与难度分布（弹窗里直接可见，不用自己去数表格）
+  const paperStats = useMemo(() => {
+    const byType: Record<string, number> = {}
+    const byDiff: Record<string, number> = {}
+    examQuestions.forEach((q: any) => {
+      byType[q.type] = (byType[q.type] || 0) + 1
+      byDiff[q.difficulty] = (byDiff[q.difficulty] || 0) + 1
+    })
+    return { byType, byDiff }
+  }, [examQuestions])
+
   const closeQModal = () => {
     closeWithDirtyGuard(scoreDirty, tc, () => setQuestionModal(false))
   }
@@ -547,6 +576,7 @@ const ExamPage: React.FC = () => {
       })
       message.success(res.message)
       if (res.notice) message.info(res.notice)        // 兜底题/放宽条件必须让老师看见
+      if (res.reason) message.info(t('autoSelectReason', { reason: res.reason }))
       reportImpact(res)
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
@@ -566,16 +596,19 @@ const ExamPage: React.FC = () => {
     if (!questionExam) return
     setAiComposing(true)
     try {
-      const { data } = await apiClient.post(`/api/exams/${questionExam.id}/ai-compose`, {
+      const data = await examsApi.aiComposeExam(questionExam.id, {
         target_count: aiComposeCount,
         knowledge_focus: aiComposeFocus,
-      }, { timeout: 300000 })
+        question_types: aiComposeTypes.length ? aiComposeTypes : undefined,
+        difficulty: aiComposeDifficulty || undefined,
+      })
       message.success(data.message || t('composeSuccess'))
+      if (data.notice) message.info(data.notice)      // 题从哪来：兜底/放宽情况要说清楚
       reportImpact(data)
       if (data.reason) {
         Modal.info({
           title: t('cwPlanTitle'),
-          content: data.reason,
+          content: composePlanText(data),
         })
       }
       await loadExamQuestions(questionExam.id)
@@ -1310,6 +1343,24 @@ const ExamPage: React.FC = () => {
               </Typography.Text>
             )}
           </Typography.Title>
+          {examQuestions.length > 0 && (
+            <Space wrap size={4} style={{ marginBottom: 8 }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('paperStructure')}：
+              </Typography.Text>
+              {Object.entries(paperStats.byType).map(([k, v]) => (
+                <Tag key={k}>{typeLabel(k)} × {v}</Tag>
+              ))}
+              <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                {t('difficulty')}：
+              </Typography.Text>
+              {Object.entries(paperStats.byDiff).map(([k, v]) => (
+                <Tag key={k} color={k === 'hard' ? 'red' : k === 'easy' ? 'green' : 'blue'}>
+                  {difficultyLabel(k)} × {v}
+                </Tag>
+              ))}
+            </Space>
+          )}
           {examQuestions.length === 0 ? (
             <Empty description={t('noQuestionsHint')} />
           ) : (
@@ -1406,10 +1457,26 @@ const ExamPage: React.FC = () => {
               </Button>
             }
           >
+            {/* 与「自动选题」同一套筛选条件：题型与难度会真的决定候选池与配额，
+                不再只是塞进 prompt（旧实现候选池是 subject 精确等值 + ORDER BY difficulty） */}
             <Space wrap style={{ gap: 8 }}>
               <Typography.Text style={{ fontSize: 13 }}>{t('targetCount')}</Typography.Text>
               <InputNumber size="small" min={1} max={100} value={aiComposeCount}
                 onChange={(v) => setAiComposeCount(v || 10)} style={{ width: 80 }} />
+              <Select size="small" allowClear mode="multiple" placeholder={t('questionTypeAny')}
+                value={aiComposeTypes} onChange={(v) => setAiComposeTypes(v || [])}
+                maxTagCount={2} style={{ minWidth: 160 }}>
+                {TYPE_OPTIONS.map(opt => (
+                  <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                ))}
+              </Select>
+              <Select size="small" allowClear placeholder={t('difficulty')}
+                value={aiComposeDifficulty} onChange={(v) => setAiComposeDifficulty(v)}
+                style={{ width: 100 }}>
+                <Option value="easy">{t('easy')}</Option>
+                <Option value="medium">{t('medium')}</Option>
+                <Option value="hard">{t('hard')}</Option>
+              </Select>
               <Typography.Text style={{ fontSize: 13 }}>{t('knowledgeFocus')}</Typography.Text>
               <Input size="small" value={aiComposeFocus}
                 onChange={(e) => setAiComposeFocus(e.target.value)}
