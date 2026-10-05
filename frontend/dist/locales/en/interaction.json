@@ -595,5 +595,9 @@
   "ipClass": "Class",
   "ipSearchStudent": "Search name / ID / class",
   "judgeTrue": "True",
-  "judgeFalse": "False"
+  "judgeFalse": "False",
+  "speakOnHint": "Speak the student's name when revealed (polyphonic surnames auto-corrected). Click to mute",
+  "speakOffHint": "Voice announcement is off. Click to enable",
+  "speakDisabledByAdmin": "Speech synthesis is disabled by the admin (System Settings → AI & Models → Speech)",
+  "speakFailed": "Voice announcement unavailable"
 }
