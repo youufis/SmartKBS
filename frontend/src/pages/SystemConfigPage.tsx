@@ -66,7 +66,7 @@ const CONFIG_ZONES: ConfigZone[] = [
   { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward'] },
   { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
-  { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard', 'ratelimit'] },
+  { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
   { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
 ]
 
@@ -87,7 +87,6 @@ const SECTION_TITLES: Record<string, string> = {
   quota: 'group_quota',
   session: 'group_session',
   guard: 'group_guard',
-  ratelimit: 'group_ratelimit',
   upgrade: 'group_upgrade',
 }
 
@@ -147,8 +146,10 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'KB_TOP_K', labelKey: 'field_KB_TOP_K', descKey: 'field_KB_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'KB_MIN_SCORE', labelKey: 'field_KB_MIN_SCORE', descKey: 'field_KB_MIN_SCORE_desc', type: 'float', group: 'knowledgebase', required: false },
   { key: 'KB_TIMEOUT_MS', labelKey: 'field_KB_TIMEOUT_MS', descKey: 'field_KB_TIMEOUT_MS_desc', type: 'number', group: 'knowledgebase', required: false, unitKey: 'unitMilliSecond' },
-  // 对话权限
+  // AI 对话权限与每日限额：前者管"谁能用"，后者管"能用多少次"，同一件事的两个维度，放在一节
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat' },
+  { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', type: 'boolean', group: 'chat' },
+  { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'chat', unitKey: 'unitTime' },
   // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
   { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', type: 'boolean', group: 'memory' },
   { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitTurn' },
@@ -201,9 +202,6 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'LOGIN_BLOCK_STUDENT', labelKey: 'field_LOGIN_BLOCK_STUDENT', descKey: 'field_LOGIN_BLOCK_desc', type: 'boolean', group: 'guard', danger: true },
   { key: 'LOGIN_BLOCK_TEACHER', labelKey: 'field_LOGIN_BLOCK_TEACHER', type: 'boolean', group: 'guard', danger: true },
   { key: 'LOGIN_BLOCK_EXTERNAL', labelKey: 'field_LOGIN_BLOCK_EXTERNAL', type: 'boolean', group: 'guard', danger: true },
-  // 流量限制
-  { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', type: 'boolean', group: 'ratelimit' },
-  { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'ratelimit', unitKey: 'unitTime' },
 
   // ══ ⑤ 运维与升级 ══
   { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade', danger: true },
