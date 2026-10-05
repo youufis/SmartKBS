@@ -113,6 +113,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
     "IMAGE_GEN_SIZE": "1024*1024",
     "IMAGE_GEN_MAX_PLACEHOLDERS": 2,
+    # ── 语音合成（backend/tts_service.py；百炼 qwen-audio-3.0-tts-flash）──
+    # 总开关默认关：关掉时全线不产生任何计费请求，智能点名页的语音播报也一并停用。
+    # 音色与模型必须配对（跨模型混用报 411），所以默认值与 DEFAULT_VOICE 保持一致。
+    "TTS_ENABLED": False,
+    "TTS_MODEL": "qwen-audio-3.0-tts-flash",
+    "TTS_VOICE": "qwen-audio-3.0-tts-flash-longnixiwei",   # 新闻联播·男（权威播报）
+    "TTS_SPEECH_RATE": 1.0,
+    "TTS_VOLUME": 50,
     # 积分防刷：每日上限（0 = 不限制）
     "REWARD_DAILY_CHAT_POINTS": 10,
     "REWARD_DAILY_QUIZ_SESSIONS": 3,
@@ -319,16 +327,20 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     # ── 百炼知识库检索（backend/bailian_kb.py）──
     "KB_TOP_K": (1, 20),
     "KB_TIMEOUT_MS": (500, 30000),
+    # ── 语音合成（backend/tts_service.py）──
+    "TTS_VOLUME": (0, 100),
 }
 # 浮点范围校验（_NUM_RANGES 会取整，0.01~1.00 的阈值必须走这里）
 _FLOAT_RANGES: dict[str, tuple[float, float]] = {
     "KB_MIN_SCORE": (0.01, 1.00),
+    "TTS_SPEECH_RATE": (0.5, 2.00),
 }
 _BOOL_KEYS = {
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
+    "TTS_ENABLED",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
 }
 _STR_LIMITS: dict[str, int] = {
@@ -337,6 +349,7 @@ _STR_LIMITS: dict[str, int] = {
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
     "dashscope_api_key": 200, "APPID": 128,
     "KB_API_BASE": 300, "KB_AGENT_ID": 128,
+    "TTS_MODEL": 80, "TTS_VOICE": 128,
 }
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
                  "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64}
@@ -783,6 +796,19 @@ async def kb_connectivity_test(request: Request):
     require_admin(user)
     from backend import bailian_kb
     return bailian_kb.test_kb()
+
+
+@router.get("/tts-voices", summary="语音合成可选音色清单（管理员）")
+async def tts_voices():
+    """返回实测可用的音色清单，供系统配置页的音色下拉使用。
+
+    单一数据源在 backend/tts_voices.py（只收实测出声成功的音色），前端不再抄一份，
+    避免两边漂移后管理员选到一个必然报 411 的组合。
+    """
+    from backend.tts_voices import DEFAULT_MODEL, DEFAULT_VOICE, voices_for_ui
+
+    return {"model": DEFAULT_MODEL, "default_voice": DEFAULT_VOICE,
+            "voices": voices_for_ui()}
 
 
 @router.get("/titles", summary="获取称号配置（管理员）")

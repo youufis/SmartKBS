@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -43,7 +43,7 @@ interface ConfigField {
   key: string
   labelKey: string
   descKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle' | 'tts_voice'
   group: string
   required?: boolean
   placeholderKey?: string
@@ -64,7 +64,7 @@ interface ConfigZone {
 
 const CONFIG_ZONES: ConfigZone[] = [
   { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward'] },
-  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen'] },
+  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
   { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
@@ -83,6 +83,7 @@ const SECTION_TITLES: Record<string, string> = {
   memory: 'group_memory',
   grading: 'group_grading',
   imagegen: 'group_imagegen',
+  tts: 'group_tts',
   upload: 'group_upload',
   quota: 'group_quota',
   session: 'group_session',
@@ -106,6 +107,19 @@ interface ConfigMeta {
   bool_keys: string[]
   str_limits: Record<string, number>
   strlist_keys: Record<string, number>
+}
+
+// 语音合成可选音色（后端只下发**实测出声成功**的音色，跨模型混用会报 411）
+interface TtsVoice {
+  voice: string
+  name: string
+  style: string
+  gender: string
+  age: number
+  lang: string
+  group: 'main' | 'alt'
+  is_default?: boolean
+  note?: string
 }
 
 // 有专属管理入口、不算「本表单漏收」的配置键
@@ -168,6 +182,13 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', type: 'text', group: 'imagegen' },
   { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'text', group: 'imagegen' },
   { key: 'IMAGE_GEN_MAX_PLACEHOLDERS', labelKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS', descKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS_desc', type: 'number', group: 'imagegen', required: false, unitKey: 'unitCount' },
+  // 语音合成（backend/tts_service.py；百炼 qwen-audio-3.0-tts-flash，WebSocket 实时合成）
+  // 只放 5 项：超时/格式/音高在 tts_service.py 里写死，避免管理员决策负担
+  { key: 'TTS_ENABLED', labelKey: 'field_TTS_ENABLED', descKey: 'field_TTS_ENABLED_desc', type: 'boolean', group: 'tts', required: false },
+  { key: 'TTS_MODEL', labelKey: 'field_TTS_MODEL', descKey: 'field_TTS_MODEL_desc', type: 'text', group: 'tts' },
+  { key: 'TTS_VOICE', labelKey: 'field_TTS_VOICE', descKey: 'field_TTS_VOICE_desc', type: 'tts_voice', group: 'tts' },
+  { key: 'TTS_SPEECH_RATE', labelKey: 'field_TTS_SPEECH_RATE', descKey: 'field_TTS_SPEECH_RATE_desc', type: 'float', group: 'tts', required: false, unitKey: 'unitRate' },
+  { key: 'TTS_VOLUME', labelKey: 'field_TTS_VOLUME', descKey: 'field_TTS_VOLUME_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitLevel' },
 
   // 积分防刷：每日上限（0 = 不限制）
   { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
@@ -1510,6 +1531,7 @@ const SystemConfigPage: React.FC = () => {
   const [dirty, setDirty] = useState<string[]>([])      // 与已加载值不同的配置键
   const loadedRef = useRef<Record<string, unknown>>({}) // 上次加载/保存后的表单快照（脏值对比 + 放弃修改）
   const [meta, setMeta] = useState<ConfigMeta | null>(null)        // 后端校验元数据（取值范围/长度上限）
+  const [ttsVoices, setTtsVoices] = useState<TtsVoice[]>([])   // 音色下拉数据（后端实测清单）
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ memory: true }) // 收起的小节
   const [advOpen, setAdvOpen] = useState(false)                     // 「未收录配置键」兜底面板
 
@@ -1530,6 +1552,16 @@ const SystemConfigPage: React.FC = () => {
       setMeta(data)
     } catch {
       // 忽略
+    }
+  }, [])
+
+  // ── 加载音色清单（只为下拉可选值，失败不阻塞配置读写） ──
+  const loadTtsVoices = useCallback(async () => {
+    try {
+      const { data } = await apiClient.get('/api/config/tts-voices')
+      setTtsVoices(Array.isArray(data?.voices) ? data.voices : [])
+    } catch {
+      // 忽略：管理员仍可保存既有音色
     }
   }, [])
 
@@ -1637,7 +1669,8 @@ const SystemConfigPage: React.FC = () => {
     if (user?.role !== 'admin') return
     loadConfig()
     loadMeta()
-  }, [user?.role, loadConfig, loadMeta])
+    loadTtsVoices()
+  }, [user?.role, loadConfig, loadMeta, loadTtsVoices])
 
   // 滚动时高亮左侧导航当前小节（IntersectionObserver 不依赖外层滚动容器的实现细节）
   useEffect(() => {
@@ -1688,6 +1721,23 @@ const SystemConfigPage: React.FC = () => {
   // 后端返回的配置键里，本表单没收录、也没有专属管理入口的那些（正常应为空）
   const knownKeys = new Set(GLOBAL_CONFIG_FIELDS.map((f) => f.key))
   const unknownKeys = Object.keys(config).filter((k) => !knownKeys.has(k) && !MANAGED_ELSEWHERE_KEYS.includes(k))
+
+  // 音色下拉选项：精选/替补分组，标签用「风格 — 中文名」，值存 API 认的完整 voice 参数
+  const ttsVoiceValue = Form.useWatch('TTS_VOICE', form) as string | undefined
+  const ttsVoiceOptions = useMemo(() => {
+    const labelOf = (v: TtsVoice) =>
+      `${v.style} — ${v.name}（${v.gender}${v.age}${v.lang === '英文' ? ' · 英文' : ''}）${v.is_default ? ' · 默认' : ''}`
+    const groups: { label: string; options: { value: string; label: string }[] }[] = [
+      { label: t('ttsGroupMain'), options: ttsVoices.filter((v) => v.group === 'main').map((v) => ({ value: v.voice, label: labelOf(v) })) },
+      { label: t('ttsGroupAlt'), options: ttsVoices.filter((v) => v.group === 'alt').map((v) => ({ value: v.voice, label: labelOf(v) })) },
+    ].filter((g) => g.options.length)
+    const known = groups.flatMap((g) => g.options.map((o) => o.value))
+    const cur = String(ttsVoiceValue ?? '').trim()
+    if (cur && !known.includes(cur)) {
+      groups.unshift({ label: t('ttsGroupCustom'), options: [{ value: cur, label: `${cur}（${t('ttsVoiceCustomTag')}）` }] })
+    }
+    return groups
+  }, [ttsVoices, ttsVoiceValue, t])
 
   // ── 全局配置表单各小节 ──
   const renderGroup = (group: string) => {
@@ -1858,6 +1908,22 @@ const SystemConfigPage: React.FC = () => {
                     <Checkbox value="system">{t('notifSystem')}</Checkbox>
                     <Checkbox value="info">{t('notifInfo')}</Checkbox>
                   </Checkbox.Group>
+                </Form.Item>
+              ) : field.type === 'tts_voice' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={getDesc(field)}
+                >
+                  <Select
+                    showSearch
+                    // 允许按「龙霓曦薇」这类中文名或风格关键词搜，值仍是完整 voice 参数
+                    optionFilterProp="label"
+                    options={ttsVoiceOptions}
+                    placeholder={t('placeholder_ttsVoice')}
+                    notFoundContent={ttsVoices.length ? t('ttsNoMatch') : t('ttsVoicesLoading')}
+                  />
                 </Form.Item>
               ) : field.type === 'multimodal_toggle' ? (
                 <Form.Item
