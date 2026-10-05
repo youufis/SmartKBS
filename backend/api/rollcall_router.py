@@ -626,6 +626,68 @@ async def api_save_record(request: Request):
     return {"success": True}
 
 
+# ── 语音播报（点名念姓名；实现在 backend/tts_service.py）──
+
+#: 播报接口会真金白银调合成，按用户做内存态节流（真人点名一分钟点不了几次）
+_SPEECH_HITS: dict[str, list[float]] = {}
+_SPEECH_WINDOW_SECONDS = 60
+_SPEECH_MAX_PER_WINDOW = 20
+
+
+def _speech_throttled(username: str) -> bool:
+    now = time.time()
+    hits = [x for x in _SPEECH_HITS.get(username, []) if now - x < _SPEECH_WINDOW_SECONDS]
+    limited = len(hits) >= _SPEECH_MAX_PER_WINDOW
+    if not limited:
+        hits.append(now)
+    _SPEECH_HITS[username] = hits
+    return limited
+
+
+async def api_speech_status(request: Request):
+    """点名页据此决定 🔊 图标是否可用（与 /api/config/multimodal-status 同口径：登录即可，无需管理员）"""
+    get_current_user(request)
+    from backend.tts_service import tts_enabled
+
+    return {"enabled": tts_enabled()}
+
+
+async def api_speech(request: Request):
+    """播报一名学生的姓名，返回可播放的音频 URL。
+
+    只接受**该班名册里真实存在**的姓名：这个接口会产生计费调用，若收任意文本
+    就等于对外开了个免费 TTS 口。权限沿用点名本来的口径 —— 教师只能操作自己
+    任教的班级，管理员不限。
+
+    失败一律返回 {ok:false, error:中文原因}，不抛异常：点名不能被音频问题挡住。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", ROLE_STUDENT)
+    grade = request.query_params.get("grade", "")
+    cls = request.query_params.get("class", "")
+    name = (request.query_params.get("name", "") or "").strip()
+
+    if role != ROLE_ADMIN and not _is_teacher_allowed(username, grade, cls):
+        raise HTTPException(status_code=403, detail="无权操作该班级")
+    if not name or len(name) > 20:
+        raise HTTPException(status_code=400, detail="姓名长度不合法")
+
+    from backend.tts_service import speak_student_name, tts_enabled
+
+    if not tts_enabled():
+        return {"ok": False, "disabled": True, "error": "语音合成未启用，请在系统配置中开启"}
+    if _speech_throttled(username):
+        return {"ok": False, "throttled": True, "error": "播报过于频繁，请稍候再试"}
+
+    roster = {str(x.get("name") or "") for x in _load_students(grade) if x.get("class") == cls}
+    if name not in roster:
+        logger.info(f"[rollcall] 拒绝播报不在名册的姓名 user={username} {grade}/{cls} {name[:12]!r}")
+        return {"ok": False, "error": "该姓名不在本班名册中"}
+
+    return await speak_student_name(name)
+
+
 # ── 路由注册 ──
 
 router.get("/grades", summary="获取年级列表")(api_grades)
@@ -636,6 +698,8 @@ router.post("/mark", summary="标记点名结果")(api_mark)
 router.get("/history", summary="获取点名历史")(api_history)
 router.post("/reset", summary="重置点名数据")(api_reset)
 router.post("/save-record", summary="保存答题记录到 ChatHistory")(api_save_record)
+router.get("/speech-status", summary="语音播报是否可用（点名页图标用）")(api_speech_status)
+router.get("/speech", summary="播报学生姓名（返回音频 URL）")(api_speech)
 
 
 # ── 管理员总览、教师查看自己的班级 ──

@@ -121,8 +121,11 @@ def _fix_wav_sizes(data: bytes) -> bytes:
         return data                          # 长度正常，别乱改
     buf = bytearray(data)
     struct.pack_into("<I", buf, 4, len(buf) - 8)
-    if buf[36:40] == b"data":
-        struct.pack_into("<I", buf, 40, len(buf) - 44)
+    # data 块的位置不写死 36：标准头是 44 字节，但带 LIST/fact 等扩展块的 wav
+    # 会挪位，扫一遍比猜偏移可靠。找到就把它的长度也回填。
+    pos = buf.find(b"data", 12, min(len(buf) - 8, 4096))
+    if pos >= 0:
+        struct.pack_into("<I", buf, pos + 4, len(buf) - pos - 8)
     logger.info(f"[tts] wav 头部长度已回填 {len(buf)} 字节")
     return bytes(buf)
 

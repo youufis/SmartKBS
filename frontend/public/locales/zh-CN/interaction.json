@@ -595,5 +595,9 @@
   "ipClass": "班级",
   "ipSearchStudent": "搜索姓名 / 学号 / 班级",
   "judgeTrue": "对",
-  "judgeFalse": "错"
+  "judgeFalse": "错",
+  "speakOnHint": "点名揭示时用语音念出学生姓名（多音姓氏自动校正）。点击关闭",
+  "speakOffHint": "语音播报已关闭，点击开启",
+  "speakDisabledByAdmin": "管理员未启用语音合成（系统配置 → AI 与模型 → 语音合成）",
+  "speakFailed": "语音播报暂不可用"
 }

@@ -10,7 +10,7 @@ import {
   DownloadOutlined, AimOutlined, CheckOutlined,
   CloseOutlined, ForwardOutlined, RollbackOutlined,
   TrophyOutlined, UserOutlined, ClockCircleOutlined,
-  LoginOutlined, StopOutlined,
+  LoginOutlined, StopOutlined, SoundOutlined, MutedOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
@@ -68,6 +68,9 @@ interface HistoryItem {
   teacher?: string
 }
 
+/** 教师自己的播报偏好（不是系统配置：管理员的总开关在「系统配置 → AI 与模型 → 语音合成」） */
+const SPEAK_PREF_KEY = 'rollcall_speak_on'
+
 // ============================================================
 // 智能点名工具组件
 // ============================================================
@@ -97,6 +100,14 @@ const RollcallTool: React.FC = () => {
   const [total, setTotal] = useState(0)
   const [correctCount, setCorrectCount] = useState(0)
 
+  // ── 语音播报 ──
+  const [ttsEnabled, setTtsEnabled] = useState(false)   // 管理员总开关（后端下发）
+  const [speakOn, setSpeakOn] = useState(() => localStorage.getItem(SPEAK_PREF_KEY) !== '0')
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  // 待播的音频任务连同姓名一起存：万一两次点名交叠，宁可不说也不能说错人
+  const speechRef = useRef<{ name: string; task: Promise<string | null> } | null>(null)
+  const speakWarnedRef = useRef(false)                  // 一轮失败只提示一次
+
   const rollInterval = useRef<number | null>(null)
   const decelTimers = useRef<number[]>([])
   const frameRef = useRef(0)
@@ -109,6 +120,8 @@ const RollcallTool: React.FC = () => {
     }
     decelTimers.current.forEach(clearTimeout)
     decelTimers.current = []
+    // 动画被中断（重置/切班/卸载）时把待播的播报一起丢掉，免得事后突然念一个名字
+    speechRef.current = null
   }, [])
 
   useEffect(() => {
@@ -180,6 +193,55 @@ const RollcallTool: React.FC = () => {
 
   const refreshHistory = useCallback(() => loadHistoryData(grade, cls), [grade, cls, loadHistoryData])
 
+  // 管理员有没有开语音合成：决定 🔊 图标是否可用
+  useEffect(() => {
+    apiClient.get('/api/rollcall/speech-status')
+      .then(({ data }) => setTtsEnabled(!!data?.enabled))
+      .catch(() => {})
+  }, [])
+
+  // 离开页面时收声，别让点名页的音频在别的页面继续念名字
+  useEffect(() => () => { audioRef.current?.pause() }, [])
+
+  /** 要一段姓名播报音频，返回可播放 URL（拿不到就返回 null） */
+  const requestSpeech = useCallback(async (name: string): Promise<string | null> => {
+    try {
+      const { data } = await apiClient.get('/api/rollcall/speech', {
+        params: { grade, class: cls, name },
+      })
+      if (data?.ok && data.url) return String(data.url)
+      if (!speakWarnedRef.current) {
+        speakWarnedRef.current = true
+        if (data?.disabled) setTtsEnabled(false)        // 管理员中途关掉了，图标同步置灰
+        message.warning(String(data?.error || t('speakFailed')))
+      }
+      return null
+    } catch {
+      return null                                       // 网络问题静默：画面已经揭示姓名
+    }
+  }, [grade, cls, t])
+
+  /** 揭示时播放。音频在滚动动画期间就已经在取了，正常情况下此刻早已就绪 */
+  const playSpeech = useCallback(async (name: string) => {
+    if (!ttsEnabled || !speakOn) return
+    const pending = speechRef.current
+    speechRef.current = null
+    if (!pending || pending.name !== name) return      // 名字对不上就闭嘴，播错人比不播更糟
+    // 最多再等 2 秒；等不到就放弃这一次播报，绝不拖住点名节奏
+    const url = await Promise.race([
+      pending.task, new Promise<null>((r) => window.setTimeout(() => r(null), 2000)),
+    ])
+    if (!url) return
+    try {
+      audioRef.current?.pause()                         // 连按空格时打断上一段，不叠音
+      const audio = new Audio(url)
+      audioRef.current = audio
+      await audio.play()
+    } catch {
+      // 浏览器拦下自动播放（未与页面交互过）：静默，教师点一次按钮就恢复了
+    }
+  }, [ttsEnabled, speakOn])
+
   // ── 点名（老虎机动画） ──
   const pickStudent = useCallback(async () => {
     if (!grade || !cls) { message.warning(t('selectGradeClass')); return }
@@ -187,6 +249,7 @@ const RollcallTool: React.FC = () => {
     setRevealed(false)
     setResultType('')
     clearAllTimers()
+    speakWarnedRef.current = false      // 每轮点名各提示一次，不至于一次故障后永远静默
 
     const pool = studentNames.length > 0 ? studentNames
       : ['张同学', '李同学', '王同学', '赵同学', '刘同学', '陈同学']
@@ -224,6 +287,9 @@ const RollcallTool: React.FC = () => {
       return
     }
 
+    // 姓名已定：马上去要播报音频。合成约 1 秒，完全藏得进下面 4~5 秒的滚动动画，教师无感
+    speechRef.current = (ttsEnabled && speakOn) ? { name: data.student, task: requestSpeech(data.student) } : null
+
     // 停止快速滚动
     if (rollInterval.current) {
       clearInterval(rollInterval.current)
@@ -255,6 +321,7 @@ const RollcallTool: React.FC = () => {
         setTotal(data.total || 0)
         message.success(t('picked', { student: data.student }))
         refreshHistory()
+        void playSpeech(data.student)
         return
       }
 
@@ -288,9 +355,11 @@ const RollcallTool: React.FC = () => {
       setPicking(false)
       message.success(t('picked', { student: data.student }))
       refreshHistory()
+      void playSpeech(data.student)
     }, 5000)
     decelTimers.current.push(safetyTimer)
-  }, [grade, cls, studentNames, teacherUsername, t, clearAllTimers, refreshHistory])
+  }, [grade, cls, studentNames, teacherUsername, t, clearAllTimers, refreshHistory,
+      ttsEnabled, speakOn, requestSpeech, playSpeech])
 
   // ── 纸屑动画 ──
   const launchConfetti = () => {
@@ -493,6 +562,20 @@ const RollcallTool: React.FC = () => {
             >
               {t('skipWithEmoji')}
             </Button>
+            <span>
+              <Tooltip title={ttsEnabled ? (speakOn ? t('speakOnHint') : t('speakOffHint')) : t('speakDisabledByAdmin')}>
+                <Button
+                  size="large"
+                  icon={speakOn && ttsEnabled ? <SoundOutlined /> : <MutedOutlined />}
+                  disabled={!ttsEnabled}
+                  onClick={() => setSpeakOn((v) => {
+                    localStorage.setItem(SPEAK_PREF_KEY, v ? '0' : '1')
+                    return !v
+                  })}
+                  style={{ height: 48, minWidth: 64 }}
+                />
+              </Tooltip>
+            </span>
           </Space>
         </div>
 
