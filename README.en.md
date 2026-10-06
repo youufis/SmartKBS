@@ -33,6 +33,8 @@
 > 📌 **V8.6.0 Highlights**:
 > 🔊 **Speech synthesis lands**: a Speech section in System Settings (switch, model, voice, rate, volume), listing only the 23 voices verified to work; nothing is billed while the switch is off, and no new dependency was added
 > 🗣 **Roll call speaks the picked student's name**: audio is fetched during the reveal animation so teachers notice no delay, repeated names come from cache, and polyphonic surnames are corrected while the UI keeps the real characters
+> 🧭 **Model picking and settings self-tests**: chat / long-document / vision / image models are now chosen from a dropdown (unlisted names can still be typed), and image generation plus speech synthesis each got a self-test button, so a setting is verified the moment it is saved
+> 🖼 **Two image-generation endpoints dispatched automatically**: the right one is chosen per model, sizes default to auto with per-model options filtered by measured limits, and a bad size is rejected on save. The entry page is no longer cached by browsers, so a release shows up without a hard refresh
 > 🧮 **Exam score totals are a hard invariant**: the paper must add up to its target total, structural edits rebalance automatically, and a new paper audit repairs corrupted papers after a dry run
 > 🎯 **Three question-pickers became one engine**: auto-select, AI compose and the wizard share quotas, difficulty and subject-family recall, with bank availability shown while configuring
 > 🔢 **Export rendering fixed**: Chinese in figures, formulas in explanations and fill-in blanks all render properly, plus a hang that could wedge export forever
@@ -908,14 +910,14 @@ Centralized management of all system configuration parameters:
 
 - **🏷️ Brand Info**: Platform version name, organization name
 - **🔑 API Keys**: DashScope API Key
-- **🤖 Model Configuration**: APPID, API address, default chat model, long-text model, vision model, multimodal toggle
+- **🤖 Model Configuration**: APPID, API address, default chat model, long-text model, vision model, multimodal switch (all chosen from dropdowns)
 - **💬 AI Chat Settings**: Chat permission roles, daily request quota (switch plus limit)
 - **⚙️ System Limits**: File size limit, token validity, online timeout, IP protection and login gates
-- **🔊 Speech Synthesis**: Master switch, model, voice (23 verified voices), speech rate, volume
+- **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test
 - **📚 Course Settings**: Course name list, question types
 - **🔔 Notifications**: Enabled notification types
 - **📁 File Type Whitelist**: Image/document extensions
-- **🎨 Image Generation**: Image generation toggle, model, size
+- **🎨 Image Generation**: toggle, model (dropdown, endpoint dispatched automatically), size (defaults to auto, options follow the model), per-question auto-image cap, image self-test
 - **⚡ Knowledge Challenge**: Question mode (question bank/AI)
 
 > **Admin only**
@@ -1014,14 +1016,19 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-### v8.6.0 (2026-10-05)
+### v8.6.0 (2026-10-05 ~ 10-06)
 
 - 🔊 **Speech synthesis lands**: a Speech section in System Settings (master switch, model, voice, rate, volume) defaulting to an authoritative broadcast voice; the voice list contains only the 23 voices verified to produce audio, nothing is billed while the switch is off, and no new dependency was introduced
 - 🗣 **Roll call now speaks the picked student's name**: the audio is fetched in parallel while the reveal animation runs so teachers notice no delay, names are cached on disk and replay instantly, and a missing clip simply skips that announcement — roll call is never blocked by audio. Repeated presses interrupt the previous clip, one round warns once, and playback stops when leaving the page
 - 🔤 **Polyphonic surnames corrected automatically**: a dictionary of roughly 40 polyphonic or commonly misread surnames substitutes same-sounding common characters, matching compound surnames first. Only the spoken text changes; the interface, roll-call history and point records keep the student's real name
 - 🛡 **The announcement endpoint keeps to its lane**: it accepts only names really on that class roster, inherits roll call's per-class permissions and adds a per-minute limit, returning a readable reason instead of an error
 - 🔧 **The daily request quota moved home**: out of Accounts & Security into the AI chat access section, so who may use AI and how much they may use it sit together. Keys, defaults and the usage table are unchanged, so existing deployments migrate themselves
-- 🧪 **Regression**: 40 new tests, full suite 480 passed
+- 🧭 **Model candidates centralised, settings use dropdowns**: chat, long-document, vision and image model choices now come from one catalogue, and the settings page replaced free-text boxes with a grouped dropdown carrying a short description of each option (names outside the list can still be typed). Previously model names were spread across 18 call sites, so changing a default was easy to miss and a retired model only surfaced as a runtime error
+- 🔎 **Settings self-tests completed**: image generation and speech synthesis each gained a self-test button, matching the existing chat / agent / knowledge-base ones. The image test reports which endpoint was really used and which size was really sent; the speech test returns playable audio. Both are admin-only and rate-limited, and the button says plainly that one real, billable call is made
+- 🖼 **Two image-generation endpoints dispatched automatically**: the older and newer generations differ in endpoint, payload shape and size rules, but the code only supported the older one while the settings text recommended a newer model — following the advice broke every figure. The right endpoint is now chosen per model and fallbacks re-assemble their own parameters; size defaults to auto, the offered values are filtered by each model's measured limits, and an invalid one is rejected on save with the rule spelled out
+- 🗣 **A second speech generation model**: voice lists are grouped per model (the newer one adds dialects, foreign languages and more English voices); switching models switches the voice list and the default voice with it. A voice that belongs to the other model is rejected on save (unknown hand-typed voices still pass), and at runtime it falls back to the current model's default with a log line, so roll call never fails silently
+- ⚡ **The entry page is no longer cached**: index.html was served with no cache directive at all, so browsers kept the old shell and ran the old bundle — the server was updated while admins saw nothing new. It now revalidates every time, so a release appears on an ordinary refresh
+- 🧪 **Regression**: 102 new tests (catalogue consistency, measured size limits, hand-typed endpoint routing, voice/model pairing, self-test permissions and throttling); full suite 542 passed
 - ⚠️ **Breaking changes**: none (every new setting has a default, the usage table is untouched, and speech stays off after an upgrade)
 
 ### v8.5.0 (2026-10-03 ~ 10-04)
