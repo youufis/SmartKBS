@@ -45,8 +45,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-plus",
-    "MODEL_NAME": "deepseek-v4-flash",
-    # 多模态模型开关（当默认对话模型为 qwen3.5-flash / qwen3.6-flash 等多模态模型时，
+    "MODEL_NAME": "qwen3.7-flash",   # 默认值统一由 backend/model_catalog.py 维护（DEFAULT_CHAT_MODEL）
+    # 多模态模型开关（当默认对话模型是支持图片输入的模型时开启，
     # 开启后对话支持图片+文本同时输入，走多模态 API 格式）
     "ENABLE_MULTIMODAL": False,
     # 文件大小限制
@@ -111,11 +111,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 图片生成（通义万相，与对话模型共享 API Key）
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
-    "IMAGE_GEN_SIZE": "1024*1024",
+    "IMAGE_GEN_SIZE": "auto",   # auto = 不传尺寸、用模型默认值；也可选按模型联动的具体档位
     "IMAGE_GEN_MAX_PLACEHOLDERS": 2,
-    # ── 语音合成（backend/tts_service.py；百炼 qwen-audio-3.0-tts-flash）──
+    # ── 语音合成（backend/tts_service.py；两代模型见 backend/tts_voices.py）──
     # 总开关默认关：关掉时全线不产生任何计费请求，智能点名页的语音播报也一并停用。
-    # 音色与模型必须配对（跨模型混用报 411），所以默认值与 DEFAULT_VOICE 保持一致。
+    # 音色与模型必须配对（跨模型混用实测报 411），保存时有跨键校验、页面上换模型会带出
+    # 对应音色清单，所以这两个默认值必须成对出现。
     "TTS_ENABLED": False,
     "TTS_MODEL": "qwen-audio-3.0-tts-flash",
     "TTS_VOICE": "qwen-audio-3.0-tts-flash-longnixiwei",   # 新闻联播·男（权威播报）
@@ -488,11 +489,57 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
         elif key == "skill_scene_map":
             _validate_skill_scene_map(value)
             out[key] = value
+    out = _check_model_pairing(out, updates)
     dropped = [k for k in updates if k not in out]
     if dropped:
         # 走到这里说明该键在 DEFAULT_CONFIG 里但没有登记任何校验规则 —— 保存会被丢弃。
         # 补进 _NUM_RANGES/_BOOL_KEYS/_STR_LIMITS/_STRLIST_KEYS 即可。
         logger.warning(f"[config] 以下配置键无校验规则, 已被忽略: {dropped}")
+    return out
+
+
+def _check_model_pairing(out: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    """跨键一致性：音色/尺寸必须与所选模型配对。
+
+    为什么单独立一个函数：这两类错都是"两个键各看都合法、合起来必然失败"，
+    逐键校验表管不到。实测错配的表现是调用侧 411（音色）与 400/任务 FAILED（尺寸），
+    都发生在运行时，管理员在页面上完全看不出来 —— 所以在保存时就拦住。
+
+    只拦"明确属于另一个已知模型/端点"的值；清单外的手填值一律放行，
+    因为官方音色与模型远多于本清单（3.0 有 597 条音色、3.1 有 68 条）。
+    """
+    cfg = load_config()
+
+    if "TTS_MODEL" in out or "TTS_VOICE" in out:
+        from backend.tts_voices import DEFAULT_MODEL, resolve_voice
+
+        model = out.get("TTS_MODEL") or cfg.get("TTS_MODEL") or DEFAULT_MODEL
+        raw = out.get("TTS_VOICE", cfg.get("TTS_VOICE", ""))
+        resolved = resolve_voice(raw, model)
+        if resolved["status"] == "mismatch":
+            raise HTTPException(
+                status_code=400,
+                detail=(f"音色 {raw} 属于模型 {resolved['owner_model']}，"
+                        f"与所选合成模型 {model} 不配对（实测调用会报 411）。"
+                        "请先选合成模型，再从下拉里挑一个该模型的音色"))
+        out["TTS_VOICE"] = resolved["voice"]      # 顺手归一（中文名/裸后缀 → 完整参数）
+
+    if "IMAGE_GEN_MODEL" in out or "IMAGE_GEN_SIZE" in out:
+        # 延迟导入：image_gen_service 在模块级引用了本文件的 get_config_value
+        from backend.api.image_gen_service import AUTO_SIZE, normalize_size
+        from backend.model_catalog import DEFAULT_IMAGE_MODEL, size_range_for
+
+        model = out.get("IMAGE_GEN_MODEL") or cfg.get("IMAGE_GEN_MODEL") or DEFAULT_IMAGE_MODEL
+        raw = str(out.get("IMAGE_GEN_SIZE", cfg.get("IMAGE_GEN_SIZE", AUTO_SIZE)) or "").strip()
+        norm = normalize_size(raw, model)
+        if not norm:
+            lo, hi = size_range_for(model)
+            raise HTTPException(
+                status_code=400,
+                detail=(f"生图尺寸 {raw!r} 不适用于模型 {model}："
+                        f"该端点宽高需在 {lo}~{hi}，或填 auto（用模型默认）、1K/2K/4K 预设"))
+        out["IMAGE_GEN_SIZE"] = norm
+
     return out
 
 
@@ -798,17 +845,103 @@ async def kb_connectivity_test(request: Request):
     return bailian_kb.test_kb()
 
 
-@router.get("/tts-voices", summary="语音合成可选音色清单（管理员）")
+@router.get("/tts-voices", summary="语音合成模型与音色清单（管理员）")
 async def tts_voices():
-    """返回实测可用的音色清单，供系统配置页的音色下拉使用。
+    """一次返回**两个模型各自的**音色清单，供配置页做"换模型 → 换音色"联动。
 
     单一数据源在 backend/tts_voices.py（只收实测出声成功的音色），前端不再抄一份，
-    避免两边漂移后管理员选到一个必然报 411 的组合。
+    避免两边漂移后管理员选到一个必然报 411 的组合。合并成一次响应而不是按 model 查询，
+    是为了让下拉切换零延迟 —— 清单一共几十条，没必要来回打接口。
     """
-    from backend.tts_voices import DEFAULT_MODEL, DEFAULT_VOICE, voices_for_ui
+    from backend.tts_voices import DEFAULT_MODEL, MODEL_DEFAULT_VOICE, models_for_ui, voices_for_ui
 
-    return {"model": DEFAULT_MODEL, "default_voice": DEFAULT_VOICE,
-            "voices": voices_for_ui()}
+    return {
+        "default_model": DEFAULT_MODEL,
+        "models": models_for_ui(),
+        "default_voice_by_model": MODEL_DEFAULT_VOICE,
+        "voices_by_model": {m["id"]: voices_for_ui(m["id"]) for m in models_for_ui()},
+    }
+
+
+@router.get("/model-options", summary="模型候选清单与账号可见性（管理员）")
+async def model_options(request: Request, kind: str = "chat"):
+    """对话 / 长文本 / 视觉 / 生图的可选模型，供配置页下拉。
+
+    visible=false 只代表"没在账号模型清单里查到"，**不代表下线**（实测该清单不完整：
+    两个 qwen-audio TTS 模型都不在其中却能用）。所以前端只标灰提示，不做拦截。
+    """
+    from backend.model_catalog import annotate, options_for
+
+    user = get_current_user(request)
+    require_admin(user)
+    if kind not in ("chat", "long", "vl", "image"):
+        raise HTTPException(status_code=400, detail="kind 只能是 chat / long / vl / image")
+    out: dict = {"kind": kind, "options": annotate(kind),
+                 "known": sorted(m["id"] for m in options_for(kind))}
+    if kind == "image":
+        # 尺寸档位随模型变（两代端点范围不同），一并下发，前端才能做"换模型 → 校验尺寸"
+        from backend.model_catalog import size_presets_for, size_range_for
+
+        out["image_sizes"] = {
+            m["id"]: {"presets": size_presets_for(m["id"]), "range": list(size_range_for(m["id"]))}
+            for m in out["options"]
+        }
+    return out
+
+
+# ── 生图 / 语音合成自检：都会产生一次真实调用与少量费用，故限管理员 + 限次数 ──
+
+_SELFTEST_HITS: dict[str, list[float]] = {}
+_SELFTEST_WINDOW_SECONDS = 3600
+_SELFTEST_MAX_PER_WINDOW = 10
+
+
+def _selftest_guard(request: Request) -> str:
+    """自检的公共前置：登录 + 管理员 + 次数节流。返回用户名。"""
+    user = get_current_user(request)
+    require_admin(user)
+    username = user["username"]
+    now = time.time()
+    hits = [x for x in _SELFTEST_HITS.get(username, []) if now - x < _SELFTEST_WINDOW_SECONDS]
+    if len(hits) >= _SELFTEST_MAX_PER_WINDOW:
+        _SELFTEST_HITS[username] = hits
+        raise HTTPException(status_code=429,
+                            detail=f"自检次数已达上限（每小时 {selftest_max_hint()} 次）——"
+                                   "每次自检都会产生一次真实调用与费用，请稍后再试")
+    hits.append(now)
+    _SELFTEST_HITS[username] = hits
+    return username
+
+
+def selftest_max_hint() -> int:
+    return _SELFTEST_MAX_PER_WINDOW
+
+
+@router.post("/image-test", summary="生图自检（管理员，真实生成一张图）")
+async def image_gen_test(request: Request):
+    """用当前配置真生成一张最小图，回报实际用的模型 / 端点 / 尺寸。
+
+    与 model-test 同一套理由：配置页填完就该立刻知道对不对，而不是等教师出题时
+    才发现"配图一直没出来"。返回里刻意区分 size_configured 与 size_sent ——
+    auto 表示不传、跨端点降级会回落，这正是过去最难自查的一类不一致。
+    """
+    _selftest_guard(request)
+    from backend.api.image_gen_service import self_test
+
+    return await self_test()
+
+
+@router.post("/tts-test", summary="语音合成自检（管理员，返回可播放音频）")
+async def tts_connectivity_test(request: Request):
+    """合成一句固定自检文本，返回可播放 URL 与实际生效的模型 / 音色。
+
+    回传 voice_configured 与 voice 两个值：改模型后音色没跟着换（配置里仍是上一个
+    模型的音色）是最常见的一种错配，只回一个值看不出"写的是什么、用的是什么"。
+    """
+    _selftest_guard(request)
+    from backend.tts_service import self_test as tts_self_test
+
+    return await tts_self_test()
 
 
 @router.get("/titles", summary="获取称号配置（管理员）")

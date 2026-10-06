@@ -16,6 +16,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 from backend.config import ai_api_base
+from backend.model_catalog import DEFAULT_CHAT_MODEL, DEFAULT_LONG_MODEL, DEFAULT_VL_MODEL
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import get_user_role
@@ -224,7 +225,7 @@ class FileSummaryCache:
                     f'{ai_api_base()}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": get_config_value("MODEL_LONG_NAME", "qwen-long"),
+                        "model": get_config_value("MODEL_LONG_NAME", DEFAULT_LONG_MODEL),
                         "messages": [
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "system", "content": f"fileid://{file_id}"},
@@ -248,7 +249,7 @@ class FileSummaryCache:
                     f'{ai_api_base()}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-plus"),
+                        "model": get_config_value("MODEL_VL_NAME", DEFAULT_VL_MODEL),
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -295,7 +296,7 @@ async def get_usage(request: Request):
 
     if role_val == 0:
         multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
-        model_name = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+        model_name = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
         return {
             "enabled": enabled, "used": 0, "max": 0, "remaining": -1,
             "multimodal_enabled": multimodal_enabled,
@@ -305,7 +306,7 @@ async def get_usage(request: Request):
         }
 
     multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
-    model_name = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+    model_name = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
 
     return {
         "enabled": enabled,
@@ -494,7 +495,7 @@ def _chat_event_generator(
             logger.warning(f"[对话记忆] 上下文加载失败，按单轮继续: {e}")
 
         if multimodal_enabled and image_files:
-            model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+            model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
             api_base = ai_api_base()
             from backend.api.ai_service import call_multimodal_stream
 
@@ -667,7 +668,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
         file_id = file_resp.json().get("id", "")
 
         payload = {
-            "model": get_config_value("MODEL_LONG_NAME", "qwen-long"),
+            "model": get_config_value("MODEL_LONG_NAME", DEFAULT_LONG_MODEL),
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "system", "content": f"fileid://{file_id}"},
@@ -716,7 +717,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     import requests as sync_requests
     try:
         encoded_image = encode_image_to_base64(file_path)
-        model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-plus")
+        model_name = get_config_value("MODEL_VL_NAME", DEFAULT_VL_MODEL)
         payload = {
             "model": model_name,
             "messages": [{

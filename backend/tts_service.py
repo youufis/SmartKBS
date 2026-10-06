@@ -39,7 +39,8 @@ from backend.api.config_router import get_config_value
 from backend.bailian_kb import resolve_api_key      # 与对话链路一致：环境变量优先，回退系统配置
 from backend.logger import logger
 from backend.question_media import media_dir, url_for
-from backend.tts_voices import DEFAULT_MODEL, DEFAULT_VOICE, fix_name_reading, normalize_voice
+from backend.tts_voices import (DEFAULT_MODEL, DEFAULT_VOICE, MODEL_DEFAULT_VOICE,
+                                fix_name_reading, resolve_voice)
 
 # ── 固定参数（刻意不进系统配置，减少管理员决策负担；要改就改这里） ──
 AUDIO_FORMAT_NAME = "mp3"                 # 姓名播报走 mp3：体积是 wav 的四成，浏览器原生可播
@@ -68,9 +69,22 @@ def tts_enabled() -> bool:
 
 
 def current_params() -> dict[str, Any]:
-    """当前生效的合成参数（运行时读配置，改完即生效、无需重启）"""
+    """当前生效的合成参数（运行时读配置，改完即生效、无需重启）。
+
+    音色与模型不配对时**不能静默失败**：点名现场念不出名字比念错名字更糟。
+    所以这里检测到"明确属于另一个模型"的音色，就回落本模型默认音色并写 warning，
+    让管理员在日志与自检里都能看到该去改配置。清单外的手填音色不回落（放行试一次）。
+    """
     model = str(get_config_value("TTS_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL).strip()
-    voice = normalize_voice(get_config_value("TTS_VOICE", DEFAULT_VOICE), model)
+    configured_voice = str(get_config_value("TTS_VOICE", DEFAULT_VOICE) or "").strip()
+    resolved = resolve_voice(configured_voice, model)
+    voice = resolved["voice"]
+    if resolved["status"] == "mismatch":
+        voice = MODEL_DEFAULT_VOICE.get(model, DEFAULT_VOICE)
+        logger.warning(
+            f"[tts] 配置的音色 {resolved['voice']} 属于模型 {resolved['owner_model']}，"
+            f"与当前模型 {model} 不配对（实测报 411），本次已回落 {voice}；"
+            "请到 系统配置 → 语音合成 把音色改回来")
     try:
         rate = float(get_config_value("TTS_SPEECH_RATE", 1.0))
     except (TypeError, ValueError):
@@ -83,6 +97,8 @@ def current_params() -> dict[str, Any]:
         "enabled": tts_enabled(),
         "model": model,
         "voice": voice,
+        "voice_configured": configured_voice,
+        "voice_status": resolved["status"],
         "speech_rate": min(2.0, max(0.5, rate)),
         "volume": min(100, max(0, volume)),
         "pitch_rate": PITCH_RATE,
@@ -220,6 +236,32 @@ def synthesize_blocking(text: str, params: dict[str, Any] | None = None) -> dict
 async def synthesize(text: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     """异步包装：SDK 是阻塞调用，扔进线程池，别把事件循环卡住（SSE/其他请求会一起停）"""
     return await asyncio.to_thread(synthesize_blocking, text, params or current_params())
+
+
+# ══════════════════════════════ 自检 ══════════════════════════════
+
+#: 自检短句：够听出音色差异，又短到几乎不产生成本
+SELFTEST_TEXT = "这是语音合成自检，用来确认当前模型与音色可以正常出声。"
+
+
+async def self_test() -> dict[str, Any]:
+    """用**当前配置**合成一句自检音频，返回可播放 URL。
+
+    刻意把 voice_configured / voice / voice_status 三个都回传：
+    管理员改模型后音色可能仍是上一个模型的（页面下拉没跟上的情况），
+    只回一个 voice 值看不出"配置写的是什么、实际用的是什么"。
+    """
+    params = current_params()
+    out: dict[str, Any] = {"model": params["model"], "voice_configured": params["voice_configured"],
+                           "voice": params["voice"], "voice_status": params["voice_status"],
+                           "speech_rate": params["speech_rate"], "volume": params["volume"]}
+    if not params["enabled"]:
+        return {**out, "ok": False, "disabled": True, "error": "语音合成未启用（总开关关闭）"}
+    result = await synthesize(SELFTEST_TEXT, params)
+    out.update({k: v for k, v in result.items() if k in ("ok", "url", "cached", "cost_ms", "bytes", "error")})
+    if out.get("ok"):
+        out["text"] = SELFTEST_TEXT
+    return out
 
 
 # ══════════════════════════════ 场景封装 ══════════════════════════════

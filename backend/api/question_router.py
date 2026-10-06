@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, HTTPException, Request, Query, UploadFile, 
 from pydantic import BaseModel
 
 from backend.config import ai_api_base
+from backend.model_catalog import DEFAULT_VL_MODEL
 from backend.api.config_router import get_config_value
 from backend.question_db import (
     execute_query,
@@ -1681,7 +1682,7 @@ async def extract_questions_from_image(
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
     # 调用视觉模型提取试题
-    model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-plus")
+    model_name = get_config_value("MODEL_VL_NAME", DEFAULT_VL_MODEL)
 
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     prompt_text = _build_image_extract_prompt(subject, difficulty_desc)

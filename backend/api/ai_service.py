@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from backend.logger import logger
 from backend.config import ai_api_base
+from backend.model_catalog import DEFAULT_CHAT_MODEL
 
 # AI 读超时统一取系统配置 AI_REQUEST_TIMEOUT（默认 300 秒）：前端各 AI 端点的
 # 专属 timeout 不应被后端硬编码的 120/180 秒反向截断，三层（前端/后端/IIS）同向对齐。
@@ -124,7 +125,7 @@ def get_ai_config(use_agent: bool = True):
         return {"mode": "agent", "app_id": app_id}
     return {
         "mode": "direct",
-        "model": get_config_value("MODEL_NAME", "deepseek-v4-flash"),
+        "model": get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL),
         "api_base": ai_api_base(),
     }
 
@@ -297,7 +298,7 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
 
     # 降级：直接调大模型
     from backend.api.config_router import get_config_value
-    model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+    model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
     api_base = ai_api_base()
     return _call_model_sync(prompt, api_key, model, api_base)
 
@@ -381,7 +382,7 @@ def call_ai_sync_direct(prompt: str, api_key: str,
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     from backend.api.config_router import get_config_value
-    model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+    model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
     api_base = ai_api_base()
     logger.info(f"call_ai_sync_direct: model={model}, prompt_len={len(prompt)}, "
                 f"thinking={'默认' if enable_thinking is None else enable_thinking}, "
@@ -452,14 +453,14 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
         if not has_output:
             logger.warning(f"智能体流式返回为空，降级到直接调模型 (app_id={app_id})")
             from backend.api.config_router import get_config_value
-            model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+            model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
             api_base = ai_api_base()
             for chunk in _call_model_stream(prompt, api_key, model, api_base):
                 yield chunk
     except Exception as e:
         logger.error(f"智能体流式调用失败: {e}，降级到直接调模型")
         from backend.api.config_router import get_config_value
-        model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+        model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
         api_base = ai_api_base()
         for chunk in _call_model_stream(prompt, api_key, model, api_base):
             yield chunk
@@ -578,7 +579,7 @@ async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
     except Exception as e:
         logger.error(f"智能体异步调用失败 (app_id={app_id}): {e}，降级到直接调模型")
         from backend.api.config_router import get_config_value
-        model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+        model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
         api_base = ai_api_base()
         return await _call_model_async(prompt, api_key, model, api_base)
     finally:
@@ -731,7 +732,7 @@ def call_multimodal_stream(
 ):
     """多模态流式调用（OpenAI 兼容接口），yield {"text": str, "session_id": None}
 
-    支持图片+文本同时输入，适用于 qwen3.5-flash / qwen3.6-flash 等多模态模型。
+    支持图片+文本同时输入，适用于带视觉能力的对话模型（见系统配置「模型与端点」）。
     """
     import requests as sync_requests
 

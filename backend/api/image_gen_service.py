@@ -9,14 +9,27 @@ AI 图片生成服务（增强版）
   - 详细的失败原因日志
 
 API Key 复用现有的 dashscope_api_key（环境变量 > 系统配置）。
-模型优先级：
-  1. 系统配置 IMAGE_GEN_MODEL（默认 wanx2.1-t2i-turbo）
-  2. 降级模型 wanx2.1-t2i-turbo（如果主模型不是它）
-  3. 最终降级 wan2.2-t2i-flash
+
+两代端点（2026-10-06 实测，这是本文件最容易踩的坑）
+  image_synthesis  = dashscope.ImageSynthesis（text2image 端点）：wan2.2 / wanx2.1 这一代，
+                     尺寸只认 宽*高，且宽高实测需在 512~1440。
+  image_generation = dashscope.aigc.image_generation（多模态端点）：wan2.7 / qwen-image 这一代，
+                     尺寸可用 宽*高，也可用 1K/2K/4K 预设。
+  跨端点调用直接 400 —— 而旧版配置说明恰恰推荐 wan2.7-image，照说明改就全线生不出图。
+  现在按 model_catalog 里每个模型的 endpoint 自动分派，降级链也按各自端点重新装配参数。
+
+"HTTP 200 但其实失败了"（同样实测）
+  老端点收到不属于自己的尺寸（如 size=1K）、或产物被内容审核拦下时，状态码是 200、
+  也不抛异常，真原因只在 output.task_status=FAILED + output.code/message 里。
+  旧实现只报"解析响应结果失败"，管理员无从判断；现在把服务端原文带出来。
+
+模型优先级：系统配置 IMAGE_GEN_MODEL → FALLBACK_MODEL_CHAIN 依次兜底（跨端点也兜，
+  因为参数按每个模型自己的端点装配）。
 """
 import asyncio
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -26,32 +39,28 @@ import dashscope
 from backend.ai_task_manager import report_progress
 
 from backend.api.config_router import get_config_value
+from backend.model_catalog import (DEFAULT_IMAGE_MODEL, image_endpoint_of, options_for,
+                                   preset_values_for, size_range_for)
 from backend.logger import logger
 
 # ── 全局并发控制 ──
 # 通义万相 API 并发限制较低，使用信号量控制最大并发数
 IMAGE_GEN_SEMAPHORE = asyncio.Semaphore(2)
 
-# 支持的模型列表（管理员可在系统配置里填其中之一；填别的也能用，只是会打警告）
-# 说明：万相 2.7 / Qwen-Image 系列是 2026 年的现役代际，中文文字渲染明显好于 2.1/2.2；
-# 默认值保持历史配置不变，避免已有部署一夜之间换成没开通的模型而全线生图失败。
-SUPPORTED_MODELS = {
-    "wanx2.1-t2i-turbo": "通义万相-快速（上一代）",
-    "wanx2.1-t2i-plus": "通义万相-高质量（上一代）",
-    "wan2.2-t2i-flash": "万相生图-快速",
-    "wan2.2-t2i-plus": "万相生图-高质量",
-    "wan2.5-t2i-preview": "万相 2.5",
-    "wan2.6-t2i": "万相 2.6",
-    "wan2.7-image": "万相 2.7（推荐）",
-    "wan2.7-image-pro": "万相 2.7 Pro（4K）",
-    "qwen-image-2.0": "Qwen-Image 2.0（中文标注准确）",
-    "qwen-image-3.0-pro": "Qwen-Image 3.0 Pro（复杂排版）",
-}
+# 模型清单、端点归属、尺寸档位与允许范围统一由 backend/model_catalog.py 维护
+# （含 2026-10-06 实测边界：老端点宽高 512~1440；wan2.6-t2i 实测不可用，已从清单里去掉）。
+# 这个别名保留是给老引用用的，值来自同一份目录，不再各处抄一遍。
+SUPPORTED_MODELS = {m["id"]: m["note"] for m in options_for("image")}
 
-# 降级链：主模型失败后按此顺序尝试（去重后追加到调用链尾部）
+# 降级链：主模型失败后按此顺序尝试（去重后追加到调用链尾部）。
+# 两个都是"实测仍可用"的老端点模型，留作最后兜底 —— 新端点模型万一账号没开通还能出图。
 FALLBACK_MODEL_CHAIN = ["wan2.2-t2i-flash", "wanx2.1-t2i-turbo"]
 
-DEFAULT_MODEL = "wan2.2-t2i-flash"
+DEFAULT_MODEL = DEFAULT_IMAGE_MODEL
+
+#: "自动"：不传 size，让模型用它自己的默认值（实测两代端点都能正常出图，是最省心的档）
+AUTO_SIZE = "auto"
+_PRESET_TOKENS = {"1k", "2k", "4k"}   # 具体哪档可用由 model_catalog 的实测目录判
 DEFAULT_SIZE = "1024*1024"
 
 #: 单次下载的体积上限（防止 CDN 返回异常大包撑爆磁盘）
@@ -64,28 +73,59 @@ TERMINAL_ERROR_HINTS = (
     "invalidapikey", "api key", "arrearage", "insufficient", "quota",
     "model not exist", "not authorized", "unsupported model",
     "datainspectionfailed", "contentpolicy", "inappropriate",
+    # 实测：尺寸越界与参数非法都是这一类 —— 换模型、重试都救不回来，只会白等 9 次
+    "invalidparameter", "should be between",
 )
 
 
-def normalize_size(raw: str | None) -> str:
-    """把生图尺寸配置规范成 API 认的写法
+def normalize_size(raw: str | None, model: str | None = None) -> str:
+    """把生图尺寸配置规范成 API 认的写法；不合法返回空串。
 
-    管理员常在网页里手抖写成 1024x1024 / 1024 × 1024，DashScope 只认 ``宽*高``，
+    管理员常手抖写成 1024x1024 / 1024 × 1024 / 全角，DashScope 只认 ``宽*高``，
     否则会 400，再叠加 3 次重试 × 3 个模型 = 9 次无意义调用。
-    另外放行 wan2.7 那一代的预设尺寸写法（1K/2K/4K）。
+
+    传了 model 就按它所在端点校验：
+      - ``auto`` 两代都合法（含义是不传 size）；
+      - ``1K/2K/4K`` 只有多模态端点认 —— 老端点收到会变成"HTTP 200 但任务 FAILED"，
+        所以在这里就判不合法，别发出去；
+      - 宽高范围按端点取（老端点实测 512~1440）。
     """
-    text = (raw or "").strip().lower().replace("\u00d7", "*").replace("x", "*")
+    text = (str(raw or "").strip().lower()
+            .replace("\u00d7", "*").replace("x", "*").replace("\u3000", "").replace(" ", ""))
     if not text:
         return DEFAULT_SIZE
-    if text in {"1k", "2k", "4k"}:
-        return text.upper()
+    if text == AUTO_SIZE:
+        return AUTO_SIZE
+    if text in _PRESET_TOKENS:
+        # 没给模型就不替调用方下判断；给了就按该模型所在端点的实测档位判
+        if model is None:
+            return text.upper()
+        return text.upper() if text in preset_values_for(model) else ""
     m = re.match(r"^(\d{3,5})\*(\d{3,5})$", text)
     if not m:
         return ""
     w, h = int(m.group(1)), int(m.group(2))
-    if not (256 <= w <= 4096 and 256 <= h <= 4096):
+    lo, hi = size_range_for(model)
+    if not (lo <= w <= hi and lo <= h <= hi):
         return ""
     return f"{w}*{h}"
+
+
+def size_for_call(model: str, configured: str) -> tuple[str | None, str]:
+    """按模型所在端点解析出真正要发送的 size，返回 (要发的值或 None, 人话说明)。
+
+    降级链换端点时原尺寸可能不再合法（如 4K 到了老端点）—— 这里回落到常用档而不是
+    把非法值发出去，避免"降级反而必然失败"。
+    """
+    raw = str(configured or "").strip()
+    if not raw or raw.lower() == AUTO_SIZE:
+        return None, "auto（不传 size，用模型默认值）"
+    ok = normalize_size(raw, model)
+    if ok and ok.lower() != AUTO_SIZE:
+        return ok, ok
+    lo, hi = size_range_for(model)
+    return DEFAULT_SIZE, (f"{raw} 不适用于 {model}"
+                         f"（该端点宽高需在 {lo}~{hi}），已改用 {DEFAULT_SIZE}")
 
 
 def get_image_gen_config() -> dict[str, Any] | None:
@@ -107,49 +147,110 @@ def get_image_gen_config() -> dict[str, Any] | None:
         # 不阻断：账号可能开了新模型而清单没更新；只提醒，便于排查"生图一直失败"
         logger.warning(f"生图模型 {model} 不在已知清单内，仍将尝试调用")
 
-    size = normalize_size(get_config_value("IMAGE_GEN_SIZE", DEFAULT_SIZE))
+    endpoint = image_endpoint_of(model)
+    raw_size = str(get_config_value("IMAGE_GEN_SIZE", AUTO_SIZE) or "").strip()
+    size = normalize_size(raw_size, model)
+    size_note = size or AUTO_SIZE
     if not size:
-        raw_size = get_config_value("IMAGE_GEN_SIZE", DEFAULT_SIZE)
-        logger.warning(f"IMAGE_GEN_SIZE={raw_size!r} 不合法（应为 宽*高，如 {DEFAULT_SIZE}），已回落 {DEFAULT_SIZE}")
+        # 以前这里静默回落，管理员以为配的是 2048 实际出的是 1024 —— 把回落原因带出去，
+        # 自检接口与日志都能看到（generate_and_save_image 也照旧继续，不阻断教学）。
         size = DEFAULT_SIZE
+        lo, hi = size_range_for(model)
+        size_note = f"{raw_size!r} 不适用于 {model}（该端点宽高需在 {lo}~{hi}），已回落 {DEFAULT_SIZE}"
+        logger.warning(f"IMAGE_GEN_SIZE={raw_size!r} {size_note}")
 
     return {
         "api_key": api_key,
         "model": model,
+        "endpoint": endpoint,
         "size": size,
+        "size_raw": raw_size,
+        "size_note": size_note,
     }
+
+
+def _pick(obj: Any, key: str, default: Any = None) -> Any:
+    """output 有时是 dict、有时是带属性的对象，两种都取一次，避免结构变化就解析失败"""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _task_failure(out: Any) -> tuple[bool, str]:
+    """老端点把失败藏在 output 里（HTTP 仍是 200）：task_status=FAILED + code/message。
+
+    实测两种情形都是这个形状：尺寸不属于该端点（InvalidParameter: Either width or
+    height should be between 512 and 1440）、产物被内容审核拦下。旧实现看不见它们，
+    只会报"解析响应结果失败"，所以这里先读 task_status。
+    """
+    status = str(_pick(out, "task_status") or "").upper()
+    if status and status != "SUCCEEDED":
+        code = str(_pick(out, "code") or "").strip()
+        msg = str(_pick(out, "message") or "").strip()
+        return True, " ".join(x for x in (code, msg) if x)
+    return False, ""
+
+
+def _extract_image_url(out: Any, endpoint: str) -> str:
+    """按端点各自的返回结构取图片地址：老 results[].url / 新 choices[].message.content[].image"""
+    if endpoint == "image_generation":
+        for choice in (_pick(out, "choices") or []):
+            for part in (_pick(_pick(choice, "message") or {}, "content") or []):
+                url = _pick(part, "image") or _pick(part, "url")
+                if url:
+                    return str(url)
+        return ""
+    for item in (_pick(out, "results") or []):
+        url = _pick(item, "url")
+        if url:
+            return str(url)
+    return ""
 
 
 async def _call_dashscope_safe(
     model: str,
     prompt: str,
-    size: str,
+    size: str | None,
     timeout: int,
 ) -> tuple[int, str | None, str | None, bool]:
-    """安全调用 DashScope ImageSynthesis API
+    """安全调用生图，按模型所在端点分派两代 API。
+
+    Args:
+        size: 要发送的尺寸；None 表示不传（"auto"，用模型自己的默认值）。
 
     Returns:
         (status_code, image_url, error_msg, terminal)
         terminal=True 表示换模型/重试都不会有结果（认证、参数、内容安全、模型不存在），
         调用方应当立刻结束整条降级链，而不是把 3 个模型各重试 3 次。
     """
+    endpoint = image_endpoint_of(model)
+    kwargs = {} if size is None else {"size": size}
     try:
-        response = await asyncio.to_thread(
-            dashscope.ImageSynthesis.call,
-            model=model,
-            prompt=prompt,
-            n=1,
-            size=size,
-            timeout=timeout,
-        )
+        if endpoint == "image_generation":
+            from dashscope.aigc.image_generation import ImageGeneration
+            fn = ImageGeneration.call
+            call_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": [{"role": "user", "content": [{"text": prompt}]}],
+                **kwargs,
+            }
+        else:
+            fn = dashscope.ImageSynthesis.call
+            call_kwargs = {"model": model, "prompt": prompt, "n": 1, **kwargs}
+        response = await asyncio.to_thread(fn, **call_kwargs)
         code = getattr(response, "status_code", 500)
+        out = getattr(response, "output", None)
         if code == 200:
-            try:
-                url = response.output.results[0].url
+            failed, reason = _task_failure(out)
+            if failed:
+                # 状态码 200 但任务失败：把服务端原话带出去，别再含糊成"解析失败"
+                msg = reason or "服务端未给原因"
+                logger.warning(f"生图任务失败 model={model} endpoint={endpoint} :: {msg}")
+                return code, None, msg, _is_terminal_error(0, msg)
+            url = _extract_image_url(out, endpoint)
+            if url:
                 return (200, url, None, False)
-            except (AttributeError, IndexError, KeyError) as e:
-                # 200 但没图：多半是异步任务还没就绪或返回结构变化，重试无意义
-                return (code, None, f"解析响应结果失败: {e}", True)
+            return (code, None, "接口成功但没有图片地址（异步任务未就绪或返回结构变化）", True)
         msg = str(getattr(response, "message", "未知错误") or "未知错误")
         return (code, None, msg, _is_terminal_error(code, msg))
     except asyncio.TimeoutError:
@@ -321,10 +422,13 @@ async def generate_and_save_image(
                 report_progress(phase="image", model=model, attempt=attempt,
                                 max_attempts=max_retries,
                                 models_left=len(model_chain) - model_idx,
+                                endpoint=image_endpoint_of(model),
                                 message=f"{model} 第 {attempt}/{max_retries} 次尝试")
 
+                # 每个模型按自己所在端点解析尺寸：降级跨端点时（4K → 老端点）不能照发原值
+                send_size, size_note = size_for_call(model, size)
                 status_code, image_url, error_msg, terminal = await _call_dashscope_safe(
-                    model=model, prompt=prompt, size=size, timeout=180,
+                    model=model, prompt=prompt, size=send_size, timeout=180,
                 )
 
                 if status_code == 200 and image_url:
@@ -358,6 +462,59 @@ async def generate_and_save_image(
         if error_sink is not None and last_error:
             error_sink.append(last_error)
         return None
+
+
+# ══════════════════════════════ 自检 ══════════════════════════════
+
+#: 自检产物目录（question_media/selftest/，登录后可读，孤儿回收豁免具名目录）
+SELFTEST_DIR = "selftest"
+#: 固定提示词：内容安全友好、成本最小，只为验证"模型 + 端点 + 尺寸 + Key"这条链通不通
+SELFTEST_PROMPT = "一支红色铅笔放在打开的课本上，简洁插画风格"
+
+
+async def self_test() -> dict[str, Any]:
+    """用**当前配置**真生成一张图，把"配置到底能不能用"如实报出来。
+
+    与 model-test / appid-test / kb-test 同一套思路：管理员在页面上填完就该立刻知道
+    对不对，而不是等到出题时才发现"生图一直没出图"。会产生一次真实调用与少量费用，
+    所以端点侧限管理员并做次数节流。
+
+    返回里刻意把 size_configured / size_sent / size_note 分开：
+    配置值与实际发送值可能不同（auto 不传、跨端点回落），这正是过去最难自查的一类问题。
+    """
+    from backend.question_media import ensure_media_dir, url_for
+
+    cfg = get_image_gen_config()
+    if not cfg:
+        enabled = bool(get_config_value("IMAGE_GEN_ENABLED", True))
+        return {"ok": False,
+                "error": ("生图开关未启用" if not enabled else "API Key 未配置，请在系统配置中填写")}
+    if not cfg.get("api_key"):
+        return {"ok": False, "error": "API Key 未配置", "model": cfg["model"]}
+
+    send_size, size_note = size_for_call(cfg["model"], cfg["size"])
+    t0 = time.time()
+    errors: list[str] = []
+    media = ensure_media_dir(extra=SELFTEST_DIR)
+    name = f"selftest-{int(time.time() * 1000)}"
+    path = await generate_and_save_image(SELFTEST_PROMPT, media, filename=name,
+                                         max_retries=1, error_sink=errors)
+    out: dict[str, Any] = {
+        "ok": bool(path),
+        "model": cfg["model"],
+        "endpoint": cfg["endpoint"],
+        "size_configured": cfg["size_raw"] or AUTO_SIZE,
+        "size_sent": send_size or AUTO_SIZE,
+        "size_note": size_note,
+        "cost_ms": int((time.time() - t0) * 1000),
+    }
+    if path:
+        file_path = Path(path)
+        out["url"] = url_for(extra=SELFTEST_DIR, filename=file_path.name)
+        out["bytes"] = file_path.stat().st_size if file_path.exists() else 0
+    else:
+        out["error"] = (errors[0] if errors else "生成失败（未拿到原因）")
+    return out
 
 
 async def generate_placeholders_batch(

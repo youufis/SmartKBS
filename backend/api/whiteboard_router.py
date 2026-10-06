@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.config import ai_api_base
+from backend.model_catalog import DEFAULT_VL_MODEL
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
 from backend.api.config_router import get_config_value
@@ -1365,7 +1366,7 @@ async def _understand_whiteboard_with_vision(
         from backend.api.chat_router import get_config_value as get_cfg
         from backend.utils import encode_image_to_base64, get_image_mime_type
 
-        model_name = get_cfg("MODEL_VL_NAME", "qwen3-vl-plus")
+        model_name = get_cfg("MODEL_VL_NAME", DEFAULT_VL_MODEL)
         api_base = ai_api_base()
 
         content = []
@@ -1653,7 +1654,7 @@ def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_pat
     from backend.api.chat_router import get_config_value as get_cfg
     from backend.utils import encode_image_to_base64, get_image_mime_type
 
-    model_name = get_cfg("MODEL_VL_NAME", "qwen3-vl-plus")
+    model_name = get_cfg("MODEL_VL_NAME", DEFAULT_VL_MODEL)
     api_base = ai_api_base()
 
     # 构建多模态 content 数组

@@ -17,6 +17,7 @@ from backend.api.chat_router import get_api_keys, upload_file_to_dashscope
 from backend.prompts import build_ai_role
 from backend.permission_service import check_activity_visibility
 from backend.api.config_router import get_config_value
+from backend.model_catalog import DEFAULT_LONG_MODEL
 from backend.config import (
     SUMMARY_DIR_NAME,
     TEACHERS_SUMMARY_DIR,
@@ -880,7 +881,7 @@ async def ai_grade_task(task_id: str, request: Request):
         raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
 
     api_base = ai_api_base()
-    model = get_config_value("MODEL_LONG_NAME", "qwen-long")
+    model = get_config_value("MODEL_LONG_NAME", DEFAULT_LONG_MODEL)
 
     # 4. 上传 summary 文件到 DashScope
     try:
@@ -1165,7 +1166,7 @@ async def ai_grade_single_student(task_id: str, request: Request):
         raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
 
     api_base = ai_api_base()
-    model = get_config_value("MODEL_LONG_NAME", "qwen-long")
+    model = get_config_value("MODEL_LONG_NAME", DEFAULT_LONG_MODEL)
 
     from backend.prompts.homework_grade import TASK_STUDENT_GRADING_PROMPT
     prompt = f"{build_ai_role()}\n" + TASK_STUDENT_GRADING_PROMPT.format(

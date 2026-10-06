@@ -43,7 +43,7 @@ interface ConfigField {
   key: string
   labelKey: string
   descKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle' | 'tts_voice'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size'
   group: string
   required?: boolean
   placeholderKey?: string
@@ -51,6 +51,8 @@ interface ConfigField {
   unitKey?: string
   /** 生效方式，未标注即保存后立即生效 */
   scope?: EffScope
+  /** model_select 用：向 /api/config/model-options 取哪一类候选 */
+  optionsKind?: 'chat' | 'long' | 'vl' | 'image'
   /** 改动会影响安全面或难以挽回，保存前统一二次确认 */
   danger?: boolean
 }
@@ -115,11 +117,32 @@ interface TtsVoice {
   name: string
   style: string
   gender: string
-  age: number
+  /** 3.0 基础音色表有年龄，3.1 系统音色表没有 —— 没有就是空串 */
+  age: string
   lang: string
   group: 'main' | 'alt'
   is_default?: boolean
   note?: string
+}
+
+// 合成模型（音色必须与模型配对，实测跨模型报 411，所以下拉与音色清单联动）
+interface TtsModel {
+  id: string
+  label: string
+  note: string
+  default_voice: string
+  default_voice_name: string
+  voice_count: number
+  is_default?: boolean
+}
+
+// 后端下发的模型候选（visible=false 只是"没在账号清单里查到"，不代表下线，故只标灰）
+interface ModelOption {
+  id: string
+  note: string
+  tier: 'recommended' | 'legacy' | 'premium'
+  visible: boolean | null
+  endpoint?: string
 }
 
 // 有专属管理入口、不算「本表单漏收」的配置键
@@ -150,9 +173,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 接入地址：专属域名优先（非必填），普通域名备用（默认已填）；两者通用，连不上自动回落
   { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
   { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', type: 'text', group: 'models' },
-  { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'text', group: 'models' },
-  { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'models' },
-  { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'text', group: 'models' },
+  { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models' },
+  { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'model_select', optionsKind: 'long', group: 'models' },
+  { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models' },
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
   { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', type: 'boolean', group: 'knowledgebase', required: false },
@@ -179,13 +202,14 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AI_GRADING_MAX_ITEMS_PER_ROUND', labelKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND', descKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitItem', scope: 'nextRound' },
   // 图片生成
   { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen' },
-  { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', type: 'text', group: 'imagegen' },
-  { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'text', group: 'imagegen' },
+  { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', type: 'model_select', optionsKind: 'image', group: 'imagegen' },
+  // 尺寸可选 auto（不传，用模型默认值）；档位与允许范围随模型所在端点变化，切换模型时会自动校正
+  { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'image_size', group: 'imagegen' },
   { key: 'IMAGE_GEN_MAX_PLACEHOLDERS', labelKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS', descKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS_desc', type: 'number', group: 'imagegen', required: false, unitKey: 'unitCount' },
   // 语音合成（backend/tts_service.py；百炼 qwen-audio-3.0-tts-flash，WebSocket 实时合成）
   // 只放 5 项：超时/格式/音高在 tts_service.py 里写死，避免管理员决策负担
   { key: 'TTS_ENABLED', labelKey: 'field_TTS_ENABLED', descKey: 'field_TTS_ENABLED_desc', type: 'boolean', group: 'tts', required: false },
-  { key: 'TTS_MODEL', labelKey: 'field_TTS_MODEL', descKey: 'field_TTS_MODEL_desc', type: 'text', group: 'tts' },
+  { key: 'TTS_MODEL', labelKey: 'field_TTS_MODEL', descKey: 'field_TTS_MODEL_desc', type: 'tts_model', group: 'tts' },
   { key: 'TTS_VOICE', labelKey: 'field_TTS_VOICE', descKey: 'field_TTS_VOICE_desc', type: 'tts_voice', group: 'tts' },
   { key: 'TTS_SPEECH_RATE', labelKey: 'field_TTS_SPEECH_RATE', descKey: 'field_TTS_SPEECH_RATE_desc', type: 'float', group: 'tts', required: false, unitKey: 'unitRate' },
   { key: 'TTS_VOLUME', labelKey: 'field_TTS_VOLUME', descKey: 'field_TTS_VOLUME_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitLevel' },
@@ -1521,6 +1545,10 @@ const SystemConfigPage: React.FC = () => {
     host?: string; base?: string; fallback_used?: boolean
     results?: { base: string; host: string; primary: boolean; ok: boolean; cost_ms?: number; error?: string }[]
   } | null>(null)
+  const [imageTesting, setImageTesting] = useState(false)
+  const [imageTestResult, setImageTestResult] = useState<Record<string, any> | null>(null)
+  const [ttsTesting, setTtsTesting] = useState(false)
+  const [ttsTestResult, setTtsTestResult] = useState<Record<string, any> | null>(null)
   const [appidTesting, setAppidTesting] = useState(false)
   const [appidTestResult, setAppidTestResult] = useState<{
     ok: boolean; cost_ms?: number; reply?: string; error?: string
@@ -1531,7 +1559,12 @@ const SystemConfigPage: React.FC = () => {
   const [dirty, setDirty] = useState<string[]>([])      // 与已加载值不同的配置键
   const loadedRef = useRef<Record<string, unknown>>({}) // 上次加载/保存后的表单快照（脏值对比 + 放弃修改）
   const [meta, setMeta] = useState<ConfigMeta | null>(null)        // 后端校验元数据（取值范围/长度上限）
-  const [ttsVoices, setTtsVoices] = useState<TtsVoice[]>([])   // 音色下拉数据（后端实测清单）
+  // 音色按模型分组（换合成模型时清单与默认音色都要跟着换）
+  const [ttsModels, setTtsModels] = useState<TtsModel[]>([])
+  const [ttsVoicesByModel, setTtsVoicesByModel] = useState<Record<string, TtsVoice[]>>({})
+  const [ttsDefaultVoice, setTtsDefaultVoice] = useState<Record<string, string>>({})
+  const [modelOptions, setModelOptions] = useState<Record<string, ModelOption[]>>({})
+  const [imageSizes, setImageSizes] = useState<Record<string, { presets: { value: string; label: string }[]; range: [number, number] }>>({})
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ memory: true }) // 收起的小节
   const [advOpen, setAdvOpen] = useState(false)                     // 「未收录配置键」兜底面板
 
@@ -1559,10 +1592,30 @@ const SystemConfigPage: React.FC = () => {
   const loadTtsVoices = useCallback(async () => {
     try {
       const { data } = await apiClient.get('/api/config/tts-voices')
-      setTtsVoices(Array.isArray(data?.voices) ? data.voices : [])
+      setTtsModels(Array.isArray(data?.models) ? data.models : [])
+      setTtsVoicesByModel(data?.voices_by_model || {})
+      setTtsDefaultVoice(data?.default_voice_by_model || {})
     } catch {
       // 忽略：管理员仍可保存既有音色
     }
+  }, [])
+
+  // ── 加载模型候选（含账号可见性与各模型可用尺寸；失败只退回手填，不挡配置页） ──
+  const loadModelOptions = useCallback(async () => {
+    const kinds = ['chat', 'long', 'vl', 'image'] as const
+    const results = await Promise.all(
+      kinds.map((k) => apiClient.get('/api/config/model-options', { params: { kind: k } })
+        .then(({ data }) => [k, data] as const)
+        .catch(() => [k, null] as const)),
+    )
+    const opts: Record<string, ModelOption[]> = {}
+    const sizes: Record<string, { presets: { value: string; label: string }[]; range: [number, number] }> = {}
+    for (const [k, data] of results) {
+      if (Array.isArray(data?.options)) opts[k] = data.options
+      if (data?.image_sizes) Object.assign(sizes, data.image_sizes)
+    }
+    setModelOptions(opts)
+    if (Object.keys(sizes).length) setImageSizes(sizes)
   }, [])
 
   // ── 把配置灌进表单并记下快照（快照用于脏值统计与「放弃修改」） ──
@@ -1670,7 +1723,8 @@ const SystemConfigPage: React.FC = () => {
     loadConfig()
     loadMeta()
     loadTtsVoices()
-  }, [user?.role, loadConfig, loadMeta, loadTtsVoices])
+    loadModelOptions()
+  }, [user?.role, loadConfig, loadMeta, loadTtsVoices, loadModelOptions])
 
   // 滚动时高亮左侧导航当前小节（IntersectionObserver 不依赖外层滚动容器的实现细节）
   useEffect(() => {
@@ -1722,22 +1776,87 @@ const SystemConfigPage: React.FC = () => {
   const knownKeys = new Set(GLOBAL_CONFIG_FIELDS.map((f) => f.key))
   const unknownKeys = Object.keys(config).filter((k) => !knownKeys.has(k) && !MANAGED_ELSEWHERE_KEYS.includes(k))
 
-  // 音色下拉选项：精选/替补分组，标签用「风格 — 中文名」，值存 API 认的完整 voice 参数
+  // ── 合成模型 ↔ 音色 联动 ──
+  // 音色与模型必须配对（实测跨模型报 411），所以换模型时清单和当前值都要跟着换
+  const ttsModelValue = (Form.useWatch('TTS_MODEL', form) as string | undefined) || ttsModels[0]?.id
   const ttsVoiceValue = Form.useWatch('TTS_VOICE', form) as string | undefined
+  const prevTtsModel = useRef<string | undefined>(undefined)
+
   const ttsVoiceOptions = useMemo(() => {
+    const list = ttsVoicesByModel[ttsModelValue || ''] || []
     const labelOf = (v: TtsVoice) =>
-      `${v.style} — ${v.name}（${v.gender}${v.age}${v.lang === '英文' ? ' · 英文' : ''}）${v.is_default ? ' · 默认' : ''}`
+      `${v.style} — ${v.name}（${v.gender}${v.age ? ` ${v.age}` : ''}${v.lang === '英文' ? ' · 英文' : ''}）${v.is_default ? ' · 默认' : ''}`
     const groups: { label: string; options: { value: string; label: string }[] }[] = [
-      { label: t('ttsGroupMain'), options: ttsVoices.filter((v) => v.group === 'main').map((v) => ({ value: v.voice, label: labelOf(v) })) },
-      { label: t('ttsGroupAlt'), options: ttsVoices.filter((v) => v.group === 'alt').map((v) => ({ value: v.voice, label: labelOf(v) })) },
+      { label: t('ttsGroupMain'), options: list.filter((v) => v.group === 'main').map((v) => ({ value: v.voice, label: labelOf(v) })) },
+      { label: t('ttsGroupAlt'), options: list.filter((v) => v.group === 'alt').map((v) => ({ value: v.voice, label: labelOf(v) })) },
     ].filter((g) => g.options.length)
-    const known = groups.flatMap((g) => g.options.map((o) => o.value))
     const cur = String(ttsVoiceValue ?? '').trim()
-    if (cur && !known.includes(cur)) {
+    if (cur && !groups.some((g) => g.options.some((o) => o.value === cur))) {
       groups.unshift({ label: t('ttsGroupCustom'), options: [{ value: cur, label: `${cur}（${t('ttsVoiceCustomTag')}）` }] })
     }
     return groups
-  }, [ttsVoices, ttsVoiceValue, t])
+  }, [ttsVoicesByModel, ttsModelValue, ttsVoiceValue, t])
+
+  useEffect(() => {
+    if (!ttsModelValue) return
+    // 首次只记基线：否则页面刚加载就会把管理员已存的音色当成"不匹配"改掉
+    if (prevTtsModel.current === undefined) { prevTtsModel.current = ttsModelValue; return }
+    if (prevTtsModel.current === ttsModelValue) return
+    prevTtsModel.current = ttsModelValue
+    const list = ttsVoicesByModel[ttsModelValue] || []
+    if (!list.length) return
+    const cur = String(form.getFieldValue('TTS_VOICE') ?? '')
+    if (list.some((v) => v.voice === cur)) return
+    const next = ttsDefaultVoice[ttsModelValue] || list[0].voice
+    form.setFieldsValue({ TTS_VOICE: next })
+    message.info(t('ttsVoiceAutoSwitch', { voice: list.find((v) => v.voice === next)?.name || next }))
+  }, [ttsModelValue, ttsVoicesByModel, ttsDefaultVoice, form, t])
+
+  // ── 生图模型 ↔ 尺寸 联动（两代端点的可用档位不同） ──
+  const imageModelValue = Form.useWatch('IMAGE_GEN_MODEL', form) as string | undefined
+  const imageSizeValue = Form.useWatch('IMAGE_GEN_SIZE', form) as string | undefined
+  const prevImageModel = useRef<string | undefined>(undefined)
+
+  const imageSizeOptions = useMemo(() => {
+    const presets = imageSizes[imageModelValue || '']?.presets || []
+    return [{ value: 'auto', label: t('imageSizeAutoLabel') }, ...presets]
+  }, [imageSizes, imageModelValue, t])
+
+  useEffect(() => {
+    if (!imageModelValue) return
+    if (prevImageModel.current === undefined) { prevImageModel.current = imageModelValue; return }
+    if (prevImageModel.current === imageModelValue) return
+    prevImageModel.current = imageModelValue
+    const cur = String(form.getFieldValue('IMAGE_GEN_SIZE') ?? '').trim()
+    if (!cur || cur === 'auto') return
+    const presets = imageSizes[imageModelValue]?.presets || []
+    if (presets.some((x) => x.value === cur)) return
+    // 回落到 auto 而不是猜一个档位：auto 在两代端点都实测可用
+    form.setFieldsValue({ IMAGE_GEN_SIZE: 'auto' })
+    message.info(t('imageSizeAutoSwitch', { size: cur }))
+  }, [imageModelValue, imageSizes, form, t])
+
+  // ── 模型下拉（对话 / 长文本 / 视觉 / 生图共用一套） ──
+  // 用 AutoComplete 而不是 Select：清单外的模型名仍能手填（账号可能刚开通新模型）。
+  // visible=false 只代表"没在账号模型清单里查到"（实测该清单不完整：两个 TTS 模型都不在
+  // 其中却能用），所以只追加提示文字，绝不拦保存。
+  // 注意 options 必须是扁平结构：AutoComplete 传分组会让 filterOption 收到的 option
+  // 变成组对象、没有 value，所以档位改成标签前缀 + 排序来表达。
+  const modelOptionsFor = useCallback((kind?: ConfigField['optionsKind']) => {
+    const order: Record<string, number> = { recommended: 0, legacy: 1, premium: 2 }
+    const tierLabel: Record<string, string> = {
+      recommended: t('modelTierRecommended'),
+      legacy: t('modelTierLegacy'),
+      premium: t('modelTierPremium'),
+    }
+    return [...(modelOptions[kind || 'chat'] || [])]
+      .sort((a, b) => (order[a.tier] ?? 9) - (order[b.tier] ?? 9))
+      .map((m) => ({
+        value: m.id,
+        label: `${tierLabel[m.tier] || ''} · ${m.id} — ${m.note}`
+          + (m.visible === false ? `（${t('modelNotVisibleTag')}）` : ''),
+      }))
+  }, [modelOptions, t])
 
   // ── 全局配置表单各小节 ──
   const renderGroup = (group: string) => {
@@ -1922,7 +2041,45 @@ const SystemConfigPage: React.FC = () => {
                     optionFilterProp="label"
                     options={ttsVoiceOptions}
                     placeholder={t('placeholder_ttsVoice')}
-                    notFoundContent={ttsVoices.length ? t('ttsNoMatch') : t('ttsVoicesLoading')}
+                    notFoundContent={ttsVoiceOptions.length ? t('ttsNoMatch') : t('ttsVoicesLoading')}
+                  />
+                </Form.Item>
+              ) : field.type === 'model_select' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={getDesc(field)}
+                >
+                  <AutoComplete
+                    options={modelOptionsFor(field.optionsKind)}
+                    placeholder={t('placeholder_modelSelect')}
+                    filterOption={(input, option) =>
+                      String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                  />
+                </Form.Item>
+              ) : field.type === 'image_size' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={getDesc(field)}
+                >
+                  <AutoComplete options={imageSizeOptions} placeholder={t('placeholder_imageSize')} />
+                </Form.Item>
+              ) : field.type === 'tts_model' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={getDesc(field)}
+                >
+                  <Select
+                    options={ttsModels.map((m) => ({
+                      value: m.id,
+                      label: `${m.label}（${m.voice_count} 个音色${m.is_default ? ' · 默认' : ''}）— ${m.note}`,
+                    }))}
+                    placeholder={t('placeholder_ttsModel')}
                   />
                 </Form.Item>
               ) : field.type === 'multimodal_toggle' ? (
@@ -2041,6 +2198,88 @@ const SystemConfigPage: React.FC = () => {
                       {t('kbTestSample')}：{kbTestResult.sample.map((x) => `《${x.doc_name}》(${x.score})`).join('、')}
                     </span>
                   ) : undefined}
+                />
+              )}
+            </div>
+          )}
+          {/* 生图自检：配置填完就该当场知道对不对，而不是等教师出题时才发现配图全空 */}
+          {group === 'imagegen' && isOpen && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+              <Tooltip title={t('imageTestHint')}>
+                <Button size="small" loading={imageTesting} onClick={async () => {
+                  setImageTesting(true); setImageTestResult(null)
+                  try {
+                    const { data } = await apiClient.post('/api/config/image-test', null, { timeout: SELF_TEST_TIMEOUT })
+                    setImageTestResult(data)
+                  } catch (e: any) {
+                    setImageTestResult({ ok: false, error: selfTestErr(e) })
+                  } finally { setImageTesting(false) }
+                }}>{t('imageTestBtn')}</Button>
+              </Tooltip>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('selfTestCostHint')}</Text>
+              {imageTestResult && (
+                <Alert
+                  style={{ width: '100%', marginTop: 4 }}
+                  type={imageTestResult.ok ? 'success' : 'error'}
+                  showIcon
+                  title={imageTestResult.ok
+                    ? t('imageTestOk', { model: imageTestResult.model, ms: imageTestResult.cost_ms })
+                    : t('imageTestFail', { err: imageTestResult.error })}
+                  description={(
+                    <div style={{ fontSize: 12 }}>
+                      {/* 配置值与实际发送值分开显示：auto 表示不传、跨端点会回落，这是过去最难自查的不一致 */}
+                      <div>{t('imageTestDetail', {
+                        endpoint: imageTestResult.endpoint || '-',
+                        configured: imageTestResult.size_configured || '-',
+                        sent: imageTestResult.size_sent || '-',
+                      })}</div>
+                      {imageTestResult.size_note && imageTestResult.size_note !== imageTestResult.size_sent && (
+                        <div>{t('imageTestSizeNote', { note: imageTestResult.size_note })}</div>
+                      )}
+                      {imageTestResult.url && (
+                        <a href={imageTestResult.url} target="_blank" rel="noreferrer">{t('imageTestView')}</a>
+                      )}
+                    </div>
+                  )}
+                />
+              )}
+            </div>
+          )}
+          {/* 语音合成自检：回传可播放音频，管理员当场听音色，比看参数有用 */}
+          {group === 'tts' && isOpen && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+              <Tooltip title={t('ttsTestHint')}>
+                <Button size="small" loading={ttsTesting} onClick={async () => {
+                  setTtsTesting(true); setTtsTestResult(null)
+                  try {
+                    const { data } = await apiClient.post('/api/config/tts-test', null, { timeout: SELF_TEST_TIMEOUT })
+                    setTtsTestResult(data)
+                  } catch (e: any) {
+                    setTtsTestResult({ ok: false, error: selfTestErr(e) })
+                  } finally { setTtsTesting(false) }
+                }}>{ttsTestResult?.ok ? t('ttsTestBtnAgain') : t('ttsTestBtn')}</Button>
+              </Tooltip>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('selfTestCostHint')}</Text>
+              {ttsTestResult && (
+                <Alert
+                  style={{ width: '100%', marginTop: 4 }}
+                  type={ttsTestResult.ok ? 'success' : 'error'}
+                  showIcon
+                  title={ttsTestResult.ok
+                    ? t('ttsTestOk', { voice: ttsTestResult.voice, ms: ttsTestResult.cost_ms })
+                    : t('ttsTestFail', { err: ttsTestResult.error })}
+                  description={(
+                    <div style={{ fontSize: 12 }}>
+                      <div>{t('ttsTestDetail', { model: ttsTestResult.model || '-' })}</div>
+                      {/* 配置里写的音色和实际用的音色不一致 = 音色与模型错配，已自动回落 */}
+                      {ttsTestResult.voice_configured && ttsTestResult.voice !== ttsTestResult.voice_configured && (
+                        <div>{t('ttsTestMismatch', { configured: ttsTestResult.voice_configured })}</div>
+                      )}
+                      {ttsTestResult.ok && ttsTestResult.url && (
+                        <audio controls src={ttsTestResult.url} style={{ width: '100%', marginTop: 6 }} />
+                      )}
+                    </div>
+                  )}
                 />
               )}
             </div>
