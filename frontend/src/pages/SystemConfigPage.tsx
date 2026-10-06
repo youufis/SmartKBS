@@ -1880,6 +1880,16 @@ const SystemConfigPage: React.FC = () => {
       }))
   }, [modelOptions, t])
 
+  // ── AutoComplete 的过滤要按"用户实际键入的内容"，不能用输入框当前值 ──
+  // 踩过的坑：AutoComplete 默认拿当前输入值去过滤，而输入值就是已存的模型名 / 尺寸，
+  // 于是下拉一打开只剩自己那一项（2026-10-06 现场：三个候选只显示一个）。
+  const [freeSearch, setFreeSearch] = useState('')
+  const pickBySearch = useCallback((opts: { value: string; label: string }[]) => {
+    const q = freeSearch.trim().toLowerCase()
+    if (!q) return opts
+    return opts.filter((o) => `${o.value} ${o.label}`.toLowerCase().includes(q))
+  }, [freeSearch])
+
   // ── 全局配置表单各小节 ──
   const renderGroup = (group: string) => {
     const fields = fieldsOf(group)
@@ -2078,10 +2088,11 @@ const SystemConfigPage: React.FC = () => {
                   extra={getDesc(field)}
                 >
                   <AutoComplete
-                    options={modelOptionsFor(field.optionsKind)}
+                    options={pickBySearch(modelOptionsFor(field.optionsKind))}
                     placeholder={t('placeholder_modelSelect')}
-                    filterOption={(input, option) =>
-                      String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                    filterOption={false}
+                    onSearch={setFreeSearch}
+                    onOpenChange={(open) => { if (!open) setFreeSearch('') }}
                   />
                 </Form.Item>
               ) : field.type === 'image_size' ? (
@@ -2091,7 +2102,13 @@ const SystemConfigPage: React.FC = () => {
                   rules={getRule(field)}
                   extra={getDesc(field)}
                 >
-                  <AutoComplete options={imageSizeOptions} placeholder={t('placeholder_imageSize')} />
+                  <AutoComplete
+                    options={pickBySearch(imageSizeOptions)}
+                    placeholder={t('placeholder_imageSize')}
+                    filterOption={false}
+                    onSearch={setFreeSearch}
+                    onOpenChange={(open) => { if (!open) setFreeSearch('') }}
+                  />
                 </Form.Item>
               ) : field.type === 'tts_model' ? (
                 <Form.Item
