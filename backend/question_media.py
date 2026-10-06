@@ -46,9 +46,10 @@ WHITEBOARD_DIR_NAME = "whiteboard_ai"
 #: 这些目录不是「某道题库题的配图」，孤儿回收必须永久豁免
 PROTECTED_DIR_NAMES = {ARCHIVE_DIR_NAME, SOURCE_QUEST, WHITEBOARD_DIR_NAME}
 
-#: 单题占位符默认上限：AI 一次给 5 个描述就会烧 5 张图，成本失控
+#: 单题占位符默认上限：AI 一次给 5 个描述就会烧 5 张图，成本失控。
+#: 2026-10-06 由 2 收到 1 —— 一道题配两张实拍图的情况极少，而批量出题时这是成倍的成本差。
 #: 可在系统配置 IMAGE_GEN_MAX_PLACEHOLDERS 调整，0 表示不限制
-MAX_PLACEHOLDERS_PER_QUESTION = 2
+MAX_PLACEHOLDERS_PER_QUESTION = 1
 
 
 def media_root() -> Path:
@@ -437,7 +438,7 @@ def normalize_placeholders(raw: Any, limit: int | None = None) -> list[dict[str,
     - 丢掉非 dict、缺 description 的项（否则生图循环里 ``ph["description"]`` 直接
       KeyError，把整批已入库的题目一起带崩）
     - key 缺失或重复时补 p1/p2…（面板按 key 定位条目，重复 key 会让两张图互相覆盖）
-    - 数量截到 ``MAX_PLACEHOLDERS_PER_QUESTION``（默认 2），控住单题生图成本
+    - 数量截到 ``MAX_PLACEHOLDERS_PER_QUESTION``（默认 1），控住单题生图成本
     - status 归一成 pending / generated / uploaded / failed 之一
     """
     if limit is None:

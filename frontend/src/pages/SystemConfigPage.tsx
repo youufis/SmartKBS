@@ -136,11 +136,18 @@ interface TtsModel {
   is_default?: boolean
 }
 
+// 某模型的尺寸目录：档位 + 实测规则（side 按边长判、area 按宽×高 总面积判）
+interface ImageSizeConf {
+  presets: { value: string; label: string }[]
+  rule: { kind: 'side' | 'area'; lo: number; hi: number }
+  hint: string
+}
+
 // 后端下发的模型候选（visible=false 只是"没在账号清单里查到"，不代表下线，故只标灰）
 interface ModelOption {
   id: string
   note: string
-  tier: 'recommended' | 'legacy' | 'premium'
+  tier: 'recommended' | 'alternative' | 'premium' | 'legacy'
   visible: boolean | null
   endpoint?: string
 }
@@ -1564,7 +1571,7 @@ const SystemConfigPage: React.FC = () => {
   const [ttsVoicesByModel, setTtsVoicesByModel] = useState<Record<string, TtsVoice[]>>({})
   const [ttsDefaultVoice, setTtsDefaultVoice] = useState<Record<string, string>>({})
   const [modelOptions, setModelOptions] = useState<Record<string, ModelOption[]>>({})
-  const [imageSizes, setImageSizes] = useState<Record<string, { presets: { value: string; label: string }[]; range: [number, number] }>>({})
+  const [imageSizes, setImageSizes] = useState<Record<string, ImageSizeConf>>({})
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ memory: true }) // 收起的小节
   const [advOpen, setAdvOpen] = useState(false)                     // 「未收录配置键」兜底面板
 
@@ -1609,7 +1616,7 @@ const SystemConfigPage: React.FC = () => {
         .catch(() => [k, null] as const)),
     )
     const opts: Record<string, ModelOption[]> = {}
-    const sizes: Record<string, { presets: { value: string; label: string }[]; range: [number, number] }> = {}
+    const sizes: Record<string, ImageSizeConf> = {}
     for (const [k, data] of results) {
       if (Array.isArray(data?.options)) opts[k] = data.options
       if (data?.image_sizes) Object.assign(sizes, data.image_sizes)
@@ -1817,6 +1824,21 @@ const SystemConfigPage: React.FC = () => {
   const imageSizeValue = Form.useWatch('IMAGE_GEN_SIZE', form) as string | undefined
   const prevImageModel = useRef<string | undefined>(undefined)
 
+  /** 按后端下发的实测规则判一个尺寸对该模型是否可用（面积制与边长制并存，别在前端写死） */
+  const sizeValidForModel = useCallback((model: string, value: string) => {
+    const conf = imageSizes[model]
+    if (!conf) return true              // 没拿到目录就不动管理员填的值
+    const cur = String(value || '').trim()
+    if (!cur || cur.toLowerCase() === 'auto') return true
+    if (conf.presets.some((x) => x.value.toLowerCase() === cur.toLowerCase())) return true
+    const m = /^(\d{3,5})[*x×](\d{3,5})$/i.exec(cur.replace(/\s/g, ''))
+    if (!m) return false
+    const w = Number(m[1])
+    const h = Number(m[2])
+    const { kind, lo, hi } = conf.rule
+    return kind === 'area' ? w * h >= lo && w * h <= hi : [w, h].every((s) => s >= lo && s <= hi)
+  }, [imageSizes])
+
   const imageSizeOptions = useMemo(() => {
     const presets = imageSizes[imageModelValue || '']?.presets || []
     return [{ value: 'auto', label: t('imageSizeAutoLabel') }, ...presets]
@@ -1829,8 +1851,7 @@ const SystemConfigPage: React.FC = () => {
     prevImageModel.current = imageModelValue
     const cur = String(form.getFieldValue('IMAGE_GEN_SIZE') ?? '').trim()
     if (!cur || cur === 'auto') return
-    const presets = imageSizes[imageModelValue]?.presets || []
-    if (presets.some((x) => x.value === cur)) return
+    if (sizeValidForModel(imageModelValue, cur)) return
     // 回落到 auto 而不是猜一个档位：auto 在两代端点都实测可用
     form.setFieldsValue({ IMAGE_GEN_SIZE: 'auto' })
     message.info(t('imageSizeAutoSwitch', { size: cur }))
@@ -1843,11 +1864,12 @@ const SystemConfigPage: React.FC = () => {
   // 注意 options 必须是扁平结构：AutoComplete 传分组会让 filterOption 收到的 option
   // 变成组对象、没有 value，所以档位改成标签前缀 + 排序来表达。
   const modelOptionsFor = useCallback((kind?: ConfigField['optionsKind']) => {
-    const order: Record<string, number> = { recommended: 0, legacy: 1, premium: 2 }
+    const order: Record<string, number> = { recommended: 0, alternative: 1, premium: 2, legacy: 3 }
     const tierLabel: Record<string, string> = {
       recommended: t('modelTierRecommended'),
-      legacy: t('modelTierLegacy'),
+      alternative: t('modelTierAlternative'),
       premium: t('modelTierPremium'),
+      legacy: t('modelTierLegacy'),
     }
     return [...(modelOptions[kind || 'chat'] || [])]
       .sort((a, b) => (order[a.tier] ?? 9) - (order[b.tier] ?? 9))
@@ -1868,7 +1890,11 @@ const SystemConfigPage: React.FC = () => {
     const getLabel = (field: ConfigField) => t(field.labelKey)
     // 数字项把后端 _NUM_RANGES 的范围直接标在说明里，避免"填了才被拒"
     const getDesc = (field: ConfigField) => {
-      const base = field.descKey ? t(field.descKey) : undefined
+      let base = field.descKey ? t(field.descKey) : undefined
+      // 尺寸的可选项随模型变，直接把该模型的实测规则挂在说明里，省得管理员去猜
+      if (field.type === 'image_size' && imageModelValue && imageSizes[imageModelValue]?.hint) {
+        base = `${base || ''}${t('imageSizeRuleHint', { hint: imageSizes[imageModelValue].hint })}`
+      }
       const range = field.type === 'number' ? meta?.num_ranges?.[field.key]
         : field.type === 'float' ? meta?.float_ranges?.[field.key]
         : undefined

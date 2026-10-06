@@ -39,8 +39,8 @@ import dashscope
 from backend.ai_task_manager import report_progress
 
 from backend.api.config_router import get_config_value
-from backend.model_catalog import (DEFAULT_IMAGE_MODEL, image_endpoint_of, options_for,
-                                   preset_values_for, size_range_for)
+from backend.model_catalog import (DEFAULT_IMAGE_MODEL, describe_size_rule, image_endpoint_of,
+                                   options_for, preset_values_for, size_ok)
 from backend.logger import logger
 
 # ── 全局并发控制 ──
@@ -84,11 +84,11 @@ def normalize_size(raw: str | None, model: str | None = None) -> str:
     管理员常手抖写成 1024x1024 / 1024 × 1024 / 全角，DashScope 只认 ``宽*高``，
     否则会 400，再叠加 3 次重试 × 3 个模型 = 9 次无意义调用。
 
-    传了 model 就按它所在端点校验：
-      - ``auto`` 两代都合法（含义是不传 size）；
-      - ``1K/2K/4K`` 只有多模态端点认 —— 老端点收到会变成"HTTP 200 但任务 FAILED"，
-        所以在这里就判不合法，别发出去；
-      - 宽高范围按端点取（老端点实测 512~1440）。
+    传了 model 就按它自己的实测规则校验（model_catalog.SIZE_RULES）：
+      - ``auto`` 一律合法（含义是不传 size）；
+      - 预设 token 只有部分模型接受（实测 wan2.7 收 1K/2K、4K 被拒；老端点只认 宽*高），
+        而老端点收到不属于自己的写法会变成"HTTP 200 但任务 FAILED"，所以在这里就判掉；
+      - 宽高是按边长判还是按面积判，各家不同，交给 size_ok。
     """
     text = (str(raw or "").strip().lower()
             .replace("\u00d7", "*").replace("x", "*").replace("\u3000", "").replace(" ", ""))
@@ -97,7 +97,7 @@ def normalize_size(raw: str | None, model: str | None = None) -> str:
     if text == AUTO_SIZE:
         return AUTO_SIZE
     if text in _PRESET_TOKENS:
-        # 没给模型就不替调用方下判断；给了就按该模型所在端点的实测档位判
+        # 没给模型就不替调用方下判断；给了就按该模型实测接受的预设判
         if model is None:
             return text.upper()
         return text.upper() if text in preset_values_for(model) else ""
@@ -105,10 +105,7 @@ def normalize_size(raw: str | None, model: str | None = None) -> str:
     if not m:
         return ""
     w, h = int(m.group(1)), int(m.group(2))
-    lo, hi = size_range_for(model)
-    if not (lo <= w <= hi and lo <= h <= hi):
-        return ""
-    return f"{w}*{h}"
+    return f"{w}*{h}" if size_ok(model, w, h) else ""
 
 
 def size_for_call(model: str, configured: str) -> tuple[str | None, str]:
@@ -123,9 +120,8 @@ def size_for_call(model: str, configured: str) -> tuple[str | None, str]:
     ok = normalize_size(raw, model)
     if ok and ok.lower() != AUTO_SIZE:
         return ok, ok
-    lo, hi = size_range_for(model)
-    return DEFAULT_SIZE, (f"{raw} 不适用于 {model}"
-                         f"（该端点宽高需在 {lo}~{hi}），已改用 {DEFAULT_SIZE}")
+    return DEFAULT_SIZE, (f"{raw} 不适用于 {model}（{describe_size_rule(model)}），"
+                          f"已改用 {DEFAULT_SIZE}")
 
 
 def get_image_gen_config() -> dict[str, Any] | None:
@@ -155,8 +151,8 @@ def get_image_gen_config() -> dict[str, Any] | None:
         # 以前这里静默回落，管理员以为配的是 2048 实际出的是 1024 —— 把回落原因带出去，
         # 自检接口与日志都能看到（generate_and_save_image 也照旧继续，不阻断教学）。
         size = DEFAULT_SIZE
-        lo, hi = size_range_for(model)
-        size_note = f"{raw_size!r} 不适用于 {model}（该端点宽高需在 {lo}~{hi}），已回落 {DEFAULT_SIZE}"
+        size_note = (f"{raw_size!r} 不适用于 {model}（{describe_size_rule(model)}），"
+                     f"已回落 {DEFAULT_SIZE}")
         logger.warning(f"IMAGE_GEN_SIZE={raw_size!r} {size_note}")
 
     return {

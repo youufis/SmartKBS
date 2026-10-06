@@ -112,7 +112,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
     "IMAGE_GEN_SIZE": "auto",   # auto = 不传尺寸、用模型默认值；也可选按模型联动的具体档位
-    "IMAGE_GEN_MAX_PLACEHOLDERS": 2,
+    "IMAGE_GEN_MAX_PLACEHOLDERS": 1,   # 单题默认只自动生成 1 张实拍配图，控住成本
     # ── 语音合成（backend/tts_service.py；两代模型见 backend/tts_voices.py）──
     # 总开关默认关：关掉时全线不产生任何计费请求，智能点名页的语音播报也一并停用。
     # 音色与模型必须配对（跨模型混用实测报 411），保存时有跨键校验、页面上换模型会带出
@@ -527,17 +527,16 @@ def _check_model_pairing(out: dict[str, Any], updates: dict[str, Any]) -> dict[s
     if "IMAGE_GEN_MODEL" in out or "IMAGE_GEN_SIZE" in out:
         # 延迟导入：image_gen_service 在模块级引用了本文件的 get_config_value
         from backend.api.image_gen_service import AUTO_SIZE, normalize_size
-        from backend.model_catalog import DEFAULT_IMAGE_MODEL, size_range_for
+        from backend.model_catalog import DEFAULT_IMAGE_MODEL, describe_size_rule
 
         model = out.get("IMAGE_GEN_MODEL") or cfg.get("IMAGE_GEN_MODEL") or DEFAULT_IMAGE_MODEL
         raw = str(out.get("IMAGE_GEN_SIZE", cfg.get("IMAGE_GEN_SIZE", AUTO_SIZE)) or "").strip()
         norm = normalize_size(raw, model)
         if not norm:
-            lo, hi = size_range_for(model)
             raise HTTPException(
                 status_code=400,
-                detail=(f"生图尺寸 {raw!r} 不适用于模型 {model}："
-                        f"该端点宽高需在 {lo}~{hi}，或填 auto（用模型默认）、1K/2K/4K 预设"))
+                detail=(f"生图尺寸 {raw!r} 不适用于模型 {model}：{describe_size_rule(model)}；"
+                        "也可以填 auto 让模型自己定"))
         out["IMAGE_GEN_SIZE"] = norm
 
     return out
@@ -880,10 +879,11 @@ async def model_options(request: Request, kind: str = "chat"):
                  "known": sorted(m["id"] for m in options_for(kind))}
     if kind == "image":
         # 尺寸档位随模型变（两代端点范围不同），一并下发，前端才能做"换模型 → 校验尺寸"
-        from backend.model_catalog import size_presets_for, size_range_for
+        from backend.model_catalog import describe_size_rule, size_presets_for, size_rule
 
         out["image_sizes"] = {
-            m["id"]: {"presets": size_presets_for(m["id"]), "range": list(size_range_for(m["id"]))}
+            m["id"]: {"presets": size_presets_for(m["id"]), "rule": size_rule(m["id"]),
+                      "hint": describe_size_rule(m["id"])}
             for m in out["options"]
         }
     return out
