@@ -10,7 +10,7 @@
   "logout": "退出登录",
   "logoutConfirm": "确认退出登录？",
   "onlineCount": "当前在线 {{count}} 人",
-  "onlineCountText": "当前在线: {{count}} 人",
+  "onlineCountText": "在线 {{count}}",
   "usernameRequired": "请输入用户名",
   "passwordRequired": "请输入密码",
   "defaultAgentName": "智慧教学平台",
@@ -94,5 +94,7 @@
   "ssConfirmSet": "确认设置",
   "skinSwitch": "登录页配色",
   "shuffleSkin": "🎲 随机换一个",
-  "dailySkin": "📅 恢复今日配色"
+  "dailySkin": "📅 恢复今日配色",
+  "visitTodayText": "今日 {{users}}/{{times}}",
+  "visitTotalText": "累计 {{times}}"
 }

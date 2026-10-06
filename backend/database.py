@@ -1136,6 +1136,23 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 站点计数器（只增不减）：登录页"累计访问"用它，与下面 IP 账本同一套设计 ──
+            #    （独立于明细清理、永久累计，实现见 backend/site_stats.py）
+            #    为什么不用 COUNT(login_logs)：管理员可批量删除登录历史，那样累计数会倒退。
+            c.execute("""CREATE TABLE IF NOT EXISTS site_counter (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT
+            )""")
+            try:
+                # 首次建档：基线取当前留存的明细条数。启用前被删过的历史追不回来，
+                # 但只偏低一次，之后严格只增。已有计数器时 INSERT OR IGNORE 不动它。
+                c.execute("""INSERT OR IGNORE INTO site_counter (key, value, updated_at)
+                             SELECT 'login_total', COUNT(*), datetime('now', 'localtime')
+                             FROM login_logs""")
+            except sqlite3.OperationalError:
+                pass
+
             # ── IP 活跃日账本（每 IP 一行，跨天自增；独立于明细清理，永久累计）──
             c.execute("""CREATE TABLE IF NOT EXISTS ip_active_ledger (
                 ip TEXT PRIMARY KEY,

@@ -46,6 +46,24 @@ export async function getOnlineCount(): Promise<number> {
   return data.count;
 }
 
+/** 登录页统计：在线人数 + 今日访问（人次 / 人数）+ 累计访问次数 */
+export interface VisitStats {
+  online: number
+  today_times: number
+  today_users: number
+  total_times: number
+}
+
+export async function getVisitStats(): Promise<VisitStats> {
+  const { data } = await apiClient.get('/api/auth/visit-stats');
+  return {
+    online: Number(data?.online) || 0,
+    today_times: Number(data?.today_times) || 0,
+    today_users: Number(data?.today_users) || 0,
+    total_times: Number(data?.total_times) || 0,
+  };
+}
+
 // ── 密保问题（双问题 + 频率限制）──
 
 export interface SecurityStatus {

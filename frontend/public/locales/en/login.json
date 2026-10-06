@@ -94,5 +94,7 @@
   "ssConfirmSet": "Confirm setup",
   "skinSwitch": "Login color scheme",
   "shuffleSkin": "🎲 Shuffle",
-  "dailySkin": "📅 Today's palette"
+  "dailySkin": "📅 Today's palette",
+  "visitTodayText": "{{users}}/{{times}} today",
+  "visitTotalText": "{{times}} total"
 }

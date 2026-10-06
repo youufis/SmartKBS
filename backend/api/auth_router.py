@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.database import execute_query, execute_insert_update
+from backend.site_stats import bump_login_count, visit_stats
 from backend.auth import (
     check_password,
     create_jwt_token,
@@ -138,6 +139,8 @@ async def login(req: LoginRequest, fastapi_request: Request):
              now_str, src_ip, user_agent),
         )
         logger.info(f"登录日志已记录: {username}({role_label}) @ {now_str} from {src_ip}")
+        # 累计访问计数：与明细同一条路径，删明细不会让它倒退（见 backend/site_stats.py）
+        bump_login_count()
     except Exception as e:
         logger.warning(f"记录登录日志失败: {e}")
         import traceback
@@ -257,6 +260,7 @@ async def get_current_user(request: Request):
                  now_str, src_ip, user_agent),
             )
             logger.info(f"会话恢复记录考勤: {username}({role_label}) @ {now_str}")
+            bump_login_count()      # 会话恢复也算"进来一次"，与写入的明细保持一致
     except Exception as e:
         logger.warning(f"会话恢复记录考勤失败: {e}")
 
@@ -273,6 +277,16 @@ async def get_current_user(request: Request):
 async def online_count():
     """获取在线用户数"""
     return {"count": get_online_count()}
+
+
+@router.get("/visit-stats", summary="访问统计（免登录，登录页用）")
+async def visit_stats_api():
+    """一次返回登录页要展示的四个数：在线 / 今日人次 / 今日人数 / 累计次数。
+
+    刻意合在一个接口里 —— 登录页对未登录访客也在轮询，拆成多个接口就是多倍开销。
+    结果在 site_stats 里缓存 15 秒（与前端轮询同频）。
+    """
+    return visit_stats()
 
 
 # ── 密保问题（双问题验证 + 频率限制）──

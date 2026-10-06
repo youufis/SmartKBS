@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
-import { getOnlineCount } from '../api/auth'
+import { getVisitStats, type VisitStats } from '../api/auth'
 import apiClient from '../api/client'
 import ThemeSwitcher from '../components/ThemeSwitcher'
 import LanguageSwitcher from '../components/LanguageSwitcher'
@@ -43,10 +43,25 @@ const LoginPage: React.FC = () => {
   const login = useAuthStore((s) => s.login)
   const themeName = useThemeStore((s) => s.current)
   const [loading, setLoading] = useState(false)
-  const [onlineCount, setOnlineCount] = useState(0)
+  const [stats, setStats] = useState<VisitStats>({ online: 0, today_times: 0, today_users: 0, total_times: 0 })
   const [agentName, setAgentName] = useState(t('defaultAgentName'))
   const [orgName, setOrgName] = useState('')
   const [forgotModalOpen, setForgotModalOpen] = useState(false)
+
+  // 把大数缩写成固定量级的文本：中文 万/亿，其它语言 k/M。
+  // 登录页这一行是 nowrap + 省略号兜底，但真正让它不被"累计"撑破的是这里 ——
+  // 数字位数会随使用不断增长，不缩写迟早从一行变成两行。精确值放在悬停提示里。
+  const formatBigCount = (n: number): string => {
+    const v = Number(n) || 0
+    if (lang === 'zh-CN') {
+      if (v >= 1e8) return `${(v / 1e8).toFixed(1).replace(/\.0$/, '')}亿`
+      if (v >= 1e4) return `${(v / 1e4).toFixed(1).replace(/\.0$/, '')}万`
+      return String(v)
+    }
+    if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, '')}M`
+    if (v >= 1e3) return `${(v / 1e3).toFixed(1).replace(/\.0$/, '')}k`
+    return String(v)
+  }
 
   // 随机选一条名言（仅在组件挂载时确定）
   const [quote] = useState(() => getRandomQuote())
@@ -87,7 +102,8 @@ const LoginPage: React.FC = () => {
   }, [lang, t])
 
   useEffect(() => {
-    const poll = () => { getOnlineCount().then(setOnlineCount).catch(() => {}) }
+    // 一个接口拿全四个数：登录页对未登录访客也在轮询，不该拆成多个请求
+    const poll = () => { getVisitStats().then(setStats).catch(() => {}) }
     // 登录页本身没有登录态，requireAuth=false；标签页切到后台时自动停轮询
     startPoller('login-online-count', poll, 15000, { requireAuth: false })
     return () => stopPoller('login-online-count')
@@ -224,14 +240,25 @@ const LoginPage: React.FC = () => {
                 )}
               </div>
 
-              {/* 在线人数 */}
-              <div className="login-online" style={{
-                textAlign: 'center',
-                marginBottom: 20,
-                fontSize: 12,
-                color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)',
-              }}>
-                🟢 {t('onlineCountText', { count: onlineCount })}
+              {/* 在线 + 访问统计。这一行必须永远只占一行：正文只留数字
+                  （今日是 人数/人次），累计按量级缩写，样式上 nowrap + 省略号兜底 */}
+              <div
+                className="login-online"
+                style={{
+                  textAlign: 'center',
+                  marginBottom: 20,
+                  fontSize: 12,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  color: stats.online > 0 ? 'var(--success-color)' : 'var(--text-tertiary)',
+                }}
+              >
+                🟢 {t('onlineCountText', { count: stats.online })}
+                <span> · </span>
+                {t('visitTodayText', { users: stats.today_users, times: stats.today_times })}
+                <span> · </span>
+                {t('visitTotalText', { times: formatBigCount(stats.total_times) })}
               </div>
 
               {/* 名言 */}
