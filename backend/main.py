@@ -324,6 +324,11 @@ if _frontend_dist.exists() and _frontend_dist.is_dir():
     import re
     _HASHED_FILE_RE = re.compile(r'^assets/.+\.[a-fA-F0-9]{8}\.(js|css|woff2?|png|svg)$')
 
+    #: 入口 HTML 必须每次回源校验。它引用的是带 hash 的 JS/CSS，缓存住 index.html
+    #: 就等于把整站钉死在旧版本上 —— 2026-10-06 现场即如此：服务器已换新包，
+    #: 浏览器仍跑旧包，管理员看到的是"下拉和新文案都没生效"。
+    _INDEX_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         file_path = _frontend_dist / full_path
@@ -335,9 +340,11 @@ if _frontend_dist.exists() and _frontend_dist.is_dir():
             elif full_path.endswith('.json'):
                 # locale JSON 文件不缓存，确保翻译更新即时生效
                 headers["Cache-Control"] = "no-cache, must-revalidate"
+            elif full_path == "index.html":
+                headers.update(_INDEX_HEADERS)
             return FileResponse(str(file_path), headers=headers)
-        # SPA fallback: 所有非 API、非文件路径返回 index.html
-        return FileResponse(str(_frontend_dist / "index.html"))
+        # SPA fallback: 所有非 API、非文件路径返回 index.html（含站点根路径）
+        return FileResponse(str(_frontend_dist / "index.html"), headers=_INDEX_HEADERS)
 else:
     logger.warning(f"前端构建目录不存在: {_frontend_dist}，请先执行 npm run build")
 
