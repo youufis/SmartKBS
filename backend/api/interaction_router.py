@@ -28,12 +28,7 @@ from backend.prompts import apply_skills, build_ai_role
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.utils import extract_json_from_text
-from backend.question_media import media_columns_for_insert
-from backend.question_db import (
-    execute_query as qb_execute_query,
-    execute_insert as qb_execute_insert,
-    execute_update as qb_execute_update,
-)
+from backend.question_db import execute_update as qb_execute_update
 from backend.config import BASE_DIR
 from backend.permission_service import get_user_grade_class, check_activity_visibility
 
@@ -106,21 +101,6 @@ def _call_ai(prompt: str) -> str:
 # ── 从题库搜索题目 ──
 
 
-def _array_opts_to_dict(opt_array: list[str]) -> dict[str, str]:
-    """将 AI 返回的选项数组 ["A. 文本", "B. 文本"] 转为入库对象 {"A": "文本", "B": "文本"}"""
-    result: dict[str, str] = {}
-    for opt in opt_array:
-        opt_str = str(opt).strip()
-        if len(opt_str) >= 2 and opt_str[1] in ('.', '、'):
-            key = opt_str[0].upper()
-            val = opt_str[2:].strip()
-            result[key] = val
-        else:
-            key = chr(65 + len(result))
-            result[key] = opt_str
-    return result
-
-
 def _search_questions_from_bank(
     topic: str,
     subject: str,
@@ -177,6 +157,94 @@ def _search_questions_from_bank(
     return questions
 
 
+async def _persist_quiz_ai_questions(questions: list[dict[str, Any]], *, topic: str,
+                                     subject: str, username: str,
+                                     now: str) -> list[dict[str, Any]]:
+    """随堂测验 AI 补题的入库：收敛到 backend.question_factory（题目入库唯一出口）。
+
+    原地把 id / media_files 写回输入对象（前端按条渲染），并**返回过滤后的可答题列表**：
+    被剔掉的条目必须从返回值里消失，否则前端会渲染出一道没有 id、判不了分的幽灵题
+    （同步练习那条路径踩过，见 cac1a84）。
+
+    与旧实现的差异（都是往统一口径靠，没有任何放宽）：
+      · 判重口径不变 —— 旧代码本来就在用 question_select.find_duplicate_question
+        （学科族 + 题型 + 规范化题干），现在直接复用 factory 里的同一份调用。
+      · 新增入库前体检：缺答案、答案越界、选项不足 2 个的模型输出不再进题库。
+      · 新增连教材知识点边：旧实现从来不连，于是随堂测验生成的题下次仍走不到 T0、
+        还要再烧一次 AI；命中已有题也补边（老题只有连上边才进得了候选池）。
+      · 判断题的选项与答案对齐：旧实现强制选项 {"A":"对","B":"错"}，却把模型写的
+        "正确/错误"原样存进答案列，两边对不上，判分必然判错；现在按选项文字归一成
+        库内约定的「对/错」，并且保留模型真正给出的选项文字。
+      · 题型仍以模型输出为准 —— 本站"混合出题"是一等选项，不能像课程练习那样强制
+        single；但未知题型（'choice' 这类）会收敛成 single，不再把脏值写进库。
+      · 整批一个事务，中途失败全部回滚（旧实现逐条写，崩在半路会留下半套题）；
+        生图与连边都放在提交之后，绝不按住数据库写锁去等外部 HTTP。
+    """
+    from backend import question_factory
+
+    outcome = question_factory.persist_questions(
+        questions,
+        subject=subject,
+        source="ai",
+        username=username,
+        knowledge_points=topic,
+        difficulty="medium",
+        link_duplicates=True,
+        write_creator_name=False,
+    )
+    stats = outcome["stats"]
+    logger.info(f"[随堂测验入库] topic={topic} 新入库={stats['saved']} "
+                f"重复回填={stats['duplicated']} 不合格={stats['rejected']}")
+    for r in outcome["rejected"][:5]:
+        logger.info(f"[随堂测验入库] 拒收 {r['type']}: {r['reason']} | {r['question_text']}")
+
+    kept: set[int] = set()
+    for e in list(outcome["saved"]) + list(outcome["duplicated"]):
+        idx = e.get("source_index")
+        if not isinstance(idx, int) or idx >= len(questions) or e.get("id") is None:
+            continue
+        questions[idx]["id"] = e["id"]
+        if e.get("duplicated"):
+            # 命中题库已有题：把旧题的配图带回来。同一道题没道理让老师看到"新题有图、
+            # 重复题没图"（与同步练习/课程练习同一口径）
+            questions[idx]["media_files"] = e.get("media_files") or []
+        elif "media_files" not in questions[idx]:
+            questions[idx]["media_files"] = []
+        kept.add(idx)
+
+    # 生图只给本次**新入库**的题烧配额；重复命中沿用题库里已有的配图
+    to_draw = [e for e in outcome["saved"] if e.get("media_raw") and e.get("id") is not None]
+    if to_draw:
+        from backend.api.config_router import get_config_value
+        if get_config_value("IMAGE_GEN_ENABLED", True):
+            from backend.api.image_gen_service import generate_placeholders_batch
+            for e in to_draw:
+                placeholders = e.get("media_raw") or []
+                media_files: list[Any] = []
+                try:
+                    media_dir = BASE_DIR / "question_media" / str(e["id"])
+                    media_files = await generate_placeholders_batch(
+                        placeholders=placeholders,
+                        subject=subject,
+                        media_dir=media_dir,
+                        qid=e["id"],
+                        now=now,
+                    ) or []
+                    qb_execute_update(
+                        "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                        (json.dumps(placeholders, ensure_ascii=False),
+                         json.dumps(media_files, ensure_ascii=False), e["id"]),
+                    )
+                except Exception as img_err:
+                    # 配图失败只降级为无图题，不能让整次出题作废
+                    logger.warning(f"AI 题目自动生图失败 (id={e['id']}): {img_err}")
+                idx = e.get("source_index")
+                if isinstance(idx, int) and idx < len(questions):
+                    questions[idx]["media_files"] = media_files
+
+    return [q for i, q in enumerate(questions) if i in kept]
+
+
 # ── AI 生成随堂测验 ──
 
 @router.post("/quizzes/ai-generate", summary="AI 自动生成随堂测验（优先题库，不足时 AI 补充）")
@@ -194,6 +262,7 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
         raise HTTPException(status_code=400, detail="数量范围为 1-50")
 
     all_questions: list[dict[str, Any]] = []
+    quiz_note = ""  # 本次有题目被剔除时给老师的说明（沿用该端点已有的 note 字段）
 
     # ════════════════════════════════════════════
     # 第 1 步：优先从题库抽取
@@ -265,85 +334,22 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
                     q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
                 q["_source"] = "ai"
 
-                # ── 入库到 question_bank ──
-                try:
-                    q_text = (q.get("question") or "").strip()
-                    if q_text:
-                        # 统一查重(B): 学科族+题型+规范化题干(旧口径为全局题干精确)
-                        from backend.question_select import family_members, find_duplicate_question
-                        _fam = family_members(req.subject)
-                        _cond = (" AND subject IN (" + ",".join("?" * len(_fam)) + ")") if _fam else ""
-                        _prm = ([q.get("type", "single")] + list(_fam)) if _fam else [q.get("type", "single")]
-                        _rows = [dict(r) for r in (qb_execute_query(
-                            "SELECT id, question_text FROM question_bank WHERE status='active' AND type=?" + _cond,
-                            tuple(_prm)) or [])]
-                        _hit = find_duplicate_question([(r["id"], r["question_text"]) for r in _rows], q_text)
-                        if _hit is not None:
-                            qid = _hit
-                            q["id"] = qid
-                            q["media_files"] = []
-                            logger.info(f"跳过重复题目 (topic={req.topic}): {q_text[:40]}...")
-                        else:
-                            # 选项格式转换: 数组 → 对象
-                            opts = q.get("options")
-                            if isinstance(opts, list):
-                                opts_dict = _array_opts_to_dict(opts)
-                            elif isinstance(opts, dict):
-                                opts_dict = opts
-                            else:
-                                opts_dict = {}
-
-                            # 判断题固定选项
-                            if q.get("type") == "true_false":
-                                opts_dict = {"A": "对", "B": "错"}
-
-                            svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
-
-                            qid = qb_execute_insert(
-                                """INSERT INTO question_bank
-                                   (type,question_text,options,correct_answer,explanation,
-                                    knowledge_points,subject,difficulty,creator_username,source,
-                                    status,created_at,updated_at,
-                                    svg_content,has_svg,media_placeholders)
-                                   VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
-                                (q.get("type", "single"), q_text,
-                                 json.dumps(opts_dict, ensure_ascii=False),
-                                 q.get("answer", ""), q.get("explanation", ""),
-                                 req.topic, req.subject, "medium",
-                                 username, now_str, now_str,
-                                 svg_code, has_svg, media_placeholders),
-                            )
-                            if qid:
-                                q["id"] = qid
-                                logger.info(f"AI 题目已入库: id={qid}")
-
-                                # ── 自动调用通义万相生图（有占位符时）──
-                                placeholders = q.get("media_placeholders") or []
-                                media_files: list[Any] = []
-                                if placeholders:
-                                    try:
-                                        from backend.api.config_router import get_config_value
-                                        if get_config_value("IMAGE_GEN_ENABLED", True):
-                                            from backend.api.image_gen_service import generate_placeholders_batch
-                                            media_dir = BASE_DIR / "question_media" / str(qid)
-                                            media_files = await generate_placeholders_batch(
-                                                placeholders=placeholders,
-                                                subject=req.subject,
-                                                media_dir=media_dir,
-                                                qid=qid,
-                                                now=now_str,
-                                            )
-                                            # 更新占位符状态和 media_files
-                                            qb_execute_update(
-                                                "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-                                                (json.dumps(placeholders, ensure_ascii=False),
-                                                 json.dumps(media_files, ensure_ascii=False), qid),
-                                            )
-                                    except Exception as img_err:
-                                        logger.warning(f"AI 题目自动生图失败 (id={qid}): {img_err}")
-                                q["media_files"] = media_files
-                except Exception as e:
-                    logger.warning(f"AI 题目入库失败，跳过: {e}")
+            # 入库统一走 question_factory（校验 → 查重 → 事务 → 连边 → 提交后生图）。
+            # 返回的列表只含"真入库/命中已有题"的条目，被剔掉的不会变成幽灵题。
+            dropped = len(ai_questions)
+            ai_questions = await _persist_quiz_ai_questions(
+                ai_questions, topic=req.topic, subject=req.subject,
+                username=username, now=now_str)
+            dropped -= len(ai_questions)
+            if dropped:
+                logger.warning(f"AI 生成 {dropped} 道题不合格或与本次重复，已剔除")
+            if not ai_questions:
+                if not all_questions:
+                    raise HTTPException(status_code=502,
+                                        detail="AI 生成的题目全部不合格（缺答案或答案越界），请重试")
+                quiz_note = f"AI 补充的题目全部未通过校验，已剔除；仅返回题库中的 {len(all_questions)} 道题"
+            elif dropped:
+                quiz_note = f"AI 补充中 {dropped} 道题未通过校验或与本次重复，已剔除"
 
             if len(ai_questions) < remaining:
                 logger.warning(f"AI 出题数量不足: 请求 {remaining} 道, 实际 {len(ai_questions)} 道")
@@ -356,7 +362,10 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
     # 随机打乱，混合题库与 AI 题目
     random.shuffle(all_questions)
 
-    return {"questions": all_questions, "total": len(all_questions)}
+    result: dict[str, Any] = {"questions": all_questions, "total": len(all_questions)}
+    if quiz_note:
+        result["note"] = quiz_note
+    return result
 
 
 # ── AI 生成快速投票 ──
