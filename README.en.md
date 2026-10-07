@@ -31,19 +31,14 @@
 ---
 
 > 📌 **V8.6.0 Highlights**:
-> 🔊 **Speech synthesis lands**: a Speech section in System Settings (switch, model, voice, rate, volume), listing only the 23 voices verified to work; nothing is billed while the switch is off, and no new dependency was added
-> 🗣 **Roll call speaks the picked student's name**: audio is fetched during the reveal animation so teachers notice no delay, repeated names come from cache, and polyphonic surnames are corrected while the UI keeps the real characters
-> 🧭 **Model picking and settings self-tests**: chat / long-document / vision / image models are now chosen from a dropdown (unlisted names can still be typed), and image generation plus speech synthesis each got a self-test button, so a setting is verified the moment it is saved
-> 📊 **Login page visit stats**: besides who is online it now shows today's users/visits and an all-time count; the numbers are abbreviated by magnitude so the line still fits a phone
-> 🖼 **Two image-generation endpoints dispatched automatically**: the right one is chosen per model, sizes default to auto with per-model options filtered by measured limits, and a bad size is rejected on save. The entry page is no longer cached by browsers, so a release shows up without a hard refresh
-> 🧮 **Exam score totals are a hard invariant**: the paper must add up to its target total, structural edits rebalance automatically, and a new paper audit repairs corrupted papers after a dry run
-> 🎯 **Three question-pickers became one engine**: auto-select, AI compose and the wizard share quotas, difficulty and subject-family recall, with bank availability shown while configuring
-> 🔢 **Export rendering fixed**: Chinese in figures, formulas in explanations and fill-in blanks all render properly, plus a hang that could wedge export forever
-> 🔀 **Drag-to-reorder questions** + 🔒 **papers lock while students answer** + 🎲 **question shuffling actually works** + ⏱ **AI compose and figures moved to background jobs**
-> 📱 **Mobile adaptation lands**: works straight from a phone browser with a bottom tab bar and per-role allow-lists; desktop and packaged-app layouts untouched
-> 🖼 **Question-figure pipeline fixed**: separate namespaces per source, sanitised vector figures, figure manager usable again
-> 🏆 **Point farming closed, honours back to students**: daily caps on chat, quizzes and totals; teachers and admins leave the leaderboards; students get a weekly star card
-> 🛡 **Operations and settings**: pause-login switches per audience, bulk delete for upgrade history, multi-mirror update checks, unified login history, per-scene skill injection; the daily request quota now sits beside chat access
+> 🔊 **Speech synthesis and roll-call voice**: only voices verified to speak are listed, polyphonic surnames corrected, nothing billed while off
+> 🧭 **Model catalogue, config self-tests, two image endpoints**: wrong settings fail at save time, sizes filtered by measured limits
+> 📊 **Login page visit stats** + ⚡ **The entry page is never cached**: an all-time total that cannot go backwards, refresh after an update
+> 🧱 **One door into the question bank**: nine hand-written INSERT paths became one — validate, de-duplicate, one transaction, link knowledge points
+> 🔁 **One filling policy**: bank first → AI covers the shortfall → AI questions are stored before being returned; buzzer rounds no longer pad with repeats
+> 📏 **Question counts mean what the teacher typed**: real parameters, out-of-range errors instead of silent rewrites
+> 🧮 **Score totals are a hard invariant** + 🎯 **Three selection engines became one** + 🔢 **Export rendering fixed** + 🔀 **Drag to reorder** + 🎲 **Per-student shuffling** + ⏱ **AI moved to background jobs**
+> 📱 **Phone support** + 🖼 **Figure pipeline cleanup** + 🏆 **Anti-farming points** + 🛡 **Ops and settings polish**
 
 ---
 
@@ -334,6 +329,7 @@ Step-by-step guided paper generation wizard supporting smart selection and profe
 
 - **📋 Configuration Wizard**: Question type and quantity configuration, difficulty distribution, knowledge point range filtering
 - **🤖 AI Smart Selection**: Intelligent matching by knowledge point
+- **🔌 Gap filling**: off by default so a shortfall is only reported; tick it and AI generates and stores exactly the missing questions
 - **📊 Rule-Based Selection**: Random extraction by difficulty proportion
 - **📊 Paper Composition Statistics Panel**: Real-time question type/difficulty distribution, total score, supports manual question removal
 - **📄 Word Export** (three documents):
@@ -420,7 +416,7 @@ Use AI directly in the Resource Center to generate HTML teaching resources:
   - 🎨 **Custom HTML**: Freely input topics, generate any HTML as needed
 - **🎭 Theme Selection**: Multiple preset themes for each type
   - Animation 17 types, Quiz 20 types, Exercise 10 types, Lab 12 types
-- **📚 Question Bank + AI Mixed Questioning**: Automatically matches questions from the question bank, AI supplements shortfalls
+- **📚 Question Bank + AI Mixed Questioning**: Automatically matches questions from the question bank, AI supplements; the number of questions can be set before generating shortfalls
 - **💾 AI New Questions Auto-Added**: AI-generated questions are automatically saved to the question bank
 - **🔗 Subject/Grade Smart Association**: Fetches corresponding question bank based on subject and grade
 
@@ -515,7 +511,7 @@ Online programming practice and auto-grading system:
 Classroom instant quiz system:
 
 - ✏️ Visual editor creation (multiple-choice/multi-select/true-false)
-- 🤖 One-click AI generation (specify topic/question type/quantity)
+- 🤖 One-click AI generation (specify topic/question type/quantity): the bank comes first, AI only fills the shortfall and those questions are saved back for reuse
 - 📊 Auto-grading and result statistics
 - 📐 Supports LaTeX formulas and images
 - 📤 Data export
@@ -549,7 +545,7 @@ Real-time multiplayer online quick-answer competition system:
 
 - **Teacher Side**:
   - Create competition rooms (set time limit, question count, subject)
-  - Question sources: from question bank / AI-generated
+  - Question sources: the bank comes first, AI generates the shortfall and stores it; built-in questions are a last resort when AI cannot deliver, and never repeat
   - Control competition process (start/next question/end)
   - View real-time leaderboard
 - **Student Side**:
@@ -1020,63 +1016,65 @@ Git-based online incremental upgrade system:
 
 ### v8.6.0 (2026-10-05 ~ 10-07)
 
-- 🔊 **Speech synthesis lands**: a Speech section in System Settings (master switch, model, voice, rate, volume) defaulting to an authoritative broadcast voice; the voice list contains only the 23 voices verified to produce audio, nothing is billed while the switch is off, and no new dependency was introduced
-- 🗣 **Roll call now speaks the picked student's name**: the audio is fetched in parallel while the reveal animation runs so teachers notice no delay, names are cached on disk and replay instantly, and a missing clip simply skips that announcement — roll call is never blocked by audio. Repeated presses interrupt the previous clip, one round warns once, and playback stops when leaving the page
-- 🔤 **Polyphonic surnames corrected automatically**: a dictionary of roughly 40 polyphonic or commonly misread surnames substitutes same-sounding common characters, matching compound surnames first. Only the spoken text changes; the interface, roll-call history and point records keep the student's real name
-- 🛡 **The announcement endpoint keeps to its lane**: it accepts only names really on that class roster, inherits roll call's per-class permissions and adds a per-minute limit, returning a readable reason instead of an error
-- 🔧 **The daily request quota moved home**: out of Accounts & Security into the AI chat access section, so who may use AI and how much they may use it sit together. Keys, defaults and the usage table are unchanged, so existing deployments migrate themselves
-- 🧭 **Model candidates centralised, settings use dropdowns**: chat, long-document, vision and image model choices now come from one catalogue, and the settings page replaced free-text boxes with a grouped dropdown carrying a short description of each option (names outside the list can still be typed). Previously model names were spread across 18 call sites, so changing a default was easy to miss and a retired model only surfaced as a runtime error
-- 🔎 **Settings self-tests completed**: image generation and speech synthesis each gained a self-test button, matching the existing chat / agent / knowledge-base ones. The image test reports which endpoint was really used and which size was really sent; the speech test returns playable audio. Both are admin-only and rate-limited, and the button says plainly that one real, billable call is made
-- 🖼 **Two image-generation endpoints dispatched automatically**: the older and newer generations differ in endpoint, payload shape and size rules, but the code only supported the older one while the settings text recommended a newer model — following the advice broke every figure. The right endpoint is now chosen per model and fallbacks re-assemble their own parameters; size defaults to auto, the offered values are filtered by each model's measured limits, and an invalid one is rejected on save with the rule spelled out
-- 📊 **Login page visit stats**: the page used to show only the online count; it now also shows today's users and visits plus an all-time total. The total comes from a **monotonic** counter, so bulk-deleting login history can never make it go backwards (the baseline was seeded from the rows still retained, so deletions before this change stay lost, once). The endpoint is public, shares the login page's single 15-second poll and is cached at the same cadence; a failed counter write only logs and never blocks sign-in
-- 🗣 **A second speech generation model**: voice lists are grouped per model (the newer one adds dialects, foreign languages and more English voices); switching models switches the voice list and the default voice with it. A voice that belongs to the other model is rejected on save (unknown hand-typed voices still pass), and at runtime it falls back to the current model's default with a log line, so roll call never fails silently
-- ⚡ **The entry page is no longer cached**: index.html was served with no cache directive at all, so browsers kept the old shell and ran the old bundle — the server was updated while admins saw nothing new. It now revalidates every time, so a release appears on an ordinary refresh
-- 🧱 **Question storage now goes through one door**: nine places used to hand-write their own INSERT into the question bank — AI generation, smart extraction, synced / curriculum / smart practice, chapter practice, in-class quizzes. They share a single exit now, always in the same order: field check → duplicate check → one transaction → textbook knowledge-point link after commit. A new hand-written writer fails the test suite
-- 🚫 **Ungradeable questions no longer enter the bank**: missing answers, answers outside the options, options pasted into the stem, machine-generated code questions are rejected with a stated reason. Quizzes and practice no longer pass them back to the browser either, where they used to render as a ghost question — no id, impossible to answer or grade. If the whole batch is rejected the teacher is asked to retry rather than served a blank paper — the cost is one retry, not a question that can never be marked
-- 🔗 **Generated questions reach the selection engine the same day**: extraction, in-class quizzes and smart practice never linked their questions to textbook knowledge points, so those questions could not be reused and burned AI again; they all link now, by knowledge-point id whenever one is known
-- 🧩 **No more duplicate entries**: duplicate checking is one standard everywhere (subject family + question type + normalised stem), self-duplicates inside a single batch are caught, and a duplicate hit brings back the existing question's id and its figures instead of showing the new one with a picture and the matched one without
-- 🛡 **SVG figures are sanitised on the way in**: the chapter-practice and AI-resource page path stored whatever SVG the model returned, and those pages share the main site's origin, so a script or event handler smuggled into a figure became a stored XSS surface
-- 📐 **The question prompts share one written spec**: the six prompts that feed the bank each described the schema their own way, and four of them contradicted the code: they invited code questions the endpoints refuse, taught Chinese option keys while the rest of the bank uses A/B/C/D, kept the quote-safety rule (the lesson of a batch that once lost every question) in only one of them, and worded answer formats differently from the storage gate. They now reference one shared fragment set; the in-class quiz deliberately keeps array-shaped options because the teacher editor renders that shape
-- 🎲 **True/false questions use letter keys**: new true/false questions store {"A":"对","B":"错"} (keys only, option wording untouched); the 112 legacy rows with Chinese keys are not rewritten and grade exactly as before
+- 🔊 **Speech synthesis lands**: a Speech section in System Settings (switch, model, voice, rate, volume); only voices verified to speak are listed, and nothing is billed while off
+- 🗣 **Roll call says the name**: the audio is fetched during the reveal animation so teachers notice nothing; cached per name, never blocks the roll call
+- 🔤 **Polyphonic surnames corrected**: about 40 surnames swapped for same-sounding characters — broadcast only, the UI and records keep the real name
+- 🧭 **One model catalogue, dropdown settings**: hand-typed names still accepted, and image generation and speech each gained a self-test so a wrong setting fails visibly at save time
+- 🖼 **Two image-generation endpoints routed automatically**: channel, payload and sizes chosen per model, options filtered by measured limits and rejected on save if wrong
+- ⚡ **The entry page is no longer cached**: refresh after an update and the new bundle is there — no more "server updated but the admin sees nothing"
+- 📊 **Login page visit stats**: today's users and visits plus an all-time total that never goes down when login history is deleted
+- 🧱 **One door into the question bank**: nine hand-written INSERT paths became one — validate, de-duplicate, single transaction, then link knowledge points
+- 🚫 **Ungradeable questions are turned away**: missing or out-of-range answers, options in the stem, machine-made code questions — never handed back as ghost questions
+- 🧩 **No more duplicate entries**: de-duplication is one standard (subject family + type + normalised stem); a hit brings back the existing id and its figures
+- 🔗 **AI questions reach the selection engine the same day**: extraction, quizzes and smart practice never linked to knowledge points, so they burned AI again next time
+- 📐 **The question prompts share one written spec**: type vocabulary, true/false option keys, the quote-safety rule and answer formats now match the storage gate
+- 🛡 **Figures are sanitised on the way in**: the page path used to store whatever SVG the model returned, on a same-origin page
+- 🔁 **One "fill the paper" policy**: bank first → AI covers the shortfall → AI questions must be stored before they are returned; degradation is never silent
+- 🎚 **In-class quiz counts finally stick**: the form never collected the number, so everyone got the default 5; now 1-50 as asked
+- 🎯 **Buzzer rounds stop padding with repeats**: the shortfall goes to AI and into the bank, built-ins are a last resort only, and true/false answers normalise onto the option key
+- 🔌 **An opt-in "fill the gap with AI" for exam selection**: auto selection, AI composing and the wizard, **off by default**; a failed fill is only a note, never a lost paper
+- 📏 **Page question counts are a real parameter**: three disagreeing places became one input (quizzes 1-30, practice 1-50), and out-of-range input errors instead of rewriting itself
+- 📁 **Async generation prefers the bank too**: the path the UI uses queried neither the bank nor stored new questions; wrong-question practice no longer rewrites counts silently
 - 🧪 **Regression**: 102 new tests (catalogue consistency, measured size limits, hand-typed endpoint routing, voice/model pairing, self-test permissions and throttling); full suite 542 passed
-- ⚠️ **Breaking changes**: none (every new setting has a default, speech stays off after an upgrade; the new storage gate only turns away questions being written now — the existing bank and every saved paper are untouched, and legacy Chinese-key true/false rows are not rewritten)
+- ⚠️ **Breaking changes**: none — gap filling is off by default, buzzer rounds may spend AI calls when the bank is short, and out-of-range counts now error instead of rewriting themselves
 
 ### v8.5.0 (2026-10-03 ~ 10-04)
 
-- 🧮 **Exam score totals became a hard invariant**: the paper must add up to its target total, selection no longer rewrites that target, structural edits rebalance proportionally, grading uses the real paper total, and publishing is gated by a mandatory check
-- 🩺 **Paper audit and repair**: finds historically corrupted papers, reports by default, lists the intended per-question scores and only writes after confirmation; duplicate entries are dropped, papers under way are skipped, and target and pass marks are never touched
-- 🔒 **Papers lock while students answer**: adding, removing, re-scoring, rebalancing and reordering are refused when an answer sheet is in flight, with the student named; duplicates are blocked by a unique constraint and bulk writes are transactional
-- 🎯 **Three question-pickers became one engine**: auto-select, AI compose and the wizard share type quotas, difficulty ratios and subject-family recall, with AI output never stored verbatim; availability per type is shown while configuring and over-allocation is flagged
-- 🔢 **Export rendering fixed**: Chinese in figures no longer becomes tofu boxes, formulas in explanations render, fill-in blanks survive, and a defect that could wedge export forever is gone
-- 🔀 **Drag-to-reorder and question management**: the field deciding printed layout order finally has a UI, with inline preview of options and answers, bulk removal, clear-all and type/difficulty breakdown
-- 📄 **Paper header persisted**: school name and term are stored with the exam instead of being retyped, and all three documents share one source
-- ⏱ **AI compose and figures moved to background jobs**: progress reporting, repeated clicks reuse one job instead of paying twice, and a timeout no longer looks like a failure
-- 🎲 **Question shuffling actually works**: it was stored but never applied, so every student saw the same order; now it is deterministic per student, stable across refresh and devices, with no effect on grading
-- 📱 **Mobile adaptation lands**: breakpoint system and mobile shell with per-role allow-lists (27 pages for students, 22 for teachers) across six batches; desktop and packaged-app layouts untouched; narrow-screen tables scroll, dialogs clamp, copy localised
-- 🖼 **Question-figure pipeline fixed**: bank / quest / whiteboard figures are namespaced apart, generated-figure state persists with the image, the figure manager works again and vector figures are sanitised
-- 🏆 **Point farming closed, honours back to students**: daily caps on chat, quizzes and totals (configurable, 0 disables), roll call scores daily, idempotency enforced by a unique constraint; teachers and admins leave points, titles, badges and the weekly stars, students get a weekly star card
-- 🔐 **Login history and operations**: an admin-only login history page (filters, paging, three-sheet export, bulk delete) with online status judged from server-side sessions, plus pause-login switches per audience, bulk delete for upgrade history and multi-mirror update checks
-- 🧠 **Skill system hardened**: structured-output paths no longer receive skill injection, with scene mapping, an injection allow-list and content-safety rules that actually apply
+- 🧮 **Paper scores became a hard invariant**: the paper must add up to the target total, edits rebalance proportionally, and publishing runs a mandatory health check
+- 🩺 **Paper audit and repair**: dry run by default, per-question plan before any write, exams with students still answering are skipped
+- 🔒 **Papers lock while students answer**: adding, re-scoring, rebalancing and reordering are refused with an in-flight attempt, and batch writes happen in one transaction
+- 🎯 **Three selection engines became one**: auto selection, AI generation and the wizard share one engine, and each type shows its available supply while you configure
+- 🔀 **Drag-to-reorder and bulk management**: the field that decides print order finally got a UI; preview, remove in bulk, clear the paper
+- 🎲 **Question shuffling actually applies**: it used to be written and read but never used; now it is deterministic per student and survives refresh
+- 🔢 **Export rendering fixed**: CJK tofu in figures, formulas in explanations and swallowed blanks, plus an export that could hang forever
+- 📄 **Paper header is stored with the exam**: school and semester are filled once and shared by all three documents
+- ⏱ **Generation and figures moved to background jobs**: progress reporting, duplicate clicks no longer double-bill, timeouts say "still running"
+- 📱 **Phone support landed**: tab bar plus role-based whitelist (27 student / 22 teacher pages), desktop layout untouched
+- 🖼 **Figure pipeline cleaned up**: bank / quest / whiteboard figures isolated per namespace, placeholder state persisted, vectors sanitised
+- 🏆 **Point farming closed**: daily caps for chat, buzzer and totals, teachers and admins leave the leaderboards, students gain "Weekly Star"
+- 🔐 **Login history and ops**: admin-only login history (filter, paging, export, bulk delete), three pause-login switches, multi-mirror upgrades
+- 🧠 **Skill injection hardened**: structured outputs no longer receive skills, scenes mapped and whitelisted
 - 🧪 **Regression**: 130+ new tests for exams and paper composition
-- ⚠️ **Breaking changes**: none (if a historical paper already holds duplicates, the unique constraint degrades to a normal index and logs it — nothing is deleted)
+- ⚠️ **Breaking changes**: none (if a historical paper already holds duplicates, the unique index degrades to a normal one and is logged; nothing is deleted)
 
 ### v8.0 – v8.4 (2026-09-05 ~ 2026-09-29)
 
-- 🔒 **Auth and authorisation sweep**: 16 rounds of per-feature review closed anonymous reads and cross-teacher writes; roll-call and classroom interaction now trust the logged-in identity, activity and resource publishing is limited to a teacher's own classes, and config endpoints mask secrets
-- ⏱️ **AI calls fully asynchronous**: grading moved off the request thread, answer submission answers with an idempotent receipt, long-running endpoints got individual timeouts; SSE streaming fixed and a startup self-check added
-- 🎯 **Classroom activity stability**: quick quiz advances automatically once everyone has answered and can be safely reopened after a reset; quests start instantly with the remaining questions filled in the background; programming questions now belong to "Code Practice"
-- 🧮 **Points and data consistency**: nine activity types support "clear participation, keep content" resets (dry-run preview, name confirmation, rollback, full audit); totals are recomputed immediately after a delete or reset so no orphan scores remain; seven same-named empty shell tables were dropped from the main database and the hall of fame now reads live points
-- 📝 **Teaching flow**: "Task Management" became "Conversational Homework", graded point by point against the teacher's requirements; formula rendering unified across 23 places; chat history is grouped by session title with search, rename and automatic disk reconciliation; cross-activity scores export to a four-sheet Excel or CSV
-- 📚 **Knowledge base drives the AI chain**: question generation, lesson plans, grading, analytics and the whiteboard all retrieve then generate, degrading automatically when retrieval fails and showing citations in chat; generation and grading hardened (length caps with truncation logging, tolerant JSON parsing, normalised answers and duplicate checks before insert)
-- 📰 **News and dashboards**: RSS sources validated item by item with a per-source breaker and a backup pool, cold-starting the daily briefing from 57.2s to 6.6s; students got today's agenda, learning trend and ability profile, teachers a to-do driven dashboard; dark mode completed and theming and copy consolidated
-- ⚠️ **Breaking changes**: roll-call writes now require login and are limited to the teacher's classes; quizzes and polls may only target classes the teacher teaches; config endpoints mask secret values; "Task Management" renamed to "Conversational Homework"
+- 🔒 **Auth and privilege lockdown**: 16 review rounds closed anonymous reads and cross-teacher writes; activities limited to one's own classes, secrets masked
+- ⏱️ **AI calls fully async**: grading left the request thread, submissions became idempotent, long endpoints got their own timeouts
+- 🎯 **Class activity stability**: buzzer advances when everyone answered and restarts safely, quests start instantly with the rest filled in the background, code questions moved to Code Practice
+- 🧮 **Points and data semantics**: nine activity types support "clear participation, keep content" resets (dry run, confirm, rollback, audited) and totals recompute immediately
+- 📝 **Teaching main flow**: Tasks became Conversational Homework with per-requirement evidence, formula rendering unified in 23 places, history grouped per session, four-table export
+- 📚 **Knowledge base drives the AI chain**: generation, lesson plans, grading, analytics and whiteboard all retrieve first and degrade gracefully with visible citations
+- 📰 **News and dashboard rebuilt**: per-feed validation with circuit breaker and backup pool, brief cold start 57.2s → 6.6s, teacher home is task-driven
+- ⚠️ **Breaking changes**: roll-call writes require login and teaching scope; quizzes / polls target only one's own classes; Tasks renamed to Conversational Homework
 
 ### v7.x and earlier (H1 2026)
 
-- 🎯 **AI skill system and i18n**: 20 modular skills auto-injected across 40+ routes; every page switches between Chinese and English
-- 🏆 **Hall of fame and UI pass**: honour showcase wall, 10 gradient themes, container and spacing standardised on 70+ pages
-- 📰 **Extension and interaction**: daily pick card pool plus RSS news and daily brief (all on-demand), AI companion with three personas, lesson prep and paper generation, collaborative whiteboard, auto-graded practice
-- 🧱 **Platform work**: all-grade all-subject refactor without hard-coded subjects, bulk user import and grade promotion, learning analytics and growth portfolio, smart paper generation with Word export, new badges and a full security audit
+- 🎯 **AI skill system and i18n**: 20 modular skills injected across 40+ routes by scene, whole UI switchable between Chinese and English
+- 🏆 **Hall of Fame and UI unification**: honour wall, 10 gradient themes, container and spacing rules across 70+ pages
+- 📰 **Knowledge and interaction**: daily discovery cards, RSS hot topics and a daily brief, three AI companion personalities, lesson and paper generation, collaborative whiteboard, auto grading
+- 🧱 **Platform rebuild**: subject hardcoding removed for any stage and subject, bulk import and grade promotion, learning analytics and portfolios, paper composition with Word export, full security audit
+
 
 ---
 
