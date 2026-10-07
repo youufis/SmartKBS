@@ -261,40 +261,33 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
     if req.count < 1 or req.count > 50:
         raise HTTPException(status_code=400, detail="数量范围为 1-50")
 
-    all_questions: list[dict[str, Any]] = []
-    quiz_note = ""  # 本次有题目被剔除时给老师的说明（沿用该端点已有的 note 字段）
+    # 出题策略统一走 backend.question_fill：**题库优先，缺口才交给 AI，AI 题必须先入库**。
+    # 以前这个流程在本文件里手写了一遍（步骤 1 抽题 / 步骤 2 补题 / 无 Key 分支 / 失败降级 /
+    # 切片 / 防重），而同样的流程在同步练习里又写了另一份 —— 两份各改各的，文案与降级路径
+    # 就漂了（知识抢答干脆没写，缺口拿 3 道硬编码常识题循环凑数）。现在只剩一份实现。
+    from backend import question_fill
 
-    # ════════════════════════════════════════════
-    # 第 1 步：优先从题库抽取
-    # ════════════════════════════════════════════
-    try:
-        bank_questions = _search_questions_from_bank(
-            topic=req.topic,
-            subject=req.subject,
-            question_type=req.question_type,
-            count=req.count,
-        )
-        all_questions.extend(bank_questions)
-        if bank_questions:
-            logger.info(f"从题库命中 {len(bank_questions)} 道题 (topic={req.topic})")
-    except Exception as e:
-        logger.warning(f"题库搜索异常，跳过: {e}")
+    # 适配器①：题库抽题。查不动不阻断 —— 当 0 命中继续走 AI 补差。
+    def _fetch_bank(need: int) -> list[dict[str, Any]]:
+        try:
+            rows = _search_questions_from_bank(
+                topic=req.topic,
+                subject=req.subject,
+                question_type=req.question_type,
+                count=need,
+            )
+        except Exception as e:
+            logger.warning(f"题库搜索异常，跳过: {e}")
+            return []
+        if rows:
+            logger.info(f"从题库命中 {len(rows)} 道题 (topic={req.topic})")
+        return rows
 
-    # ════════════════════════════════════════════
-    # 第 2 步：题库不足时，AI 补充
-    # ════════════════════════════════════════════
-    remaining = req.count - len(all_questions)
-    if remaining > 0:
+    # 适配器②：AI 补差。只补真正缺的那几道，不做整批重出。
+    async def _gen_ai(need: int, avoid: list[str]) -> list[dict[str, Any]]:
         api_key, _ = get_api_keys(username)
         if not api_key:
-            # 无 AI Key 但有题库题目 → 直接返回题库结果
-            if all_questions:
-                logger.info(f"无 API Key，仅返回题库 {len(all_questions)} 道题")
-                random.shuffle(all_questions)
-                return {"questions": all_questions, "total": len(all_questions),
-                        "note": "未配置 API Key，仅从题库匹配"}
-            raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
-
+            raise question_fill.MissingApiKey(question_fill.NOTE_NO_KEY)
         type_desc = {
             "single": "单选题（4个选项）",
             "true_false": "判断题",
@@ -305,62 +298,55 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
         from backend.prompts.question_schema import schema_block, render_question_prompt
         ai_role = build_ai_role(subject=req.subject)
         prompt = f"{ai_role}\n" + render_question_prompt(
-                QUIZ_GENERATE_PROMPT,
-                schema=schema_block("single/true_false", options_shape="list"),
+            QUIZ_GENERATE_PROMPT,
+            schema=schema_block("single/true_false", options_shape="list"),
             subject=req.subject,
             topic=req.topic,
             type_desc=type_desc,
-            count=remaining,
+            count=need,
         )
         # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
+        text = await call_ai_async(prompt, api_key, json_mode=True,
+                                   kb_query=f"{req.subject} {req.topic}")
+        return _parse_ai_generated(text)
 
-        try:
-            result_text = await call_ai_async(prompt, api_key, json_mode=True,
-                                  kb_query=f"{req.subject} {req.topic}")
-        except Exception as e:
-            # AI 失败但有题库题目 → 静默返回题库结果
-            if all_questions:
-                logger.warning(f"AI 补充出题失败，仅返回题库 {len(all_questions)} 道题: {e}")
-                random.shuffle(all_questions)
-                return {"questions": all_questions, "total": len(all_questions),
-                        "note": f"AI 补充出题失败，仅返回题库中的 {len(all_questions)} 道题"}
-            raise HTTPException(status_code=502, detail=f"AI 出题失败: {str(e)}")
+    # 适配器③：入库。只有真入库/命中已有题的条目会被返回，被拒收的不会变成"没有 id 的幽灵题"。
+    dropped_note: list[str] = []
 
-        ai_questions = _parse_ai_generated(result_text)
-        if ai_questions:
-            ai_questions = ai_questions[:remaining]
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            for q in ai_questions:
-                if "svg_code" in q and "svg_content" not in q:
-                    q["svg_content"] = q["svg_code"]
-                if "has_svg" not in q:
-                    q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
-                q["_source"] = "ai"
+    async def _persist(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for q in items:
+            if "svg_code" in q and "svg_content" not in q:
+                q["svg_content"] = q["svg_code"]
+            if "has_svg" not in q:
+                q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+            q["_source"] = "ai"
+        kept = await _persist_quiz_ai_questions(
+            items, topic=req.topic, subject=req.subject, username=username, now=now_str)
+        dropped = len(items) - len(kept)
+        if dropped:
+            dropped_note.append(f"其中 {dropped} 道未通过校验或与本次重复，已剔除")
+        return kept
 
-            # 入库统一走 question_factory（校验 → 查重 → 事务 → 连边 → 提交后生图）。
-            # 返回的列表只含"真入库/命中已有题"的条目，被剔掉的不会变成幽灵题。
-            dropped = len(ai_questions)
-            ai_questions = await _persist_quiz_ai_questions(
-                ai_questions, topic=req.topic, subject=req.subject,
-                username=username, now=now_str)
-            dropped -= len(ai_questions)
-            if dropped:
-                logger.warning(f"AI 生成 {dropped} 道题不合格或与本次重复，已剔除")
-            if not ai_questions:
-                if not all_questions:
-                    raise HTTPException(status_code=502,
-                                        detail="AI 生成的题目全部不合格（缺答案或答案越界），请重试")
-                quiz_note = f"AI 补充的题目全部未通过校验，已剔除；仅返回题库中的 {len(all_questions)} 道题"
-            elif dropped:
-                quiz_note = f"AI 补充中 {dropped} 道题未通过校验或与本次重复，已剔除"
+    try:
+        filled = await question_fill.fill_questions(
+            count=req.count,
+            fetch_bank=_fetch_bank,
+            gen_ai=_gen_ai,
+            persist=_persist,
+            detail_when_empty="AI 未能给出可用题目（未解析出题目，或题目全部未通过入库校验），请重试",
+        )
+    except question_fill.FillUnavailable as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
-            if len(ai_questions) < remaining:
-                logger.warning(f"AI 出题数量不足: 请求 {remaining} 道, 实际 {len(ai_questions)} 道")
-            all_questions.extend(ai_questions)
-            logger.info(f"AI 补充 {len(ai_questions)} 道题")
-        elif not all_questions:
-            # 既无题库又无 AI → 报错
-            raise HTTPException(status_code=502, detail="AI 返回格式异常，未能解析出题目")
+    all_questions = filled.questions
+    notes = list(filled.notes) + dropped_note
+    if filled.gap > 0:
+        notes.append(f"目标 {req.count} 道，实得 {len(all_questions)} 道（还缺 {filled.gap} 道）")
+        logger.warning(f"AI 出题数量不足: 请求 {req.count} 道, 实得 {len(all_questions)} 道")
+    quiz_note = "；".join(notes)
+    logger.info(f"随堂测验出题完成: topic={req.topic} 题库={filled.bank_count} "
+                f"AI={filled.ai_count} 合计={len(all_questions)}")
 
     # 随机打乱，混合题库与 AI 题目
     random.shuffle(all_questions)

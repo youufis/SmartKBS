@@ -311,61 +311,52 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
                                       username: str, api_key: str) -> tuple[list[dict], str]:
     """题库优先 + AI 补足 的统一出题流程(同步/异步端点共用)。
 
-    返回 (questions, note)。AI 题走 _persist_generated_questions 入库;
-    题库题原样引用不再入库。AI 失败/无 Key 但已有题库命中 → 降级返回部分题。
+    策略本体在 backend.question_fill（题库优先 → 缺口 AI 补 → AI 题必须先入库），
+    这里只留本站点的三个适配器：怎么抽题库、怎么问模型、入库后怎么把 id 写回原对象。
+    返回 (questions, note)；AI 失败/无 Key 但已有题库命中 → 降级返回部分题。
     """
+    from backend import question_fill
     from backend.question_search import query_bank_questions
 
-    bank_qs: list[dict] = []
-    if req.prefer_bank:
+    def _fetch_bank(need: int) -> list[dict]:
+        """prefer_bank 时先抽题库题（题型限定与旧口径一致），命中数不超过 need。"""
+        if not req.prefer_bank:
+            return []
         types = _BANK_REUSE_TYPES_MIXED
         if req.question_type and req.question_type != "mixed":
             types = (req.question_type,) if req.question_type in _BANK_REUSE_TYPES_MIXED else ()
-        if types:
-            rows = query_bank_questions(
-                topic=req.knowledge_points, subject=req.subject,
-                question_type=req.question_type, count=req.count, types=types,
-            )
-            bank_qs = [_format_bank_row(r) for r in rows][: req.count]
+        if not types:
+            return []
+        rows = query_bank_questions(
+            topic=req.knowledge_points, subject=req.subject,
+            question_type=req.question_type, count=need, types=types,
+        )
+        return [_format_bank_row(r) for r in rows][: need]
 
-    notes = []
-    if bank_qs:
-        notes.append(f"题库命中 {len(bank_qs)} 道")
-    remaining = req.count - len(bank_qs)
+    async def _gen_ai(need: int, avoid: list[str]) -> list[dict]:
+        """问模型要 need 道新题；avoid 是已抽到的题库题干，交给 prompt 做第一道防重。"""
+        if not (api_key or "").strip():
+            raise question_fill.MissingApiKey("未配置 API Key，仅返回题库匹配题")
+        prompt = _build_generate_prompt(req, avoid_texts=avoid)
+        text = await call_ai_async(prompt, api_key, json_mode=True,
+                                   kb_query=f"{req.subject} {req.knowledge_points}")
+        return _parse_ai_result(text)
 
-    ai_qs: list[dict] = []
-    if remaining > 0:
-        if not api_key:
-            if bank_qs:
-                return bank_qs, "；".join(notes + ["未配置 API Key，仅返回题库匹配题"])
-            raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
-        prompt = _build_generate_prompt(req, avoid_texts=[q["question"] for q in bank_qs])
-        try:
-            result_text = await call_ai_async(prompt, api_key, json_mode=True,
-                                  kb_query=f"{req.subject} {req.knowledge_points}")
-        except Exception as e:
-            if bank_qs:
-                return bank_qs, "；".join(notes + [f"AI 补足失败({e})，仅返回题库题"])
-            raise HTTPException(status_code=502, detail=f"AI 出题失败: {str(e)}")
-        ai_qs = _parse_ai_result(result_text)
-        # 与已抽题库题防重: prompt 已声明禁止, 但模型可能不遵守, 出口再拦一道
-        seen = {_norm_q_text(q["question"]) for q in bank_qs}
-        dedup: list[dict] = []
-        for q in ai_qs:
-            key = _norm_q_text(q.get("question") or "")
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            dedup.append(q)
-        ai_qs = dedup[: remaining]
-        if ai_qs:
-            # 必须用返回值：入库现在会拒收不合格条目（答案越界、缺答案、题干过短），
-            # 沿用"原地改 + 丢弃返回值"的写法会把没入库的题当作正常题返回给前端
-            ai_qs = await _persist_generated_questions(ai_qs, req, username)
-        if len(ai_qs) < remaining:
-            notes.append(f"AI 新生成 {len(ai_qs)} 道(要求 {remaining} 道, 已尽力补足)")
-        else:
-            notes.append(f"AI 新生成 {len(ai_qs)} 道")
+    async def _persist(items: list[dict]) -> list[dict]:
+        # 必须用返回值：入库会拒收不合格条目（答案越界、缺答案、题干过短），
+        # 沿用"原地改 + 丢弃返回值"的写法会把没入库的题当作正常题返回给前端
+        return await _persist_generated_questions(items, req, username)
+
+    try:
+        filled = await question_fill.fill_questions(
+            count=req.count,
+            fetch_bank=_fetch_bank,
+            gen_ai=_gen_ai,
+            persist=_persist,
+        )
+    except question_fill.FillUnavailable as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    notes = list(filled.notes)
     try:  # 提示不拦截：把"题库命中多少、为什么缺"直接告诉老师
         from backend.question_search import LAST_AUDIT, bank_notice_from_audit
         _notice = bank_notice_from_audit(LAST_AUDIT)
@@ -374,7 +365,7 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
     except Exception:
         pass
 
-    return bank_qs + ai_qs, "；".join(notes)
+    return filled.questions, "；".join(notes)
 
 
 async def _persist_generated_questions(questions: list[dict], req: PracticeGenerateRequest,
