@@ -314,12 +314,17 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
                       difficulty: str = "medium", knowledge_points: str = "",
                       dedup: bool = True, link: bool = True,
                       dry_run: bool = False, allow_code: bool = False,
+                      link_duplicates: bool = False,
                       kp_id: int = 0,
                       write_creator_name: bool = True) -> dict[str, Any]:
     """把一批题目入库，返回 saved / duplicated / rejected 三段结果。
 
     items 可以是模型原始 dict（会自动 normalize），也可以是已 normalize 的 dict。
     dry_run=True 时不写库，只报告将要发生什么。
+
+    link_duplicates=True 时，命中题库已有题也补一条知识点边（连边本身幂等，
+    INSERT OR IGNORE）。章节练习那条路径历史上就是这么做的：老题只有连上边才能进 T0
+    候选池，下次才不必再烧一次 AI。默认关，避免"统一"顺手改掉其它站点已有的行为。
 
     source_index 是必须的：调用方（同步练习、课程练习）拿到结果后要**按输入顺序**把
     id 与旧题配图写回原来的题目对象，再交给前端渲染。没有它就只能赌"顺序恰好一致"，
@@ -345,11 +350,17 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
     # 用与 find_duplicate_question 同一个 norm() 做键，先在本批内折叠。
     seen_in_batch: dict[tuple[str, str], int] = {}
     in_batch_pairs: list[tuple[int, dict[str, Any]]] = []
+    dup_links: list[tuple[int, str]] = []
 
     for i, raw in enumerate(items or []):
-        n = raw if "question_text" in raw and isinstance(raw.get("options"), dict) \
-            else normalize_item(raw or {}, subject=subject, question_type=question_type,
-                                difficulty=difficulty, knowledge_points=knowledge_points)
+        # 一律过 normalize_item，**不做"看起来已经规整过"的嗅探**：历史上这里用
+        # 「有 question_text 且 options 是 dict」当作已规整的判据，于是章节练习那种
+        # 半成品输入（有题干、有选项字典，但没有 has_svg / media_placeholders）会整批
+        # 绕过规直，直到 INSERT 时 KeyError: 'has_svg' —— 而且发生在事务里，一整批题
+        # 全部回滚。normalize_item 对已规整的 dict 是幂等的（题干、选项、答案原样，
+        # 配图列按同一套清洗规则重算），少一条分支就少一类"两处口径不一致"。
+        n = normalize_item(raw or {}, subject=subject, question_type=question_type,
+                           difficulty=difficulty, knowledge_points=knowledge_points)
         n["subject"] = subject or n.get("subject", "")
         for note in n.get("normalize_notes") or []:
             notes.append(note)
@@ -379,6 +390,8 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
         if dedup:
             hit = index.find(n["type"], n["question_text"])
             if hit is not None:
+                if link_duplicates:
+                    dup_links.append((int(hit["id"]), n.get("knowledge_points") or ""))
                 duplicated.append({
                     "id": hit["id"], "type": n["type"],
                     "question_text": hit.get("question_text") or n["question_text"],
@@ -461,6 +474,9 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
         duplicated.append(dup)
 
     linked = 0
+    if link and link_duplicates and not dry_run:
+        # 重复题的补边同样必须在事务提交之后（link_question_kp 自开连接）
+        to_link.extend(dup_links)
     for qid, kp in to_link:
         # 连边必须在事务提交之后：link_question_kp 自己开连接写库
         try:

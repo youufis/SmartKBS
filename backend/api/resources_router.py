@@ -1064,77 +1064,50 @@ def _fetch_matching_questions(topic: str, subject: str = "",
 
 
 def _save_questions_to_db(questions: list[dict], username: str, name: str = "") -> int:
-    """将题目列表保存到 question_bank，返回保存数量。
+    """把 AI 生成页面里解析出的新题落到 question_bank，返回实际新增数量。
 
-    入库前按题干精确查重：页面里常有部分题目来自更早的生成结果（已在题库），
-    不做查重就会在 question_bank 里堆出重复题，题库页和组卷都会受影响。
+    2026-10 收敛到 backend.question_factory（题目入库唯一出口），本站点不再自己
+    写 INSERT / 查重 / 连边。迁移动机与口径差异（实测 active 965 道）：
+      · 判重从「全库题干精确相等」换成统一口径（学科族 + 题型 + 规范化题干）：
+        旧口径 0 组命中、新口径多拦 2 组（标点和空格造成的真重复），且库里不存
+        在「文本相同但题型或学科不同」的组，所以新口径是严格超集 —— 只会少塞重复题，
+        不会把原来能跳过的题变成新题。
+      · 命中重复时也补知识点边（link_duplicates）：这是本站原本就有的行为，老题连上
+        边才能进 T0 候选池，下次出题就不必再烧一次 AI。
+      · 入库前统一体检：缺答案、答案越界、把选项写进题干的模型输出不再进库。
+    解析层照旧不动：题干内嵌选项仍由 ai_json.strip_options_from_stem 先剥掉。
     """
-    from backend.question_select import link_question_kp  # 落库即与教材知识点连 ID 边（供 T0 用）
+    from backend import ai_json, question_factory
 
-    import time
-    from backend.question_db import execute_insert, execute_query
-    saved = 0
-    skipped = 0
-    rejected = 0
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    from backend import ai_json
-
-    for raw_q in questions:
+    prepared: list[dict] = []
+    for raw_q in questions or []:
         try:
-            # 先剥掉误写进题干的选项，再做字段体检，不合格的不入库
-            q, _changed, _why = ai_json.strip_options_from_stem(raw_q)
-            if _changed:
-                logger.info("剥离题干内嵌选项: %s", _why)
-            ok_q, reason = ai_json.question_is_complete(q)
-            if not ok_q:
-                rejected += 1
-                logger.warning("跳过不合格题目(%s): %s", reason, (q.get("question_text") or "")[:30])
-                continue
-            text = (q.get("question_text") or "").strip()
-            if not text:
-                continue
-            _dup = execute_query(
-                "SELECT id FROM question_bank WHERE question_text = ? AND status = 'active' LIMIT 1",
-                (text,),
-            )
-            if _dup:
-                # 题已存在 —— 也要把边补上，历史 AI 题才能进 T0 候选池
-                try:
-                    link_question_kp(int(_dup[0]["id"]), q.get("knowledge_points", ""))
-                except Exception:
-                    pass
-                skipped += 1
-                continue
-            qid = execute_insert(
-                """INSERT INTO question_bank
-                   (type, question_text, options, correct_answer, explanation,
-                    knowledge_points, subject, difficulty, creator_username, creator_name,
-                    source, svg_content, has_svg, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai', ?, ?, 'active', ?, ?)""",
-                (
-                    q.get("type", "single"),
-                    q.get("question_text", ""),
-                    json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else "",
-                    q.get("correct_answer", ""),
-                    q.get("explanation", ""),
-                    q.get("knowledge_points", ""),
-                    q.get("subject", ""),
-                    q.get("difficulty", "medium"),
-                    username,
-                    name,
-                    q.get("svg_content", ""),
-                    1 if q.get("svg_content") else 0,
-                    now, now,
-                ),
-            )
-            if qid:
-                saved += 1
-                link_question_kp(int(qid), q.get("knowledge_points", ""))
+            q, changed, why = ai_json.strip_options_from_stem(raw_q)
+            if changed:
+                logger.info("剥离题干内嵌选项: %s", why)
+            prepared.append(q)
         except Exception as e:
-            logger.warning(f"保存题目到题库失败: {e}")
-    if skipped or rejected:
-        logger.info("题库入库：查重跳过 %d 道、不合格剔除 %d 道、实际新增 %d 道", skipped, rejected, saved)
-    return saved
+            logger.warning("题目规整失败，跳过: %s", e)
+    if not prepared:
+        return 0
+
+    # 一次调用的题目同属一个学科（来自同一个页面的 QUESTION_BANK）
+    subject = next((str(q.get("subject") or "").strip() for q in prepared if q.get("subject")), "")
+    outcome = question_factory.persist_questions(
+        prepared,
+        subject=subject,
+        source="ai",
+        username=username,
+        creator_name=name,
+        link_duplicates=True,
+    )
+    stats = outcome["stats"]
+    for r in outcome["rejected"][:5]:
+        logger.warning("跳过不合格题目(%s): %s", r["reason"], r["question_text"])
+    if stats["duplicated"] or stats["rejected"]:
+        logger.info("题库入库：查重跳过 %d 道、不合格剔除 %d 道、实际新增 %d 道",
+                    stats["duplicated"], stats["rejected"], stats["saved"])
+    return int(stats["saved"])
 
 
 @router.post("/ai-preview")
