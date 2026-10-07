@@ -249,6 +249,17 @@ export interface QuestionGenerateResponse {
   total: number;
   /** 降级提示：配图部分失败、代码题不入题库等（前端需要显式提示，不能只报"成功 N 道"） */
   note?: string;
+  /** 入库守门员回报的三个数量：老师要几道 / 实际新入库几道 / 题库已有几道 / 不合格几道 */
+  requested?: number;
+  saved?: number;
+  duplicated?: number;
+  rejected?: number;
+  stats?: {
+    requested: number; saved: number; duplicated: number; rejected: number;
+    by_type?: Record<string, number>; by_difficulty?: Record<string, number>;
+    normalize_notes?: string[]; in_batch_duplicates?: number; linked?: number;
+    dry_run?: boolean;
+  };
 }
 
 export interface QuestionListResponse {

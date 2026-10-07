@@ -138,6 +138,7 @@
   "extractingWithTime": "AI 提取中... {{time}}s",
   "startExtract": "开始提取",
   "generatedCount": "✅ 已生成 {{count}} 道题（已自动保存到题库）",
+  "qbAlreadyInBank": "题库里已有，未重复入库",
   "extractedCount": "✅ 已提取 {{count}} 道题（已自动保存到题库）",
   "editQuestion_": "编辑题目 #{{id}}",
   "uploadDocument": "上传文档（支持 docx/txt/md/pdf/json）",

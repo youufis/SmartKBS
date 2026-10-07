@@ -112,6 +112,7 @@
   "extractingWithTime": "AI extracting... {{time}}s",
   "startExtract": "Start Extract",
   "generatedCount": "✅ Generated {{count}} questions (auto-saved to question bank)",
+  "qbAlreadyInBank": "already in bank, not duplicated",
   "extractedCount": "✅ Extracted {{count}} questions (auto-saved to question bank)",
   "editQuestion_": "Edit Question #{{id}}",
   "uploadDocument": "Upload document (supports docx/txt/md/pdf/json)",

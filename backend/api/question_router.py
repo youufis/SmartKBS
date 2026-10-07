@@ -27,6 +27,8 @@ from backend.question_db import (
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files
 from backend.logger import logger
+# 出题入库统一走 question_factory（校验 → 查重 → 事务插入 → 连边）
+from backend import question_factory
 from backend.question_media import (
     SOURCE_BANK,
     archive_bank_dir,
@@ -465,60 +467,53 @@ async def generate_questions(req: GenerateRequest, request: Request):
     user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
     creator_name = user_row[0][0] if user_row and user_row[0][0] else username
 
-    # 入库
-    saved_questions = []
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    code_note = ""
-    for q_data in questions[:req.count]:
-        q_type = q_data.get("type", req.question_type)
-        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code, has_svg, media_placeholders = _media_columns(q_data)
-        qid = execute_insert(
-            """INSERT INTO question_bank
-               (type, question_text, options, correct_answer, explanation,
-                knowledge_points, subject, difficulty, creator_username, creator_name,
-                source, status, created_at, updated_at,
-                svg_content, has_svg, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai', 'active', ?, ?,
-                       ?, ?, ?)""",
-            (
-                q_type,
-                q_data.get("question", ""),
-                options_str,
-                q_data.get("answer", ""),
-                q_data.get("explanation", ""),
-                q_data.get("knowledge_point", req.knowledge_points),
-                req.subject,
-                q_data.get("difficulty", req.difficulty),
-                username,
-                creator_name,
-                now,
-                now,
-                svg_code, has_svg, media_placeholders,
-            ),
-        )
+    # 入库统一走 question_factory（与含配图版同一口径、同一实现，见其注释）
+    outcome = question_factory.persist_questions(
+        questions[:req.count],
+        subject=req.subject,
+        source="ai",
+        username=username,
+        creator_name=creator_name,
+        question_type=req.question_type,
+        difficulty=req.difficulty,
+        knowledge_points=req.knowledge_points,
+    )
+    stats = outcome["stats"]
 
-        # AI 自己返回了 code 题型：题库存不下模板代码与测试用例，见 CODE_BANK_NOTE
-        if q_type == "code":
-            code_note = CODE_BANK_NOTE
-
+    saved_questions = [
+        {
+            "id": n["id"],
+            "type": n["type"],
+            "question_text": n["question_text"],
+            "options": n["options"],
+            "correct_answer": n["correct_answer"],
+            "explanation": n["explanation"],
+            "knowledge_points": n["knowledge_points"],
+            "difficulty": n["difficulty"],
+        }
+        for n in outcome["saved"]
+    ]
+    for d in outcome["duplicated"]:
         saved_questions.append({
-            "id": qid,
-            "type": q_type,
-            "question_text": q_data.get("question", ""),
-            "options": q_data.get("options", {}),
-            "correct_answer": q_data.get("answer", ""),
-            "explanation": q_data.get("explanation", ""),
-            "knowledge_points": q_data.get("knowledge_point", req.knowledge_points),
-            "difficulty": q_data.get("difficulty", req.difficulty),
+            "id": d["id"], "type": d["type"], "question_text": d["question_text"],
+            "options": d["options"], "correct_answer": d["correct_answer"],
+            "explanation": d["explanation"], "knowledge_points": d["knowledge_points"],
+            "difficulty": d["difficulty"], "duplicated": True,
         })
 
-    logger.info(f"用户 {username} 生成并入库 {len(saved_questions)} 道{req.question_type}题")
+    note = _generation_note(outcome, [], asked=req.count, parsed=len(questions))
+    logger.info(f"用户 {username} AI 出题 入库={stats['saved']} 重复={stats['duplicated']} "
+                f"拒绝={stats['rejected']} 题型={stats['by_type']}")
     return {
-        "message": f"成功生成 {len(saved_questions)} 道{TYPE_DESC.get(req.question_type, '')}",
+        "message": f"成功生成 {stats['saved']} 道{TYPE_DESC.get(req.question_type, '')}题",
         "questions": saved_questions,
         "total": len(saved_questions),
-        "note": code_note,
+        "requested": req.count,
+        "saved": stats["saved"],
+        "duplicated": stats["duplicated"],
+        "rejected": stats["rejected"],
+        "stats": stats,
+        "note": note,
     }
 
 
@@ -543,6 +538,42 @@ async def generate_questions_async(req: GenerateRequest, request: Request):
         f"教师 {username} AI 出题：{req.knowledge_points}({req.count}题)",
     )
     return {"task_id": task_id, "message": "AI 已开始出题，请稍候..."}
+
+
+def _generation_note(outcome: dict[str, Any], media_notes: list[str], *,
+                     asked: int = 0, parsed: int = 0) -> str:
+    """把 factory 回报的"哪些没入库、为什么"拼成给老师看的一句话。
+
+    只报"成功生成 N 道"是不够的：模型返回的题型与指定不符、答案落在选项外、
+    题干与题库已有题重复、模型少给或多给被截断 —— 过去全部被静默吞掉，
+    老师以为 5 道都出题成功了。
+
+    三个数量必须分清：asked=老师要几道，parsed=模型实际返回几道，
+    saved/duplicated/rejected=factory 处置结果。stats["requested"] 是 parsed，
+    拿它跟 saved 比永远相等，所以缺口要用 asked 来算。
+    """
+    stats = outcome.get("stats") or {}
+    bits: list[str] = []
+    rejected = stats.get("rejected") or 0
+    saved = stats.get("saved") or 0
+    if rejected:
+        reasons = "；".join(f"{r['question_text'][:18]}…：{r['reason']}"
+                            for r in (outcome.get("rejected") or [])[:3])
+        bits.append(f"{rejected} 道未入库（{reasons}）")
+    dup = stats.get("duplicated") or 0
+    if dup:
+        kind = "与本批重复" if (stats.get("in_batch_duplicates") or 0) == dup else "题库里已有"
+        bits.append(f"{dup} 道{kind}，未重复入库")
+    if asked and parsed and parsed < asked:
+        bits.append(f"模型只返回 {parsed} 道（要求 {asked} 道），可重试或减少数量")
+    elif asked and parsed > asked:
+        bits.append(f"模型返回 {parsed} 道，已按要求只取前 {asked} 道")
+    fixed = [n for n in (stats.get("normalize_notes") or []) if n]
+    if fixed:
+        bits.append("已自动纠正：" + "；".join(fixed[:4]))
+    if media_notes:
+        bits.append("配图情况：" + "；".join(media_notes[:3]))
+    return "。".join(bits)
 
 
 def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, count: int, difficulty: str, username: str = "") -> str:
@@ -1987,52 +2018,37 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
     creator_name = user_row[0][0] if user_row and user_row[0][0] else username
 
-    # 入库（含多媒体字段）
-    saved_questions = []
+    # 入库统一走 question_factory：字段体检 → 查重（学科族 + 题型 + 规范化题干）
+    # → 整批一个事务插入 → 提交后连教材知识点边（当天就进选题引擎的 T0 候选）。
+    # 解析链路 _parse_ai_response（快速三策略 + ai_json 容错层 + 题干内嵌选项剥离）
+    # 原样不动：历史上"客套话包裹 / 中文引号当定界符 / 尾逗号 / 响应截断"导致的
+    # 无法解析，全部由那一层修好并有原文留档，这里不参与、也不许改口径。
+    outcome = question_factory.persist_questions(
+        questions[:req.count],
+        subject=req.subject,
+        source="ai",
+        username=username,
+        creator_name=creator_name,
+        question_type=req.question_type,
+        difficulty=req.difficulty,
+        knowledge_points=req.knowledge_points,
+    )
+    saved_items = outcome["saved"]
+    stats = outcome["stats"]
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    code_note = ""
+
+    saved_questions: list[dict[str, Any]] = []
     media_notes: list[str] = []
-    for q_data in questions[:req.count]:
-        q_type = q_data.get("type", req.question_type)
-        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code, has_svg, media_placeholders = _media_columns(q_data)
-
-        qid = execute_insert(
-            """INSERT INTO question_bank
-               (type, question_text, options, correct_answer, explanation,
-                knowledge_points, subject, difficulty, creator_username, creator_name,
-                source, status, created_at, updated_at,
-                svg_content, has_svg, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai', 'active', ?, ?, ?, ?, ?)""",
-            (
-                q_type,
-                q_data.get("question", ""),
-                options_str,
-                q_data.get("answer", ""),
-                q_data.get("explanation", ""),
-                q_data.get("knowledge_point", req.knowledge_points),
-                req.subject,
-                q_data.get("difficulty", req.difficulty),
-                username,
-                creator_name,
-                now,
-                now,
-                svg_code,
-                has_svg,
-                media_placeholders,
-            ),
-        )
-
-        # AI 自己返回了 code 题型：题库存不下模板代码与测试用例，见 CODE_BANK_NOTE
-        if q_type == "code":
-            code_note = CODE_BANK_NOTE
-
+    for n in saved_items:
+        qid = n["id"]
         # ── 自动配图（通义万相）：统一走 generate_placeholders_batch ──
-        # 过去这里自己手写了一份并发版，最大的问题是**只回写 media_files、不回写
-        # media_placeholders**：generated/failed 状态留在内存里就丢了。配图管理面板
-        # 按 status 决定显不显示图片、给不给"AI 生成/上传替换"按钮，于是出题生成的
-        # 图在面板里既看不见也点不动，失败项连"批量重试"都不出现。
-        placeholders = q_data.get("media_placeholders") or []
+        # 配图状态必须**同时回写 media_placeholders 与 media_files 两列**。过去这里
+        # 自己手写了一份并发版，最大的问题是只回写 media_files、不回写
+        # media_placeholders：generated/failed 状态留在内存里就丢了。配图管理面板按
+        # status 决定显不显示图片、给不给"AI 生成/上传替换"按钮，于是出题生成的图在
+        # 面板里既看不见也点不动，失败项连"批量重试"都不出现。
+        # （占位符取 factory 保留的原始列表 media_raw，生图要的是模型给的那份描述）
+        placeholders = n.get("media_raw") or []
         media_files: list[dict[str, Any]] = []
         if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
             from backend.api.image_gen_service import generate_placeholders_batch
@@ -2062,28 +2078,45 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
         saved_questions.append({
             "id": qid,
-            "type": q_type,
-            "question_text": q_data.get("question", ""),
-            "options": q_data.get("options", {}),
-            "correct_answer": q_data.get("answer", ""),
-            "explanation": q_data.get("explanation", ""),
-            "knowledge_points": q_data.get("knowledge_point", req.knowledge_points),
-            "difficulty": q_data.get("difficulty", req.difficulty),
-            "has_svg": has_svg,
-            "svg_content": svg_code if has_svg else None,
+            "type": n["type"],
+            "question_text": n["question_text"],
+            "options": n["options"],
+            "correct_answer": n["correct_answer"],
+            "explanation": n["explanation"],
+            "knowledge_points": n["knowledge_points"],
+            "difficulty": n["difficulty"],
+            "has_svg": n["has_svg"],
+            "svg_content": n["svg_content"] if n["has_svg"] else None,
             "media_placeholders": placeholders,
             "media_files": media_files,
             "media_summary": media_summary(placeholders, media_files),
         })
 
-    note = code_note
-    if media_notes:
-        note = (note + " " if note else "") + "配图情况：" + "；".join(media_notes[:3])
+    # 命中题库已有题的，回填旧题一起展示（与智能提取同一口径），但不重复入库
+    for d in outcome["duplicated"]:
+        saved_questions.append({
+            "id": d["id"], "type": d["type"], "question_text": d["question_text"],
+            "options": d["options"], "correct_answer": d["correct_answer"],
+            "explanation": d["explanation"], "knowledge_points": d["knowledge_points"],
+            "difficulty": d["difficulty"], "has_svg": d["has_svg"],
+            "svg_content": d["svg_content"], "media_placeholders": d["media_placeholders"],
+            "media_files": [], "media_summary": media_summary(d["media_placeholders"], []),
+            "duplicated": True,
+        })
+
+    note = _generation_note(outcome, media_notes, asked=req.count, parsed=len(questions))
+    logger.info(f"用户 {username} AI 出题(含配图) 入库={stats['saved']} 重复={stats['duplicated']} "
+                f"拒绝={stats['rejected']} 题型={stats['by_type']}")
 
     return {
-        "message": f"成功生成 {len(saved_questions)} 道试题",
+        "message": f"成功生成 {stats['saved']} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
+        "requested": req.count,
+        "saved": stats["saved"],
+        "duplicated": stats["duplicated"],
+        "rejected": stats["rejected"],
+        "stats": stats,
         "note": note,
     }
 

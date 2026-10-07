@@ -817,10 +817,26 @@ const QuestionBankPage: React.FC = () => {
                           </Divider>
                           {generatedQuestions.map((q, idx) => (
                             <Card
-                              key={q.id}
+                              key={`${q.id}-${idx}`}
                               size="small"
-                              style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
-                              title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
+                              style={{
+                                marginBottom: 8,
+                                // 命中题库已有题的是"回填展示"，不是新入库的题：
+                                // 画成一样的绿卡会让老师以为又生成了几道，数量也对不上
+                                background: (q as any).duplicated ? '#fafafa' : '#f6ffed',
+                                border: (q as any).duplicated
+                                  ? '1px dashed #d9d9d9' : '1px solid #b7eb8f',
+                              }}
+                              title={(
+                                <span style={{ fontSize: 14 }}>
+                                  #{idx + 1} {TYPE_LABELS[q.type] || q.type}
+                                  {(q as any).duplicated && (
+                                    <Tag color="default" style={{ marginLeft: 8 }}>
+                                      {t('qbAlreadyInBank')}
+                                    </Tag>
+                                  )}
+                                </span>
+                              )}
                             >
                               <FormulaRenderer content={q.question_text} />
                               {q.options && Object.entries(q.options).map(([k, v]) => (
