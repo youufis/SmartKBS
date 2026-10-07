@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Switch, Pagination } from 'antd'
+import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Switch, Pagination, InputNumber } from 'antd'
 import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, BulbOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
@@ -162,6 +162,9 @@ const ResourceMgmtPage: React.FC = () => {
   const [aiExpCategory, setAiExpCategory] = useState<string>('algorithm')
   // ── 配图增强开关 ──
   const [enableMediaGen, setEnableMediaGen] = useState(true)
+  // 题目数量：以前页面题量在 prompt 与检索里各写一套、界面上根本没有入口，
+  // 老师想少几道题只能自己在页面上删。这里给它一个真入参（默认值与后端一致）。
+  const [aiQuestionCount, setAiQuestionCount] = useState<number>(10)
 
   // 打开弹窗时加载学科、年级、主题
   useEffect(() => {
@@ -185,6 +188,7 @@ const ResourceMgmtPage: React.FC = () => {
   // 切换类型时加载主题
   const handleAiTypeChange = (type: 'animation' | 'quiz' | 'practice' | 'custom' | 'interactive') => {
     setAiGenType(type)
+    setAiQuestionCount(type === 'practice' ? 15 : 10)
     resourcesApi.getAiThemes(type).then(themes => {
       setAiThemes(themes)
       if (themes.length > 0) setAiTheme(themes[0].id)
@@ -205,6 +209,10 @@ const ResourceMgmtPage: React.FC = () => {
         custom_prompt: aiGenType === 'custom' || aiGenType === 'interactive' ? aiCustomPrompt : undefined,
         theme: aiTheme || undefined,
         enable_media: enableMediaGen,
+      }
+      // 只有答题/练习两类页面有"题目"概念，其它类型不发这个字段
+      if (aiGenType === 'quiz' || aiGenType === 'practice') {
+        params.question_count = aiQuestionCount
       }
       if (aiGenType === 'interactive') {
         params.experiment_params = {
@@ -680,7 +688,23 @@ const ResourceMgmtPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '10px 14px', background: '#f6f8fa', borderRadius: 8, border: '1px solid #e8ecf0' }}>
             <div>
-              <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.autoMediaLabel')}</Typography.Text>
+              {(aiGenType === 'quiz' || aiGenType === 'practice') && (
+              <Space size={6} align="center">
+                <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.questionCountLabel')}</Typography.Text>
+                <InputNumber
+                  size="small"
+                  min={1}
+                  max={aiGenType === 'practice' ? 50 : 30}
+                  value={aiQuestionCount}
+                  onChange={(v) => setAiQuestionCount(v || (aiGenType === 'practice' ? 15 : 10))}
+                  style={{ width: 84 }}
+                />
+                <Tooltip title={t('resource.questionCountHint')}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>({t('resource.bankFirstNote')})</Typography.Text>
+                </Tooltip>
+              </Space>
+            )}
+            <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.autoMediaLabel')}</Typography.Text>
               <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
                 {t('resource.autoMediaDesc')}
               </Typography.Text>

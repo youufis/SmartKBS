@@ -934,8 +934,10 @@ async def generate_wrong_practice(req: PracticeGenerateRequest, request: Request
     user = get_current_user(request)
     role = user.get("role", 2)
     target = _assert_can_access_student(user, req.student_username)
+    # 旧写法把越界的题量**静默改成 5**：老师填 30 道，拿回 5 道，界面上没有任何解释。
+    # 现在明确报错，让"要多少"与"给多少"永远一致。
     if req.count < 1 or req.count > 20:
-        req.count = 5
+        raise HTTPException(status_code=400, detail=f"题目数量范围为 1-20 道（当前 {req.count}）")
 
     _backfill_wrong_book(target)
     rows = db_dict(

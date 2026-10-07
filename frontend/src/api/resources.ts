@@ -99,6 +99,8 @@ export interface AiPreviewParams {
   theme?: string;  // 主题 ID
   experiment_params?: Record<string, string>;  // 实验参数
   enable_media?: boolean;  // 是否启用自动配图增强
+  /** 题目数量（仅 quiz / practice 有效）；不传则按类型默认（练习 15 道、答题 10 道） */
+  question_count?: number;
 }
 
 // 实验分类常量（覆盖全学科）

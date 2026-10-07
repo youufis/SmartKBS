@@ -235,7 +235,10 @@
     "stage1": "Stage 1: AI is planning content...",
     "stage2": "Stage 2: Generating HTML code...",
     "stage3": "Stage 3: Saving files + generating images...",
-    "waitingStage": "⏳ {{stage}} (waited {{minutes}} min)"
+    "waitingStage": "⏳ {{stage}} (waited {{minutes}} min)",
+    "questionCountLabel": "Questions",
+    "questionCountHint": "This number wins. Real questions are pulled from the bank first; AI only generates the shortfall (and they are saved back to the bank)",
+    "bankFirstNote": "bank first"
   },
   "nbTitle": "Notifications",
   "nbReadAll": "Mark all read",

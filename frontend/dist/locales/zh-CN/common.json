@@ -235,7 +235,10 @@
     "stage1": "第一阶段：AI 构思内容...",
     "stage2": "第二阶段：生成 HTML 代码...",
     "stage3": "第三阶段：保存文件 + 生成配图...",
-    "waitingStage": "⏳ {{stage}}（已等待 {{minutes}} 分钟）"
+    "waitingStage": "⏳ {{stage}}（已等待 {{minutes}} 分钟）",
+    "questionCountLabel": "题目数量",
+    "questionCountHint": "题量以这里为准；系统会先从题库取相关真题，不足部分才让 AI 出新题（新题会存入题库）",
+    "bankFirstNote": "题库优先"
   },
   "nbTitle": "消息通知",
   "nbReadAll": "全部已读",

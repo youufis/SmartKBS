@@ -1110,6 +1110,66 @@ def _save_questions_to_db(questions: list[dict], username: str, name: str = "") 
     return int(stats["saved"])
 
 
+# ── 页面类出题（章节练习 / 互动答题）的题量与题库优先 ──
+
+# 每类页面允许的题量区间：与前端输入框同口径，越界直接说明而不是偷偷夹取
+PAGE_QUESTION_LIMITS = {"quiz": (1, 30), "practice": (1, 50)}
+PAGE_QUESTION_DEFAULTS = {"quiz": 10, "practice": 15}
+
+
+def _resolve_question_count(gen_type: str, body: dict[str, Any]) -> int:
+    """题量入参：老师说了算。
+
+    以前页面题量在三个地方各写一套、谁也听不见谁：prompt 模板写"10-15 道 / 15-20 道"，
+    检索真题的数量在端点里硬编码 q_limit，前端连一个输入框都没有。现在统一成一个入参：
+    没传就按原来的类型默认值（行为不变），传了就以此为准；越界**明确报错**不静默夹取
+    （静默改老师的输入是这类"看着没生效"问题的根源）。
+    """
+    lo, hi = PAGE_QUESTION_LIMITS.get(gen_type, (1, 30))
+    raw = body.get("question_count", None)
+    if raw in (None, ""):
+        return PAGE_QUESTION_DEFAULTS.get(gen_type, 10)
+    # 注意 bool 是 int 的子类，且 int(1.5) 会静默变成 1 —— 两种都要拦下来，
+    # 否则又回到"老师填的数与实际题数不一致"这个老问题上。
+    if isinstance(raw, bool) or (isinstance(raw, float) and not float(raw).is_integer()):
+        raise HTTPException(status_code=400,
+                            detail=f"题目数量必须是 {lo}-{hi} 之间的整数（当前 {raw!r}）")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail=f"题目数量必须是 {lo}-{hi} 之间的整数")
+    if n < lo or n > hi:
+        raise HTTPException(status_code=400,
+                            detail=f"题目数量范围为 {lo}-{hi} 道（当前 {n}）")
+    return n
+
+
+def _page_real_questions(gen_type: str, topic: str, subject: str,
+                         count: int) -> list[dict[str, Any]]:
+    """题库优先：按题量从题库取真题塞进页面（只有答题类页面有题目概念）。"""
+    if gen_type not in ("quiz", "practice"):
+        return []
+    need_types = ('single', 'true_false', 'multiple')
+    rows = _fetch_matching_questions(topic, subject, limit=count, need_types=need_types)
+    logger.info(f"页面出题：题库命中 {len(rows)}/{count} 道 (type={gen_type}, topic={topic})")
+    return rows
+
+
+def _question_count_instruction(gen_type: str, count: int, real_n: int) -> str:
+    """把"题量以本次入参为准"写成硬要求，覆盖模板里那些写死的区间。"""
+    if gen_type not in ("quiz", "practice"):
+        return ""
+    gap = max(count - real_n, 0)
+    return (
+        f"\n\n## 题目数量（本次硬性要求，覆盖上文一切题量区间）\n"
+        f"- 本页**总共恰好 {count} 道题**，不多不少\n"
+        f"- 上面 JSON 里已给出 {real_n} 道题库真题，必须原样使用（题干、选项、答案、解析都不改）\n"
+        + (f"- 还缺 {gap} 道：请按同样格式新出 {gap} 道与该主题紧密相关的题补齐\n" if gap else
+           "- 题量已由题库真题满足，**不要再额外加题**\n")
+        + "- 题号从 1 连续编到 " + str(count) + "，页面标题/统计里显示的题数也必须是 " + str(count) + "\n"
+    )
+
 @router.post("/ai-preview")
 async def ai_preview_html(request: Request):
     """AI 生成 HTML 资源预览（不保存，返回 HTML 内容）
@@ -1135,6 +1195,8 @@ async def ai_preview_html(request: Request):
     theme = body.get("theme", "").strip()
     experiment_params = body.get("experiment_params", {})
     enable_media = body.get("enable_media", True)
+    # 题量：老师说了算（越界明确报错，不静默夹取）
+    question_count = _resolve_question_count(gen_type, body)
 
     # 校验
     if gen_type == "custom":
@@ -1169,13 +1231,8 @@ async def ai_preview_html(request: Request):
         rag_context = ""
 
     # ── 题库取题（仅 quiz/practice / interactive 类型）──
-    real_questions = []
+    real_questions = _page_real_questions(gen_type, topic, subject, question_count)
     user_name = user.get("name", "")
-    if gen_type in ("quiz", "practice"):
-        need_types = ('single', 'true_false', 'multiple')
-        q_limit = 15 if gen_type == "practice" else 10
-        real_questions = _fetch_matching_questions(topic, subject, limit=q_limit, need_types=need_types)
-        logger.info(f"从题库检索到 {len(real_questions)} 道与「{topic}」相关的题目")
 
     # 构建 Prompt（含真实题目数据）
     prompt = build_html_prompt(
@@ -1198,6 +1255,7 @@ async def ai_preview_html(request: Request):
         from backend.prompts.question_schema import JSON_QUOTES_RULE, QUESTION_DATA_CONTRACT
         prompt += ("\n\n## 题目数据字段口径（与题库入库校验一致）\n"
                    + QUESTION_DATA_CONTRACT + "\n\n" + JSON_QUOTES_RULE)
+    prompt += _question_count_instruction(gen_type, question_count, len(real_questions))
 
     # 调用 AI（HTML 页面动辄上万字，必须显式给 max_tokens，
     # 否则走服务商默认上限会被静默截断，产出半截页面）
@@ -1768,6 +1826,7 @@ async def ai_generate_async(request: Request):
     theme = body.get("theme", "").strip()
     experiment_params = body.get("experiment_params", {})
     enable_media = body.get("enable_media", True)
+    question_count = _resolve_question_count(gen_type, body)
 
     if not topic and not custom_prompt:
         raise HTTPException(status_code=400, detail="请输入主题或自定义需求")
@@ -1805,6 +1864,9 @@ async def ai_generate_async(request: Request):
             # ── 异步任务用更长的超时（后台不阻塞 HTTP）──
             ASYNC_AI_TIMEOUT = 600  # 10 分钟，复杂资源可能需要更长时间
 
+            # 题库优先：异步生成路径以前**根本不查题库**（只有已无人调用的 /ai-preview 查），
+            # 于是同一个知识点重复生成十次、每次都是全新的题，题库既没参与也没沉淀。
+            real_questions = _page_real_questions(gen_type, topic, subject, question_count)
             prompt = build_html_prompt(
                 prompt_type=gen_type,
                 topic=topic,
@@ -1813,7 +1875,13 @@ async def ai_generate_async(request: Request):
                 grade=grade,
                 custom_prompt=custom_prompt,
                 theme=theme,
+                real_questions=real_questions,
             )
+            if gen_type in ("quiz", "practice"):
+                from backend.prompts.question_schema import JSON_QUOTES_RULE, QUESTION_DATA_CONTRACT
+                prompt += ("\n\n## 题目数据字段口径（与题库入库校验一致）\n"
+                           + QUESTION_DATA_CONTRACT + "\n\n" + JSON_QUOTES_RULE)
+            prompt += _question_count_instruction(gen_type, question_count, len(real_questions))
 
             from backend.api.ai_service import call_ai_sync_with_timeout
             from backend import ai_json
@@ -1842,6 +1910,7 @@ async def ai_generate_async(request: Request):
                     raw = ai_json.dump_failed_raw("async-single", ai_result or "")
                     logger.warning(f"[异步] 单文件产物不合格: {why}（原文留档 {raw or '失败'}）")
                     return {"error": f"AI 生成的内容不可用：{why}，请重试"}
+            main_html = (files.get("index.html") or next(iter(files.values()), "")) if files else html_cleaned
             html_dir = get_account_html_dir(username)
 
             # 确定目录名
@@ -1916,8 +1985,29 @@ async def ai_generate_async(request: Request):
                 except Exception as e:
                     logger.warning(f"[异步] 配图增强失败: {e}")
 
-            logger.info(f"[异步] 生成完成: {saved_info}")
-            return {"saved": saved_info}
+            # 新题回收入库：AI 为补齐题量新出的题写进题库（校验/查重/连边同一道关口），
+            # 下次再生成同一主题时它们就成了"题库真题"，不再重复烧钱
+            db_saved = 0
+            db_note = ""
+            if gen_type in ("quiz", "practice"):
+                try:
+                    new_questions, parsed_total = _extract_questions_from_html(
+                        main_html, real_questions, topic, subject)
+                    if new_questions:
+                        db_saved = _save_questions_to_db(new_questions, username, user_name)
+                    if parsed_total and not db_saved:
+                        db_note = f"本页 {parsed_total} 题全部复用现有题库"
+                except Exception as e:
+                    db_note = "题目入库失败（不影响页面）"
+                    logger.warning(f"[异步] 保存 AI 题目到题库失败: {e}")
+
+            logger.info(f"[异步] 生成完成: {saved_info} 题库命中={len(real_questions)} "
+                        f"新题入库={db_saved}")
+            out = {"saved": saved_info, "question_count": question_count,
+                   "bank_used": len(real_questions), "db_saved": db_saved}
+            if db_note:
+                out["db_note"] = db_note
+            return out
 
         except Exception as e:
             logger.error(f"[异步] 生成失败: {e}")
