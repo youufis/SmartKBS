@@ -314,6 +314,7 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
                       difficulty: str = "medium", knowledge_points: str = "",
                       dedup: bool = True, link: bool = True,
                       dry_run: bool = False, allow_code: bool = False,
+                      kp_id: int = 0,
                       write_creator_name: bool = True) -> dict[str, Any]:
     """把一批题目入库，返回 saved / duplicated / rejected 三段结果。
 
@@ -463,7 +464,9 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
     for qid, kp in to_link:
         # 连边必须在事务提交之后：link_question_kp 自己开连接写库
         try:
-            if link_question_kp(qid, kp):
+            # kp_id 是现成的场景（课程练习按知识点生成）直接连 ID 边，最准且不受
+            # "知识点名是否全库唯一"限制；没有 kp_id 时才退回按名字唯一命中
+            if link_question_kp(qid, kp, kp_id):
                 linked += 1
         except Exception as e:
             logger.debug(f"[入库] 连边失败 qid={qid}: {e}")

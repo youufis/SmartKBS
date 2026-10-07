@@ -19,8 +19,7 @@ from backend.database import (
     get_transaction,
 )
 from backend.question_db import execute_query as q_execute_query
-from backend.question_media import (SOURCE_BANK, ensure_media_dir, media_columns_for_insert,
-                                      normalize_media_files)
+from backend.question_media import (SOURCE_BANK, ensure_media_dir, normalize_media_files)
 from backend.svg_safety import is_usable_svg, sanitize_svg
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
@@ -2822,6 +2821,84 @@ def _practice_overrides(body: dict) -> tuple[str, str, str]:
     return topic, subject, grade
 
 
+async def _persist_curriculum_ai_questions(questions: list[dict[str, Any]], *, subject: str,
+                                           kp_name: str, kp_id: int, username: str,
+                                           now: str) -> tuple[list[int], list[int]]:
+    """课程练习 / 智能练习两条 AI 补题路径共用的入库（收敛到 question_factory）。
+
+    返回 (new_ids, dup_ids)：
+      new_ids  本次真正新入库的题 id（只有这些题去烧生图配额）
+      dup_ids  命中题库已有题的 id（不再重复入库，也不再重复生图）
+
+    两条路径历史上行为不一致，这里一并对齐：
+      · 判重从「全库精确文本」换成统一口径（学科族 + 题型 + 规范化题干）。实测现口径
+        一条重复都没拦住（0 组），新口径拦住 2 组 4 条 —— 是严格超集，不会漏掉原来能拦的。
+      · 智能练习那条**从来不连教材知识点边**，于是它生成的题下次仍走不到 T0、还要再烧
+        一次 AI。现在两条都带 kp_id 连 ID 边（比按名字猜准，也不受"名字是否全库唯一"限制）。
+      · 入库前做字段体检：答案越界、缺答案、题干过短的模型输出不再进题库。
+    """
+    from backend import question_factory
+
+    outcome = question_factory.persist_questions(
+        questions,
+        subject=subject,
+        source="ai",
+        username=username,
+        question_type="single",
+        knowledge_points=kp_name,
+        kp_id=kp_id,
+        write_creator_name=False,
+    )
+    stats = outcome["stats"]
+    logger.info(f"[AI练习入库] kp_id={kp_id} 新入库={stats['saved']} 重复回填={stats['duplicated']} "
+                f"不合格={stats['rejected']}")
+    for r in outcome["rejected"][:5]:
+        logger.info(f"[AI练习入库] 拒收 {r['type']}: {r['reason']} | {r['question_text']}")
+
+    new_ids: list[int] = []
+    for e in sorted(outcome["saved"], key=lambda x: x.get("source_index", 0)):
+        idx = e.get("source_index")
+        if isinstance(idx, int) and idx < len(questions):
+            questions[idx]["id"] = e["id"]
+            questions[idx]["index"] = e["id"]
+        new_ids.append(int(e["id"]))
+
+    dup_ids: list[int] = []
+    for e in sorted(outcome["duplicated"], key=lambda x: x.get("source_index", 0)):
+        idx = e.get("source_index")
+        if isinstance(idx, int) and idx < len(questions):
+            questions[idx]["id"] = e["id"]
+            questions[idx]["index"] = e["id"]
+        dup_ids.append(int(e["id"]))
+
+    # 只给新入库的题生图：重复题沿用题库已有的配图，不再烧一次生图配额
+    if new_ids and get_config_value("IMAGE_GEN_ENABLED", True):
+        from backend.api.image_gen_service import generate_placeholders_batch
+        # q_update 在本模块是各函数内部的局部导入别名，模块级 helper 取不到 ——
+        # 直接引用会在"生图后回写"这一步抛 NameError（只在开了自动生图时才走到，
+        # 所以必须有测试真的跑进这个分支才拦得住）
+        from backend.question_db import execute_update as q_update
+        for e in outcome["saved"]:
+            placeholders = e.get("media_raw") or []
+            if not placeholders:
+                continue
+            try:
+                media_dir = ensure_media_dir(SOURCE_BANK, e["id"])
+                media_files = await generate_placeholders_batch(
+                    placeholders=placeholders, subject=subject,
+                    media_dir=media_dir, qid=e["id"], now=now,
+                ) or []
+                q_update(
+                    "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                    (json.dumps(placeholders, ensure_ascii=False),
+                     json.dumps(media_files, ensure_ascii=False), e["id"]),
+                )
+            except Exception as img_err:
+                # 配图失败只降级为无图题，不能让整次出题作废
+                logger.warning(f"自动生图失败 qid={e['id']}: {img_err}")
+    return new_ids, dup_ids
+
+
 @router.post("/ai-practice/{kp_id}")
 async def ai_generate_practice(kp_id: int, request: Request):
     """[教师] AI 根据知识点生成10道单选题 + 创建练习任务 + 生成HTML答题页面"""
@@ -2858,7 +2935,6 @@ async def ai_generate_practice(kp_id: int, request: Request):
     from backend.prompts.teaching import PRACTICE_SINGLE_CHOICE_PROMPT
     from backend.api.ai_service import call_ai_async
     from backend.utils import get_account_html_dir
-    from backend.question_db import execute_insert as q_insert, execute_update as q_update
     from backend.config import BASE_DIR
 
     subject = subject_ov or kp.get("subject") or kp["course_name"] or ""
@@ -2932,7 +3008,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
 
             # ── 已入库的 bank 题目 ID ──
             all_question_ids: list[int] = [q["id"] for q in bank_questions if q.get("id")]
-            used_texts: set[str] = {q.get("question_text", q.get("question", "")) for q in bank_questions if q.get("id")}
+            # 原先这里还有个 used_texts 精确文本集合给逐题循环用；入库判重已收敛到
+            # question_factory（学科族 + 题型 + 规范化题干，严格强于精确文本），故删除
 
             # ══════════════════════════════════════════════════════════
             # 第2步：AI 补全差额（最多10题）
@@ -3018,76 +3095,19 @@ async def ai_generate_practice(kp_id: int, request: Request):
 
                     questions = good[:remaining]
 
+                    # 入库统一走 question_factory（校验 → 查重 → 事务 → 连 kp_id 边 → 生图）
+                    new_ids, dup_ids = await _persist_curriculum_ai_questions(
+                        questions, subject=subject, kp_name=kp_name, kp_id=kp_id,
+                        username=username, now=now)
                     round_new_ids: list[int] = []
-                    for q in questions:
-                        q_text = q.get("question", "").strip()
-                        if not q_text or q_text in used_texts:
-                            continue
-                        used_texts.add(q_text)
-
-                        # 检查题库中是否已有相同题目文本
-                        dup = q_execute_query(
-                            "SELECT id FROM question_bank WHERE question_text=? AND status='active'",
-                            (q_text,),
-                        )
-                        if dup:
-                            logger.info(f"跳过重复题目: {q_text[:40]}...")
-                            qid = dup[0]["id"]
-                            q["id"] = qid
-                            q["index"] = qid
-                            if qid not in round_new_ids:
-                                round_new_ids.append(qid)
-                                ai_question_ids.append(qid)
-                            continue
-
-                        opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-                        svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
-                        qid = q_insert(
-                            """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
-                                knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
-                                svg_content,has_svg,media_placeholders)
-                               VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
-                            ("single", q.get("question", ""), opts,
-                             q.get("answer", ""), q.get("explanation", ""),
-                             kp_name, subject,
-                             q.get("difficulty", "medium"), username, now, now,
-                             svg_code, has_svg, media_placeholders),
-                        )
-                        assert qid is not None, "插入题目失败，qid 为 None"
-                        # 这里 kp_id 是现成的 —— 直接连 ID 边，下次该知识点优先走 T0，不再烧 AI
-                        from backend.question_select import link_question_kp as _link
-                        _link(int(qid), kp_name, kp_id)
-                        q["id"] = qid
-                        q["index"] = qid
-                        if "svg_code" in q and "svg_content" not in q:
-                            q["svg_content"] = q["svg_code"]
-                        if "has_svg" not in q:
-                            q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
-
-                        # 自动生图（有占位符时）
-                        placeholders = q.get("media_placeholders") or []
-                        media_files = []
-                        if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
-                            try:
-                                from backend.api.image_gen_service import generate_placeholders_batch
-                                media_dir = ensure_media_dir(SOURCE_BANK, qid)
-                                media_files = await generate_placeholders_batch(
-                                    placeholders=placeholders,
-                                    subject=subject,
-                                    media_dir=media_dir,
-                                    qid=qid,
-                                    now=now,
-                                )
-                                q_update(
-                                    "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-                                    (json.dumps(placeholders, ensure_ascii=False),
-                                     json.dumps(media_files, ensure_ascii=False), qid)
-                                )
-                            except Exception as img_err:
-                                logger.warning(f"自动生图失败: {img_err}")
-                        q["media_files"] = media_files
-                        round_new_ids.append(qid)
-                        ai_question_ids.append(qid)
+                    for qid in new_ids + dup_ids:
+                        # 与历史行为一致：命中题库已有题也算"本轮拿到题"。若只算新入库的，
+                        # 下面那句"本轮无新题目就停止"会在题库已有同题时提前中断，
+                        # 结果 10 道凑不满 —— 行为看起来更严，实际是功能退化
+                        if qid not in round_new_ids:
+                            round_new_ids.append(qid)
+                        if qid not in ai_question_ids:
+                            ai_question_ids.append(qid)
 
                     # 如果这轮没有新增有效题目，提前结束
                     if not round_new_ids and len(ai_question_ids) > 0:
@@ -4033,67 +4053,14 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         if q.get("id"):
             all_question_ids.append(q["id"])
 
-    for q in ai_questions:
-        q_text = q.get("question", "").strip()
-        if not q_text:
-            continue
-        # 去重：检查题库中是否已有相同题目
-        dup = q_exec(
-            "SELECT id FROM question_bank WHERE question_text=? AND status='active'",
-            (q_text,),
-        )
-        if dup:
-            logger.info(f"跳过重复AI题目: {q_text[:40]}...")
-            qid = dup[0]["id"]
-            q["id"] = qid
-            if qid not in all_question_ids:
-                all_question_ids.append(qid)
-            continue
-
-        opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-        svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
-        qid = q_insert(
-            """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
-                knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
-                svg_content,has_svg,media_placeholders)
-               VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
-            ("single", q.get("question", ""), opts,
-             q.get("answer", ""), q.get("explanation", ""),
-             kp_name,  # 强制使用知识点名称，确保后续可检索
-             subject,
-             q.get("difficulty", "medium"), username, now, now,
-             svg_code, has_svg, media_placeholders),
-        )
-        assert qid is not None, "插入题目失败，qid 为 None"
-        q["id"] = qid
-        if "svg_code" in q and "svg_content" not in q:
-            q["svg_content"] = q["svg_code"]
-        if "has_svg" not in q:
-            q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
-
-        # 自动生图（有占位符时）
-        placeholders = q.get("media_placeholders") or []
-        media_files = []
-        if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
-            try:
-                from backend.api.image_gen_service import generate_placeholders_batch
-                media_dir = ensure_media_dir(SOURCE_BANK, qid)
-                media_files = await generate_placeholders_batch(
-                    placeholders=placeholders,
-                    subject=subject,
-                    media_dir=media_dir,
-                    qid=qid,
-                    now=now,
-                )
-                q_update(
-                    "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-                    (json.dumps(placeholders, ensure_ascii=False),
-                     json.dumps(media_files, ensure_ascii=False), qid)
-                )
-            except Exception as img_err:
-                logger.warning(f"自动生图失败: {img_err}")
-        q["media_files"] = media_files
-        all_question_ids.append(qid)
+    # 入库统一走 question_factory。这条路径历史上**从来不连教材知识点边**，
+    # 于是它生成的题下次仍走不到 T0、还要再烧一次 AI —— 现在两条路径都带 kp_id 连边。
+    new_ids, dup_ids = await _persist_curriculum_ai_questions(
+        ai_questions, subject=subject, kp_name=kp_name, kp_id=kp_id,
+        username=username, now=now)
+    for qid in new_ids + dup_ids:
+        if qid not in all_question_ids:
+            all_question_ids.append(qid)
 
     # ── 最终检查 ──
     if not all_question_ids:
