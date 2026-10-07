@@ -116,7 +116,6 @@ const InteractionPage: React.FC = () => {
     setAiQuizLoading(true)
     setAiQuizResult(null)
     try {
-      console.log('生成测验参数:', values)
       const { data } = await apiClient.post('/api/interaction/quizzes/ai-generate', values, { timeout: 300000 })
       setAiQuizResult(data)
       if (data.questions?.length > 0) {
@@ -703,8 +702,17 @@ const InteractionPage: React.FC = () => {
               <Select.Option value="mixed">{t('mixedMode')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="count" label={t('questionCount')} initialValue={5}>
-            <InputNumber min={1} max={50} defaultValue={5} style={{ width: 120 }} /> {t('questions')}
+          {/* 单位「题」放在控件外面：Form.Item 只有"唯一子元素是控件"时才会把
+              value/onChange 注入进去。以前这里写成 <InputNumber /> {t('questions')}
+              两个子元素，导致 count 从来没进过表单状态，请求体里也就没有它，
+              老师把数量改成 8 也永远拿到后端默认值的 5 题。 */}
+          <Form.Item label={t('questionCount')}>
+            <Space size={6}>
+              <Form.Item name="count" initialValue={5} noStyle>
+                <InputNumber min={1} max={50} style={{ width: 120 }} />
+              </Form.Item>
+              <Text type="secondary">{t('questions')}</Text>
+            </Space>
           </Form.Item>
           <Form.Item label={t('targetScope')}>
             <ActivityScopeSelector value={aiQuizScope} onChange={setAiQuizScope} />
