@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.question_db import execute_insert, execute_query, execute_query_one, execute_update
-from backend.question_media import media_columns_for_insert
 from backend.database import execute_query as db_execute_query, execute_insert_update as db_execute_update
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
@@ -358,7 +357,9 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
             dedup.append(q)
         ai_qs = dedup[: remaining]
         if ai_qs:
-            await _persist_generated_questions(ai_qs, req, username)
+            # 必须用返回值：入库现在会拒收不合格条目（答案越界、缺答案、题干过短），
+            # 沿用"原地改 + 丢弃返回值"的写法会把没入库的题当作正常题返回给前端
+            ai_qs = await _persist_generated_questions(ai_qs, req, username)
         if len(ai_qs) < remaining:
             notes.append(f"AI 新生成 {len(ai_qs)} 道(要求 {remaining} 道, 已尽力补足)")
         else:
@@ -376,91 +377,87 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
 
 async def _persist_generated_questions(questions: list[dict], req: PracticeGenerateRequest,
                                        username: str) -> list[dict]:
-    """P11: 同步/异步两个出题端点共用一套入库逻辑(P10: 命中重复题时回填题库已有的图与媒体)"""
-    from backend.question_select import family_members, find_duplicate_question
+    """同步/异步两个出题端点共用一套入库逻辑。
+
+    入库本体已收敛到 backend/question_factory（校验 → 查重 → 整批一个事务 → 连边）。
+    这里只保留本站点特有的两件事：
+
+      1. **按 source_index 原地写回**输入对象（id / index / 旧题配图与媒体）。
+         调用链与前端一直按"逐条对应输入"渲染，且 P10 就要求命中重复时把题库已有
+         题的图带回来 —— 不回填的话老师会看到"新题有图、重复题没图"。
+      2. **只给新入库的题生图**：命中重复的题沿用旧题已有的图，不再烧一次生图配额。
+
+    返回**真正有 id 的条目**（顺序与输入一致）。被拒收的条目不在其中。
+    不再写 creator_name 列：本站点历史上就没有写，保持原样（把 NULL 变成 '' 也是行为变化）。
+    """
+    from backend import question_factory
+
+    outcome = question_factory.persist_questions(
+        questions,
+        subject=req.subject,
+        source="ai",
+        username=username,
+        # mixed 模式下题型由模型决定，此时不传 question_type 覆盖
+        question_type=(req.question_type if req.question_type and req.question_type != "mixed" else ""),
+        difficulty=req.difficulty,
+        knowledge_points=req.knowledge_points,
+        write_creator_name=False,
+    )
+    stats = outcome["stats"]
+    logger.info(f"[同步练习入库] 新入库={stats['saved']} 重复回填={stats['duplicated']} "
+                f"不合格={stats['rejected']} 题型={stats['by_type']}")
+    for r in outcome["rejected"][:5]:
+        logger.info(f"[同步练习入库] 拒收 {r['type']}: {r['reason']} | {r['question_text']}")
+
+    kept: list[dict] = []
+    for e in sorted(outcome["saved"] + outcome["duplicated"],
+                    key=lambda x: x.get("source_index", 0)):
+        idx = e.get("source_index")
+        if not isinstance(idx, int) or idx >= len(questions):
+            continue
+        target = questions[idx]
+        target["id"] = e["id"]
+        target["index"] = e["id"]
+        target["question"] = e["question_text"]
+        target["type"] = e["type"]
+        target["answer"] = e["correct_answer"]
+        target["options"] = e["options"]
+        # 命中重复时用旧题的图与媒体覆盖（P10）
+        target["svg_content"] = e.get("svg_content") or ""
+        target["has_svg"] = e.get("has_svg") or 0
+        target["media_files"] = e.get("media_files") or []
+        target["media_placeholders"] = e.get("media_placeholders") or []
+        kept.append(target)
+
+    # ── 新题自动生图（重复题不再烧配额）──
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _dup_scope_cache: dict[str, list[dict]] = {}
-    for q in questions:
-        q_text = (q.get("question") or "").strip()
-        if not q_text:
+    for e in outcome["saved"]:
+        idx = e.get("source_index")
+        if not isinstance(idx, int) or idx >= len(questions):
             continue
-        # 统一查重(B): 学科族+题型+规范化题干。旧口径「标签 LIKE + 题干精确」会漏掉
-        # 换标签的同题与空格/标点变体, 导致同一道题反复入库、选题时靠运行时折叠兜底。
-        _t = q.get("type", "single")
-        if _t not in _dup_scope_cache:
-            _fam = family_members(req.subject)
-            _cond = (" AND subject IN (" + ",".join("?" * len(_fam)) + ")") if _fam else ""
-            _prm = ([_t] + list(_fam)) if _fam else [_t]
-            _dup_scope_cache[_t] = [dict(r) for r in (execute_query(
-                "SELECT id, svg_content, has_svg, media_files, question_text FROM question_bank"
-                " WHERE status='active' AND type=?" + _cond, tuple(_prm)) or [])]
-        _rows = _dup_scope_cache[_t]
-        _hit = find_duplicate_question([(r["id"], r["question_text"]) for r in _rows], q_text)
-        dup = [r for r in _rows if r["id"] == _hit][:1] if _hit is not None else []
-        if dup:
-            logger.info(f"跳过重复题目 (kp={req.knowledge_points}): {q_text[:40]}...")
-            old = dict(dup[0])
-            q["id"] = old["id"]
-            q["index"] = old["id"]
-            q["svg_content"] = old.get("svg_content") or ""
-            q["has_svg"] = old.get("has_svg") or 0
-            raw_media = old.get("media_files")
-            try:
-                q["media_files"] = json.loads(raw_media) if isinstance(raw_media, str) and raw_media else (raw_media or [])
-            except (json.JSONDecodeError, TypeError):
-                q["media_files"] = []
+        q = questions[idx]
+        placeholders = e.get("media_raw") or []
+        if not placeholders or not get_config_value("IMAGE_GEN_ENABLED", True):
             continue
-
-        opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-        svg_code, has_svg, media_placeholders = media_columns_for_insert(q)
-        qid = execute_insert(
-            """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
-                knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
-                svg_content,has_svg,media_placeholders)
-               VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
-            (q.get("type", "single"), q_text, opts,
-             q.get("answer", ""), q.get("explanation", ""),
-             # 知识点列以教师输入为准(与随堂测验入库口径一致), 否则按
-             # req.knowledge_points LIKE 检索永远命中不了自己生成的题
-             req.knowledge_points or q.get("knowledge_point", ""), req.subject,
-             q.get("difficulty", req.difficulty), username, now, now,
-             svg_code, has_svg, media_placeholders),
-        )
-        if qid is None:
-            logger.warning(f"题目入库失败, 已跳过: {q_text[:40]}")
-            continue
-        # 知识点名唯一命中教材知识点时才连边（歧义不猜），供选题 T0 复用
-        from backend.question_select import link_question_kp as _link
-        _link(int(qid), req.knowledge_points or q.get("knowledge_point", ""))
-        q["id"] = qid
-        q["index"] = qid
-        # 统一字段名：AI 返回 svg_code -> 前端用 svg_content
-        if "svg_code" in q and "svg_content" not in q:
-            q["svg_content"] = q["svg_code"]
-        if "has_svg" not in q:
-            q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
-
-        placeholders = q.get("media_placeholders") or []
+        from backend.api.image_gen_service import generate_placeholders_batch
+        from backend.question_media import SOURCE_BANK, ensure_media_dir
+        media_dir = ensure_media_dir(SOURCE_BANK, e["id"])
         media_files: list = []
-        if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
-            from backend.api.image_gen_service import generate_placeholders_batch
-            from backend.config import BASE_DIR
-            media_dir = BASE_DIR / "question_media" / str(qid)
-            try:
-                media_files = await generate_placeholders_batch(
-                    placeholders=placeholders, subject=req.subject,
-                    media_dir=media_dir, qid=qid, now=now,
-                ) or []
-                execute_update(
-                    "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-                    (json.dumps(placeholders, ensure_ascii=False),
-                     json.dumps(media_files, ensure_ascii=False), qid),
-                )
-            except Exception as gen_err:
-                # 配图失败只降级为无图题, 不能让整次出题作废
-                logger.warning(f"题目 {qid} 自动配图失败: {gen_err}")
+        try:
+            media_files = await generate_placeholders_batch(
+                placeholders=placeholders, subject=req.subject,
+                media_dir=media_dir, qid=e["id"], now=now,
+            ) or []
+            execute_update(
+                "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                (json.dumps(placeholders, ensure_ascii=False),
+                 json.dumps(media_files, ensure_ascii=False), e["id"]),
+            )
+        except Exception as gen_err:
+            # 配图失败只降级为无图题, 不能让整次出题作废
+            logger.warning(f"题目 {e['id']} 自动配图失败: {gen_err}")
         q["media_files"] = media_files
-    return questions
+    return kept
 
 
 @router.post("/generate")
