@@ -1,7 +1,8 @@
 """
 知识抢答活动 Prompt
-- QUICK_QUIZ_GENERAL_KNOWLEDGE_PROMPT：百科抢答出题（在用）
-- 历史上的 QUICK_QUIZ_GENERATE_PROMPT 已在 2026-10 出题规范收敛时删除：全仓零引用，字段口径又与在用的这份不一致，留着只会被误当成标准
+- 现状（2026-10-07 核实）：抢答的出题流程**只从题库取题**（学科题库 question_bank / 百科题库 quest_question_bank），不足时由 quick_quiz_router 用一组硬编码兜底题补齐，全程不调用 AI —— 下面这份 QUICK_QUIZ_GENERAL_KNOWLEDGE_PROMPT 因此也是**零引用**。
+- 已删除的 QUICK_QUIZ_GENERATE_PROMPT：同样零引用，且字段口径与这份不一致。
+- 如果要给抢答接上"题库不够就 AI 补题"，这份是现成的落点；接线时请连同本说明与 tests/test_prompt_contract.py 的零引用断言一起更新。
 """
 
 QUICK_QUIZ_GENERAL_KNOWLEDGE_PROMPT = """你是一位百科知识竞赛的出题专家，正在为课堂抢答活动出题。
