@@ -296,6 +296,7 @@ AI-powered smart question management system supporting multiple question types a
 
 - **🤖 One-Click AI Generation**: Automatically generate questions by subject, type, knowledge point, difficulty, and quantity
 - **📤 Smart Extraction**: Supports pasting text or uploading .docx/JSON files, automatically identifies types, options, and answers
+- **🧱 One door into the bank**: AI generation, smart extraction and every practice / quiz backfill share the same entry point — validate, dedup, one transaction, link knowledge points after commit; ungradeable questions are turned away at the door with a reason
 - **📋 Supported Types**: Multiple-choice, multi-select, true/false, short answer, fill-in-the-blank, essay, subjective
 - **📐 Formula Support**: Full support for LaTeX formula ($...$) rendering display
 - **🖼️ Image System**:
@@ -1017,7 +1018,7 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-### v8.6.0 (2026-10-05 ~ 10-06)
+### v8.6.0 (2026-10-05 ~ 10-07)
 
 - 🔊 **Speech synthesis lands**: a Speech section in System Settings (master switch, model, voice, rate, volume) defaulting to an authoritative broadcast voice; the voice list contains only the 23 voices verified to produce audio, nothing is billed while the switch is off, and no new dependency was introduced
 - 🗣 **Roll call now speaks the picked student's name**: the audio is fetched in parallel while the reveal animation runs so teachers notice no delay, names are cached on disk and replay instantly, and a missing clip simply skips that announcement — roll call is never blocked by audio. Repeated presses interrupt the previous clip, one round warns once, and playback stops when leaving the page
@@ -1030,8 +1031,17 @@ Git-based online incremental upgrade system:
 - 📊 **Login page visit stats**: the page used to show only the online count; it now also shows today's users and visits plus an all-time total. The total comes from a **monotonic** counter, so bulk-deleting login history can never make it go backwards (the baseline was seeded from the rows still retained, so deletions before this change stay lost, once). The endpoint is public, shares the login page's single 15-second poll and is cached at the same cadence; a failed counter write only logs and never blocks sign-in
 - 🗣 **A second speech generation model**: voice lists are grouped per model (the newer one adds dialects, foreign languages and more English voices); switching models switches the voice list and the default voice with it. A voice that belongs to the other model is rejected on save (unknown hand-typed voices still pass), and at runtime it falls back to the current model's default with a log line, so roll call never fails silently
 - ⚡ **The entry page is no longer cached**: index.html was served with no cache directive at all, so browsers kept the old shell and ran the old bundle — the server was updated while admins saw nothing new. It now revalidates every time, so a release appears on an ordinary refresh
+- 🧱 **Question storage now goes through one door**: nine places used to hand-write their own INSERT into the question bank — AI generation, smart extraction, synced / curriculum / smart practice, chapter practice, in-class quizzes. They share a single exit now, always in the same order: field check → duplicate check → one transaction → textbook knowledge-point link after commit. A new hand-written writer fails the test suite
+- 🚫 **Ungradeable questions no longer enter the bank**: missing answers, answers outside the options, options pasted into the stem, machine-generated code questions are rejected with a stated reason. Quizzes and practice no longer pass them back to the browser either, where they used to render as a ghost question — no id, impossible to answer or grade. If the whole batch is rejected the teacher is asked to retry rather than served a blank paper — the cost is one retry, not a question that can never be marked
+- 🔗 **Generated questions reach the selection engine the same day**: extraction, in-class quizzes and smart practice never linked their questions to textbook knowledge points, so those questions could not be reused and burned AI again; they all link now, by knowledge-point id whenever one is known
+- 🧩 **No more duplicate entries**: duplicate checking is one standard everywhere (subject family + question type + normalised stem), self-duplicates inside a single batch are caught, and a duplicate hit brings back the existing question's id and its figures instead of showing the new one with a picture and the matched one without
+- 🛡 **SVG figures are sanitised on the way in**: the chapter-practice and AI-resource page path stored whatever SVG the model returned, and those pages render same-origin, so `onload` / `<script>` was a stored XSS surface
+- 📐 **The question prompts share one written spec**: the six prompts that feed the bank each described the schema their own way, and four of them contradicted the code: they invited code questions the endpoints refuse, taught Chinese option keys while the rest of the bank uses A/B/C/D, kept the quote-safety rule (the lesson of a batch that once lost every question) in only one of them, and worded answer formats differently from the storage gate. They now reference one shared fragment set; the in-class quiz deliberately keeps array-shaped options because the teacher editor renders that shape
+- 🎲 **True/false questions use letter keys**: new true/false questions store {"A":"对","B":"错"} (keys only, option wording untouched); the 112 legacy rows with Chinese keys are not rewritten and grade exactly as before
+- 🧪 **Regression (question storage & prompt spec)**: 53 new tests (storage contract, per-site behaviour alignment, prompt schema contract); full suite 715 passed, plus a real-model end-to-end smoke test on a throwaway copy of the question bank
+
 - 🧪 **Regression**: 102 new tests (catalogue consistency, measured size limits, hand-typed endpoint routing, voice/model pairing, self-test permissions and throttling); full suite 542 passed
-- ⚠️ **Breaking changes**: none (every new setting has a default, the usage table is untouched, and speech stays off after an upgrade)
+- ⚠️ **Breaking changes**: none (every new setting has a default, speech stays off after an upgrade; the new storage gate only turns away questions being written now — the existing bank and every saved paper are untouched, and legacy Chinese-key true/false rows are not rewritten)
 
 ### v8.5.0 (2026-10-03 ~ 10-04)
 
