@@ -22,6 +22,7 @@ from backend.reward_engine import award_participation, award_grade, batch_recomp
 from backend.title_system import check_and_unlock_badges
 from backend.question_db import execute_query as qb_execute_query, execute_query_one as qb_execute_query_one
 from backend.async_utils import spawn_bg
+from backend.api.chat_router import get_api_keys
 
 router = APIRouter()
 
@@ -321,16 +322,215 @@ def _parse_json_field(val: Any) -> Any:
     return val or ""
 
 
-def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> list[dict[str, Any]]:
-    """为房间准备题目（从题库加载）。
+# ── 出题策略：题库优先、缺口 AI 补（backend.question_fill 的抢答适配器） ──
+
+# 百科抢答的类别（与闯关共用的 quest_question_bank 口径一致）
+GENERAL_CATEGORIES = ("文学常识", "历史知识", "地理知识", "科技前沿",
+                      "自然科学", "生活百科", "传统文化")
+
+_FALLBACK_QUESTIONS = [
+    {"question_text": "中国的四大发明不包括以下哪项？",
+     "options": {"A": "造纸术", "B": "火药", "C": "电灯", "D": "印刷术"},
+     "correct_answer": "C", "explanation": "四大发明是造纸术、火药、印刷术和指南针。"},
+    {"question_text": "世界上最长的河流是？",
+     "options": {"A": "长江", "B": "亚马逊河", "C": "尼罗河", "D": "密西西比河"},
+     "correct_answer": "C", "explanation": "尼罗河全长约6650公里，是世界上最长的河流。"},
+    {"question_text": "光在真空中的传播速度约为？",
+     "options": {"A": "3×10⁶ m/s", "B": "3×10⁸ m/s", "C": "3×10¹⁰ m/s", "D": "3×10⁴ m/s"},
+     "correct_answer": "B", "explanation": "光速约为3×10⁸米/秒。"},
+]
+
+
+def _answer_as_option_key(options: Any, raw: Any, qtype: str = "") -> str:
+    """把答案归一成"学生点的那个选项键"。
+
+    学科题库里判断题按全库存法写「对 / 错」，而抢答判分是
+    `answer.strip().upper() == correct_answer.strip().upper()` 的字面比较 ——
+    于是判断题学生选 A 也对不上"对"，**永远判错**（不是这次改出来的，一直在）。
+    统一走 answer_norm 把答案落到选项键上，判断题就与单选同一口径。
+    """
+    from backend.answer_norm import normalize_answer, option_keys
+    opts = options if isinstance(options, dict) else {}
+    got = str(normalize_answer(raw, opts, qtype) or "").upper()
+    keys = [str(k).strip().upper() for k in option_keys(opts)]
+    letters = [c for c in got if c in keys]
+    uniq = ",".join(dict.fromkeys(letters))
+    return uniq or str(raw or "").strip().upper()
+
+
+def _quiz_row(row: dict[str, Any], source: str) -> dict[str, Any]:
+    """把"题目"统一成抢答内部行：选项 dict + 答案选项键 + 配图字段。"""
+    opts = row.get("options")
+    if isinstance(opts, str):
+        try:
+            opts = json.loads(opts)
+        except (json.JSONDecodeError, TypeError):
+            opts = {}
+    opts = opts if isinstance(opts, dict) else {}
+    return {
+        "id": row.get("id"),
+        "question_text": str(row.get("question_text") or row.get("question") or "").strip(),
+        "options": opts,
+        "correct_answer": _answer_as_option_key(opts, row.get("correct_answer")
+                                                or row.get("answer"),
+                                                str(row.get("type") or "")),
+        "explanation": row.get("explanation") or "",
+        "svg_content": row.get("svg_content") or row.get("svg_code") or "",
+        "has_svg": row.get("has_svg") or (1 if (row.get("svg_content") or row.get("svg_code")) else 0),
+        "media_files": row.get("media_files") or "",
+        "media_placeholders": row.get("media_placeholders") or "",
+        "_source": source,
+    }
+
+
+def _pad_fallbacks(want: int, have: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """AI 也拿不到题时的最后退路：用内置常识题补，但**绝不重复**。
+
+    旧写法是 `fallbacks[len(questions) % 3]` 循环补齐 —— 老师要 10 道而题库只给 2 道时，
+    整场只出现 5 种题面（同一道"世界上最长的河流"会被抢答三次），学生白做重复题。
+    补不满就如实少出：局内题数本来就是按实际写入数广播的，少几道远好过重复几道。
+    """
+    import re as _re
+
+    def norm(t: str) -> str:
+        return _re.sub(r"[\s。．.！!？?；;，,]+", "", str(t or "")).lower()
+
+    seen = {norm(q.get("question_text")) for q in have}
+    out: list[dict[str, Any]] = []
+    for fb in _FALLBACK_QUESTIONS:
+        if len(out) >= max(0, want):
+            break
+        if norm(fb["question_text"]) in seen:
+            continue
+        seen.add(norm(fb["question_text"]))
+        out.append(_quiz_row(dict(fb), "ai"))
+    return out
+
+
+def _bank_questions_for_room(room: dict[str, Any], need: int) -> list[dict[str, Any]]:
+    """适配器①：按房间来源抽题库题（学科题库 / 百科题库，都不入库、只读）。"""
+    source = room.get("question_source") or "bank"
+    rows: list[dict[str, Any]] = []
+    if source in ("bank", "bank_academic"):
+        try:
+            rows = _load_questions_from_bank(
+                subject=room.get("subject", "") or "",
+                knowledge_points=room.get("knowledge_points", "") or "",
+                difficulty=room.get("difficulty", "medium") or "medium",
+                count=need,
+            )
+        except Exception as e:
+            logger.warning(f"从学科试题库加载题目失败: {e}")
+            return []
+    elif source == "bank_general":
+        try:
+            rows = _load_questions_from_general_bank(count=need)
+        except Exception as e:
+            logger.warning(f"从百科题库加载题目失败: {e}")
+            return []
+    return [_quiz_row(r, "bank") for r in rows[:need]]
+
+
+async def _ai_questions_for_room(need: int, avoid: list[str], room: dict[str, Any],
+                                 username: str) -> list[dict[str, Any]]:
+    """适配器②：问模型要 need 道新题（复用出题端点那条修好的解析链路）。"""
+    from backend import question_fill
+    api_key, _ = get_api_keys(room.get("creator_username") or username)
+    if not api_key:
+        raise question_fill.MissingApiKey(question_fill.NOTE_NO_KEY)
+
+    general = (room.get("question_source") or "") == "bank_general"
+    subject = str(room.get("subject") or "").strip() or ("综合常识" if general else "")
+    knowledge_points = str(room.get("knowledge_points") or "").strip()
+    if general:
+        knowledge_points = knowledge_points or "、".join(GENERAL_CATEGORIES)
+    difficulty = str(room.get("difficulty") or "medium")
+    difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
+
+    from backend.prompts.chat import QUESTION_GENERATE_PROMPT
+    from backend.prompts.question_schema import render_question_prompt
+    prompt = render_question_prompt(
+        QUESTION_GENERATE_PROMPT,
+        subject=subject,
+        knowledge_points=knowledge_points,
+        type_desc="单选题（4个选项，抢答用，题干简明）",
+        count=need,
+        difficulty_desc=difficulty_desc,
+    )
+    if avoid:
+        lines = "\n".join(f"{i + 1}. {str(t)[:40]}" for i, t in enumerate(avoid[:12]))
+        prompt += ("\n\n## 禁止重复的已有题目\n"
+                   "以下题干本房间已用过，**不要**再输出相同或高度相似的题目"
+                   "（换角度、换材料重新设计）：\n" + lines)
+    # 注意：不注入技能 —— 技能的结构化输出指令与纯 JSON 输出要求冲突
+    from backend.api.ai_service import call_ai_async
+    text = await call_ai_async(prompt, api_key, json_mode=True,
+                               kb_query=f"{subject} {knowledge_points}")
+    from backend.api.question_router import _parse_ai_response
+    return _parse_ai_response(text) or []
+
+
+async def _persist_room_ai_questions(items: list[dict[str, Any]], room: dict[str, Any],
+                                     username: str) -> list[dict[str, Any]]:
+    """适配器③：AI 补出来的题**必须先入库**，下次开局就能直接复用、不再重复烧 AI。
+
+    学科来源走题目入库唯一出口 question_factory（校验 → 查重 → 事务 → 连知识点边）；
+    百科来源与闯关共用 quest_question_bank（那里已有按规范化题干去重的入库函数）。
+    """
+    if not items:
+        return []
+    general = (room.get("question_source") or "") == "bank_general"
+    out: list[dict[str, Any]] = []
+    if general:
+        from backend.api.quest_router import _save_question_to_bank
+        for i, raw in enumerate(items):
+            row = dict(raw)
+            if not row.get("category"):
+                row["category"] = GENERAL_CATEGORIES[i % len(GENERAL_CATEGORIES)]
+            try:
+                _save_question_to_bank(row)
+            except Exception as e:
+                logger.warning(f"百科抢答新题回写题库失败: {e}")
+            out.append(_quiz_row(row, "ai"))
+        return out
+
+    from backend import question_factory
+    outcome = question_factory.persist_questions(
+        items,
+        subject=str(room.get("subject") or ""),
+        source="ai",
+        username=str(room.get("creator_username") or username or ""),
+        knowledge_points=str(room.get("knowledge_points") or ""),
+        difficulty=str(room.get("difficulty") or "medium"),
+        link_duplicates=True,
+        write_creator_name=False,
+    )
+    stats = outcome["stats"]
+    logger.info(f"[抢答补题入库] 新入库={stats['saved']} 重复回填={stats['duplicated']} "
+                f"不合格={stats['rejected']}")
+    for r in outcome["rejected"][:5]:
+        logger.info(f"[抢答补题入库] 拒收 {r['type']}: {r['reason']} | {r['question_text']}")
+    for e in list(outcome["saved"]) + list(outcome["duplicated"]):
+        out.append(_quiz_row(e, "ai"))
+    return out
+
+async def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> list[dict[str, Any]]:
+    """为房间准备题目：**题库优先，缺口交给 AI 补，AI 补出来的题必须入库**（策略在
+    backend.question_fill，与同步练习 / 随堂测验 / 课程练习共用同一份实现）。
 
     幂等：重置活动数据默认"清空参与数据、保留活动内容"，本场题目会保留在
     quick_quiz_questions 里；若教师再次点"开始"，旧实现盲目重插 1..N 行会
     直接撞 UNIQUE(room_id, sort_order) 抛 500"启动失败"。这里优先复用已
     保留的题目，数量不足（教师改大了题量等）才清空重建。
+
+    旧写法里没有任何 AI 参与：题库不够就 repeatedly 取 3 道内置常识题凑数，
+    于是"要 10 道、题库只有 2 道"的场次里，学生看到的是 2 道真题 + 同一批常识题
+    反复出现（整场只有 5 种不同题面），而且内置常识题与本房间所选学科毫无关系。
     """
-    count = room["question_count"]
-    source = room["question_source"]
+    from backend import question_fill
+
+    count = max(1, int(room["question_count"] or 1))
+    username = room.get("creator_username") or ""
 
     existing = execute_query_dict(
         """SELECT id, sort_order, question_text, options, correct_answer, explanation,
@@ -344,70 +544,51 @@ def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> list[dict
         extra_ids = [r["id"] for r in existing[count:]]
         for eid in extra_ids:
             execute_insert_update("DELETE FROM quick_quiz_questions WHERE id=?", (eid,))
-        reused = []
-        for r in keep:
-            try:
-                opts = json.loads(r["options"]) if isinstance(r["options"], str) else (r["options"] or {})
-            except (json.JSONDecodeError, TypeError):
-                opts = {}
-            reused.append({
-                "question_text": r["question_text"],
-                "options": opts,
-                "correct_answer": (r["correct_answer"] or "").strip().upper(),
-                "explanation": r.get("explanation") or "",
-                "svg_content": r.get("svg_content") or "",
-                "has_svg": r.get("has_svg") or 0,
-                "media_files": _parse_json_field(r.get("media_files")),
-                "media_placeholders": _parse_json_field(r.get("media_placeholders")),
-            })
-        return reused
+        return [_quiz_row(r, r.get("source") or "bank") for r in keep]
 
     # 需要重建：先清掉历史残留行，避免与 (room_id, sort_order) 唯一索引冲突
     execute_insert_update("DELETE FROM quick_quiz_questions WHERE room_id=?", (room_id,))
-    questions = []
 
-    # ── 学科题库 ──
-    if source in ("bank", "bank_academic"):
-        try:
-            bank_qs = _load_questions_from_bank(
-                subject=room.get("subject", ""),
-                knowledge_points=room.get("knowledge_points", ""),
-                difficulty=room.get("difficulty", "medium"),
-                count=count,
-            )
-            questions.extend(bank_qs)
-        except Exception as e:
-            logger.warning(f"从学科试题库加载题目失败: {e}")
+    try:
+        filled = await question_fill.fill_questions(
+            count=count,
+            fetch_bank=lambda need: _bank_questions_for_room(room, need),
+            gen_ai=lambda need, avoid: _ai_questions_for_room(need, avoid, room, username),
+            persist=lambda items: _persist_room_ai_questions(items, room, username),
+            text_of=lambda q: str(q.get("question") or q.get("question_text") or ""),
+        )
+        questions = list(filled.questions)
+        gap = filled.gap
+        if filled.notes:
+            logger.info(f"抢答备题: room={room_id} {'；'.join(filled.notes)}")
+    except question_fill.FillUnavailable as e:
+        logger.warning(f"抢答备题失败: room={room_id} {e.detail}")
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # 备题整条链路异常不该把房间卡死：退回"题库题 + 不重复的内置题"，能开几道开几道
+        logger.warning(f"抢答备题异常，降级为题库+内置题: room={room_id}: {e}")
+        questions = _bank_questions_for_room(room, count)
+        gap = count - len(questions)
 
-    # ── 百科题库 ──
-    if source == "bank_general":
-        if len(questions) < count:
-            try:
-                general_qs = _load_questions_from_general_bank(count=count)
-                questions.extend(general_qs)
-            except Exception as e:
-                logger.warning(f"从百科题库加载题目失败: {e}")
-
-    # 如果题目不够，用兜底题补齐
-    fallbacks = [
-        {"question_text": "中国的四大发明不包括以下哪项？",
-         "options": {"A": "造纸术", "B": "火药", "C": "电灯", "D": "印刷术"},
-         "correct_answer": "C", "explanation": "四大发明是造纸术、火药、印刷术和指南针。"},
-        {"question_text": "世界上最长的河流是？",
-         "options": {"A": "长江", "B": "亚马逊河", "C": "尼罗河", "D": "密西西比河"},
-         "correct_answer": "C", "explanation": "尼罗河全长约6650公里，是世界上最长的河流。"},
-        {"question_text": "光在真空中的传播速度约为？",
-         "options": {"A": "3×10⁶ m/s", "B": "3×10⁸ m/s", "C": "3×10¹⁰ m/s", "D": "3×10⁴ m/s"},
-         "correct_answer": "B", "explanation": "光速约为3×10⁸米/秒。"},
-    ]
-    while len(questions) < count:
-        fb = fallbacks[len(questions) % len(fallbacks)]
-        questions.append(dict(fb))
-
-    # 截断到指定数量
+    if gap > 0:
+        padded = _pad_fallbacks(gap, questions)
+        if padded:
+            logger.warning(f"抢答题库与 AI 都不够，内置题补 {len(padded)} 道（不重复）: room={room_id}")
+        questions += padded
     questions = questions[:count]
+    if not questions:
+        raise HTTPException(status_code=500, detail="未能准备任何题目，请检查题库或稍后重试")
 
-    # 写入数据库
+    # 写入数据库（答案已在 _quiz_row 里归一成选项键；配图列统一存 JSON 文本）
+    def _as_text(v: Any) -> str:
+        if isinstance(v, str):
+            return v
+        if v in (None, "", {}, []):
+            return ""
+        return json.dumps(v, ensure_ascii=False)
+
     operations = []
     for i, q in enumerate(questions):
         operations.append((
@@ -418,9 +599,9 @@ def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> list[dict
             (room_id, i + 1, q["question_text"],
              json.dumps(q["options"], ensure_ascii=False),
              q["correct_answer"], q.get("explanation", ""),
-             q.get("id") and "bank" or "ai",
-             q.get("svg_content", ""), q.get("has_svg", 0),
-             q.get("media_files", ""), q.get("media_placeholders", "")),
+             q.get("_source") or (q.get("id") and "bank" or "ai"),
+             _as_text(q.get("svg_content", "")), 1 if q.get("svg_content") else 0,
+             _as_text(q.get("media_files", "")), _as_text(q.get("media_placeholders", ""))),
         ))
     if operations:
         execute_batch(operations)
@@ -865,7 +1046,7 @@ async def start_quiz(room_id: int, request: Request):
     # 先准备题目（幂等，可能耗时/抛错），成功后才把房间置为 playing；
     # 旧实现先置 playing 再备题，备题一抛 500 房间就卡在 playing，
     # 教师看到"启动失败"，学生端永远"等待教师出题"且无法重试。
-    questions = _prepare_questions_for_room(room_id, room)
+    questions = await _prepare_questions_for_room(room_id, room)
 
     now = _now()
     execute_insert_update(
@@ -1274,8 +1455,18 @@ async def submit_answer(room_id: int, request: Request):
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
 
-    correct_answer = question["correct_answer"].strip().upper()
-    is_correct = 1 if answer == correct_answer else 0
+    # 判分统一走 answer_norm：旧写法是字面比较，而学科题库里的判断题按全库存法写
+    # 「对 / 错」，学生点 A 永远对不上 —— 判断题在抢答里一直判错。这里按选项把两边
+    # 都归一成选项键再比，存量房间（库里还留着"对"）也一并修好。
+    from backend.answer_norm import answers_equal
+    try:
+        _opts = json.loads(question["options"]) if isinstance(question["options"], str) \
+            else (question["options"] or {})
+    except (json.JSONDecodeError, TypeError):
+        _opts = {}
+    correct_answer = str(question["correct_answer"] or "").strip().upper()
+    is_correct = 1 if answers_equal(answer, correct_answer, _opts,
+                                    "true_false" if len(_opts) == 2 else "") else 0
 
     # 获取玩家信息
     player = execute_query_one(

@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
 
@@ -93,7 +94,12 @@ async def fill_questions(
 
     bank_qs: list[dict[str, Any]] = []
     if fetch_bank is not None:
-        bank_qs = list(fetch_bank(want) or [])[: want]
+        got = fetch_bank(want)
+        # 抽题库允许是同步或异步实现（各入口的取题函数历史上就有两种：学科题库走
+        # question_select 是同步的，走 HTTP/DB 包装的可能是异步的），策略本身不关心。
+        if inspect.isawaitable(got):
+            got = await got
+        bank_qs = list(got or [])[: want]
     if bank_qs:
         notes.append(NOTE_BANK_HIT % len(bank_qs))
     remaining = want - len(bank_qs)
@@ -131,7 +137,10 @@ async def fill_questions(
 
     if persist is not None and deduped:
         # 只能用 persist 的返回值：被入库门槛拒收的条目不在其中（否则就是"幽灵题"）
-        deduped = list(await persist(deduped) or [])
+        kept = persist(deduped)
+        if inspect.isawaitable(kept):
+            kept = await kept
+        deduped = list(kept or [])
 
     if len(deduped) < remaining:
         notes.append(NOTE_AI_SHORT % (len(deduped), remaining))
