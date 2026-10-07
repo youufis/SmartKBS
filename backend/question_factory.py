@@ -210,19 +210,27 @@ def normalize_item(raw: dict[str, Any], *, subject: str = "", question_type: str
         "difficulty": diff,
         "svg_content": svg_code,
         "has_svg": has_svg,
-        "media_placeholders": media_placeholders,
+        # 对外一律给 list（调用方要渲染、要传给生图），入库时再由 _as_json 序列化。
+        # media_raw 保留模型给的原始那份：占位符数量会被 media_columns_for_insert 按
+        # 上限裁切，而生图要用的是原始描述列表。
+        "media_placeholders": _as_list(media_placeholders),
         "media_raw": raw.get("media_placeholders") or [],
         "normalize_notes": notes,
     }
 
 
-def validate_item(n: dict[str, Any]) -> tuple[bool, str]:
-    """入库前体检。复用 ai_json.question_is_complete（非选择题跳过选项项检查）。"""
+def validate_item(n: dict[str, Any], *, allow_code: bool = False) -> tuple[bool, str]:
+    """入库前体检。复用 ai_json.question_is_complete（非选择题跳过选项项检查）。
+
+    allow_code：编程题的模板代码与测试用例只有「代码练习」那张表存得下，机器生成的
+    链路默认拒收（AI 给的 code 题进题库就是不可判分的死题）；人工维护链路可以放行 ——
+    题库里本来就有人手写的 code 题，一律拒反而是改坏。
+    """
     if not n.get("question_text"):
         return False, "题干为空"
     if len(n["question_text"]) < 6:
         return False, "题干过短"
-    if n["type"] in ("code",):
+    if n["type"] == "code" and not allow_code:
         return False, "编程题请走「代码练习」"
     if n["type"] in CHOICE_TYPES:
         ok, reason = question_is_complete(n)
@@ -305,16 +313,22 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
                       username: str = "", creator_name: str = "", question_type: str = "",
                       difficulty: str = "medium", knowledge_points: str = "",
                       dedup: bool = True, link: bool = True,
-                      dry_run: bool = False) -> dict[str, Any]:
+                      dry_run: bool = False, allow_code: bool = False,
+                      write_creator_name: bool = True) -> dict[str, Any]:
     """把一批题目入库，返回 saved / duplicated / rejected 三段结果。
 
     items 可以是模型原始 dict（会自动 normalize），也可以是已 normalize 的 dict。
     dry_run=True 时不写库，只报告将要发生什么。
 
+    source_index 是必须的：调用方（同步练习、课程练习）拿到结果后要**按输入顺序**把
+    id 与旧题配图写回原来的题目对象，再交给前端渲染。没有它就只能赌"顺序恰好一致"，
+    一旦有题目被拒或被折叠，回填就错位 —— 那是把 A 题的图配到 B 题上，比不回填更糟。
+
     返回：
       saved       [{id, …入库字段…, normalize_notes:[]}]
       duplicated  [{id, question_text, …}]            命中已有题，回填旧 id
       rejected    [{reason, question_text, type}]     校验没过，未入库
+      （三类条目都带 source_index = 该条在本次输入里的下标）
       stats       {requested, saved, duplicated, rejected, by_type, by_difficulty,
                    normalize_notes, dup_index_size}
     """
@@ -331,17 +345,17 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
     seen_in_batch: dict[tuple[str, str], int] = {}
     in_batch_pairs: list[tuple[int, dict[str, Any]]] = []
 
-    for raw in items or []:
+    for i, raw in enumerate(items or []):
         n = raw if "question_text" in raw and isinstance(raw.get("options"), dict) \
             else normalize_item(raw or {}, subject=subject, question_type=question_type,
                                 difficulty=difficulty, knowledge_points=knowledge_points)
         n["subject"] = subject or n.get("subject", "")
         for note in n.get("normalize_notes") or []:
             notes.append(note)
-        ok, reason = validate_item(n)
+        ok, reason = validate_item(n, allow_code=allow_code)
         if not ok:
             rejected.append({"reason": reason, "question_text": n.get("question_text", "")[:60],
-                             "type": n.get("type", "")})
+                             "type": n.get("type", ""), "source_index": i})
             continue
         key = (n["type"], norm(n["question_text"]))
         if dedup and key in seen_in_batch:
@@ -374,23 +388,23 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
                     "difficulty": hit.get("difficulty") or n["difficulty"],
                     "has_svg": hit.get("has_svg") or 0,
                     "svg_content": hit.get("svg_content") or None,
+                    # 旧题的配图与媒体原样带回：命中重复时老师仍然要看得到图（P10）。
+                    # 智能提取那侧此前固定回空列表，于是"新题有图、重复题没图"，一并修齐
                     "media_placeholders": _loads(hit.get("media_placeholders")) or [],
-                    "media_files": [],
+                    "media_files": _as_list(hit.get("media_files")),
                     "media_raw": [],
                     "duplicated": True,
                     "normalize_notes": [],
+                    "source_index": i,
                 })
                 continue
 
+        n["source_index"] = i
         saved.append(n)
         if dedup:
             seen_in_batch[key] = len(saved) - 1
         if not dry_run:
             n["_pending_id"] = None
-
-    for i, dup in in_batch_pairs:
-        dup["id"] = saved[i].get("id")          # dry_run 时没有 id，保持 None
-        duplicated.append(dup)
 
     to_link: list[tuple[int, str]] = []
     if saved and not dry_run:
@@ -399,19 +413,27 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
             conn.execute("BEGIN IMMEDIATE")
             try:
                 cur = conn.cursor()
+                # 列名与占位符按 write_creator_name 同步增删：有的站点历史上不写这一列，
+                # 把 NULL 变成 '' 也是行为变化，不该被"统一"顺手带进来
+                cn_cols = "creator_username, creator_name," if write_creator_name else "creator_username,"
+                cn_ph = "?, ?," if write_creator_name else "?,"
+                insert_sql = (
+                    "INSERT INTO question_bank"
+                    " (type, question_text, options, correct_answer, explanation,"
+                    "  knowledge_points, subject, difficulty, " + cn_cols +
+                    "  source, status, created_at, updated_at,"
+                    "  svg_content, has_svg, media_placeholders)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, " + cn_ph +
+                    " ?, 'active', ?, ?, ?, ?, ?)"
+                )
                 for n in saved:
-                    cur.execute(
-                        """INSERT INTO question_bank
-                           (type, question_text, options, correct_answer, explanation,
-                            knowledge_points, subject, difficulty, creator_username, creator_name,
-                            source, status, created_at, updated_at,
-                            svg_content, has_svg, media_placeholders)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)""",
-                        (n["type"], n["question_text"], _as_json(n["options"]), n["correct_answer"],
-                         n["explanation"], n["knowledge_points"], n["subject"], n["difficulty"],
-                         username, creator_name, source, now, now,
-                         n["svg_content"], n["has_svg"], _as_json(n["media_placeholders"])),
-                    )
+                    tail = (username, creator_name) if write_creator_name else (username,)
+                    cur.execute(insert_sql, (
+                        n["type"], n["question_text"], _as_json(n["options"]), n["correct_answer"],
+                        n["explanation"], n["knowledge_points"], n["subject"], n["difficulty"],
+                        *tail, source, now, now,
+                        n["svg_content"], n["has_svg"], _as_json(n["media_placeholders"]),
+                    ))
                     n["id"] = int(cur.lastrowid)
                     if dedup:
                         index.add(n["type"], {
@@ -430,6 +452,12 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
             n.pop("_pending_id", None)
             if link:
                 to_link.append((int(n["id"]), n.get("knowledge_points") or ""))
+
+    # 批内折叠项的 id 必须在插库之后回填：放在之前拿到的永远是 None，
+    # 前端就会渲染出一条"题库里已有"但点不动、也删不掉的条目
+    for i, dup in in_batch_pairs:
+        dup["id"] = saved[i].get("id")          # dry_run 时没有 id，保持 None
+        duplicated.append(dup)
 
     linked = 0
     for qid, kp in to_link:
@@ -463,6 +491,12 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
             "dry_run": dry_run,
         },
     }
+
+
+def _as_list(raw: Any) -> list[Any]:
+    """JSON 列取出来必须是 list（不是就回空表，不抛异常）。"""
+    got = _loads(raw)
+    return got if isinstance(got, list) else []
 
 
 def _loads(raw: Any) -> Any:

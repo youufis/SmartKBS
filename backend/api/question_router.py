@@ -555,7 +555,6 @@ def _generation_note(outcome: dict[str, Any], media_notes: list[str], *,
     stats = outcome.get("stats") or {}
     bits: list[str] = []
     rejected = stats.get("rejected") or 0
-    saved = stats.get("saved") or 0
     if rejected:
         reasons = "；".join(f"{r['question_text'][:18]}…：{r['reason']}"
                             for r in (outcome.get("rejected") or [])[:3])
@@ -1246,106 +1245,53 @@ async def list_question_types():
 def _persist_extracted_questions(questions: list[dict[str, Any]], subject: str,
                                  difficulty: str, username: str,
                                  source_label: str) -> list[dict[str, Any]]:
-    """提取结果统一入库(同步/后台任务共用), 返回带 id 的题目列表"""
+    """提取结果统一入库(同步/后台任务共用), 返回带 id 的题目列表。
+
+    实现已收敛到 backend/question_factory（校验 → 查重 → 事务插入 → 连边），
+    这里只负责两件事：
+      1. 补齐 creator_name；
+      2. 把 factory 分开的 saved / duplicated 两拨结果**按输入顺序**合回一个列表 ——
+         调用方与前端都按"逐条对应输入"来渲染，顺序错位会把 A 题的图配到 B 题上。
+    """
+    from backend import question_factory
     from backend.database import execute_query as user_query
     user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
     creator_name = user_row[0][0] if user_row and user_row[0][0] else username
-    saved: list[dict[str, Any]] = []
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # 统一查重(B 口径): 学科族+题型+规范化题干。命中已有题时直接回填旧题,
-    # 同一份文档/同一张图重复上传不再产生重复题。
-    from backend.question_select import family_members, find_duplicate_question, link_question_kp
-    _dup_cache: dict[str, list[dict]] = {}
 
-    def _dup_rows(q_type: str) -> list[dict]:
-        if q_type not in _dup_cache:
-            _fam = family_members(subject)
-            _cond = (" AND subject IN (" + ",".join("?" * len(_fam)) + ")") if _fam else ""
-            _prm = ([q_type] + list(_fam)) if _fam else [q_type]
-            _dup_cache[q_type] = [dict(r) for r in (execute_query(
-                "SELECT id, question_text, options, correct_answer, explanation, knowledge_points,"
-                " difficulty, svg_content, has_svg, media_placeholders, media_files FROM question_bank"
-                " WHERE status='active' AND type=?" + _cond, tuple(_prm)) or [])]
-        return _dup_cache[q_type]
+    outcome = question_factory.persist_questions(
+        questions,
+        subject=subject,
+        source=source_label,
+        username=username,
+        creator_name=creator_name,
+        difficulty=difficulty,
+    )
+    saved = outcome["stats"]["saved"]
+    if saved:
+        logger.info(f"[提取入库] source={source_label} 新入库={saved} "
+                    f"重复回填={outcome['stats']['duplicated']} 不合格={outcome['stats']['rejected']}")
+    for r in outcome["rejected"][:5]:
+        logger.info(f"[提取入库] 拒收 {r['type']}: {r['reason']} | {r['question_text']}")
 
-    for q_data in questions:
-        q_type = q_data.get("type", "single")
-        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code, has_svg, media_placeholders = _media_columns(q_data)
-        q_text0 = (q_data.get("question") or "").strip()
-        if not q_text0:
-            continue
-        _rows = _dup_rows(q_type)
-        _hit = find_duplicate_question([(r["id"], r["question_text"]) for r in _rows], q_text0)
-        if _hit is not None:
-            old_r = next((r for r in _rows if r["id"] == _hit), None)
-            if old_r is not None:
-                saved.append({
-                    "id": old_r["id"], "type": q_type,
-                    "question_text": old_r.get("question_text") or q_text0,
-                    "options": _parse_json_field_safe(old_r.get("options")),
-                    "correct_answer": old_r.get("correct_answer") or "",
-                    "explanation": old_r.get("explanation") or "",
-                    "knowledge_points": old_r.get("knowledge_points") or "",
-                    "difficulty": old_r.get("difficulty") or difficulty,
-                    "has_svg": old_r.get("has_svg") or 0,
-                    "svg_content": old_r.get("svg_content") or None,
-                    "media_placeholders": _parse_json_field_safe(old_r.get("media_placeholders")) or [],
-                    "media_files": [],
-                    "duplicated": True,
-                })
-            continue
-        qid = execute_insert(
-            """INSERT INTO question_bank
-               (type, question_text, options, correct_answer, explanation,
-                knowledge_points, subject, difficulty, creator_username, creator_name,
-                source, status, created_at, updated_at,
-                svg_content, has_svg, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?,
-                       ?, ?, ?)""",
-            (
-                q_type,
-                q_data.get("question", ""),
-                options_str,
-                q_data.get("answer", ""),
-                q_data.get("explanation", ""),
-                q_data.get("knowledge_point", ""),
-                subject,
-                q_data.get("difficulty", difficulty),
-                username,
-                creator_name,
-                source_label,
-                now,
-                now,
-                svg_code, has_svg, media_placeholders,
-            ),
-        )
-        saved.append({
-            "id": qid,
-            "type": q_type,
-            "question_text": q_data.get("question", ""),
-            "options": q_data.get("options", {}),
-            "correct_answer": q_data.get("answer", ""),
-            "explanation": q_data.get("explanation", ""),
-            "knowledge_points": q_data.get("knowledge_point", ""),
-            "difficulty": q_data.get("difficulty", difficulty),
-            "has_svg": has_svg,
-            "svg_content": svg_code if has_svg else None,
-            "media_placeholders": q_data.get("media_placeholders") or [],
-            "media_files": [],
+    out: list[dict[str, Any]] = []
+    for e in sorted(outcome["saved"] + outcome["duplicated"],
+                    key=lambda x: x.get("source_index", 0)):
+        out.append({
+            "id": e["id"],
+            "type": e["type"],
+            "question_text": e["question_text"],
+            "options": e["options"],
+            "correct_answer": e["correct_answer"],
+            "explanation": e["explanation"],
+            "knowledge_points": e["knowledge_points"],
+            "difficulty": e["difficulty"],
+            "has_svg": e["has_svg"],
+            "svg_content": e["svg_content"] if e["has_svg"] else None,
+            "media_placeholders": e["media_placeholders"],
+            "media_files": e.get("media_files") or [],
+            **({"duplicated": True} if e.get("duplicated") else {}),
         })
-        _dup_cache[q_type].append({
-            "id": qid, "question_text": q_data.get("question") or "",
-            "options": options_str, "correct_answer": q_data.get("answer", ""),
-            "explanation": q_data.get("explanation", ""),
-            "knowledge_points": q_data.get("knowledge_point", ""),
-            "difficulty": q_data.get("difficulty", difficulty),
-            "svg_content": svg_code, "has_svg": has_svg,
-            "media_placeholders": media_placeholders,
-        })
-        # 新题连边教材知识点(唯一命中才连), 选题引擎 T0 立即受益
-        link_question_kp(int(qid or 0), q_data.get("knowledge_point") or "")
-    return saved
+    return out
 
 
 def _parse_json_field_safe(val):
