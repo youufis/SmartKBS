@@ -302,8 +302,11 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
         }.get(req.question_type, "单选题")
 
         from backend.prompts.quiz import QUIZ_GENERATE_PROMPT
+        from backend.prompts.question_schema import schema_block, render_question_prompt
         ai_role = build_ai_role(subject=req.subject)
-        prompt = f"{ai_role}\n" + QUIZ_GENERATE_PROMPT.format(
+        prompt = f"{ai_role}\n" + render_question_prompt(
+                QUIZ_GENERATE_PROMPT,
+                schema=schema_block("single/true_false", options_shape="list"),
             subject=req.subject,
             topic=req.topic,
             type_desc=type_desc,

@@ -2933,6 +2933,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
     kp = kp_rows[0]
 
     from backend.prompts.teaching import PRACTICE_SINGLE_CHOICE_PROMPT
+    from backend.prompts.question_schema import (SINGLE_CHOICE_RULES, schema_block,
+                                                  render_question_prompt)
     from backend.api.ai_service import call_ai_async
     from backend.utils import get_account_html_dir
     from backend.config import BASE_DIR
@@ -2953,7 +2955,9 @@ async def ai_generate_practice(kp_id: int, request: Request):
         hints.append(f"适用年级：{grade_ov}")
     kp_desc = "\n".join(hints + [kp.get("description", "") or ""]).strip()
 
-    prompt = PRACTICE_SINGLE_CHOICE_PROMPT.format(
+    prompt = render_question_prompt(
+        PRACTICE_SINGLE_CHOICE_PROMPT,
+        schema=schema_block("single", answer_rules=SINGLE_CHOICE_RULES),
         subject=_safe(subject),
         course_name=_safe(kp["course_name"]),
         chapter_name=_safe(kp["chapter_name"]),
@@ -3964,6 +3968,8 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
                 if gap <= 0:
                     break
 
+                from backend.prompts.question_schema import (
+                    SINGLE_CHOICE_RULES as _SCR, schema_block as _schema_block)
                 ai_role = build_ai_role(subject=subject, grade=kp.get("grade") or grade_ov or "", role_type="expert")
                 smart_prompt = f"""{ai_role}请根据以下知识点，生成{gap}道单项选择题（每题4个选项），用于学生课后练习巩固。
 
@@ -3982,34 +3988,9 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 5. 每道题都要有详细的解析
 6. 涉及公式使用 $...$ LaTeX 语法
 
-## 配图规则（优先使用 SVG）
-每道题可输出 svg_code 和 media_placeholders 字段（都可以为 null）：
-【svg_code — **优先使用**】技术图示，viewBox="0 0 600 400"；纯代码生成，零成本
-【media_placeholders】— **谨慎使用**，仅当需要真实图片时添加；会消耗 AI 生图配额
-**不需要配图的题目 svg_code 和 media_placeholders 都留 null 即可**
+{_schema_block("single", answer_rules=_SCR)}
 
-## 输出格式
-请严格按照 JSON 数组格式输出，只返回一个 JSON 数组：
-
-[
-  {{
-    "type": "single",
-    "question": "题目内容",
-    "options": {{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}},
-    "answer": "A",
-    "explanation": "详细解析",
-    "knowledge_point": "{_safe(kp_name)}",
-    "difficulty": "easy/medium/hard",
-    "svg_code": "<svg>...</svg>",
-    "media_placeholders": []
-  }}
-]
-
-注意：
-- 每道题的 type 必须为 "single"
-- options 必须有 A,B,C,D 四个选项
-- answer 为正确选项字母（A/B/C/D）
-- knowledge_point 字段必须填「{_safe(kp_name)}」
+本批全部题目的 knowledge_point 字段一律填「{kp_name}」。
 """
 
                 logger.info(f"智能练习 AI 补全 第{round_idx+1}轮: kp_id={kp_id}, gap={gap}")

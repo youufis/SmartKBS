@@ -1192,6 +1192,12 @@ async def ai_preview_html(request: Request):
     # ── 技能增强 ──
     from backend.prompts import apply_skills
     prompt = apply_skills(prompt, "html-generation")
+    if gen_type in ("quiz", "practice"):
+        # 页面里内嵌的题目数组就是本页面往题库写题的来源（_extract_questions_from_html），
+        # 所以字段口径与引号铁律必须和 AI 出题端点用同一份，否则"页面看得到、题库进不去"
+        from backend.prompts.question_schema import JSON_QUOTES_RULE, QUESTION_DATA_CONTRACT
+        prompt += ("\n\n## 题目数据字段口径（与题库入库校验一致）\n"
+                   + QUESTION_DATA_CONTRACT + "\n\n" + JSON_QUOTES_RULE)
 
     # 调用 AI（HTML 页面动辄上万字，必须显式给 max_tokens，
     # 否则走服务商默认上限会被静默截断，产出半截页面）

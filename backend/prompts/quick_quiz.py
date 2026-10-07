@@ -1,33 +1,8 @@
 """
-知识抢答活动 Prompt（当前未使用，保留供后续扩展）
-- 题目类型：单选题
+知识抢答活动 Prompt
+- QUICK_QUIZ_GENERAL_KNOWLEDGE_PROMPT：百科抢答出题（在用）
+- 历史上的 QUICK_QUIZ_GENERATE_PROMPT 已在 2026-10 出题规范收敛时删除：全仓零引用，字段口径又与在用的这份不一致，留着只会被误当成标准
 """
-
-QUICK_QUIZ_GENERATE_PROMPT = """正在组织班级知识抢答活动。
-请根据以下要求生成一道单选题。
-
-【出题范围】
-学科：{subject}
-知识点：{knowledge_points}
-难度：{difficulty}（easy=基础概念题，medium=中等应用题，hard=综合高难题）
-
-【抢答场景要求】
-- 题目应简明扼要，15秒内可读完并理解
-- 选项要有一定迷惑性，避免过于明显
-- 答案要唯一且无争议
-- 解析要简短有力（20-40字），便于抢答后快速讲解
-- 题目和选项必须使用中文
-
-【公式支持】
-如果题目或选项涉及公式，请使用 LaTeX 语法：
-- 行内公式用 $...$，如 $E=mc^2$、$\\frac{{1}}{{2}}$
-- 化学式用 $\\ce{{H2O}}$
-
-严格按照以下 JSON 格式返回，不要包含任何其他内容：
-{{"question":"题目内容，含 $\\LaTeX$ 公式","options":{{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}},"answer":"A","explanation":"解析...","svg_content":"","has_svg":0}}
-注意：svg_content 和 has_svg 字段必须始终包含在返回中。
-"""
-
 
 QUICK_QUIZ_GENERAL_KNOWLEDGE_PROMPT = """你是一位百科知识竞赛的出题专家，正在为课堂抢答活动出题。
 

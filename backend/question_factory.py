@@ -188,6 +188,22 @@ def normalize_item(raw: dict[str, Any], *, subject: str = "", question_type: str
             else:
                 notes.append(f"多选答案 {raw_answer!r} 未落在选项键内")
 
+    if q_type == "true_false" and len(options) == 2:
+        # 判断题的选项键必须是字母键：chat.py / practice.py 那两份 prompt 历史上教模型写
+        # {"对":"对","错":"错"}，实测库里 113 道判断题有 112 道就是这么存的（键名即中文）。
+        # 判分、导出、答题页对判断题都不看选项键（导出的判断题只留"（  ）"，答题页是固定的
+        # 对/错单选），但全库其它题型的选项键一律是 A/B/C/D —— 键名混着两种约定，
+        # 任何"按选项键处理"的新代码都会在这里踩坑（选项乱序、题库编辑器回填、按键比对）。
+        # 这里只把**键**换成字母（按语义排成 对 在前、错 在后），选项文字原样保留，
+        # 所以"正确/错误""√/×""对/错"这些写法都还是老师/模型写的那个词。
+        letters = [str(k).strip() for k in option_keys(options)]
+        if any(len(k) != 1 or not k.isascii() or not k.isalpha() for k in letters):
+            verdicts = {_truth_text(options, k): k for k in letters}
+            if "对" in verdicts and "错" in verdicts:
+                options = {"A": str(options[verdicts["对"]]).strip(),
+                           "B": str(options[verdicts["错"]]).strip()}
+                notes.append("判断题选项键已统一为字母键 A=对/B=错（选项文字未改）")
+
     kp = (knowledge_points or "").strip() or str(
         raw.get("knowledge_point") or raw.get("knowledge_points") or "").strip()
     if not (knowledge_points or "").strip() and kp:

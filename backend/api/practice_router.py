@@ -259,10 +259,12 @@ def _norm_q_text(s: str) -> str:
 
 def _build_generate_prompt(req: PracticeGenerateRequest, avoid_texts: list[str] | None = None) -> str:
     from backend.prompts.practice import PRACTICE_GENERATE_PROMPT
+    from backend.prompts.question_schema import render_question_prompt
     type_desc = TYPE_DESC_MAP.get(req.question_type, "混合出题")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     # 注意：不注入技能 —— 技能的结构化输出指令与 JSON 格式要求冲突
-    prompt = f"{build_ai_role(subject=req.subject)}\n" + PRACTICE_GENERATE_PROMPT.format(
+    prompt = f"{build_ai_role(subject=req.subject)}\n" + render_question_prompt(
+        PRACTICE_GENERATE_PROMPT,
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )

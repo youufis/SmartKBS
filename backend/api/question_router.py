@@ -579,9 +579,10 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
     """构建 AI 生成试题的 Prompt（使用集中化模板）"""
     from backend.prompts.chat import QUESTION_GENERATE_PROMPT
     from backend.prompts import build_ai_role
+    from backend.prompts.question_schema import render_question_prompt
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     ai_role = build_ai_role(subject=subject)
-    return f"{ai_role}\n" + QUESTION_GENERATE_PROMPT.format(
+    return f"{ai_role}\n" + render_question_prompt(QUESTION_GENERATE_PROMPT, 
         subject=subject,
         knowledge_points=knowledge_points,
         type_desc=type_desc,
@@ -1934,11 +1935,12 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
     # 使用增强 Prompt
     from backend.prompts.chat import QUESTION_GENERATE_WITH_MEDIA_PROMPT
+    from backend.prompts.question_schema import render_question_prompt
     type_desc = {"single": "单选题（4个选项）", "multiple": "多选题（4-5个选项）",
                  "true_false": "判断题", "short": "简答题", "fill": "填空题",
                  "essay": "作文", "subjective": "主观题"}.get(req.question_type, "单选题")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
-    prompt = QUESTION_GENERATE_WITH_MEDIA_PROMPT.format(
+    prompt = render_question_prompt(QUESTION_GENERATE_WITH_MEDIA_PROMPT, 
         subject=req.subject,
         knowledge_points=req.knowledge_points,
         type_desc=type_desc,
