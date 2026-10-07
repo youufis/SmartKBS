@@ -38,6 +38,8 @@ from backend import exam_scoring
 from backend.paper_compose import (
     difficulty_split,
     get_question_pool,
+    ai_fill_gap,
+    gap_by_type,
     select_questions_by_ai,
     select_questions_by_rules,
     split_count_by_types,
@@ -110,6 +112,8 @@ class AutoSelectRequest(BaseModel):
     # 旧写法是 `class Config: validate_schema`（Pydantic v1 风格），v2 下永不执行 —— 假校验
     count: int = Field(default=10, ge=1, le=200)
     exclude_existing: bool = True
+    # 题库凑不够配额时是否让 AI 补差（默认关：保持"只报缺口、不动判分链路"的老行为）
+    fill_by_ai: bool = False
 
 
 # ── 辅助函数 ──
@@ -1206,14 +1210,38 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
         knowledge_points=[req.knowledge_keyword] if req.knowledge_keyword else None,
         types=q_types, seed="exam:%s" % exam_id, with_audit=True,
     )
-    if not pool:
-        raise HTTPException(status_code=404,
-                            detail="未找到符合条件的题目（学科/题型/知识点在题库里没有可用题）")
-    type_configs = split_count_by_types(want, q_types,
-                                        _avg_score(exam["total_score"], want), pool=pool)
+    if not pool and not req.fill_by_ai:
+        raise HTTPException(
+            status_code=404,
+            detail="未找到符合条件的题目（学科/题型/知识点在题库里没有可用题）；"
+                   "如需由 AI 按主题补题，请勾选「题库不足时用 AI 补差」")
+    # 池子为空时不能再拿它做"按可用量封顶"的配额分配（那样会算出 0 道配额），
+    # 改为在被请求的题型之间均匀摊派，缺的部分交给 AI 补。
+    type_configs = split_count_by_types(want, q_types, _avg_score(exam["total_score"], want),
+                                        pool=pool if pool else None)
     picked, reason = select_questions_by_rules(pool, type_configs, easy_r, medium_r, hard_r)
+    # ── 可选：题库凑不够配额时按缺口让 AI 补差（默认关，见 ComposeRequest.fill_by_ai） ──
+    filled_by_ai = 0
+    ai_notes: list[str] = []
+    if getattr(req, "fill_by_ai", False):
+        gap_types = gap_by_type(type_configs, picked)
+        if gap_types:
+            more, ai_notes = await ai_fill_gap(
+                gap_types,
+                subject=str(req.subject or exam.get("subject") or ""),
+                difficulty=str(req.difficulty or "medium"),
+                knowledge_points=[req.knowledge_keyword] if req.knowledge_keyword else [],
+                username=username,
+            )
+            picked.extend(more)
+            filled_by_ai = len(more)
+            if more:
+                reason = (reason + "；" if reason else "") + f"题库缺 {sum(gap_types.values())} 道，AI 补入 {len(more)} 道"
+
     if not picked:
-        raise HTTPException(status_code=400, detail=reason or "符合条件的题目都已在试卷中，请调整筛选条件")
+        raise HTTPException(status_code=400,
+                            detail="；".join([x for x in [reason] + list(ai_notes) if x])
+                                 or "符合条件的题目都已在试卷中，请调整筛选条件")
 
     # 分值：新题先插 0 分占位，再按"原有比例 + 题型权重"配平回目标总分，
     # **不改 exams.total_score**。旧写法用 total/新增题数 算分，还把 total_score
@@ -1262,8 +1290,10 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
         "score_gap": gap,
         "target_total": exam["total_score"],
         "rebalanced": abs(gap) <= 0.05,
-        "short_by": short,
-        "notice": notice,
+        "short_by": max(want - len(picked), 0),
+        "ai_filled": filled_by_ai,
+        "ai_fill_notes": ai_notes,
+        "notice": "；".join([x for x in [notice] + list(ai_notes) if x]),
         "fallback_only": bool(audit.get("fallback_only")),
         "reason": reason,
         "type_stats": type_stats,
@@ -2870,6 +2900,8 @@ class AIComposeRequest(BaseModel):
     knowledge_focus: str = ""
     question_types: list[str] | None = None
     difficulty: str | None = None
+    # 题库凑不够配额时是否让 AI 补差（默认关，同 AutoSelectRequest.fill_by_ai）
+    fill_by_ai: bool = False
     # 旧字段 difficulty_distribution: str = "easy:medium:hard = 2:5:3" 声明了却从没被读过
     # （死参数）。现在由 difficulty 单档偏好 + 引擎默认 20:50:30 取代。
 
@@ -2956,18 +2988,38 @@ async def _run_ai_compose(exam_id: int, req: AIComposeRequest, exam: dict[str, A
         knowledge_points=focus or None,
         types=q_types, seed="exam_ai:%s" % exam_id, with_audit=True,
     )
-    if not pool:
+    if not pool and not req.fill_by_ai:
         raise HTTPException(
             status_code=400,
             detail="题库里没有该学科的可用题目，请先在题库补题或调整考试学科"
-                   "（题目标签与考试学科写法不一致时，题会互相看不见）")
+                   "（题目标签与考试学科写法不一致时，题会互相看不见）；"
+                   "或勾选「题库不足时用 AI 补差」由 AI 按主题出题")
 
-    type_configs = split_count_by_types(want, q_types, _avg_score(exam["total_score"], want), pool=pool)
+    type_configs = split_count_by_types(want, q_types, _avg_score(exam["total_score"], want),
+                                        pool=pool if pool else None)
     selected_questions, reason = await select_questions_by_ai(
         pool=pool, type_configs=type_configs,
         easy_ratio=easy_r, medium_ratio=medium_r, hard_ratio=hard_r,
         knowledge_points=focus, exam_info=exam, username=username,
     )
+    # ── 可选：AI 选题也只是"在候选池里挑"，池子不够时按缺口让 AI 出新题（默认关）──
+    filled_by_ai = 0
+    ai_notes: list[str] = []
+    if req.fill_by_ai:
+        gap_types = gap_by_type(type_configs, selected_questions)
+        if gap_types:
+            more, ai_notes = await ai_fill_gap(
+                gap_types,
+                subject=str(exam.get("subject") or ""),
+                difficulty=str(req.difficulty or "medium"),
+                knowledge_points=list(focus or []),
+                username=username,
+            )
+            selected_questions.extend(more)
+            filled_by_ai = len(more)
+            if more:
+                reason = (reason + "；" if reason else "") + \
+                    f"题库缺 {sum(gap_types.values())} 道，AI 补入 {len(more)} 道"
     if not selected_questions:
         raise HTTPException(status_code=400, detail=reason or "AI 未能选出合适的题目，请调整条件后重试")
 
@@ -2981,6 +3033,8 @@ async def _run_ai_compose(exam_id: int, req: AIComposeRequest, exam: dict[str, A
     type_stats, diff_stats = stats_of(selected_questions)
     short = max(want - len(inserted), 0)
     parts = [f"AI 组卷完成，共添加 {len(inserted)} 道试题"]
+    if filled_by_ai:
+        parts.append(f"其中 {filled_by_ai} 道由 AI 按缺口新出并已入题库，下次组卷可直接复用")
     if short:
         parts.append(f"目标 {want} 道，实际凑到 {len(inserted)} 道（还缺 {short} 道）")
     if skipped_types:

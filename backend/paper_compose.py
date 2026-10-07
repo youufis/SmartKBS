@@ -65,6 +65,9 @@ class ComposeRequest(BaseModel):
     # 默认追加而不是替换：旧默认 True 让「开始智能组卷」一键删空老师已有的卷子
     replace_existing: bool = False     # 是否替换考试中已有题目
     use_ai: bool = True                # 是否使用 AI 智能选择
+    # 题库凑不够配额时是否让 AI 补差（默认关：组卷的老行为是"只报缺口"，
+    # 判分链路只碰可复核的存量题更安全；勾选后补的题照样过题目入库唯一出口）
+    fill_by_ai: bool = False
 
 
 class ComposeResponse(BaseModel):
@@ -84,6 +87,9 @@ class ComposeResponse(BaseModel):
     target_total: float = 0.0          # 本次实际配平到的目标总分
     type_scores: dict[str, float] = {}  # 配平后各题型每题真实分值
     warnings: list[str] = []
+    # 只有勾选"题库不足时用 AI 补差"时非零：补了几道、以及补题过程的说明
+    ai_filled: int = 0
+    ai_fill_notes: list[str] = []
 
 
 DEFAULT_POOL_TYPES = ("single", "multiple", "true_false", "short", "fill")
@@ -213,6 +219,23 @@ def stats_of(selected: Sequence[dict[str, Any]]) -> tuple[dict[str, int], dict[s
     return type_stats, diff_stats
 
 
+def gap_by_type(type_configs: Sequence[Any], picked: Sequence[dict[str, Any]]) -> dict[str, int]:
+    """按题型算"还缺几道"（配置数 − 实选数），供 AI 补差用。"""
+    want: dict[str, int] = {}
+    for tc in type_configs or []:
+        t = getattr(tc, "type", None) or (tc.get("type") if isinstance(tc, dict) else "")
+        n = getattr(tc, "count", None)
+        if n is None and isinstance(tc, dict):
+            n = tc.get("count")
+        if t:
+            want[str(t)] = want.get(str(t), 0) + int(n or 0)
+    got: dict[str, int] = {}
+    for q in picked or []:
+        t = str(q.get("type") or "")
+        got[t] = got.get(t, 0) + 1
+    return {t: c - got.get(t, 0) for t, c in want.items() if c - got.get(t, 0) > 0}
+
+
 def validate_compose_config(req: ComposeRequest) -> tuple[float, str]:
     """验证组卷配置，返回 (计算总分, 错误信息)"""
     if not req.type_configs:
@@ -337,6 +360,110 @@ def select_questions_by_rules(
     reason = "；".join(reason_parts)
 
     return selected, reason
+
+
+async def ai_fill_gap(need_by_type: dict[str, int], *, subject: str, difficulty: str = "medium",
+                      knowledge_points: list[str] | None = None, username: str = "",
+                      scene: str = "exam_ai_fill") -> tuple[list[dict[str, Any]], list[str]]:
+    """按题型缺口让 AI 出新题，经题目入库唯一出口校验后返回可入卷的题目行。
+
+    给考试的两条选题链路（自动选题 / 智能组卷）共用。两条链路历史上"题库凑不够就只报缺口"：
+    报告本身没错（判分链路必须只用可复核的存量题），但老师没有别的选择 —— 于是加一个
+    **默认关闭**的开关，勾选后按缺额补题，补出来的题照样走 question_factory
+    （字段体检 → 查重 → 单事务 → 连知识点边），因此不会出现"进了卷却判不了分"的题。
+
+    返回 (rows, notes)；rows 只含真入库/命中已有题的条目，形状与 get_question_pool 一致
+    （id / type / question_text / difficulty / knowledge_points / options ...）。
+    """
+    from backend import question_fill
+
+    want = {t: int(n) for t, n in (need_by_type or {}).items() if int(n) > 0}
+    if not want:
+        return [], []
+
+    kp_text = "、".join([k for k in (knowledge_points or []) if k]) or "不限"
+    rows: list[dict[str, Any]] = []
+    notes: list[str] = []
+    for qtype, gap in want.items():
+        async def _gen(need: int, avoid: list[str], _t: str = qtype, _g: int = gap) -> list[dict]:
+            from backend.api.chat_router import get_api_keys
+            from backend.api.ai_service import call_ai_async
+            from backend.prompts.chat import QUESTION_GENERATE_PROMPT
+            from backend.prompts.question_schema import render_question_prompt
+            api_key, _ = get_api_keys(username)
+            if not api_key:
+                raise question_fill.MissingApiKey("未配置 API Key，无法按缺口补题")
+            prompt = render_question_prompt(
+                QUESTION_GENERATE_PROMPT,
+                subject=subject or "不限学科",
+                knowledge_points=kp_text,
+                type_desc=TYPE_LABELS.get(_t, _t) + ("（4个选项）" if _t in ("single", "multiple") else ""),
+                count=_g,
+                difficulty_desc={"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等"),
+            )
+            # 判分链路宁可失败也不吞下半截题：只接受完整 JSON（salvage=False）
+            text = await call_ai_async(prompt, api_key, json_mode=True,
+                                       kb_query=f"{subject} {kp_text}")
+            from backend import ai_json
+            got, meta = ai_json.extract_json_array2(text, salvage=False)
+            if not got:
+                ai_json.dump_failed_raw(scene, text or "")
+                raise RuntimeError(f"AI 未返回可用题目（{meta.get('reason') or '解析失败'}）")
+            for it in got:
+                if isinstance(it, dict):
+                    it["type"] = _t          # 题型由缺口决定，不让模型自由发挥
+            return [it for it in got if isinstance(it, dict)]
+
+        async def _persist(items: list[dict], _t: str = qtype) -> list[dict]:
+            from backend import question_factory
+            outcome = question_factory.persist_questions(
+                items,
+                subject=subject or "",
+                source="ai",
+                username=username or "",
+                question_type=_t,
+                difficulty=difficulty or "medium",
+                knowledge_points=kp_text if kp_text != "不限" else "",
+                link_duplicates=True,
+                write_creator_name=False,
+            )
+            st = outcome["stats"]
+            logger.info(f"[组卷补题] 题型={_t} 新入库={st['saved']} 重复回填={st['duplicated']} "
+                        f"不合格={st['rejected']}")
+            out = []
+            for e in list(outcome["saved"]) + list(outcome["duplicated"]):
+                out.append({
+                    "id": e["id"], "type": e.get("type") or _t,
+                    "question_text": e.get("question_text", ""),
+                    "options": e.get("options") or {},
+                    "difficulty": e.get("difficulty") or difficulty or "medium",
+                    "knowledge_points": e.get("knowledge_points") or kp_text,
+                    "correct_answer": e.get("correct_answer", ""),
+                    "svg_content": e.get("svg_content") or "",
+                    "has_svg": e.get("has_svg") or 0,
+                })
+            return out
+
+        try:
+            filled = await question_fill.fill_questions(
+                count=gap,
+                fetch_bank=None,               # 题库已在这条链路上走过，这里只补差
+                gen_ai=_gen,
+                persist=_persist,
+            )
+            rows.extend(filled.questions)
+            tag = TYPE_LABELS.get(qtype, qtype)
+            if filled.gap > 0:
+                notes.append(f"{tag}仍缺 {filled.gap} 道（{'；'.join(filled.notes)}）")
+            elif filled.notes:
+                notes.append(f"{tag}已用 AI 补 {filled.ai_count} 道")
+        except question_fill.FillUnavailable as e:
+            notes.append(f"{TYPE_LABELS.get(qtype, qtype)}补题失败：{e.detail}")
+        except Exception as e:                    # 补题失败不毁掉整次组卷
+            logger.warning(f"[组卷补题] 题型={qtype} 失败: {e}")
+            notes.append(f"{TYPE_LABELS.get(qtype, qtype)}补题失败：{str(e)[:80]}")
+
+    return rows, notes
 
 
 async def select_questions_by_ai(

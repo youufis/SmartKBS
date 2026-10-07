@@ -149,10 +149,12 @@ export async function autoSelectQuestions(
     knowledge_keyword?: string;
     count?: number;
     exclude_existing?: boolean;
+    /** 题库凑不够配额时是否让 AI 按缺口补题（默认关，与后端同名字段一致） */
+    fill_by_ai?: boolean;
   }
 ): Promise<PaperMutationResult & {
     questions: any[]; short_by?: number; notice?: string; fallback_only?: boolean;
-    reason?: string;
+    reason?: string; ai_filled?: number; ai_fill_notes?: string[];
     type_stats?: Record<string, number>;
     difficulty_stats?: Record<string, number>;
   }> {
@@ -162,6 +164,7 @@ export async function autoSelectQuestions(
 
 export interface AiComposeResult extends PaperMutationResult {
   recommended?: number; reason?: string; notice?: string;
+  ai_filled?: number; ai_fill_notes?: string[];
   type_stats?: Record<string, number>; difficulty_stats?: Record<string, number>;
 }
 
@@ -179,6 +182,8 @@ export async function aiComposeExam(
     knowledge_focus?: string;
     question_types?: string[];
     difficulty?: string;
+    /** 同「自动选题」：勾选后题库不够的部分由 AI 补题并入题库 */
+    fill_by_ai?: boolean;
   },
   onProgress?: (p: AiTaskProgress) => void,
 ): Promise<AiComposeResult> {
@@ -286,6 +291,8 @@ export interface ComposeRequest {
   knowledge_points?: string[];
   total_score?: number;
   replace_existing?: boolean;
+  /** 题库不足时按缺口让 AI 补题（默认关） */
+  fill_by_ai?: boolean;
   use_ai?: boolean;
 }
 
@@ -305,6 +312,9 @@ export interface ComposeResponse {
   type_scores?: Record<string, number>;
   warnings?: string[];
   submitted_attempts?: number;
+  /** 勾选"题库不足时用 AI 补差"时：本次由 AI 新出并入题库的题数与说明 */
+  ai_filled?: number;
+  ai_fill_notes?: string[];
 }
 
 /** 智能组卷：按配置从题库选题 */

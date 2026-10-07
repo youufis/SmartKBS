@@ -127,7 +127,6 @@
   "phManual": "需人工处理",
   "phRemovedDupes": "删除重复题 {{n}} 道",
   "paperHealthFailed": "卷面体检失败",
-  "questionCount": "题数",
   "shuffleQuestionsTip": "学生看到的题目顺序按人打乱：同一学生刷新/换设备不变，不同学生各不相同",
   "expandQuestionHint": "点击行首箭头可展开选项与答案",
   "removeSelectedCount": "移除选中 ({{count}})",
@@ -530,6 +529,10 @@
   "exPendingCol": "待批改",
   "exPendingN": "{{count}} 份",
   "exPendingTip": "本场还有 {{count}} 份答卷待批改",
-  "exPendingHint": "{{count}} 场考试有待批改答卷"
+  "exPendingHint": "{{count}} 场考试有待批改答卷",
+  "fillByAi": "题库不足时用 AI 补差",
+  "aiFilledNotice": "其中 {{n}} 道由 AI 按缺口新出，已写入题库，下次可直接复用",
+  "pcAiFillLbl": "题库不足时",
+  "pcAiFillOn": "让 AI 出缺的题目（自动入题库）",
+  "pcAiFillOff": "只报缺口，不额外出题（默认）"
 }
-

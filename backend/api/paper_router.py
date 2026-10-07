@@ -22,6 +22,8 @@ from backend import exam_scoring
 # 三个入口（智能组卷 / 管理题目-自动选题 / 管理题目-AI 生成）共用这一份实现。
 from backend.question_select import family_members, split_tags, subject_family
 from backend.paper_compose import (
+    ai_fill_gap,
+    gap_by_type,
     ComposeRequest,
     ComposeResponse,
     get_question_pool,
@@ -59,6 +61,17 @@ def exam_scoring_guard(exam: dict[str, Any], action: str) -> dict[str, Any]:
 
 # API 端点
 # ═══════════════════════════════════════════════════════════════
+
+def _dominant_ratio(req) -> str:
+    """三档难度配比里取占比最高的一档，作为 AI 补题的难度倾向。
+
+    组卷配置给的是 easy/medium/hard 的比例，而补题要的是单个档位；比例相同按
+    medium > easy > hard 的稳定顺序（默认配比 20:50:30 就是 medium）。
+    """
+    pairs = [("medium", req.difficulty_medium_ratio), ("easy", req.difficulty_easy_ratio),
+             ("hard", req.difficulty_hard_ratio)]
+    return max(pairs, key=lambda x: (int(x[1] or 0), x[0] == "medium"))[0]
+
 
 @router.post("/{exam_id}/compose", summary="智能组卷")
 async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request):
@@ -109,8 +122,11 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
         knowledge_points=req.knowledge_points if req.knowledge_points else None,
     )
 
-    if not pool:
-        raise HTTPException(status_code=400, detail="题库中没有符合条件的题目，请先导入试题或调整筛选条件")
+    if not pool and not req.fill_by_ai:
+        raise HTTPException(
+            status_code=400,
+            detail="题库中没有符合条件的题目，请先导入试题或调整筛选条件；"
+                   "或勾选「题库不足时用 AI 补差」由 AI 按知识点出题")
 
     # ── 选题 ──
     if req.use_ai and pool:
@@ -132,6 +148,25 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
             medium_ratio=req.difficulty_medium_ratio,
             hard_ratio=req.difficulty_hard_ratio,
         )
+
+    # ── 可选：题库凑不够配额时按题型缺口让 AI 补差（默认关，保持"只报缺口"的老行为）──
+    filled_by_ai = 0
+    ai_notes: list[str] = []
+    if req.fill_by_ai:
+        gap_types = gap_by_type(req.type_configs, selected_questions)
+        if gap_types:
+            more, ai_notes = await ai_fill_gap(
+                gap_types,
+                subject=str(exam.get("subject") or ""),
+                difficulty=_dominant_ratio(req),
+                knowledge_points=list(req.knowledge_points or []),
+                username=username,
+            )
+            selected_questions.extend(more)
+            filled_by_ai = len(more)
+            if more:
+                reason = (reason + "；" if reason else "") + \
+                    f"题库缺 {sum(gap_types.values())} 道，AI 补入 {len(more)} 道"
 
     if not selected_questions:
         raise HTTPException(status_code=400, detail=reason or "未能选出合适的题目，请调整配置后重试")
@@ -205,6 +240,8 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
                         f"{round(_pass / target_total * 100)}%，请确认是否合适")
 
     parts = [f"智能组卷完成，共添加 {added} 道试题，卷面合计 {round(_actual_total, 1)} 分"]
+    if filled_by_ai:
+        parts.append(f"其中 {filled_by_ai} 道是题库不足时由 AI 补的题（已入题库，下次可直接复用）")
     if abs(float(exam["total_score"] or 0) - target_total) > 0.05:
         parts.append(f"目标总分 {exam['total_score']} → {round(target_total, 1)}")
     if abs(config_total - target_total) > 0.05:
@@ -231,6 +268,8 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
         target_total=round(target_total, 1),
         type_scores=type_scores,
         warnings=warnings,
+        ai_filled=filled_by_ai,
+        ai_fill_notes=ai_notes,
     )
 
 

@@ -252,6 +252,16 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
               </Select>
             </Form.Item>
           </Col>
+          <Col span={24}>
+            {/* "AI 选题"只在已有候选池里挑，挑不够就报缺口；这一项决定是否允许 AI 再**出**
+                缺的那几道题（出的题照常过入库关口，并回写题库供下次复用）。默认关。 */}
+            <Form.Item name="fill_by_ai" label={t('pcAiFillLbl')} valuePropName="checked">
+              <Select style={{ maxWidth: 320 }}>
+                <Option value={false}>{t('pcAiFillOff')}</Option>
+                <Option value={true}>{t('pcAiFillOn')}</Option>
+              </Select>
+            </Form.Item>
+          </Col>
         </Row>
       </CardSection>
     </Space>

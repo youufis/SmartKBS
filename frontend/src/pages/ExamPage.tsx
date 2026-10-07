@@ -144,6 +144,8 @@ const ExamPage: React.FC = () => {
   // ── AI 智能组卷 ──
   const [aiComposing, setAiComposing] = useState(false)
   const [aiComposeCount, setAiComposeCount] = useState(10)
+  // 与「自动选题」同一个开关：题库凑不够配额时是否让 AI 按缺口补题（默认关）
+  const [aiComposeFill, setAiComposeFill] = useState(false)
   const [aiComposeFocus, setAiComposeFocus] = useState('')
   const [aiComposeTypes, setAiComposeTypes] = useState<string[]>([])
   const [aiComposeDifficulty, setAiComposeDifficulty] = useState<string>()
@@ -663,8 +665,10 @@ const ExamPage: React.FC = () => {
         knowledge_keyword: values.knowledge_keyword || undefined,
         count: values.count || 10,
         exclude_existing: true,
+        fill_by_ai: values.fill_by_ai === true,
       })
       message.success(res.message)
+      if (res.ai_filled) message.info(t('aiFilledNotice', { n: res.ai_filled }))
       if (res.notice) message.info(res.notice)        // 兜底题/放宽条件必须让老师看见
       if (res.reason) message.info(t('autoSelectReason', { reason: res.reason }))
       reportImpact(res)
@@ -691,8 +695,10 @@ const ExamPage: React.FC = () => {
         knowledge_focus: aiComposeFocus,
         question_types: aiComposeTypes.length ? aiComposeTypes : undefined,
         difficulty: aiComposeDifficulty || undefined,
+        fill_by_ai: aiComposeFill,
       }, (p: AiTaskProgress) => setAiComposeNote(p?.message || ''))
       message.success(data.message || t('composeSuccess'))
+      if (data.ai_filled) message.info(t('aiFilledNotice', { n: data.ai_filled }))
       if (data.notice) message.info(data.notice)      // 题从哪来：兜底/放宽情况要说清楚
       reportImpact(data)
       if (data.reason) {
@@ -1618,6 +1624,11 @@ const ExamPage: React.FC = () => {
               <Form.Item name="count" label={t('selectCount')} style={{ width: 100 }}>
                 <InputNumber min={1} max={100} />
               </Form.Item>
+              {/* 默认不勾：组卷的老行为是"凑不够就只报缺口"，判分链路只碰存量题更稳；
+                  勾上后缺额由 AI 出新题，题目照常过入库关口并连知识点边 */}
+              <Form.Item name="fill_by_ai" valuePropName="checked" style={{ width: '100%' }}>
+                <Checkbox>{t('fillByAi')}</Checkbox>
+              </Form.Item>
             </Form>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
               {t('smartSelectHint')}
@@ -1643,6 +1654,9 @@ const ExamPage: React.FC = () => {
               <Typography.Text style={{ fontSize: 13 }}>{t('targetCount')}</Typography.Text>
               <InputNumber size="small" min={1} max={100} value={aiComposeCount}
                 onChange={(v) => setAiComposeCount(v || 10)} style={{ width: 80 }} />
+              <Checkbox checked={aiComposeFill} onChange={(e) => setAiComposeFill(e.target.checked)}>
+                {t('fillByAi')}
+              </Checkbox>
               <Select size="small" allowClear mode="multiple" placeholder={t('questionTypeAny')}
                 value={aiComposeTypes} onChange={(v) => setAiComposeTypes(v || [])}
                 maxTagCount={2} style={{ minWidth: 160 }}>

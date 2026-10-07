@@ -78,6 +78,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
     // 默认追加：旧默认 true 让「开始智能组卷」一键删空老师已有的卷子，且没有任何确认
     replace_existing: false,
     use_ai: true,
+    fill_by_ai: false,
   }
 
   // ── 步骤定义 ──
@@ -246,6 +247,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
         total_score: values.total_score || undefined,
         replace_existing: values.replace_existing !== false,
         use_ai: values.use_ai !== false,
+        fill_by_ai: values.fill_by_ai === true,
       }
 
       const result = await examsApi.composeExam(examId, req)
