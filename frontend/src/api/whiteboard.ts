@@ -40,6 +40,11 @@ export async function deleteRoom(roomId: number): Promise<void> {
   await apiClient.delete(`/api/whiteboard/rooms/${roomId}`)
 }
 
+/** 重新开启已结束的白板（仅房主与管理员）：结束后学生端看不到房间、教师也连不上 */
+export async function reopenRoom(roomId: number): Promise<void> {
+  await apiClient.post(`/api/whiteboard/rooms/${roomId}/reopen`)
+}
+
 // ── 加入/离开 ──
 
 export async function joinByCode(roomCode: string): Promise<{

@@ -4,9 +4,11 @@
 - SizeRotatingHandler: 延迟打开 + 每 32 条抽样查大小 + rename 轮转归档(.gz)保留 5 份 + 被多实例锁住时退避重试并告警(绝不复制)
 - 级别策略: logger=DEBUG, 控制台=INFO(现场不刷屏), 文件=DEBUG(排障可查)
 - uvicorn.access: 恢复 INFO(可见 4xx/5xx) + 内置噪音路径过滤器(统一配置, main.py 不再重复)
+- uvicorn.access: URL 里的 token= 一律打码(_AccessTokenRedactFilter), 不让 JWT 明文进日志文件
 """
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -37,6 +39,30 @@ _POLL_401_NOISE = (
     "/api/tasks/active",
     "/api/auth/online-count",
 )
+
+
+class _AccessTokenRedactFilter(logging.Filter):
+    """把访问日志 URL 中的 token= 值替换成 ***，其余(路径/状态码)原样保留。
+
+    WebSocket 握手只能靠 URL 或 Cookie 带令牌(白板/讨论区/抢答都用过 ?token=)，
+    uvicorn 的 access log 连 query string 一起打印，于是每连一次就往日志文件里
+    抄一份可用的 JWT —— 而日志的可见范围远大于令牌本该到的地方。
+    """
+
+    PATTERN = re.compile(r"([?&])token=[^&\s\x22\x27]+")
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if "token=" not in msg:
+            return True
+        redacted = self.PATTERN.sub(r"\1token=***", msg)
+        if redacted != msg:
+            record.msg = redacted
+            record.args = ()
+        return True
 
 
 class _SmartLogger(logging.Logger):
@@ -273,3 +299,5 @@ if not any(isinstance(f, _AccessNoiseFilter) for f in uvicorn_access.filters):
     uvicorn_access.addFilter(_AccessNoiseFilter())
 if not any(isinstance(f, _PollAuthNoiseFilter) for f in uvicorn_access.filters):
     uvicorn_access.addFilter(_PollAuthNoiseFilter())
+if not any(isinstance(f, _AccessTokenRedactFilter) for f in uvicorn_access.filters):
+    uvicorn_access.addFilter(_AccessTokenRedactFilter())

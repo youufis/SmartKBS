@@ -359,4 +359,8 @@ if __name__ == "__main__":
         port=SERVER_PORT,
         reload=True,
         log_level="info",
+        # 按消息压缩：白板一份快照实测 21KB，且是重复度极高的 JSON。一个班 55 人
+        # 同时在线时，下行带宽能降到原来的十分之一上下（浏览器默认就带
+        # permessage-deflate 扩展；实现不支持时 uvicorn 只会忽略并提示）。
+        ws_per_message_deflate=True,
     )

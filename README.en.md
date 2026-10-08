@@ -39,6 +39,7 @@
 > 📏 **Question counts mean what the teacher typed**: real parameters, out-of-range errors instead of silent rewrites
 > 🧮 **Score totals are a hard invariant** + 🎯 **Three selection engines became one** + 🔢 **Export rendering fixed** + 🔀 **Drag to reorder** + 🎲 **Per-student shuffling** + ⏱ **AI moved to background jobs**
 > 📱 **Phone support** + 🖼 **Figure pipeline cleanup** + 🏆 **Anti-farming points** + 🛡 **Ops and settings polish**
+> 🎨 **Whiteboard usability**: refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, and dropped links reconnect on their own (needs a backend restart)
 
 ---
 
@@ -1014,7 +1015,7 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-### v8.6.0 (2026-10-05 ~ 10-07)
+### v8.6.0 (2026-10-05 ~ 10-08)
 
 - 🔊 **Speech synthesis lands**: a Speech section in System Settings (switch, model, voice, rate, volume); only voices verified to speak are listed, and nothing is billed while off
 - 🗣 **Roll call says the name**: the audio is fetched during the reveal animation so teachers notice nothing; cached per name, never blocks the roll call
@@ -1035,8 +1036,20 @@ Git-based online incremental upgrade system:
 - 🔌 **An opt-in "fill the gap with AI" for exam selection**: auto selection, AI composing and the wizard, **off by default**; a failed fill is only a note, never a lost paper
 - 📏 **Page question counts are a real parameter**: three disagreeing places became one input (quizzes 1-30, practice 1-50), and out-of-range input errors instead of rewriting itself
 - 📁 **Async generation prefers the bank too**: the path the UI uses queried neither the bank nor stored new questions; wrong-question practice no longer rewrites counts silently
+- 🎨 **A whiteboard that won't connect says why**: room missing / ended / not yours get separate reasons, logged and shown in the UI (unauthenticated handshakes are still refused before accept)
+- 🔁 **Ending is reversible and tidies up**: the owner or an admin restores the room and students rejoin with the same code; ending clears online members and counters, closes live sockets, and register/writes now return 409 instead of leaving a board nobody can see
+- 👁 **Spectating teachers and replay**: no write authority is explained instead of silently ignored, and an ended room can still be reviewed and exported to Word
+- ⚡ **Pushes follow the pen**: the teacher side moved from a fixed 1s poll to change-driven (at most 400ms while writing, an extra flush 160ms after the pen settles), 600ms on stage
+- 🚦 **One slow student no longer stalls the class**: broadcasting never awaits sockets in turn, each connection owns one send queue, and un-sent full snapshots collapse to the newest one
+- 💾 **Persistence left the event loop**: writes run in a worker thread throttled per room, while page switches, the last departure and ending flush and actually wait for them
+- 📉 **The fallback paths adapt**: 20s polling while the socket is healthy, 3s once it is not, requests carry a snapshot fingerprint, and HTTP saves refresh the in-memory copy too
+- 🔌 **Reconnects recover on their own**: backoff without giving up after five tries, immediate retry on returning online or to the foreground, and the heartbeat only cuts a link whose server proved it answers pings
+- 🔐 **No more token leakage**: the handshake prefers the same-origin cookie (?token= is a fallback) and access logs mask token=
+- 🧹 **The 'switch to interactive and back' hint is gone**: its root cause - granted students never being told to step down - is fixed on both sides, with room_ready aligning authority at handshake
+- 🩹 **Three silent failures closed**: a sync timer missing isBroadcaster, reconnects resurrecting the previous room's socket, and WS errors logged but leaving a wedged connection
+- 🧪 **32 new whiteboard regression tests**: room lifecycle 16 / demo delivery 8 / realtime delivery and persistence semantics 8
 - 🧪 **Regression**: 102 new tests (catalogue consistency, measured size limits, hand-typed endpoint routing, voice/model pairing, self-test permissions and throttling); full suite 542 passed
-- ⚠️ **Breaking changes**: none — gap filling is off by default, buzzer rounds may spend AI calls when the bank is short, and out-of-range counts now error instead of rewriting themselves
+- ⚠️ **Breaking changes**: none - gap filling stays off by default, buzzer rounds may spend AI calls when the bank is short, and out-of-range counts now error instead of rewriting themselves. The whiteboard batch needs a backend restart: WS refusals now carry a reason after the handshake, register/write on an ended room return 409, and ending a room closes live sockets; permessage-deflate needs --ws websockets --ws-per-message-deflate on the command line
 
 ### v8.5.0 (2026-10-03 ~ 10-04)
 

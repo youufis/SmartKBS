@@ -47,11 +47,19 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   const readOnlyRef = useRef(readOnly)  // 用 ref 追踪 readOnly，避免闭包陈旧
   const httpSyncedRef = useRef(false) // 防止重复 HTTP 同步
   const lastWSUpdateRef = useRef(0) // 上次 WS 收到快照的时间戳
+  const wsStateRef = useRef(ws.state) // 镜像连接状态：兜底轮询频率据此自适应
+  const lastSentRef = useRef(0)     // 上次推送快照的时间
+  const lastChangeRef = useRef(0)   // 上次本地笔迹变更的时间（"落笔停住"判定）
+  const appliedSigRef = useRef('')  // 已应用快照的指纹：内容没变就别整篇重载
 
   // 同步 readOnly 到 ref
   useEffect(() => {
     readOnlyRef.current = readOnly
   }, [readOnly])
+
+  useEffect(() => {
+    wsStateRef.current = ws.state
+  }, [ws.state])
 
   // ═══════════════════════════════════════════════════════════
   // ★ 关键修复：使用 TLDraw store.listen 事件驱动检测内容变更
@@ -71,7 +79,10 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       return
     }
     const cleanup = editor.store.listen(
-      () => { pendingChangesRef.current = true },
+      () => {
+        pendingChangesRef.current = true
+        lastChangeRef.current = Date.now()
+      },
       { source: 'user', scope: 'document' }
     )
     return () => {
@@ -84,101 +95,126 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   // 快照内容哈希缓存，避免无变化时重复序列化/同步
   const snapshotHashRef = useRef('')
 
-  // HTTP 轮询兜底 + 定时广播（WS 可用时也发）
+  // 与后端 _snapshot_sig() 保持一致的指纹算法：长度 + 前 200 字符
+  const sigOf = (snap: string) => snap.length + '_' + snap.slice(0, 200)
+
+  // ═══════════════════════════════════════════════════════════
+  // ★ 自适应同步节拍（原来是：教师端固定 1s / 台上学生 2s 轮询，
+  //   只读端不管 WS 好坏都每 5s 重下一份全量快照）
+  //   连续书写：最长 MAX_WAIT 推一次 —— 跟手，不再要等满一秒
+  //   落笔停住：QUIET 后立即补发一次 —— 笔画的结尾最该被看到
+  //   兜底轮询：WS 正常降到 20s 心跳，WS 不通收紧到 3s，并带指纹让服务端
+  //             在内容没变时不再回传 21KB 全量（55 人 × 每 5s 一份本身就是全班延迟）
+  // ═══════════════════════════════════════════════════════════
+  const PUSH_TICK_MS = 60
+  const PUSH_QUIET_MS = 160
+  const TEACHER_MAX_WAIT_MS = 400
+  const STAGE_MAX_WAIT_MS = 600
+  const POLL_FAST_MS = 3000
+  const POLL_SLOW_MS = 20000
+
+  // 变更驱动广播 + 自适应兜底轮询
   useEffect(() => {
+    const pushSnapshot = (maxWait: number) => {
+      const editor = editorRef.current
+      if (!editor) return
+      if (!pendingChangesRef.current) return        // 没变化就绝不序列化（原逻辑保留）
+      const now = Date.now()
+      if (now - lastSentRef.current < maxWait && now - lastChangeRef.current < PUSH_QUIET_MS) return
+      const snapshot = JSON.stringify(editor.getSnapshot())
+      if (snapshot.length <= 100) return
+      pendingChangesRef.current = false
+      lastSentRef.current = now
+      snapshotHashRef.current = snapshot
+      didSaveRef.current = true
+      appliedSigRef.current = sigOf(snapshot)       // 自己这份不用再收一遍
+      ws.send({
+        type: 'op',
+        op_id: generateUUID(),
+        // 用当前页，别写死第 1 页：多页白板把内容全存到 page 1，
+        // 后端按「当前页」读快照时就会读到空白页，AI 判定白板为空
+        page: useWhiteboardStore.getState().currentPage,
+        data: { snapshot },
+      })
+    }
+
     if (readOnly) {
-      // 只读端（演示模式学生 / 未授权的互动学生）：每 5s 拉取最新快照 + 授权状态
-      const interval = setInterval(async () => {
+      // 只读端（演示模式学生 / 未授权的互动学生）：自适应兜底轮询
+      let timer = 0
+      const pollOnce = async () => {
         try {
-          const { data } = await apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`)
+          const { data } = await apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`, {
+            params: snapshotHashRef.current ? { sig: snapshotHashRef.current } : {},
+          })
           if (data.granted && readOnlyRef.current && data.mode === 'interactive') {
             readOnlyRef.current = false
-            if (editorRef.current) {
-              editorRef.current.updateInstanceState({ isReadonly: false })
-            }
+            editorRef.current?.updateInstanceState({ isReadonly: false })
           } else if (!data.granted && !readOnlyRef.current && data.mode === 'interactive') {
             readOnlyRef.current = true
-            if (editorRef.current) {
-              editorRef.current.updateInstanceState({ isReadonly: true })
-            }
+            editorRef.current?.updateInstanceState({ isReadonly: true })
           }
           // 只有当前仍是只读状态才加载快照（防止初始 demo 定时器在切自习后覆盖学生内容）
           if (data.snapshot && editorRef.current && readOnlyRef.current) {
-            // WS 近 5 秒内有更新则跳过（防止覆盖用户刚画的内容）
-            if (Date.now() - lastWSUpdateRef.current > 5000) {
-              // 快照未变化则跳过，减少内存分配
-              const hash = data.snapshot.length + '_' + (typeof data.snapshot === 'string' ? data.snapshot.slice(0, 200) : '')
-              if (hash === snapshotHashRef.current) return
-              snapshotHashRef.current = hash
+            if (Date.now() - lastWSUpdateRef.current > 5000) {   // WS 刚推过就别覆盖
+              const sig = (data.sig as string) || sigOf(data.snapshot)
+              if (sig === snapshotHashRef.current) return
+              snapshotHashRef.current = sig
+              appliedSigRef.current = sig
               editorRef.current.store.mergeRemoteChanges(() => {
                 try { editorRef.current?.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
               })
             }
+          } else if (data.sig) {
+            // 服务端说没变：留住指纹，下一轮继续省掉整份传输
+            snapshotHashRef.current = data.sig as string
           }
         } catch { /* 静默 */ }
-      }, 5000)
-      return () => clearInterval(interval)
-    } else if (isBroadcaster) {
-      // 教师端：★ 使用 store.listen 事件驱动代替每秒轮询 ★
-      // 仅在有实际变更（pendingChangesRef）时才序列化快照并发送
-      const wsTimer = setInterval(() => {
-        // ── 关键修复：无变更时跳过，避免 JSON.stringify 反复执行 ──
-        if (!pendingChangesRef.current) return
-        pendingChangesRef.current = false
-
-        const editor = editorRef.current
-        if (!editor) return
-        const snapshot = JSON.stringify(editor.getSnapshot())
-        if (snapshot.length > 100) {
-          snapshotHashRef.current = snapshot
-          didSaveRef.current = true
-          ws.send({
-            type: 'op',
-            op_id: generateUUID(),
-            // 用当前页，别写死第 1 页：多页白板把内容全存到 page 1，
-            // 后端按「当前页」读快照时就会读到空白页，AI 判定白板为空
-            page: useWhiteboardStore.getState().currentPage,
-            data: { snapshot },
-          })
-        }
-      }, 1000)
-      // ★ HTTP 保存：降低频率至 30s，且仅在有实际变更时才提交
-      const httpTimer = setInterval(async () => {
-        if (!didSaveRef.current) return
-        didSaveRef.current = false
-        if (!snapshotHashRef.current) return
-        await apiClient.put(
-          `/api/whiteboard/rooms/${roomId}/pages/${useWhiteboardStore.getState().currentPage}`,
-          { snapshot_data: snapshotHashRef.current },
-        )
-      }, 30000)
-      return () => { clearInterval(wsTimer); clearInterval(httpTimer); snapshotHashRef.current = ''; didSaveRef.current = false }
-    } else if (store.mode === 'interactive') {
-      // 互动模式已授权学生：★ 同样使用事件驱动 ★
-      const wsTimer = setInterval(() => {
-        if (!pendingChangesRef.current) return
-        pendingChangesRef.current = false
-
-        const editor = editorRef.current
-        if (!editor) return
-        const snapshot = JSON.stringify(editor.getSnapshot())
-        if (snapshot.length > 100) {
-          snapshotHashRef.current = snapshot
-          ws.send({
-            type: 'op',
-            op_id: generateUUID(),
-            // 用当前页，别写死第 1 页：多页白板把内容全存到 page 1，
-            // 后端按「当前页」读快照时就会读到空白页，AI 判定白板为空
-            page: useWhiteboardStore.getState().currentPage,
-            data: { snapshot },
-          })
-        }
-      }, 2000)
-      return () => { clearInterval(wsTimer); snapshotHashRef.current = '' }
-    } else {
-      // 自习模式学生：自己画自己的，不做任何同步
+      }
+      const schedule = () => {
+        const healthy = wsStateRef.current === 'open'
+          && Date.now() - lastWSUpdateRef.current < 15000
+        timer = window.setTimeout(async () => {
+          await pollOnce()
+          schedule()
+        }, healthy ? POLL_SLOW_MS : POLL_FAST_MS)
+      }
+      schedule()
+      return () => clearTimeout(timer)
     }
-  }, [roomId, store.mode, readOnly])
+
+    if (isBroadcaster) {
+      // 教师端：事件驱动 + 双阈值，代替原来每秒一次的定时序列化
+      const tick = setInterval(() => pushSnapshot(TEACHER_MAX_WAIT_MS), PUSH_TICK_MS)
+      // ★ HTTP 保存：WS 正常时 30s 一次（服务端自己也按房间节流落库）；WS 掉了就收紧到
+      //   10s —— 这时它是唯一能把板书送进服务端的路径，学生端兜底轮询要靠它才拿得到新内容
+      let httpTimer = 0
+      const httpSave = async () => {
+        if (didSaveRef.current && snapshotHashRef.current) {
+          didSaveRef.current = false
+          try {
+            await apiClient.put(
+              `/api/whiteboard/rooms/${roomId}/pages/${useWhiteboardStore.getState().currentPage}`,
+              { snapshot_data: snapshotHashRef.current },
+            )
+          } catch { /* 静默：下一轮再试 */ }
+        }
+        httpTimer = window.setTimeout(httpSave, wsStateRef.current === 'open' ? 30000 : 10000)
+      }
+      httpTimer = window.setTimeout(httpSave, 30000)
+      return () => {
+        clearInterval(tick); clearTimeout(httpTimer)
+        snapshotHashRef.current = ''; didSaveRef.current = false
+      }
+    }
+
+    if (store.mode === 'interactive') {
+      // 互动模式已授权学生：同样事件驱动，节拍放宽一档（一人对着全班，带宽省着用）
+      const tick = setInterval(() => pushSnapshot(STAGE_MAX_WAIT_MS), PUSH_TICK_MS)
+      return () => { clearInterval(tick); snapshotHashRef.current = '' }
+    }
+    // 自习模式学生：自己画自己的，不做任何同步
+  }, [roomId, store.mode, readOnly, isBroadcaster, ws.send])
+
 
   const [tldrawEditor, setTldrawEditor] = useState<Editor | null>(null)
 
@@ -208,13 +244,15 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
         })
       } catch { /* skip */ }
     }
-    // HTTP 兜底拉取初始快照（仅限只读端，且仅一次）
-if (readOnlyRef.current && !httpSyncedRef.current) {
+    // HTTP 兜底拉取初始快照：只读端之外，WS 已被拒/已断的端也要（仅一次）。
+  // 房间已结束或无权限时 WS 连不上，还只认 WS 就会出现
+  // "板书明明在库里、屏幕却是一片空白"。
+if ((readOnlyRef.current || ws.state === 'rejected' || ws.state === 'closed') && !httpSyncedRef.current) {
   httpSyncedRef.current = true
   apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`)
     .then(res => {
-      // 请求发出后可能已切换为非只读（如自习），此时不加载快照以免覆盖
-      if (!readOnlyRef.current) return
+      // 请求发出后可能已切换为非只读（如自习）且 WS 正常，此时不加载以免覆盖
+      if (!readOnlyRef.current && ws.state === 'open') return
       const data = res.data
       if (data.snapshot) {
         editor.store.mergeRemoteChanges(() => {
@@ -263,6 +301,11 @@ ws.send({ type: 'request_sync' })
           return
         }
         lastWSUpdateRef.current = Date.now()
+        // loadSnapshot 是整篇替换（重建全部图形 + 重算几何），一份 21KB 在弱机上就是
+        // 一眼可见的卡顿；内容其实没变的话，跳过这次重载。
+        const sig = snapshot.length + '_' + snapshot.slice(0, 200)
+        if (sig === appliedSigRef.current) return
+        appliedSigRef.current = sig
         try {
           isSendingRef.current = true
           editor.store.mergeRemoteChanges(() => {

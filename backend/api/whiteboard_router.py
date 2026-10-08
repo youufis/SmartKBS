@@ -148,6 +148,60 @@ def _assert_room_access(user: dict, room_id: int, need_manage: bool = False,
     raise HTTPException(status_code=403, detail=f"无权访问该房间的{what}")
 
 
+# ── WebSocket 握手拒绝码 ──
+# 为什么要在 accept 之后才关闭：Starlette 在 accept 之前 close()，uvicorn 只会
+# 记一行 "WebSocket /api/whiteboard/ws/3 403 connection rejected"，浏览器侧拿到的是
+# 一个没有原因的失败 —— 教师端表现成"白板一片空白"，谁也不知道是房间结束了、
+# 令牌过期了，还是自己跟这个房间没关系。已通过认证的请求一律先握手、把原因作为
+# 业务帧发给前端、再按应用状态码关闭；只有认证失败（不给未认证方回显通道）保留
+# accept 前关闭。
+WS_CLOSE_AUTH = 4001
+WS_CLOSE_FORBIDDEN = 4403
+WS_CLOSE_NOT_FOUND = 4404
+WS_CLOSE_ROOM_ENDED = 4410
+WS_CLOSE_INTERNAL = 4500      # 服务端处理异常：可重连，不是权限或状态问题
+
+
+async def _ws_reject(websocket: WebSocket, code: int, reason: str, *,
+                     room_id: Any, username: str = "", role: str = "") -> None:
+    """拒绝一次白板 WS 连接：日志留下一行可诊断的记录，前端拿到可读的原因"""
+    logger.warning(
+        f"[白板WS] 拒绝连接 room={room_id} user={username or '<未认证>'}"
+        f"({role or '-'}) code={code} 原因={reason}"
+    )
+    try:
+        if code != WS_CLOSE_AUTH:
+            await websocket.accept()
+            await websocket.send_json(
+                {"type": "ws_rejected", "code": code, "reason": reason})
+        await websocket.close(code=code, reason=reason)
+    except Exception as e:
+        logger.debug(f"[白板WS] 拒绝响应未送达 room={room_id}: {e}")
+
+
+def _operate_denied_reason(role: str, mode: str, can_manage: bool) -> str:
+    """书写权被拒时给当事人一句人话（原来只有一行服务端日志，界面毫无反应）"""
+    if role == "teacher":
+        if not can_manage:
+            return "你是旁观教师：只有房主和管理员可以在这个房间书写"
+        return "当前状态不允许书写，请重新进入房间"
+    if mode == "interactive":
+        return "还没有老师授权你上台，请等待授权"
+    if mode == "self_study":
+        return "自习模式已切换，请重新进入房间"
+    return "演示模式下学生只读，需要老师切到互动模式并授权"
+
+
+def _assert_room_open(room: dict, action: str = "修改板书") -> None:
+    """已结束的房间不再接受写入。
+
+    不拦的话就会出现"教师在已结束的房间里画了半天，学生端永远看不到"的幽灵板书：
+    房间不在学生列表里、WS 也进不来，只有老师自己看得见。
+    """
+    if (room.get("status") or "") != "active":
+        raise HTTPException(status_code=409, detail=f"该白板已结束，请先重新开启再{action}")
+
+
 def _jm_parse(frag: str) -> dict:
     """白板 AI 动作 JSON：直解失败走统一容错层；仍失败抛异常走既有错误路径"""
     from backend import ai_json
@@ -357,7 +411,8 @@ async def get_room(room_id: int, request: Request):
 
 
 @router.get("/rooms/{room_id}/snapshot", summary="获取当前快照（HTTP 兜底，IIS 环境用）")
-async def get_snapshot(room_id: int, request: Request):
+async def get_snapshot(room_id: int, request: Request,
+                       sig: str = Query("", max_length=400)):
     """通过 HTTP 获取当前快照和授权状态，IIS 下 WebSocket 不可用时作为兜底"""
     user = get_current_user(request)
     username = user["username"]
@@ -367,7 +422,11 @@ async def get_snapshot(room_id: int, request: Request):
     # 获取当前模式和学生授权状态
     mode = whiteboard_manager.get_mode(room_id)
     granted = whiteboard_manager.is_granted(room_id, username)
-    return {"snapshot": snap, "mode": mode, "granted": granted}
+    # 客户端那份还一样：只回 unchanged，别再传一遍全量
+    if sig and snap and _snapshot_sig(snap) == sig:
+        return {"snapshot": "", "unchanged": True, "mode": mode, "granted": granted, "sig": sig}
+    return {"snapshot": snap, "mode": mode, "granted": granted,
+            "sig": _snapshot_sig(snap) if snap else ""}
 
 
 @router.patch("/rooms/{room_id}", summary="更新房间配置")
@@ -416,12 +475,51 @@ async def end_room(room_id: int, request: Request):
 
     now = _now()
     execute_insert_update(
-        "UPDATE whiteboard_rooms SET status='ended', ended_at=? WHERE id=?",
+        "UPDATE whiteboard_rooms SET status='ended', ended_at=?, student_count=0 WHERE id=?",
         (now, room_id),
     )
-    await whiteboard_manager.broadcast(room_id, {"type": "room_ended"})
-    whiteboard_manager.rooms.pop(room_id, None)
+    # 成员在线状态跟着房间一起收尾：原来只改房间，leave_time 全留着 NULL，
+    # 于是成员抽屉和在线人数里永远挂着一堆早就走掉的人（也污染下一节课的统计）。
+    execute_insert_update(
+        "UPDATE whiteboard_room_members SET leave_time=? "
+        "WHERE room_id=? AND leave_time IS NULL",
+        (now, room_id),
+    )
+    # 收尾消息与关闭在同一步里按序完成：先发 room_ended，再关连接
+    await whiteboard_manager.close_room(room_id, code=WS_CLOSE_ROOM_ENDED,
+                                        final_message={"type": "room_ended"})
     return {"status": "ok"}
+
+
+@router.post("/rooms/{room_id}/reopen", summary="重新开启已结束的白板")
+async def reopen_room(room_id: int, request: Request):
+    """把已结束的白板恢复为进行中（仅房主与管理员）
+
+    "结束"原本是不可逆的：误点一次，这节课的板书就再也接不回来，只能新建房间重画；
+    而房间列表照旧提供"进入房间"，于是教师端 WS 被拒、学生端整页空白。
+    """
+    user = get_current_user(request)
+    room = _room_brief(room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="房间不存在")
+    if not _is_room_manager(user, room):
+        raise HTTPException(status_code=403, detail="仅房主和管理员可以重新开启白板")
+    if (room.get("status") or "") != "active":
+        execute_insert_update(
+            "UPDATE whiteboard_rooms SET status='active', ended_at=NULL, student_count=0 "
+            "WHERE id=?",
+            (room_id,),
+        )
+        # 内存房间若还在（异常残留）先回收，让下一次 join 从数据库最新快照重建
+        whiteboard_manager.rooms.pop(room_id, None)
+        logger.info(f"[白板] 房间 #{room_id} 由 {user['username']} 重新开启")
+    # 上一节课遗留的"在线"记录一律落线，避免重新开启后成员抽屉里全是幽灵
+    execute_insert_update(
+        "UPDATE whiteboard_room_members SET leave_time=? "
+        "WHERE room_id=? AND leave_time IS NULL",
+        (_now(), room_id),
+    )
+    return {"status": "ok", "room_id": room_id, "room_status": "active"}
 
 
 @router.delete("/rooms/{room_id}", summary="删除房间")
@@ -449,13 +547,22 @@ async def delete_room(room_id: int, request: Request):
 @router.post("/join-by-code", summary="通过房间码加入")
 async def join_by_code(req: JoinByCodeRequest, request: Request):
     user = get_current_user(request)
+    code = req.room_code.upper().strip()
+    # 同一个房间码可能命中多条记录（旧房间结束后新房间复用了码），优先取进行中的
     rows = execute_query(
-        "SELECT id, title, mode, grade, class_name, creator_username FROM whiteboard_rooms WHERE room_code=? AND status='active'",
-        (req.room_code.upper().strip(),),
+        """SELECT id, title, mode, grade, class_name, creator_username, status
+           FROM whiteboard_rooms WHERE room_code=?
+           ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC""",
+        (code,),
     )
     if not rows:
-        raise HTTPException(status_code=404, detail="房间不存在或已结束")
+        raise HTTPException(status_code=404, detail="房间不存在，请核对房间码")
     r = rows[0]
+    # 学生最常见的一问是"码没输错，怎么进不去"。原来一律回"不存在或已结束"，
+    # 现在分开告知并把下一步（老师重新开启）直接写进错误里。
+    if (r[6] or "") != "active":
+        raise HTTPException(
+            status_code=409, detail=f"白板 {code} 已结束，请老师重新开启后再加入")
 
     # 学生权限：和考试发布一致的逻辑
     if _get_user_role(user) == 2:  # student
@@ -563,7 +670,7 @@ async def save_page(room_id: int, page_number: int, req: SavePageRequest, reques
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可保存页面")
-    _assert_room_access(user, room_id, need_manage=True, what="保存页面")
+    _assert_room_open(_assert_room_access(user, room_id, need_manage=True, what="保存页面"), "保存板书")
     now = _now()
     execute_insert_update(
         """INSERT OR REPLACE INTO whiteboard_pages
@@ -572,6 +679,12 @@ async def save_page(room_id: int, page_number: int, req: SavePageRequest, reques
         (room_id, page_number, req.snapshot_data, req.thumbnail, req.title, now,
          room_id, page_number, now),
     )
+    # 内存副本要跟着走：/snapshot 优先读内存房间，只写库的话，教师 WS 掉线期间的
+    # 兜底保存永远送不到学生端（表现成"再也没有新内容"）。
+    live = whiteboard_manager.rooms.get(room_id)
+    if live is not None and req.snapshot_data:
+        live["last_snapshot"] = req.snapshot_data
+        live.setdefault("dirty_pages", {}).pop(page_number, None)
     return {"status": "ok"}
 
 
@@ -580,7 +693,7 @@ async def add_page(room_id: int, request: Request):
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可新增页面")
-    _assert_room_access(user, room_id, need_manage=True, what="新增页面")
+    _assert_room_open(_assert_room_access(user, room_id, need_manage=True, what="新增页面"), "新增页面")
 
     # 获取最大页码
     rows = execute_query(
@@ -600,7 +713,7 @@ async def delete_page(room_id: int, page_number: int, request: Request):
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可删除页面")
-    _assert_room_access(user, room_id, need_manage=True, what="删除页面")
+    _assert_room_open(_assert_room_access(user, room_id, need_manage=True, what="删除页面"), "删除页面")
     execute_insert_update(
         "DELETE FROM whiteboard_pages WHERE room_id=? AND page_number=?",
         (room_id, page_number),
@@ -686,7 +799,11 @@ async def register_room(room_id: int, request: Request):
     """HTTP 方式注册学生进入房间（IIS 下 WS 不通时替代 join_room）"""
     user = get_current_user(request)
     # S3: 注册即成为成员, 必须先通过房间可见性判定, 否则任何学生可挂进任意房间
-    _assert_room_access(user, room_id, what="加入")
+    room = _assert_room_access(user, room_id, what="加入")
+    # 已结束的房间同样拒绝注册：原来照样写一行 join_time，结果房间早已结束、
+    # 成员表里却挂着"在线"，教师巡览人数与学生端"暂无白板"两边都对不上。
+    if (room.get("status") or "") != "active":
+        raise HTTPException(status_code=409, detail="该白板已结束，请老师重新开启后再进入")
     role = "teacher" if _is_teacher_or_admin(user) else "student"
     execute_insert_update(
         """INSERT OR REPLACE INTO whiteboard_room_members
@@ -828,6 +945,17 @@ def _resolve_snapshot(room_id, live_snapshot: str = "") -> str:
     if rows and rows[0][0]:
         return rows[0][0]
     return ""
+
+
+def _snapshot_sig(snap: str) -> str:
+    """快照指纹：长度 + 前 200 字符。
+
+    学生端的兜底轮询原来无论有没有变化都要重下一份全量快照（实测一份 21KB，
+    一个班 55 人每 5 秒一轮就是 230KB/s，这本身就是全班延迟的来源之一）。
+    客户端把自己那份的指纹带上来，服务端一致就只回 unchanged。
+    与前端 sigOf() 必须保持一致。
+    """
+    return f"{len(snap)}_{snap[:200]}"
 
 
 def _snapshot_records(snapshot_json: str) -> dict:
@@ -2328,23 +2456,26 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
     """白板 WebSocket 实时通信"""
     # 1. 认证
     from backend.auth import authenticate_payload
-    token = websocket.query_params.get("token", "")
+    try:
+        from backend.middleware import TOKEN_COOKIE
+    except Exception:
+        TOKEN_COOKIE = "smartkb_token"
+    # 令牌优先用同源握手自动带上的 Cookie。?token= 会把 JWT 原文连 query string 一起
+    # 落进访问日志（等于凭据多一份明文副本），查询参数只作为旧客户端/桌面端兜底。
+    token = (websocket.cookies.get(TOKEN_COOKIE, "")
+             or websocket.query_params.get("token", ""))
     if not token:
-        await websocket.close(code=4001, reason="缺少认证令牌")
+        await _ws_reject(websocket, WS_CLOSE_AUTH, "缺少认证令牌", room_id=room_id)
         return
 
     try:
         payload = authenticate_payload(token)
-        if payload is None:
-            await websocket.close(code=4001, reason="认证失败")
-            return
-        username = payload.get("username", "") or ""
     except Exception:
-        await websocket.close(code=4001, reason="认证失败")
-        return
-
+        payload = None
+    username = (payload or {}).get("username", "") or ""
     if not username:
-        await websocket.close(code=4001, reason="认证失败")
+        await _ws_reject(websocket, WS_CLOSE_AUTH,
+                         "登录状态已失效，请刷新页面重新登录", room_id=room_id)
         return
 
     # 2. 查询用户详情
@@ -2352,7 +2483,8 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
         "SELECT username, role, name FROM users WHERE username=?", (username,),
     )
     if not rows:
-        await websocket.close(code=4001, reason="用户不存在")
+        await _ws_reject(websocket, WS_CLOSE_AUTH, "账号不存在，请重新登录",
+                         room_id=room_id, username=username)
         return
 
     row = rows[0]
@@ -2360,40 +2492,72 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
     role_num = row[1]
     role = "teacher" if role_num in (0, 1) else "student"
 
-    # 3. 验证房间存在
+    # 3. 房间：先不带状态取全量，再分别给"不存在 / 已结束 / 无权限"三种说法。
+    #    原来一条 SQL 里写死 status='active'，三种情况共用一个"房间不存在或已结束"，
+    #    日志和界面都看不出到底是哪一种。
     room_rows = execute_query(
-        "SELECT id, mode, creator_username, grade FROM whiteboard_rooms WHERE id=? AND status='active'",
+        "SELECT id, mode, creator_username, grade, class_name, status, ended_at "
+        "FROM whiteboard_rooms WHERE id=?",
         (room_id,),
     )
     if not room_rows:
-        await websocket.close(code=4003, reason="房间不存在或已结束")
+        await _ws_reject(websocket, WS_CLOSE_NOT_FOUND, f"房间 #{room_id} 不存在",
+                         room_id=room_id, username=username, role=role)
         return
 
-    room_mode = room_rows[0][1]
+    r = room_rows[0]
+    room_mode = r[1]
+    room_status = r[5] or ""
 
-    # S5: 仅验 token + 房间活跃是不够的 —— 还要确认该用户与房间的归属关系
+    # S5: 仅验 token 是不够的 —— 还要确认该用户与房间的归属关系
     room_ref = {
-        "id": room_rows[0][0],
-        "creator_username": room_rows[0][2] or "",
-        "grade": room_rows[0][3] or "",
-        "class_name": "",
-        "status": "active",
+        "id": r[0],
+        "creator_username": r[2] or "",
+        "grade": r[3] or "",
+        "class_name": r[4] or "",
+        "status": room_status,
     }
     can_manage = (role_num == 0) or (username == room_ref["creator_username"])
+
+    if room_status != "active":
+        ended_at = str(r[6] or "")[:16]
+        tip = "板书内容仍可回看与导出" if can_manage else "请向老师确认新的房间码"
+        await _ws_reject(
+            websocket, WS_CLOSE_ROOM_ENDED,
+            f"该白板已于 {ended_at or '此前'} 结束，不能进入实时房间；{tip}",
+            room_id=room_id, username=username, role=role)
+        return
+
     if not can_manage:
         joined = _is_room_member(username, room_id)
         if role == "teacher":
             permitted = joined or _teacher_covers_room(username, room_ref)
+            why = "你不是创建者或成员，且该房间年级不在你的任教范围"
         else:
             permitted = joined or _student_can_join_room({"username": username}, room_ref)
+            why = "该白板的开放范围不包含你的年级班级"
         if not permitted:
-            await websocket.close(code=4403, reason="无权访问该房间")
+            scope = " ".join(x for x in [room_ref["grade"], room_ref["class_name"]] if x)
+            await _ws_reject(
+                websocket, WS_CLOSE_FORBIDDEN,
+                f"无权访问该房间：{why}（开放范围：{scope or '全体'}）",
+                room_id=room_id, username=username, role=role)
             return
 
     # 4. 加入房间
     await whiteboard_manager.join_room(room_id, username, role, websocket)
     # 同步房间模式
     whiteboard_manager.set_mode(room_id, room_mode)
+    # 5. 握手回执：把服务端权威状态交给前端（模式/能否书写/是否已被授权），
+    #    避免界面按"猜出来的角色"渲染，学生以为自己能写、老师以为自己是房主。
+    await whiteboard_manager.send_to_user(room_id, username, {
+        "type": "room_ready",
+        "role": role,
+        "mode": whiteboard_manager.get_mode(room_id),
+        "can_manage": can_manage,
+        "granted": whiteboard_manager.is_granted(room_id, username),
+        "current_page": whiteboard_manager.get_current_page(room_id),
+    })
 
     try:
         while True:
@@ -2408,6 +2572,20 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                     await whiteboard_manager.handle_op(room_id, username, data)
                 else:
                     logger.warning(f"[白板WS] op denied for {username}({role}), room={room_id}, mode={live_mode}")
+                    # 只记日志不吭声，当事人只会觉得"画了没反应"；回一句人话（每连接一次）
+                    await whiteboard_manager.notify_once(room_id, username, {
+                        "type": "op_denied",
+                        "reason": _operate_denied_reason(role, live_mode, can_manage),
+                    })
+
+            # ── 心跳 ──
+            elif msg_type == "ping":
+                # 半开连接（IIS/代理空闲回收、断网）只能靠“发了没回音”发现；
+                # 原样回一个 pong，前端据此判断链路是否真的还活着。
+                # 走投递队列而不是直发：同一连接上只允许有一个发送顺序，
+                # 否则 pong 会插到还在排队的 room_ready/快照前面。
+                await whiteboard_manager.send_to_user(
+                    room_id, username, {"type": "pong", "t": data.get("t")})
 
             # ── 光标同步 ──
             elif msg_type == "cursor":
@@ -2418,6 +2596,8 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                 if role == "teacher" and can_manage:
                     page = data.get("page", 1)
                     whiteboard_manager.set_current_page(room_id, page)
+                    # 落库是按房间节流的，库里可能还差最后几秒；切页要读库，先 flush
+                    await whiteboard_manager.flush_persist(room_id)
                     # 加载新页面快照
                     page_rows = execute_query(
                         "SELECT snapshot_data FROM whiteboard_pages WHERE room_id=? AND page_number=?",
@@ -2439,13 +2619,22 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                         "UPDATE whiteboard_rooms SET mode=? WHERE id=?",
                         (new_mode, room_id),
                     )
-                    # 退出互动模式时清除所有学生授权
+                    # 退出互动模式时清除所有学生授权。
+                    # 必须逐个回发 control_revoked：学生端的"我已上台"是本地状态，
+                    # 不通知就一直是 true，于是它停在"非只读"分支——既不轮询、WS 又拒绝
+                    # 它的数据，屏幕只剩自己的旧板面，表现为"演示模式学生看不到内容，
+                    # 切到互动再切回才有"。
                     if old_mode == "interactive" and new_mode != "interactive":
                         room = whiteboard_manager.rooms.get(room_id)
                         if room:
-                            room.get("granted_users", set()).clear()
-                            for conn in room.get("connections", {}).values():
+                            for name, conn in list(room.get("connections", {}).items()):
+                                was_granted = conn.get("granted") or name in room.get(
+                                    "granted_users", set())
                                 conn["granted"] = False
+                                if was_granted:
+                                    await whiteboard_manager.send_to_user(
+                                        room_id, name, {"type": "control_revoked"})
+                            room.get("granted_users", set()).clear()
                     await whiteboard_manager.broadcast(room_id, {
                         "type": "mode_changed",
                         "mode": new_mode,
@@ -2492,7 +2681,18 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
     except WebSocketDisconnect:
         await whiteboard_manager.leave_room(room_id, username)
     except Exception as e:
-        logger.warning(f"白板 WS 异常 room#{room_id} user={username}: {e}")
+        logger.warning(f"白板 WS 异常 room#{room_id} user={username}: {e}", exc_info=True)
+        # 不能只留一行日志就悄悄把连接放掉：前端等到的是"连上了但永远没回音"，
+        # 现场表现就是"画了没反应"，而且测试也只能干等。先说清楚，再按可重连的码关闭。
+        try:
+            await websocket.send_json({
+                "type": "ws_error",
+                "code": WS_CLOSE_INTERNAL,
+                "reason": "白板实时服务处理这条消息时出错了",
+            })
+            await websocket.close(code=WS_CLOSE_INTERNAL, reason="服务端异常，请重连")
+        except Exception:
+            pass
         await whiteboard_manager.leave_room(room_id, username)
 
 

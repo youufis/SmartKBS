@@ -10,7 +10,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   PlusOutlined, CopyOutlined, PlayCircleOutlined,
   StopOutlined, DeleteOutlined, ReloadOutlined,
-  EyeOutlined, EditOutlined,
+  EyeOutlined, EditOutlined, UnlockOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -46,7 +46,9 @@ const WhiteboardPage: React.FC = () => {
     setLoading(true)
     try {
       const data = await whiteboardApi.listRooms(1, 50)
-      setRooms(data)
+      // 进行中的排前面：老师点开列表要找的是"这节课能用哪个"，不是一堆历史房间
+      const rank = (r: WhiteboardRoom) => (r.status === 'active' ? 0 : 1)
+      setRooms([...data].sort((a, b) => rank(a) - rank(b) || b.id - a.id))
     } catch {
       // ignore
     } finally {
@@ -151,6 +153,17 @@ const WhiteboardPage: React.FC = () => {
     }
   }
 
+  // ── 重新开启房间（已结束的房间学生端不可见，教师也连不上）──
+  const handleReopen = async (roomId: number) => {
+    try {
+      await whiteboardApi.reopenRoom(roomId)
+      message.success(t('wbReopened'))
+      loadRooms()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('wbReopenFailed'))
+    }
+  }
+
   // ── 删除房间 ──
   const handleDelete = async (roomId: number) => {
     try {
@@ -212,7 +225,7 @@ const WhiteboardPage: React.FC = () => {
       title: t('actions'), key: 'actions', width: 120,
       render: (_, record) => (
         <Space>
-          <Tooltip title={t('wpEnterRoom')}>
+          <Tooltip title={record.status === 'active' ? t('wpEnterRoom') : t('wpReviewRoom')}>
             <Button
               size="small"
               type="primary"
@@ -220,6 +233,13 @@ const WhiteboardPage: React.FC = () => {
               onClick={() => navigate(`/whiteboard-room/${record.id}`)}
             />
           </Tooltip>
+          {isTeacher && record.status !== 'active' && (
+            <Popconfirm title={t('wbReopenConfirm')} onConfirm={() => handleReopen(record.id)}>
+              <Tooltip title={t('wpReopenRoom')}>
+                <Button size="small" icon={<UnlockOutlined />} />
+              </Tooltip>
+            </Popconfirm>
+          )}
           {isTeacher && record.status === 'active' && (
             <Popconfirm title={t('wpConfirmEnd')} onConfirm={() => handleEnd(record.id)}>
               <Tooltip title={t('wpEndRoom')}>
@@ -271,7 +291,7 @@ const WhiteboardPage: React.FC = () => {
         rowKey="id"
         loading={loading}
         pagination={{ pageSize: 20 }}
-        locale={{ emptyText: t('noWhiteboards') }}
+        locale={{ emptyText: isStudent ? t('noWhiteboardsStudent') : t('noWhiteboards') }}
       />
 
       {/* ── 创建房间弹窗 ── */}

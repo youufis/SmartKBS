@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Button, Space, Typography, Tag, message, Modal, Input, Drawer,
-  Tooltip, Badge, Divider, Segmented,
+  Tooltip, Badge, Divider, Segmented, Alert,
 } from 'antd'
 import {
   ArrowLeftOutlined, TeamOutlined, SettingOutlined,
@@ -44,6 +44,10 @@ const WhiteboardRoomPage: React.FC = () => {
   const [onlineCount, setOnlineCount] = useState(0)
   const [mode, setModeState] = useState<WhiteboardMode>('demo')
   const [roomStatus, setRoomStatus] = useState('active')
+  const [canManage, setCanManage] = useState(false) // 房主或管理员：可书写/授权/结束/重新开启
+  const [reopening, setReopening] = useState(false)
+  const [spectator, setSpectator] = useState(false)  // 同年级旁观教师（可看不可写）
+  const [drawDenied, setDrawDenied] = useState('')   // 服务端拒绝书写的原因
   const [membersOpen, setMembersOpen] = useState(false)
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
@@ -61,17 +65,22 @@ const WhiteboardRoomPage: React.FC = () => {
         setRoomTitle(room.title)
         setModeState(room.mode as WhiteboardMode)
         setRoomStatus(room.status)
+        setCanManage(user?.role === 'admin' || (!!user?.username && user.username === (room.creator_username || '')))
         setMode(room.mode as WhiteboardMode)
         setRoom(room)
+        // 注册当前用户进入房间（HTTP 方式，WS 不通时仍能被识别）。
+        // 已结束的房间不再注册：房间都死了还写一行"在线"，成员与在线人数就变幽灵。
+        if (room.status === 'active') {
+          whiteboardApi.registerToRoom(rid)
+            .catch((err) => { reportLoadError(err, { key: 'whiteboardRoom.register' }) })
+        }
       } catch {
         message.error(t('roomNotFound'))
         navigate('/whiteboard')
       }
     }
     load()
-    // 注册当前用户进入房间（HTTP 方式，WS 不通时仍能被识别）
-    whiteboardApi.registerToRoom(rid).catch((err) => { reportLoadError(err, { key: 'whiteboardRoom.register' }) })
-  }, [rid, navigate])
+  }, [rid, navigate, user])
 
   // ── 加载成员 ──
   const loadMembers = useCallback(async () => {
@@ -110,6 +119,13 @@ const WhiteboardRoomPage: React.FC = () => {
       if (msg.type === 'mode_changed') {
         setModeState(msg.mode as WhiteboardMode)
         setMode(msg.mode as WhiteboardMode)
+        // 离开互动模式就等于"没人再授权你上台"。本地这个标志若还留着 true，学生会停在
+        // "可写"分支：既不轮询兜底、WS 又拒收它的 op，屏幕只剩自己的旧板面 —— 于是历史上
+        // 要靠"切到互动再切回演示"才能重新看到老师的内容。
+        if ((msg.mode as string) !== 'interactive') {
+          setGrantedToMe(false)
+          setDrawDenied('')
+        }
       }
       if (msg.type === 'student_submitted') {
         message.success(t('studentSubmitted', { username: msg.username }))
@@ -118,6 +134,23 @@ const WhiteboardRoomPage: React.FC = () => {
       if (msg.type === 'room_ended') {
         message.info(t('roomEnded'))
         setRoomStatus('ended')
+      }
+      if (msg.type === 'room_ready') {
+        // 服务端权威状态：模式、能否书写、是否已被授权，界面据此渲染
+        const readyMode = msg.mode as WhiteboardMode | undefined
+        if (readyMode) {
+          setModeState(readyMode)
+          setMode(readyMode)
+        }
+        setGrantedToMe(Boolean(msg.granted))
+        setCanManage(Boolean(msg.can_manage))
+        setSpectator((msg.role as string) === 'teacher' && !msg.can_manage)
+      }
+      if (msg.type === 'op_denied') {
+        // 书写被拒不再只是服务端一行日志：当事人要看见"为什么画了没反应"
+        const reason = String(msg.reason || '')
+        setDrawDenied(reason)
+        if (reason) message.warning(reason)
       }
       // 学生：收到授权/收回通知
       if (msg.type === 'control_granted') {
@@ -156,6 +189,28 @@ const WhiteboardRoomPage: React.FC = () => {
           message.success(t('wbEnded'))
         } catch {
           message.error(t('wbOpFailed'))
+        }
+      },
+    })
+  }
+
+  // ── 重新开启已结束的白板（仅房主与管理员）──
+  const handleReopen = () => {
+    Modal.confirm({
+      title: t('wbReopen'),
+      content: t('wbReopenConfirm'),
+      onOk: async () => {
+        setReopening(true)
+        try {
+          await whiteboardApi.reopenRoom(rid)
+          setRoomStatus('active')
+          setDrawDenied('')
+          message.success(t('wbReopened'))
+          ws.reconnect()
+        } catch (err: any) {
+          message.error(err?.response?.data?.detail || t('wbReopenFailed'))
+        } finally {
+          setReopening(false)
         }
       },
     })
@@ -263,6 +318,11 @@ const WhiteboardRoomPage: React.FC = () => {
 
   // 演示模式：学生只读；互动模式：授权后可操作；自习：学生各自操作
   const readOnly = !isTeacher && mode !== 'self_study' && (!grantedToMe || mode !== 'interactive')
+  // 房间已结束、或教师只是同年级旁观：一律只读。服务端此时同样拒绝写入与注册，
+  // 界面不给"能画"的错觉，老师才不会在半死的房间里写学生永远看不到的板书。
+  const canDraw = roomStatus === 'active' && (!isTeacher || canManage)
+  const boardReadOnly = readOnly || !canDraw
+  const isBroadcaster = isTeacher && canDraw
 
   return (
     <div style={{ 
@@ -349,7 +409,7 @@ const WhiteboardRoomPage: React.FC = () => {
               />
             </Tooltip>
           )}
-          {isTeacher && (
+          {isTeacher && canManage && (
             <Tooltip title={t('wbClear')}>
               <Button
                 type="text"
@@ -369,16 +429,47 @@ const WhiteboardRoomPage: React.FC = () => {
               </Button>
             </Tooltip>
           )}
-          {isTeacher && roomStatus === 'active' && (
+          {isTeacher && canManage && roomStatus === 'active' && (
             <Button danger icon={<StopOutlined />} onClick={handleEnd}>{t('end')}</Button>
           )}
         </Space>
       </div>
 
+      {/* ── 状态横幅：房间已结束 / 实时连接被拒，都要当场说清楚，不再只留一行服务端日志 ── */}
+      {roomStatus === 'ended' ? (
+        <div style={{ padding: '8px 16px', flexShrink: 0 }}>
+          <Alert
+            type="warning"
+            showIcon
+            message={isTeacher ? t('wbRoomEndedBanner') : t('wbRoomEndedBannerStudent')}
+            action={isTeacher && canManage ? (
+              <Button size="small" type="primary" loading={reopening} onClick={handleReopen}>
+                {t('wbReopen')}
+              </Button>
+            ) : undefined}
+          />
+        </div>
+      ) : (ws.rejection || ws.state === 'rejected' || ws.state === 'closed') ? (
+        <div style={{ padding: '8px 16px', flexShrink: 0 }}>
+          <Alert
+            type="error"
+            showIcon
+            message={t('wbWsRejected', {
+              reason: ws.rejection?.reason || t('wbWsRejectedUnknown'),
+            })}
+            action={(
+              <Button size="small" onClick={() => ws.reconnect()}>
+                {t('wbRetryConnect')}
+              </Button>
+            )}
+          />
+        </div>
+      ) : null}
+
       {/* ── 主区域：白板 + AI 面板（占位模式） ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <WhiteboardCanvas roomId={rid} readOnly={readOnly} isBroadcaster={isTeacher} ws={ws} externalEditorRef={editorRef} />
+          <WhiteboardCanvas roomId={rid} readOnly={boardReadOnly} isBroadcaster={isBroadcaster} ws={ws} externalEditorRef={editorRef} />
         </div>
         <AIPanel
           roomId={rid}
@@ -402,15 +493,26 @@ const WhiteboardRoomPage: React.FC = () => {
         background: 'var(--bg-layout)', flexShrink: 0, fontSize: 12, color: 'var(--text-tertiary)',
       }}>
         <span>
-          {readOnly ? '👁 ' + t('wbReadonly') : '✏️ ' + t('wbEditable')}
+          {boardReadOnly ? '👁 ' + t('wbReadonly') : '✏️ ' + t('wbEditable')}
           {' '}|{' '}
           {mode === 'demo' && t('wbDemoHint')}
-          {mode === 'demo' && isTeacher && <span style={{ color: '#faad14' }}>{t('wbDemoHint2')}</span>}
           {mode === 'interactive' && t('wbModeInterHint')}
           {mode === 'self_study' && t('wbModeSelfHint')}
+          {spectator && <span style={{ color: '#faad14' }}> · {t('wbSpectator')}</span>}
+          {drawDenied && <span style={{ color: '#faad14' }}> · {drawDenied}</span>}
         </span>
         <span>
-          {ws.isConnected ? '\ud83d\udfe2 ' + t('wbConnected') : <Tooltip title={t('wbPollTip')}>{'\u26a1 ' + t('wbPollConnected')}</Tooltip>}
+          {ws.state === 'open'
+            ? '\ud83d\udfe2 ' + t('wbConnected')
+            : ws.state === 'connecting' || ws.state === 'retrying'
+              ? '\ud83d\udd04 ' + t(ws.state === 'connecting' ? 'wbConnecting' : 'wbRetrying')
+              : boardReadOnly
+                ? <Tooltip title={t('wbPollTip')}>{'\u26a1 ' + t('wbPollConnected')}</Tooltip>
+                : (
+                  <Tooltip title={ws.rejection?.reason || t('wbWsDeadTip')}>
+                    {'\ud83d\udd34 ' + t('wbDisconnected')}
+                  </Tooltip>
+                )}
         </span>
       </div>
 
