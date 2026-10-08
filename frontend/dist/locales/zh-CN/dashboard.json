@@ -72,6 +72,7 @@
   "important": "重要",
   "normal": "普通",
   "chart": {
+    "noExamDataHint": "考完一场就会出现在这里",
     "radarDimension": "能力维度",
     "learningActivity": "学习活动",
     "questChallenge": "闯关挑战",
@@ -581,6 +582,12 @@
     "streak": "连续学习 {{n}} 天"
   },
   "statsS": {
+    "unitRank": "排名 {{rank}}",
+    "unitDone": "已完成 {{n}}",
+    "unitOverdue": "逾期{{n}}",
+    "unitUrgent": "紧急{{n}}",
+    "unitTotal": "共{{n}}",
+    "unitMastered": "已掌握{{n}}",
     "todoExams": "待完成考试",
     "todoExamsSuffix": "已完成 {{done}}",
     "pendingTodo": "待办任务",
@@ -591,6 +598,16 @@
     "myScoreSuffix": "排名 {{rank}}"
   },
   "statsT": {
+    "unitDraft": "草稿{{n}}",
+    "unitEnded": "已结束{{n}}",
+    "unitQuestions": "提问{{n}}",
+    "unitHomework": "作业{{n}}",
+    "unitLiveExams": "考试{{n}}",
+    "unitPapers": "答卷{{n}}",
+    "unitExams": "{{n}}场",
+    "unitTasks": "任务{{n}}",
+    "unitQuizzes": "测验{{n}}",
+    "unitQuick": "抢答{{n}}",
     "examManage": "已发布考试",
     "examSuffix": "草稿{{draft}} · 已结束{{ended}}",
     "pending": "待处理批阅",
@@ -602,6 +619,9 @@
     "pendingClear": "答卷与任务都已批改"
   },
   "trend": {
+    "dod": "较昨日 {{n}}",
+    "heatTip": "{{day}}：积分 {{points}} · 对话 {{chats}} · 行为 {{actions}}",
+    "emptyHint": "有学习记录后，这里会出现走势与活跃条",
     "title": "近7天学习动态",
     "weekPoints": "本周积分 +{{n}}",
     "points": "积分",
@@ -609,6 +629,7 @@
     "empty": "近 7 天还没有动态数据，去完成一项任务吧"
   },
   "radar": {
+    "noDataHint": "答题后自动生成画像",
     "title": "能力画像",
     "hint": "基于考试、课程练习、智能练习、错题掌握的真实正确率/完成率计算",
     "exam": "考试均分",
@@ -618,11 +639,18 @@
     "noData": "完成一些活动后，这里会显示你的能力维度"
   },
   "scores": {
+    "rate": "得分率",
+    "avgLine": "平均 {{v}}%",
     "avgRate": "均分率 {{v}}%",
     "total": "总分",
     "mine": "得分"
   },
   "growth": {
+    "mastery": "掌握度",
+    "mWrong": "错题掌握",
+    "mPractice": "练习完成",
+    "mCourse": "课程正确率",
+    "joined": "参与：闯关 {{quest}} 次 · 抢答 {{quiz}} 次 · 练习 {{practice}} 次",
     "title": "成长档案",
     "nextTitle": "下一称号：{{name}}",
     "maxTitle": "已是最高称号",
@@ -661,6 +689,7 @@
     "ongoingHint": "正在进行中"
   },
   "stars": {
+    "emptyCta": "去发起随堂测验",
     "title": "一周之星",
     "sub": "本周积分 TOP5（周一起算）",
     "weekTooltip": "本周一至今：点名 {{rounds}} 轮 · 被点 {{calls}} 人次 · 覆盖 {{students}} 人；建校以来累计 {{total}} 次",

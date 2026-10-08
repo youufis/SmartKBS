@@ -15,6 +15,13 @@ import { reportLoadError } from '../../utils/loadError'
 
 const { Text } = Typography
 
+/** 批次4：早/午/晚各一套渐变，首屏随时间有变化 */
+const TIME_THEME: Record<string, { bg: string }> = {
+  morning: { bg: 'linear-gradient(135deg, #1677ff 0%, #0ea5e9 100%)' },
+  afternoon: { bg: 'linear-gradient(135deg, #0958d9 0%, #1677ff 100%)' },
+  evening: { bg: 'linear-gradient(135deg, #531dab 0%, #0958d9 100%)' },
+}
+
 interface Props {
   summary: DashboardSummary
   todoTotal: number
@@ -53,7 +60,7 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
   return (
     <Card style={{
       marginBottom: 16,
-      background: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
+      background: TIME_THEME[timeKey].bg,
       borderRadius: 10,
       border: 'none',
     }} styles={{ body: { padding: '12px 20px' } }}>

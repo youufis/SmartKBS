@@ -17,6 +17,7 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
   const stars = todo?.weekly_top_students ?? []
+  const maxPts = Math.max(1, ...stars.map((s) => Number(s.points) || 0))
 
   // 本周点名统一按周一起算；卡片显示"轮次"，其余口径放进悬停说明，
   // 免得又把"累计"当成"本周"（老字段 rollcall_this_week 就是这么骗人的）
@@ -28,6 +29,7 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
   return (
     <Card
       size="small"
+      className="dash-card"
       style={{ height: '100%' }}
       title={
         <Space size={6}>
@@ -42,18 +44,35 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
       {stars.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '20px 0' }}>
           <Text type="secondary" style={{ fontSize: 12 }}>{t('stars.empty')}</Text>
+          <div style={{ marginTop: 6 }}>
+            <Button size="small" type="primary" ghost onClick={() => navigate('/interaction')}>
+              {t('stars.emptyCta')}
+            </Button>
+          </div>
         </div>
       ) : (
-        <div>
+        <div className="dash-stagger">
           {stars.map((s, idx) => (
             <div
               key={`${s.username}-${idx}`}
               style={{
+                position: 'relative',
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                 padding: '5px 0',
                 borderBottom: idx === stars.length - 1 ? 'none' : '1px solid rgba(128,128,128,0.12)',
               }}
             >
+              {/* 以榜首为 100% 的相对条：光看分数看不出差多少，有条才有比较 */}
+              <span
+                className="dash-bar-fill"
+                aria-hidden
+                style={{
+                  position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 4,
+                  width: `${((Number(s.points) || 0) / maxPts) * 100}%`,
+                  background: idx === 0 ? 'rgba(250,173,20,0.18)' : 'rgba(22,119,255,0.10)',
+                  pointerEvents: 'none',
+                }}
+              />
               <Space size={8} style={{ minWidth: 0 }}>
                 <span style={{ width: 22, textAlign: 'center', fontSize: idx < 3 ? 15 : 12, fontWeight: 600, flexShrink: 0 }}>
                   {MEDALS[idx]}

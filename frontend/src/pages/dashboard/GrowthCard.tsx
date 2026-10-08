@@ -25,11 +25,26 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
     return () => { cancelled = true }
   }, [])
 
+  const practiceDone = summary.completed_practice_count ?? 0
+  const practiceAll = practiceDone + (summary.pending_practice_count ?? 0)
+  const mastery = [
+    (summary.wrong_book_total ?? 0) > 0 && {
+      label: t('growth.mWrong'), pct: Math.round(((summary.wrong_book_mastered ?? 0) / (summary.wrong_book_total ?? 1)) * 100), color: '#52c41a',
+    },
+    practiceAll > 0 && { label: t('growth.mPractice'), pct: Math.round((practiceDone / practiceAll) * 100), color: '#1677ff' },
+    (summary.course_practice_count ?? 0) > 0 && {
+      label: t('growth.mCourse'), pct: Math.max(0, Math.min(100, Math.round(summary.course_practice_avg_accuracy ?? 0))), color: '#722ed1',
+    },
+  ].filter(Boolean) as { label: string; pct: number; color: string }[]
+  const questTimes = summary.quest_completed_count ?? 0
+  const quizTimes = summary.quick_quiz_participated ?? 0
+  const practiceTimes = practiceDone
   const badgesHint = `${t('growth.badges')}: ${summary.badges_unlocked ?? 0}/${summary.badges_total ?? 0}`
 
   return (
     <Card
       size="small"
+      className="dash-card"
       style={{ height: '100%' }}
       title={
         <Space size={6}>
@@ -70,6 +85,33 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
         </Button>
       </div>
 
+      {/* 掌握度：两个比率条 + 一行参与计数。原来这三类活动是三个孤立数字，
+          放在一起才能看出"哪一类做得多、哪一类掌握得差" */}
+      {mastery.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('growth.mastery')}：</Text>
+          <div className="dash-stagger" style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {mastery.map((m) => (
+              <div key={m.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span style={{ width: 60, flexShrink: 0, color: ct.tick, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
+                <span
+                  style={{
+                    flex: 1, height: 6, borderRadius: 3, overflow: 'hidden',
+                    background: ct.isDark ? 'rgba(255,255,255,0.10)' : '#f0f0f0',
+                  }}
+                >
+                  <span
+                    className="dash-bar-fill"
+                    style={{ display: 'block', height: '100%', width: `${m.pct}%`, background: m.color }}
+                  />
+                </span>
+                <strong style={{ width: 38, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{m.pct}%</strong>
+              </div>
+            ))}
+          </div>
+          <Text type="secondary" style={{ fontSize: 11 }}>{t('growth.joined', { quest: questTimes, quiz: quizTimes, practice: practiceTimes })}</Text>
+        </div>
+      )}
       {/* 学科称号 */}
       {subjects.length === 0 && (
         <div style={{ marginBottom: 10 }}>

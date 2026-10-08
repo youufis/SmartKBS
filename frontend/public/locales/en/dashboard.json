@@ -72,6 +72,7 @@
   "important": "Important",
   "normal": "Normal",
   "chart": {
+    "noExamDataHint": "One finished exam is enough to fill this in",
     "radarDimension": "Skills",
     "learningActivity": "Activities",
     "questChallenge": "Quests",
@@ -581,6 +582,12 @@
     "streak": "{{n}}-day study streak"
   },
   "statsS": {
+    "unitRank": "rank {{rank}}",
+    "unitDone": "{{n}} done",
+    "unitOverdue": "{{n}} overdue",
+    "unitUrgent": "{{n}} due soon",
+    "unitTotal": "{{n}} total",
+    "unitMastered": "{{n}} mastered",
     "todoExams": "Pending Exams",
     "todoExamsSuffix": "{{done}} completed",
     "pendingTodo": "Open Tasks",
@@ -591,6 +598,16 @@
     "myScoreSuffix": "Rank {{rank}}"
   },
   "statsT": {
+    "unitDraft": "{{n}} drafts",
+    "unitEnded": "{{n}} ended",
+    "unitQuestions": "{{n}} questions",
+    "unitHomework": "{{n}} homework",
+    "unitLiveExams": "{{n}} live",
+    "unitPapers": "{{n}} sheets",
+    "unitExams": "{{n}} exams",
+    "unitTasks": "{{n}} tasks",
+    "unitQuizzes": "{{n}} quizzes",
+    "unitQuick": "{{n}} buzzer",
     "examManage": "Published Exams",
     "examSuffix": "{{draft}} drafts · {{ended}} ended",
     "pending": "To Grade",
@@ -602,6 +619,9 @@
     "pendingClear": "All sheets and tasks graded"
   },
   "trend": {
+    "dod": "+{{n}} vs yesterday",
+    "heatTip": "{{day}}: {{points}} pts · {{chats}} chats · {{actions}} actions",
+    "emptyHint": "Your activity trend shows up here once there is any",
     "title": "7-Day Learning Trend",
     "weekPoints": "Points this week +{{n}}",
     "points": "Points",
@@ -609,6 +629,7 @@
     "empty": "No activity in the last 7 days. Go finish a task!"
   },
   "radar": {
+    "noDataHint": "Generated automatically once you answer",
     "title": "Ability Profile",
     "hint": "Based on real accuracy/completion across exams, course practice, smart practice and mistake mastery",
     "exam": "Exam avg",
@@ -618,11 +639,18 @@
     "noData": "Complete some activities to reveal your ability profile"
   },
   "scores": {
+    "rate": "Score rate",
+    "avgLine": "avg {{v}}%",
     "avgRate": "Avg rate {{v}}%",
     "total": "Total",
     "mine": "Score"
   },
   "growth": {
+    "mastery": "Mastery",
+    "mWrong": "Mistakes",
+    "mPractice": "Practice",
+    "mCourse": "Course accuracy",
+    "joined": "Joined: {{quest}} quests · {{quiz}} buzzer · {{practice}} practice",
     "title": "Growth Portfolio",
     "nextTitle": "Next: {{name}}",
     "maxTitle": "Top title reached",
@@ -661,6 +689,7 @@
     "ongoingHint": "In progress"
   },
   "stars": {
+    "emptyCta": "Start a quiz",
     "title": "Stars of the Week",
     "sub": "Top 5 points this week (since Monday)",
     "weekTooltip": "Since Monday: {{rounds}} rounds · {{calls}} call-times · {{students}} students called; {{total}} lifetime",

@@ -40,3 +40,8 @@ export function pct(v: number | null | undefined): number {
   if (v == null || Number.isNaN(v)) return 0
   return Math.max(0, Math.min(100, Math.round(v)))
 }
+
+/** 零值不显示：只拼有内容的片段（原来"答卷0·0场 · 任务1"读起来像坏了） */
+export function joinParts(parts: (string | number | null | undefined | false)[], sep = ' · '): string {
+  return parts.filter((x) => x !== 0 && x !== false && x !== null && x !== undefined && x !== '').map(String).join(sep)
+}

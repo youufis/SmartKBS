@@ -96,9 +96,6 @@ const TeacherTodoBar: React.FC<{ data: TeacherTodo | null }> = ({ data }) => {
           {pendingCount === 0 && ongoingCount === 0 && (
             <Text type="success" style={{ fontSize: 13 }}>{t('teacherTodo.clear')}</Text>
           )}
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'rgba(128,128,128,0.85)', whiteSpace: 'nowrap' }}>
-            {t('teacherTodo.activeToday', { n: data.active_students_today })}
-          </span>
         </div>
       </Space>
     </Card>

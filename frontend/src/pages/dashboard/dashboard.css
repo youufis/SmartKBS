@@ -1,0 +1,64 @@
+/**
+ * 看板动效（批次 2）
+ * 原则：动效只服务于"反馈"和"数据变化"，不做无意义装饰；
+ * 一律尊重 prefers-reduced-motion（系统开"减弱动态效果"时全部关闭）。
+ */
+
+/* 卡片/列表入场：淡入 + 轻微上浮 */
+.dash-fade-up {
+  animation: dashFadeUp 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes dashFadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 列表错峰：给容器加 dash-stagger，子项按序号延迟入场 */
+.dash-stagger > * {
+  animation: dashFadeUp 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.dash-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.dash-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.dash-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.dash-stagger > *:nth-child(4) { animation-delay: 120ms; }
+.dash-stagger > *:nth-child(5) { animation-delay: 160ms; }
+.dash-stagger > *:nth-child(6) { animation-delay: 200ms; }
+.dash-stagger > *:nth-child(7) { animation-delay: 240ms; }
+.dash-stagger > *:nth-child(8) { animation-delay: 280ms; }
+
+/* 可点卡片的反馈：只做 1px 抬升 + 阴影，不改变占位高度 */
+.dash-card {
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+.dash-card:hover {
+  transform: translateY(-1px);
+}
+
+/* 条形/进度：宽度补间，数据刷新时是"长过去"而不是"跳过去" */
+.dash-bar-fill {
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 热力条小格 */
+.dash-heat-cell {
+  transition: background-color 0.4s ease, transform 0.15s ease;
+}
+.dash-heat-cell:hover {
+  transform: scaleY(1.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-fade-up,
+  .dash-stagger > * {
+    animation: none;
+  }
+  .dash-card,
+  .dash-bar-fill,
+  .dash-heat-cell {
+    transition: none;
+  }
+  .dash-heat-cell:hover {
+    transform: none;
+  }
+}
