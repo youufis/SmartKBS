@@ -141,14 +141,14 @@ async def weekly_stars(request: Request):
 
     此前"一周之星"只存在于教师端 dashboard（/api/dashboard/teacher-todo 里 role!=2
     直接 403），学生侧完全没有正反馈。这里单独开一个学生可访问的只读端点：
-    - 榜单口径与教师端一致（activity_rewards 近 7 天、role=2 且未停用）
+    - 榜单口径与教师端一致（activity_rewards 本周一起算、role=2 且未停用）
     - 只下发 姓名/年级班/积分，不下发任何答题明细或答案数据
     """
     user = get_current_user(request)
     username = user["username"]
-    from datetime import datetime, timedelta
+    from backend.utils import week_range_str
 
-    since = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
+    since = week_range_str()[0]   # 本周一起算，与教师端卡片同一口径
     rows = execute_query(
         """SELECT ar.student_username, u.name, u.grade, u.class,
                   COALESCE(SUM(ar.points), 0) AS pts

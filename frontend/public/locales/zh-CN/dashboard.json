@@ -662,7 +662,8 @@
   },
   "stars": {
     "title": "一周之星",
-    "sub": "近7天积分 TOP5",
+    "sub": "本周积分 TOP5（周一起算）",
+    "weekTooltip": "本周一至今：点名 {{rounds}} 轮 · 被点 {{calls}} 人次 · 覆盖 {{students}} 人；建校以来累计 {{total}} 次",
     "empty": "本周还没有积分记录",
     "pointsUnit": "分",
     "todayChat": "今日对话",

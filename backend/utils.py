@@ -6,6 +6,7 @@ import os
 import time
 import json
 import hashlib
+from datetime import datetime, timedelta
 import re
 from pathlib import Path
 from typing import Optional, Any
@@ -27,6 +28,20 @@ from backend.logger import logger
 def get_user_role_num(username: str) -> Optional[int]:
     rows = execute_query("SELECT role FROM users WHERE username=?", (username,))
     return rows[0][0] if rows else None
+
+
+# ── "本周"的唯一口径 ──
+
+def week_range_str(now: Optional[datetime] = None) -> tuple[str, str]:
+    """返回 (本周一, 本周日) 的 YYYY-MM-DD（按服务器本地时区，周一为一周之始）。
+
+    全系统只允许这一种"本周"解释。之前教师端字段叫 rollcall_this_week 却查全表累计，
+    学生端星榜按"近 7 天"，画像按周一起算 —— 同一屏三种口径互相对不上。
+    """
+    today = now or datetime.now()
+    monday = today - timedelta(days=today.weekday())
+    sunday = monday + timedelta(days=6)
+    return monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
 
 
 def _resolve_abs(path: str) -> str:

@@ -406,11 +406,9 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
 # ── 获取 AI API Key ──
 
 def _get_week_range() -> tuple[str, str]:
-    """获取当前周的起止日期 (周一, 周日)"""
-    today = datetime.now()
-    monday = today - timedelta(days=today.weekday())
-    sunday = monday + timedelta(days=6)
-    return monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
+    """获取当前周的起止日期 (周一, 周日)；口径统一到 backend.utils.week_range_str"""
+    from backend.utils import week_range_str
+    return week_range_str()
 
 
 def _get_api_key() -> str:

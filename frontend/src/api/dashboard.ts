@@ -82,6 +82,10 @@ export interface DashboardSummary {
   total_students?: number
   total_teachers?: number
   rollcall_this_week?: number
+  rollcall_this_week_rounds?: number
+  rollcall_this_week_calls?: number
+  rollcall_this_week_students?: number
+  rollcall_total?: number
   today_chat_count?: number
   teacher_grades?: string
   teacher_classes?: string

@@ -129,6 +129,22 @@ def _load_history(teacher, grade, cls):
     }
 
 
+def _base_date_for_history(last_time) -> str:
+    """给只有 HH:MM 的历史条目补日期。
+
+    last_time 由客户端回传，可能是 float 时间戳，也可能是字符串。旧代码直接
+    time.localtime(last_time)，遇到字符串就 TypeError 把整批保存打挂——
+    点名状态一条都写不进去。解析失败或算出未来日期时，一律退回「今天」。
+    """
+    try:
+        ts = float(last_time)
+    except (TypeError, ValueError):
+        return time.strftime("%Y-%m-%d")
+    today = time.strftime("%Y-%m-%d")
+    stamp = time.strftime("%Y-%m-%d", time.localtime(ts))
+    return stamp if stamp <= today else today
+
+
 def _save_history(teacher, grade, cls, data):
     """保存点名状态到数据库"""
     try:
@@ -155,10 +171,7 @@ def _save_history(teacher, grade, cls, data):
             for entry in data.get("history", []):
                 raw_time = entry.get("time", "")
                 if raw_time and len(raw_time) <= 10 and ":" in raw_time:
-                    if data.get("last_time"):
-                        base_date = time.strftime("%Y-%m-%d", time.localtime(data["last_time"]))
-                    else:
-                        base_date = time.strftime("%Y-%m-%d")
+                    base_date = _base_date_for_history(data.get("last_time"))
                     full_time = f"{base_date} {raw_time}"
                 else:
                     full_time = raw_time if raw_time else time.strftime("%Y-%m-%d %H:%M:%S")

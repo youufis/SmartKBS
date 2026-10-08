@@ -22,9 +22,39 @@ from backend.title_system import (
 )
 from backend.reward_engine import get_student_total as get_reward_total
 from backend.permission_service import get_user_grade_class
+from backend.utils import week_range_str
 from backend.grading_state import pending_grading_by_exam
 
 router = APIRouter()
+
+
+def _rollcall_class_conditions(username: str) -> tuple[str, list]:
+    """教师看点名：按"我教的班级"，而不是只数自己点过的那些。
+
+    rollcall_history 里没有 student_username，只有 grade / class_name，且 class_name
+    历史上存在"高一1班""1班""1"三种写法，所以只能按班级文本匹配（三种写法都认），
+    不能套用"学生范围"那套 username IN(...)。
+    """
+    from backend.permission_service import parse_legacy_teacher_grade_class
+    grade, cls = get_user_grade_class(username)
+    gcm = parse_legacy_teacher_grade_class(str(grade or ""), str(cls or ""))
+    conds: list[str] = []
+    params: list = []
+    for g, tokens in gcm.items():
+        per_grade = []
+        for tk in (tokens or [""]):
+            tk = str(tk).strip()
+            if not tk:
+                per_grade.append("(grade=? AND (class_name IS NULL OR class_name=''))")
+                params.append(g)
+                continue
+            per_grade.append("(grade=? AND (class_name=? OR class_name=? OR class_name=?))")
+            params.extend([g, tk, f"{tk}班", f"{g}{tk}班"])
+        conds.append("(" + " OR ".join(per_grade) + ")")
+    if not conds:
+        return " AND 0", []          # 没配任教范围：不给看任何班级点名
+    return " AND (" + " OR ".join(conds) + ")", params
+
 
 # ── 简单内存缓存（TTL 30 秒） ──
 _dashboard_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -554,21 +584,45 @@ async def dashboard_summary(request: Request):
         else:
             total_teachers = 0
 
+        # 点名统计。老实现是没有任何时间过滤的 COUNT(*)，却把结果装进 rollcall_this_week，
+        # 卡片上写"本周点名"其实是建校以来累计（实测某周显示 67，真值 1）。
+        week_start, week_end = week_range_str()
+        rc_cond, rc_params = ("", []) if role == 0 else _rollcall_class_conditions(username)
+        rc_sql = (
+            "SELECT "
+            "COUNT(DISTINCT COALESCE(grade,'')||'|'||COALESCE(class_name,'')"
+            "||'|'||substr(created_at,1,10)||'|'||substr(created_at,12,5)) AS rounds, "
+            "COUNT(*) AS calls, "
+            "COUNT(DISTINCT COALESCE(grade,'')||COALESCE(class_name,'')||'|'"
+            "||COALESCE(student_name,'')) AS students "
+            "FROM rollcall_history "
+            "WHERE substr(created_at, 1, 10) BETWEEN ? AND ?" + rc_cond
+        )
+        rc_row = execute_query(rc_sql, (week_start, week_end, *rc_params))
+        rollcall_week_rounds = int(rc_row[0][0] or 0) if rc_row else 0
+        rollcall_week_calls = int(rc_row[0][1] or 0) if rc_row else 0
+        rollcall_week_students = int(rc_row[0][2] or 0) if rc_row else 0
+        total_rollcalls = _db_count(
+            "SELECT COUNT(*) FROM rollcall_history WHERE 1=1" + rc_cond, tuple(rc_params),
+        )
+
+        # "今日对话"原来既不区分范围也不区分角色：教师看到全校，还把教师自己的对话算进去。
+        # 这张卡讲的是学生，口径与"活跃学生"对齐：本人任教范围内的学生。
         if role == 0:
-            total_rollcalls = execute_query(
-                "SELECT COUNT(*) FROM rollcall_history",
+            today_chat_count = _db_count(
+                "SELECT COUNT(*) FROM conversations c "
+                "JOIN users u ON u.username = c.username "
+                "WHERE c.date = ? AND u.role = 2 AND IFNULL(u.status,'active')='active'",
+                (today_str,),
+            )
+        elif _teacher_student_names:
+            _ph_chat = ",".join("?" for _ in _teacher_student_names[:900])
+            today_chat_count = _db_count(
+                f"SELECT COUNT(*) FROM conversations WHERE date = ? AND username IN ({_ph_chat})",
+                (today_str, *_teacher_student_names[:900]),
             )
         else:
-            total_rollcalls = execute_query(
-                "SELECT COUNT(*) FROM rollcall_history WHERE teacher_username = ?",
-                (username,),
-            )
-        total_rollcalls = total_rollcalls[0][0] if total_rollcalls else 0
-
-        today_chat_count = _db_count(
-            "SELECT COUNT(*) FROM conversations WHERE date = ?",
-            (today_str,),
-        )
+            today_chat_count = 0
 
         # ── 课堂互动数据 ──
         if role == 0:
@@ -720,7 +774,12 @@ async def dashboard_summary(request: Request):
             "active_task_count": active_task_count,
             "total_students": total_students,
             "total_teachers": total_teachers,
-            "rollcall_this_week": total_rollcalls,
+            # rollcall_this_week 保留原字段名（学伴卡等多处在用），语义改为"本周轮次"
+            "rollcall_this_week": rollcall_week_rounds,
+            "rollcall_this_week_rounds": rollcall_week_rounds,
+            "rollcall_this_week_calls": rollcall_week_calls,
+            "rollcall_this_week_students": rollcall_week_students,
+            "rollcall_total": total_rollcalls,
             "today_chat_count": today_chat_count,
             # 课堂互动
             "teacher_quiz_count": quiz_count,
@@ -1049,7 +1108,7 @@ async def teacher_todo(request: Request):
             WHERE substr(ar.created_at, 1, 10) = ?{_rebind('ar', p_cond)}""",
         (today_str, *p_params),
     )
-    week_ago = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
+    week_ago = week_range_str()[0]          # 本周一（原来是 today-6 的"近7天"，与卡片上的"本周"不是一回事）
     top_rows = _act_q(
         f"""SELECT ar.student_username, SUM(ar.points) AS pts FROM activity_rewards ar
             JOIN users u ON u.username = ar.student_username
@@ -1227,7 +1286,7 @@ async def recent_activity(request: Request):
         quest_activities = _act_q(
             """SELECT completed_at, score, correct_count, total_questions
                FROM quest_records
-               WHERE student_username = ? AND completed != 0 AND completed_at IS NOT NULL
+               WHERE student_username = ? AND completed = 1 AND completed_at IS NOT NULL
                ORDER BY completed_at DESC LIMIT 5""",
             (username,),
         )
@@ -1608,7 +1667,7 @@ async def recent_activity(request: Request):
             quest_acts = _act_q(
                 f"""SELECT qr.completed_at, qr.student_username, qr.score, qr.correct_count, qr.total_questions
                     FROM quest_records qr
-                    WHERE qr.student_username IN ({ph}) AND qr.completed != 0 AND qr.completed_at IS NOT NULL
+                    WHERE qr.student_username IN ({ph}) AND qr.completed = 1 AND qr.completed_at IS NOT NULL
                     ORDER BY qr.completed_at DESC LIMIT 10""",
                 tuple(cp_student_names),
             )
@@ -1660,10 +1719,13 @@ async def recent_activity(request: Request):
         if not (len(a.get("time") or "") <= 10 and ":" in (a.get("time") or ""))
     ]
     # 兜底去重: 同事件多源写入(如浏览日志历史双写)不再重复成多条动态
+    # 键取到分钟而不是原始时间串：界面本来就只渲染 HH:MM，按秒去重会留下两条
+    # 内容一样、时间也一样的条目（现场就是 15:27 重复两行），并把学生维度并入键。
     _seen = set()
     _deduped = []
     for a in activities:
-        k = (a.get("time") or "", a.get("type") or "", a.get("title") or "", a.get("detail") or "")
+        k = (str(a.get("time") or "")[:16], a.get("type") or "", a.get("title") or "",
+             a.get("detail") or "", a.get("student") or a.get("username") or "")
         if k in _seen:
             continue
         _seen.add(k)

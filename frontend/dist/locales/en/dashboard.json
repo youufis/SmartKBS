@@ -662,7 +662,8 @@
   },
   "stars": {
     "title": "Stars of the Week",
-    "sub": "Top 5 points in 7 days",
+    "sub": "Top 5 points this week (since Monday)",
+    "weekTooltip": "Since Monday: {{rounds}} rounds · {{calls}} call-times · {{students}} students called; {{total}} lifetime",
     "empty": "No points recorded this week",
     "pointsUnit": "pts",
     "todayChat": "Chats today",

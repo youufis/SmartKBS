@@ -2,7 +2,7 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Avatar, Button, Card, Space, Tag, Typography } from 'antd'
+import { Avatar, Button, Card, Space, Tag, Tooltip, Typography } from 'antd'
 import { CrownOutlined, RightOutlined } from '@ant-design/icons'
 import type { DashboardSummary, TeacherTodo } from '../../api/dashboard'
 import { useChartTheme } from './chartTheme'
@@ -17,6 +17,13 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
   const stars = todo?.weekly_top_students ?? []
+
+  // 本周点名统一按周一起算；卡片显示"轮次"，其余口径放进悬停说明，
+  // 免得又把"累计"当成"本周"（老字段 rollcall_this_week 就是这么骗人的）
+  const rcRounds = summary.rollcall_this_week_rounds ?? summary.rollcall_this_week ?? 0
+  const rcCalls = summary.rollcall_this_week_calls ?? 0
+  const rcStudents = summary.rollcall_this_week_students ?? 0
+  const rcTotal = summary.rollcall_total ?? 0
 
   return (
     <Card
@@ -77,7 +84,9 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 2px', borderTop: '1px dashed rgba(128,128,128,0.25)', fontSize: 12 }}>
         <Text type="secondary">{t('stars.todayChat')}: <Text strong style={{ fontSize: 12 }}>{summary.today_chat_count ?? 0}</Text></Text>
-        <Text type="secondary">{t('thisWeekRollcall')}: <Text strong style={{ fontSize: 12 }}>{summary.rollcall_this_week ?? 0}</Text></Text>
+        <Tooltip title={t('stars.weekTooltip', { rounds: rcRounds, calls: rcCalls, students: rcStudents, total: rcTotal })}>
+          <Text type="secondary">{t('thisWeekRollcall')}: <Text strong style={{ fontSize: 12 }}>{rcRounds}</Text></Text>
+        </Tooltip>
         <Text type="secondary">{t('stars.activeToday')}: <Text strong style={{ fontSize: 12 }}>{todo?.active_students_today ?? 0}</Text></Text>
       </div>
     </Card>

@@ -2,7 +2,7 @@
 资源查看追踪 API 路由
 记录学生查看 HTML/下载资源的日志，并提供教师端统计查询
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -45,6 +45,28 @@ async def log_resource_view(request: Request):
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     client_ip = request.client.host if request.client else ""
+
+    # 60 秒内同人同资源只记一次：埋点会因组件重挂 / 重复点击再报一次，
+    # 直接访问文件那侧(files_router)早有这个窗口、埋点这侧没有 —— 于是最近动态出现
+    # “同一资源、相差 1 秒”的两条，资源浏览数也被双计。
+    try:
+        _cut = (datetime.now() - timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
+        if resource_id and int(resource_id) > 0:
+            _dup = execute_query_one(
+                "SELECT id FROM resource_view_logs WHERE student_username=? AND resource_type=?"
+                " AND resource_id=? AND viewed_at>=? LIMIT 1",
+                (username, resource_type, int(resource_id), _cut),
+            )
+        else:
+            _dup = execute_query_one(
+                "SELECT id FROM resource_view_logs WHERE student_username=? AND resource_type=?"
+                " AND file_path=? AND viewed_at>=? LIMIT 1",
+                (username, resource_type, file_path, _cut),
+            )
+        if _dup:
+            return {"message": "ok", "deduped": True}
+    except Exception as e:
+        logger.debug(f"[tracking] 资源浏览去重检查失败，按未命中继续记录: {e}")
 
     try:
         execute_insert_update(
