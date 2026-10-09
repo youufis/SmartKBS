@@ -451,10 +451,13 @@ async def generate_questions(req: GenerateRequest, request: Request):
     # 调用 AI
     try:
         result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True,
-                                              kb_query=f"{req.subject} {req.knowledge_points}")
+                                              kb_query=f"{req.subject} {req.knowledge_points}",
+                                              max_tokens=_estimate_generate_max_tokens(req.count))
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"AI 生成试题失败: {e}")
-        raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
+        logger.error(f"AI 生成试题失败: user={username} count={req.count} {_ai_fail_detail(e)}")
+        raise HTTPException(status_code=502, detail=_ai_fail_detail(e))
 
     # 解析 JSON
     questions = _parse_ai_response(result_text)
@@ -592,10 +595,34 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 
 
 async def _call_dashscope_agent(prompt: str, api_key: str, json_mode: bool = False,
-                                kb_query: str = "") -> str:
-    """调用 AI（异步）- 支持智能体/直接调大模型双模式；json_mode 由网关保证输出合法 JSON"""
+                                kb_query: str = "", max_tokens: int | None = None) -> str:
+    """调用 AI（异步）- 支持智能体/直接调大模型双模式；json_mode 由网关保证输出合法 JSON
+
+    max_tokens 一律由调用点显式给（见 _estimate_generate_max_tokens）：非流式请求不给上限，
+    等于把生成长度交给服务商默认值 —— 既会被静默截断，也可能一直生成到读超时、整批题目作废。
+    """
     from backend.api.ai_service import call_ai_async
-    return await call_ai_async(prompt, api_key, json_mode=json_mode, kb_query=kb_query)
+    return await call_ai_async(prompt, api_key, json_mode=json_mode, kb_query=kb_query,
+                               max_tokens=max_tokens)
+
+
+def _estimate_generate_max_tokens(count: int, with_media: bool = False) -> int:
+    """按题量估输出上限：普通题 ~800/题，含配图（整段 svg_code 内嵌）~1600/题。
+
+    下限 2000 防"1 道题也被截断"，上限 16000 与课件/资源抽取那几条链路同口径。
+    """
+    per = 1600 if with_media else 800
+    return int(min(16000, max(2000, (int(count or 1)) * per)))
+
+
+def _ai_fail_detail(exc: Exception, prefix: str = "AI 生成失败") -> str:
+    """把异常压成一句人话给前端：httpx 的超时异常 str() 是空的，直接用会显示成"AI 生成失败: "。"""
+    try:
+        from backend.api.ai_service import ai_error_brief
+        reason = ai_error_brief(exc)
+    except Exception:
+        reason = " ".join(str(exc or "").split()) or type(exc).__name__
+    return f"{prefix}：{reason}"
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
@@ -1952,10 +1979,15 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
     try:
         # 含配图出题输出长、结构复杂：走 json_mode，由网关兜底 JSON 合法性
+        # max_tokens 必须显式给（svg_code 整段内嵌），否则非流式请求会一路生成到读超时
         result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True,
-                                          kb_query=f"{req.subject} {req.knowledge_points}")
+                                          kb_query=f"{req.subject} {req.knowledge_points}",
+                                          max_tokens=_estimate_generate_max_tokens(req.count, with_media=True))
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
+        logger.error(f"AI 出题(含配图)失败: user={username} count={req.count} {_ai_fail_detail(e)}")
+        raise HTTPException(status_code=502, detail=_ai_fail_detail(e))
 
     questions = _parse_ai_response_with_media(result_text)
     if not questions:

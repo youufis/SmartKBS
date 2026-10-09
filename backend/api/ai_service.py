@@ -6,6 +6,7 @@ AI 服务封装：根据是否配置 APPID 自动选择调用模式
 """
 import json
 import os
+import time
 import concurrent.futures
 from typing import Any, Optional
 
@@ -61,37 +62,201 @@ def _is_connect_error(exc: Exception) -> bool:
             or "connection refused" in text or "nodename nor servname" in text)
 
 
+def _is_fallback_error(exc: Exception) -> bool:
+    """值得换下一个接入地址再试一次的错误：连接层失败 + 读超时（上游卡住不回字节）。
+
+    ⚠️ 读超时换地址重试 = 同一条提示词可能被计费两次，所以只有"预算拆得开"
+    （见 _attempt_read_timeout：必须有备用地址且调用方声明了 max_tokens）才会发生。
+    """
+    return _is_connect_error(exc) or _is_timeout_error(exc)
+
+
+# ── 超时预算：一次卡死不许拖满整条链路 ──
+# 非流式请求在模型写完之前一个字节都不会回，httpx 的 read 计时器没有"续命"机会；
+# 实测 qwen3.7-flash 约 50-95 tok/s，取 20 tok/s 当保守下限估生成耗时。
+_TOKENS_PER_SECOND = 20.0
+_QUEUE_ALLOWANCE_SECONDS = 30.0     # 排队 + TLS 往返
+_MIN_ATTEMPT_SECONDS = 60.0
+
+
+class AiTimeoutError(TimeoutError):
+    """连上了网关但它在预算内没返回任何内容（区别于"连不上"和 HTTP 4xx/5xx）。
+
+    继承内置 TimeoutError：老的 `except TimeoutError` 分支照样能接住，不破坏调用方语义。
+
+    httpx 的 ReadTimeout str() 是空串，直接拼进报错会让日志和前端都显示成空白，
+    所以超时一律翻译成这个带上下文的类型再往上抛。
+    """
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, (AiTimeoutError, TimeoutError)):
+        return True
+    if type(exc).__name__ in ("ReadTimeout", "WriteTimeout", "PoolTimeout",
+                              "ConnectTimeout", "TimeoutException", "Timeout"):
+        return True
+    try:
+        import httpx
+        if isinstance(exc, httpx.TimeoutException):
+            return True
+    except Exception:
+        pass
+    try:
+        import requests as _rq
+        if isinstance(exc, _rq.exceptions.Timeout):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def ai_error_brief(exc: BaseException, max_len: int = 200) -> str:
+    """把异常压成一行给前端/日志用的人话（空消息的超时类异常给出兜底文案）。"""
+    text = " ".join(str(exc or "").split())
+    if not text:
+        text = {
+            "ReadTimeout": "读取超时：AI 网关在限定时间内没有返回任何内容",
+            "WriteTimeout": "写入超时：请求没能发完",
+            "PoolTimeout": "连接池超时：本地并发已占满",
+            "ConnectTimeout": "连接超时：连不上 AI 网关",
+            "TimeoutException": "超时：AI 网关在限定时间内没有返回任何内容",
+            "ConnectError": "无法连接 AI 网关",
+        }.get(type(exc).__name__, type(exc).__name__)
+    first = text.splitlines()[0] if text.splitlines() else text
+    return first if len(first) <= max_len else first[:max_len] + "…"
+
+
+def _est_generation_seconds(max_tokens) -> float:
+    try:
+        return _QUEUE_ALLOWANCE_SECONDS + float(max_tokens) / _TOKENS_PER_SECOND
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _attempt_read_timeout(total: float, bases_count: int, max_tokens=None) -> list:
+    """把总预算切成「每个接入地址一段」的读超时，允许专属域名卡死时换公共域名重试。
+
+    只在两个条件同时成立时才拆：① 确实有备用地址可换；② 调用方声明了 max_tokens，
+    于是这一段的长度是"估得出来的"，不会把正常生成掐死。
+    各段之和恰好等于总预算；真正开跑时由 _next_attempt 按截止时间继续扣减，
+    整条地址链累计等待永远 ≤ AI_REQUEST_TIMEOUT —— 前端/后端/IIS 三层对齐不破。
+    """
+    total = float(total or 0)
+    if total <= 0:
+        total = _ai_read_timeout()
+    n = max(1, int(bases_count or 1))
+    if n < 2 or not max_tokens:
+        return [total]                       # 没备用地址 / 不知道要生成多长：行为同旧，一次跑满
+    if total / n < _MIN_ATTEMPT_SECONDS:
+        return [total]                       # 预算太短，拆开只会两头都失败
+    per = min(total / n, max(_MIN_ATTEMPT_SECONDS, _est_generation_seconds(max_tokens)))
+    return [round(per, 1)] * n
+
+
+def _next_attempt(bases: list, idx: int, segments: list, deadline: float):
+    """第 idx 次尝试还能不能做、给多少秒；返回 None 表示地址或预算已用尽。
+
+    预算用 deadline（单调时钟）兜死：前一段吃掉的时间会从后一段里扣掉，
+    整条地址链的累计等待永远不超过总预算 —— 前端/后端/IIS 三层对齐才不破。
+    """
+    if idx < 0 or idx >= len(bases):
+        return None
+    left = deadline - time.monotonic()
+    if idx == 0:
+        return max(1.0, min(segments[0], left if left > 0 else segments[0]))
+    if left < _MIN_ATTEMPT_SECONDS:
+        return None                     # 只剩几十秒，换地址也跑不完一段有意义的读超时
+    return min(segments[min(idx, len(segments) - 1)], left)
+
+
+def _split_timeout(timeout) -> tuple:
+    """把 timeout 归一成 (连接秒数, 读取总预算秒数)；支持 float 与 (connect, read) 元组。"""
+    if isinstance(timeout, (tuple, list)) and len(timeout) >= 2:
+        return float(timeout[0]), float(timeout[1])
+    t = float(timeout) if timeout else _ai_read_timeout()
+    return min(30.0, t), t
+
+
+def _timeout_error(exc: Exception, bases: list, segments: list) -> Exception:
+    """超时统一换成带上下文的可读异常；其它异常原样返回。"""
+    if not _is_timeout_error(exc):
+        return exc
+    hosts = " → ".join(_host_of(b) for b in bases[:len(segments)])
+    budget = "/".join(f"{s:.0f}s" for s in segments)
+    return AiTimeoutError(
+        f"AI 网关在 {budget}（合计 {sum(segments):.0f}s）内未返回内容，已尝试：{hosts}。"
+        f"多为本次输出过长或上游排队，可减少单次题量/关闭配图，或调大系统配置 AI_REQUEST_TIMEOUT"
+    )
+
+
 def _post_model(bases: list, payload: dict, headers: dict, timeout, stream: bool = False):
-    """依次在候选地址上 POST，只有连接层错误才换下一个；返回 (生效地址, 响应)"""
+    """依次在候选地址上 POST，连接失败与读超时都换下一个；返回 (生效地址, 响应)"""
     import requests as sync_requests
+    connect, total = _split_timeout(timeout)
+    segments = _attempt_read_timeout(total, len(bases), payload.get("max_tokens"))
+    deadline = time.monotonic() + total
+    last_err = None
     for idx, base in enumerate(bases):
+        seg = _next_attempt(bases, idx, segments, deadline)
+        if seg is None:
+            break
         try:
             resp = sync_requests.post(
                 f"{base}/chat/completions", headers=headers, json=payload,
-                timeout=timeout, stream=stream,
+                timeout=(connect, seg), stream=stream,
             )
             if idx:
-                logger.warning(f"[AI] 已回落到备用接入地址: {_host_of(base)}（主用地址连接失败）")
+                logger.warning(f"[AI] 已回落到备用接入地址: {_host_of(base)}（前面地址连接失败或超时未返回）")
             return base, resp
         except Exception as err:
-            if not _is_connect_error(err) or idx + 1 >= len(bases):
-                raise
-            logger.warning(f"[AI] {_host_of(base)} 连接失败（{err}），尝试下一个接入地址")
+            last_err = err
+            if not _is_fallback_error(err):
+                raise _timeout_error(err, bases, segments) from err
+            nxt = _next_attempt(bases, idx + 1, segments, deadline)
+            if nxt is None:
+                break
+            logger.warning(
+                f"[AI] {_host_of(base)} {seg:.0f}s 内未完成（{type(err).__name__}: {ai_error_brief(err)}）"
+                f"，换 {_host_of(bases[idx + 1])} 再试 {nxt:.0f}s（这条提示词可能被重复计费一次）"
+            )
+    if last_err is not None:
+        raise _timeout_error(last_err, bases, segments) from last_err
     return bases[-1], None
 
 
 async def _apost_model(bases: list, client, payload: dict, headers: dict, timeout):
     """_post_model 的异步版（httpx）"""
+    import httpx
+    connect, total = _split_timeout(timeout)
+    segments = _attempt_read_timeout(total, len(bases), payload.get("max_tokens"))
+    deadline = time.monotonic() + total
+    last_err = None
     for idx, base in enumerate(bases):
+        seg = _next_attempt(bases, idx, segments, deadline)
+        if seg is None:
+            break
         try:
-            resp = await client.post(f"{base}/chat/completions", headers=headers, json=payload, timeout=timeout)
+            resp = await client.post(
+                f"{base}/chat/completions", headers=headers, json=payload,
+                timeout=httpx.Timeout(connect=connect, read=seg,
+                                      write=min(120.0, seg), pool=min(30.0, seg)),
+            )
             if idx:
-                logger.warning(f"[AI] 已回落到备用接入地址: {_host_of(base)}（主用地址连接失败）")
+                logger.warning(f"[AI] 已回落到备用接入地址: {_host_of(base)}（前面地址连接失败或超时未返回）")
             return base, resp
         except Exception as err:
-            if not _is_connect_error(err) or idx + 1 >= len(bases):
-                raise
-            logger.warning(f"[AI] {_host_of(base)} 连接失败（{err}），尝试下一个接入地址")
+            last_err = err
+            if not _is_fallback_error(err):
+                raise _timeout_error(err, bases, segments) from err
+            nxt = _next_attempt(bases, idx + 1, segments, deadline)
+            if nxt is None:
+                break
+            logger.warning(
+                f"[AI] {_host_of(base)} {seg:.0f}s 内未完成（{type(err).__name__}: {ai_error_brief(err)}）"
+                f"，换 {_host_of(bases[idx + 1])} 再试 {nxt:.0f}s（这条提示词可能被重复计费一次）"
+            )
+    if last_err is not None:
+        raise _timeout_error(last_err, bases, segments) from last_err
     return bases[-1], None
 # 限制最大 3 个并发 AI 线程，避免长时间等待的 AI 调用阻塞数据库等其他操作
 _ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
@@ -321,7 +486,9 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
     messages = _hist_messages(history, content) if history else [{"role": "user", "content": content}]
     fmts = ["hist"] if history else ["str", "array"]
     last_error = None
+    payload: dict = {}
     for fmt in fmts:
+        t0 = time.monotonic()
         if fmt == "array":
             # 部分 DashScope 模型要求 content 为数组格式
             messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
@@ -365,7 +532,11 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
             logger.error(f"大模型调用失败: status={resp.status_code}, {resp.text[:300]}")
             raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
         except Exception as e:
-            logger.error(f"大模型调用异常: {e}")
+            logger.error(
+                f"大模型调用异常: {ai_error_brief(e)} | model={model} 地址={_host_of(api_base)}"
+                f" 等待={time.monotonic() - t0:.1f}s prompt={len(content)}字"
+                f" max_tokens={payload.get('max_tokens', '默认(服务商上限)')}"
+            )
             raise
     # 两种格式都失败
     raise Exception(f"AI 调用失败: {last_error}")
@@ -596,7 +767,9 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
     content = prompt if prompt else ""
     fmts = ["hist"] if history else ["str", "array"]
     last_error = None
+    payload: dict = {}
     for fmt in fmts:
+        t0 = time.monotonic()
         if fmt == "hist":
             messages = _hist_messages(history, content)
         elif fmt == "str":
@@ -662,7 +835,11 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                 logger.error(f"大模型异步调用失败: status={resp.status_code}, {resp.text[:300]}")
                 raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
         except Exception as e:
-            logger.error(f"大模型异步调用异常: {e}")
+            logger.error(
+                f"大模型异步调用异常: {ai_error_brief(e)} | model={model} 地址={_host_of(api_base)}"
+                f" 等待={time.monotonic() - t0:.1f}s prompt={len(content)}字"
+                f" max_tokens={payload.get('max_tokens', '默认(服务商上限)')}"
+            )
             raise
     raise Exception(f"AI 调用失败: {last_error}")
 

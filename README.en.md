@@ -40,6 +40,7 @@
 > 🧮 **Score totals are a hard invariant** + 🎯 **Three selection engines became one** + 🔢 **Export rendering fixed** + 🔀 **Drag to reorder** + 🎲 **Per-student shuffling** + ⏱ **AI moved to background jobs**
 > 📱 **Phone support** + 🖼 **Figure pipeline cleanup** + 🏆 **Anti-farming points** + 🛡 **Ops and settings polish**
 > 🎨 **Whiteboard usability**: refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, and dropped links reconnect on their own (needs a backend restart)
+> ⏱ **AI generation stops gambling the whole timeout**: the question count sets the output ceiling and the timeout budget is split across endpoints (a stalled dedicated domain falls over to the public one), and a timeout now says how long it waited and which endpoint it tried (needs a backend restart)
 
 ---
 
@@ -1015,7 +1016,7 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-### v8.6.0 (2026-10-05 ~ 10-08)
+### v8.6.0 (2026-10-05 ~ 10-09)
 
 - 🔊 **Speech synthesis lands**: a Speech section in System Settings (switch, model, voice, rate, volume); only voices verified to speak are listed, and nothing is billed while off
 - 🗣 **Roll call says the name**: the audio is fetched during the reveal animation so teachers notice nothing; cached per name, never blocks the roll call
@@ -1042,7 +1043,9 @@ Git-based online incremental upgrade system:
 - 🧾 **Quieter activity feed**: an abandoned quiz run no longer counts as “completed”, resource-view tracking is idempotent within 60s, and same-minute duplicate events collapse
 - 🎨 **Dashboard feel and motion**: skeleton screens instead of a page-wide spinner, tweened counters, staggered card/list entrances and unified chart animations - all disabled when the OS asks for reduced motion
 - 📊 **Dashboard charts redone**: an activity heat strip plus a day-over-day delta on the 7-day trend, the exam pie becomes a segmented bar (chart and numbers in one place), weekly stars gain rank-relative bars, scores are plotted as rates with an average line, the radar gets a numeric legend and empty states now carry a next action
-- ⚠️ **Breaking changes**: none - gap filling stays off by default, buzzer rounds may spend AI calls when the bank is short, and out-of-range counts now error instead of rewriting themselves. The whiteboard batch needs a backend restart: WS refusals now carry a reason after the handshake, register/write on an ended room return 409, and ending a room closes live sockets; permessage-deflate needs --ws websockets --ws-per-message-deflate on the command line
+- ⏱ **AI question generation no longer gambles the whole timeout**: the question count now sets max_tokens explicitly (~800 per question, ~1600 with figures, clamped to 2000-16000), so a non-streaming request is no longer sized by the provider default; AI_REQUEST_TIMEOUT is split into one segment per endpoint - the dedicated and public domains get 150s each, and if the dedicated domain sends nothing for 150s the public one is retried once, while the whole chain still stays inside the budget; async connect tightened from 300s to 30s, so an unreachable domain is abandoned in seconds
+- 🧯 **Timeouts are no longer a blank message**: httpx ReadTimeout carries an empty string, so logs and popups read "AI generation failed: " with nothing after it; timeouts now surface as a sentence naming the endpoint and the seconds waited (the new error subclasses the built-in TimeoutError, so existing handlers still catch it), 502 responses stop dumping the stack to the browser, and failure logs add model / host / elapsed / prompt size / max_tokens
+- ⚠️ **Breaking changes**: none - gap filling stays off by default, buzzer rounds may spend AI calls when the bank is short, and out-of-range counts now error instead of rewriting themselves. The whiteboard batch needs a backend restart: WS refusals now carry a reason after the handshake, register/write on an ended room return 409, and ending a room closes live sockets; permessage-deflate needs --ws websockets --ws-per-message-deflate on the command line. This batch also needs a backend restart; retrying on another endpoint can bill the same prompt twice, and that only happens when an output ceiling is declared and a backup endpoint is configured
 
 ### v8.5.0 (2026-10-03 ~ 10-04)
 
