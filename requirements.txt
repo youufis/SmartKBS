@@ -12,6 +12,8 @@ requests>=2.31.0
 python-multipart>=0.0.6
 PyPDF2>=3.0.0
 python-docx>=1.1.0
+# 导出 Excel 报告（成绩单 / 考试 / 点名 / 课堂互动）的硬依赖，export_router 在启动时即导入
+openpyxl>=3.1.0
 latex2mathml>=3.80
 svglib>=1.6.0
 # 试卷/讲义导出 Word·PDF 时把 SVG 配图栅格化。缺它也能跑（自动降级到 svglib），
