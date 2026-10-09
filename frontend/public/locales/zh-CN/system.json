@@ -1109,6 +1109,7 @@
   "scene_wrong-book": "错题本讲解",
   "scene_portrait": "自我画像",
   "scene_html-generation": "资源页生成",
+  "scene_daily-discovery": "每日精选",
   "sceneMapDesc": "已按教学场景配好默认值，正常无需更改。仅当某场景输出风格明显不合适时再展开调整：取消勾选=该场景跳过该技能（例如学情报告不需要「苏格拉底引导」）。灰色技能与该场景无关，不会注入。",
   "sceneMapColInject": "注入技能数",
   "sceneMapColMode": "状态",

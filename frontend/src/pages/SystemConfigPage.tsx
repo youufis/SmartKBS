@@ -464,6 +464,15 @@ const SkillManagePanel: React.FC = () => {
     return translated !== key ? translated : tag
   }
 
+  // 场景名同上：优先取 scene_xxx 译文，无译文时回退原始 key。
+  // 不用 SCENE_SUGGESTIONS 判断——那份清单只列「当前有注入调用点的场景」，
+  // 而使用统计里还会出现已下线场景的历史流水（如 daily-discovery）。
+  const tScene = (scene: string): string => {
+    const key = `scene_${scene}`
+    const translated = t(key)
+    return translated !== key ? translated : scene
+  }
+
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -887,7 +896,7 @@ const SkillManagePanel: React.FC = () => {
               size="small" rowKey="scene" pagination={false} style={{ marginBottom: 16 }}
               dataSource={Object.entries(stats.by_scene).map(([scene, v]) => ({ scene, ...v }))}
               columns={[
-                { title: t('skillStatsScene'), dataIndex: 'scene', render: (s: string) => (SCENE_SUGGESTIONS.includes(s) ? t('scene_' + s) : s) },
+                { title: t('skillStatsScene'), dataIndex: 'scene', render: (s: string) => tScene(s) },
                 { title: t('skillStatsCount'), dataIndex: 'count' },
                 { title: t('skillStatsCharsCol'), dataIndex: 'chars' },
                 { title: t('skillStatsLastUsed'), dataIndex: 'last_used' },
@@ -899,7 +908,7 @@ const SkillManagePanel: React.FC = () => {
               columns={[
                 { title: t('skillStatsSkill'), dataIndex: 'skill', render: (name: string) => skillDisplayName[name] || name },
                 { title: t('skillStatsCount'), dataIndex: 'count' },
-                { title: t('skillStatsScenesCol'), dataIndex: 'scenes', render: (ss: string[]) => ss.map((s) => <Tag key={s}>{SCENE_SUGGESTIONS.includes(s) ? t('scene_' + s) : s}</Tag>) },
+                { title: t('skillStatsScenesCol'), dataIndex: 'scenes', render: (ss: string[]) => ss.map((s) => <Tag key={s}>{tScene(s)}</Tag>) },
               ]}
             />
           </>
