@@ -45,8 +45,6 @@
 > - 🎨 **Whiteboard usability and a rebuilt realtime path** — refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, dropped links reconnect on their own
 > - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports how long it waited and which endpoint it tried
 > - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
->
-> The whiteboard and generation batches **require a backend restart**. Full details in the [changelog](#changelog).
 
 ---
 
@@ -1059,7 +1057,7 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.6.0** (2026-10-05 ~ 10-09). The bullets below are the changes a user can notice; the complete entries are folded under each release.
+Current version **8.6.0** (2026-10-05 ~ 10-09). Each release lists the changes a user can notice; per-commit detail lives in the git history.
 
 ### v8.6.0 (2026-10-05 ~ 10-09)
 
@@ -1074,39 +1072,6 @@ Current version **8.6.0** (2026-10-05 ~ 10-09). The bullets below are the change
 - 🧪 134 regression tests added; full suite 802 passed, 1 skipped
 - ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error instead of being silently rewritten; the whiteboard and generation batches need a backend restart; retrying across endpoints may bill the same prompt twice
 
-<details>
-<summary>Expand the full v8.6.0 entries (27)</summary>
-
-- 🔊 **Speech synthesis lands**: a Speech section in System Settings (switch, model, voice, rate, volume); only voices verified to speak are listed, and nothing is billed while off
-- 🗣 **Roll call says the name**: the audio is fetched during the reveal animation so teachers notice nothing; cached per name, never blocks the roll call
-- 🔤 **Polyphonic surnames corrected**: about 40 surnames swapped for same-sounding characters — broadcast only, the UI and records keep the real name
-- 🧭 **One model catalogue, dropdown settings**: hand-typed names still accepted, and image generation and speech each gained a self-test so a wrong setting fails visibly at save time
-- 🖼 **Two image-generation endpoints routed automatically**: channel, payload and sizes chosen per model, options filtered by measured limits and rejected on save if wrong
-- ⚡ **The entry page is no longer cached**: refresh after an update and the new bundle is there — no more "server updated but the admin sees nothing"
-- 📊 **Login page visit stats**: today's users and visits plus an all-time total that never goes down when login history is deleted
-- 🧱 **One door into the question bank**: nine hand-written INSERT paths became one — validate, de-duplicate, single transaction, then link knowledge points
-- 🚫 **Ungradeable questions are turned away**: missing or out-of-range answers, options in the stem, machine-made code questions — never handed back as ghost questions
-- 🧩 **No more duplicate entries**: de-duplication is one standard (subject family + type + normalised stem); a hit brings back the existing id and its figures
-- 🔗 **AI questions reach the selection engine the same day**: extraction, quizzes and smart practice never linked to knowledge points, so they burned AI again next time
-- 📐 **The question prompts share one written spec**: type vocabulary, true/false option keys, the quote-safety rule and answer formats now match the storage gate
-- 🛡 **Figures are sanitised on the way in**: the page path used to store whatever SVG the model returned, on a same-origin page
-- 🔁 **One "fill the paper" policy**: bank first → AI covers the shortfall → AI questions must be stored before they are returned; degradation is never silent
-- 🎚 **In-class quiz counts finally stick**: the form never collected the number, so everyone got the default 5; now 1-50 as asked
-- 🎯 **Buzzer rounds stop padding with repeats**: the shortfall goes to AI and into the bank, built-ins are a last resort only, and true/false answers normalise onto the option key
-- 🔌 **An opt-in "fill the gap with AI" for exam selection**: auto selection, AI composing and the wizard, **off by default**; a failed fill is only a note, never a lost paper
-- 📏 **Page question counts are a real parameter**: three disagreeing places became one input (quizzes 1-30, practice 1-50), and out-of-range input errors instead of rewriting itself
-- 📁 **Async generation prefers the bank too**: the path the UI uses queried neither the bank nor stored new questions; wrong-question practice no longer rewrites counts silently
-- 🎨 **Whiteboard usability closed out**: refusals now say which of "missing / ended / not yours" it is, in the log and on screen; ending a room is reversible (owner or admin reopens it and students rejoin with the same code) and tidies up after itself, spectating teachers are read-only with a stated reason, an ended room still replays and exports, and the handshake prefers the same-origin cookie with token= masked in access logs
-- ⚡ **Whiteboard realtime path rebuilt**: the teacher side went from a fixed 1s poll to change-driven (≤400ms while writing, 160ms after the pen settles); broadcasting no longer awaits sockets in turn and un-sent snapshots collapse to the newest one, so a slow student can't stall the class; persistence left the event loop and is throttled per room with flushes before page switches, the last departure and ending; fallback polling adapts (20s/3s) with a snapshot fingerprint; reconnects back off without giving up, the heartbeat only cuts links whose server answers pings, and the 'switch to interactive and back' hint is gone (its root cause: granted students were never told to step down)
-- 🧪 **Regression**: 134 new tests (catalogue consistency, measured size limits, hand-typed endpoint routing, voice/model pairing, self-test permissions and throttling; 32 whiteboard: room lifecycle 16, demo delivery 8, realtime delivery and persistence semantics 8); full suite 802 passed, 1 skipped
-- 🧾 **Quieter activity feed**: an abandoned quiz run no longer counts as “completed”, resource-view tracking is idempotent within 60s, and same-minute duplicate events collapse
-- 🎨 **Dashboard feel and motion**: skeleton screens instead of a page-wide spinner, tweened counters, staggered card/list entrances and unified chart animations - all disabled when the OS asks for reduced motion
-- 📊 **Dashboard charts redone**: an activity heat strip plus a day-over-day delta on the 7-day trend, the exam pie becomes a segmented bar (chart and numbers in one place), weekly stars gain rank-relative bars, scores are plotted as rates with an average line, the radar gets a numeric legend and empty states now carry a next action
-- ⏱ **AI question generation no longer gambles the whole timeout**: the question count sets the output ceiling and the timeout budget is split per endpoint - a stalled dedicated domain falls over to the public one and retries once, all still inside the budget; a timeout now names how long it waited and which endpoint it tried instead of an empty message
-- ⚠️ **Breaking changes**: none - gap filling stays off by default, buzzer rounds may spend AI calls when the bank is short, and out-of-range counts now error instead of rewriting themselves. The whiteboard batch needs a backend restart: WS refusals now carry a reason after the handshake, register/write on an ended room return 409, and ending a room closes live sockets; permessage-deflate needs --ws websockets --ws-per-message-deflate on the command line. This batch also needs a backend restart; retrying on another endpoint can bill the same prompt twice, and that only happens when an output ceiling is declared and a backup endpoint is configured
-
-</details>
-
 ### v8.5.0 (2026-10-03 ~ 10-04)
 
 - 🧮 Paper score totals became a hard invariant; the paper health check only simulates until you confirm
@@ -1116,28 +1081,6 @@ Current version **8.6.0** (2026-10-05 ~ 10-09). The bullets below are the change
 - 📱 Phone support landed; 🖼 figure pipeline governed; 🏆 points anti-farming and honour cleanup
 - 🔐 Admin login history and three login kill switches; 🧠 skill injection restricted by scene; 🧪 130+ regression tests added
 - ⚠️ **Breaking changes**: none (when old papers already contain duplicates, the unique index degrades to a normal index with a log line — no data deleted)
-
-<details>
-<summary>Expand the full v8.5.0 entries (16)</summary>
-
-- 🧮 **Paper scores became a hard invariant**: the paper must add up to the target total, edits rebalance proportionally, and publishing runs a mandatory health check
-- 🩺 **Paper audit and repair**: dry run by default, per-question plan before any write, exams with students still answering are skipped
-- 🔒 **Papers lock while students answer**: adding, re-scoring, rebalancing and reordering are refused with an in-flight attempt, and batch writes happen in one transaction
-- 🎯 **Three selection engines became one**: auto selection, AI generation and the wizard share one engine, and each type shows its available supply while you configure
-- 🔀 **Drag-to-reorder and bulk management**: the field that decides print order finally got a UI; preview, remove in bulk, clear the paper
-- 🎲 **Question shuffling actually applies**: it used to be written and read but never used; now it is deterministic per student and survives refresh
-- 🔢 **Export rendering fixed**: CJK tofu in figures, formulas in explanations and swallowed blanks, plus an export that could hang forever
-- 📄 **Paper header is stored with the exam**: school and semester are filled once and shared by all three documents
-- ⏱ **Generation and figures moved to background jobs**: progress reporting, duplicate clicks no longer double-bill, timeouts say "still running"
-- 📱 **Phone support landed**: tab bar plus role-based whitelist (27 student / 22 teacher pages), desktop layout untouched
-- 🖼 **Figure pipeline cleaned up**: bank / quest / whiteboard figures isolated per namespace, placeholder state persisted, vectors sanitised
-- 🏆 **Point farming closed**: daily caps for chat, buzzer and totals, teachers and admins leave the leaderboards, students gain "Weekly Star"
-- 🔐 **Login history and ops**: admin-only login history (filter, paging, export, bulk delete), three pause-login switches, multi-mirror upgrades
-- 🧠 **Skill injection hardened**: structured outputs no longer receive skills, scenes mapped and whitelisted
-- 🧪 **Regression**: 130+ new tests for exams and paper composition
-- ⚠️ **Breaking changes**: none (if a historical paper already holds duplicates, the unique index degrades to a normal one and is logged; nothing is deleted)
-
-</details>
 
 ### v8.0 – v8.4 (2026-09-05 ~ 2026-09-29)
 
