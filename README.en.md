@@ -1,116 +1,135 @@
 # SmartKBS — AI-Powered Smart Teaching Platform
 
-> **🌐 [English](README.en.md) | [中文](README.md)**
-> AI-Powered Smart Teaching Management Platform for All Grades and Subjects — **Suitable for Any Subject, Any Grade Level**
+> **🌐 [中文](README.md) | [English](README.en.md)**
 >
-> Integrated AI streaming dialogue, learning companion/assistant, question bank, online exams, intelligent test paper generation & Word export,
-> course syllabus, classroom interaction (class quiz/voting/Q&A), group discussion (AI tutor),
-> quick-answer competitions, knowledge challenge, code practice, automated code grading,
-> points reward system (12-level titles + achievement badges), classroom points, smart roll call, attendance statistics,
-> wrong answer review, targeted practice, course exercises, daily picks, trending news, AI resource recommendations, learning analytics, growth portfolio,
-> AI self-portrait, collaborative whiteboard, class summary, activity monitoring, resource view tracking,
-> dialogue homework with AI grading, user management, system announcements, notification center,
-> online incremental upgrade, multi-theme appearance system, comprehensive grade-class system, and **50+ functional modules**.
+> **An AI-powered smart teaching platform for primary, junior secondary and senior secondary schools** — subjects, grades and classes are all configuration-driven, **with no subject hard-coded anywhere**.
 >
-> Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
+> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 46 feature areas and 50+ capabilities:
+>
+> - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
+> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
+> - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio, plus 12-level titles, achievement badges and the automatic points engine
+> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, AI self-portrait, online incremental upgrade, multi-theme appearance
+>
+> Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/Version-8.6.0-blue)
-![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
-![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
+![Version](https://img.shields.io/badge/version-8.6.0-blue)
+![Backend](https://img.shields.io/badge/backend-FastAPI-green)
+![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
-![License](https://img.shields.io/badge/License-AGPL--3.0-red)
+![License](https://img.shields.io/badge/license-AGPL--3.0-red)
 
 ---
 
-<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 6px;">
+<a id="toc"></a>
 
-<a href="#-project-introduction">📋 Project Introduction</a> · <a href="#-demo-environment">🎮 Demo Environment</a> · <a href="#-complete-feature-overview">✨ Feature Overview</a> · <a href="#-changelog">📦 Changelog</a> · <a href="#-deployment-guide">📦 Deployment Guide</a> · <a href="#-quick-start">🚀 Quick Start</a> · <a href="#-project-structure">📁 Project Structure</a> · <a href="#-data-storage">💾 Data Storage</a> · <a href="#-permissions-overview">👥 Permissions Overview</a> · <a href="#-tech-stack">🔧 Tech Stack</a> · <a href="#-license">📄 License</a> · <a href="#-faq">❓ FAQ</a> · <a href="#-about">📬 About</a>
+## Table of Contents
 
-</div>
+- 📋 [Project Introduction](#intro) · 💡 [Core Design Philosophy](#philosophy) · 🎮 [Demo Environment](#demo) · ✨ [Feature Overview](#overview)
+- 📦 [Changelog](#changelog) · 🚢 [Deployment Guide](#deployment) · 🚀 [Quick Start](#quickstart) · 📁 [Project Structure](#structure)
+- 💾 [Data Storage](#storage) · 👥 [Permissions Overview](#permissions) · 🔧 [Tech Stack](#tech-stack) · 📄 [License](#license) · ❓ [FAQ](#faq) · 📬 [About](#about)
 
----
-
-> 📌 **V8.6.0 Highlights**:
-> 🔊 **Speech synthesis and roll-call voice**: only voices verified to speak are listed, polyphonic surnames corrected, nothing billed while off
-> 🧭 **Model catalogue, config self-tests, two image endpoints**: wrong settings fail at save time, sizes filtered by measured limits
-> 📊 **Login page visit stats** + ⚡ **The entry page is never cached**: an all-time total that cannot go backwards, refresh after an update
-> 🧱 **One door into the question bank**: nine hand-written INSERT paths became one — validate, de-duplicate, one transaction, link knowledge points
-> 🔁 **One filling policy**: bank first → AI covers the shortfall → AI questions are stored before being returned; buzzer rounds no longer pad with repeats
-> 📏 **Question counts mean what the teacher typed**: real parameters, out-of-range errors instead of silent rewrites
-> 🧮 **Score totals are a hard invariant** + 🎯 **Three selection engines became one** + 🔢 **Export rendering fixed** + 🔀 **Drag to reorder** + 🎲 **Per-student shuffling** + ⏱ **AI moved to background jobs**
-> 📱 **Phone support** + 🖼 **Figure pipeline cleanup** + 🏆 **Anti-farming points** + 🛡 **Ops and settings polish**
-> 🎨 **Whiteboard usability**: refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, and dropped links reconnect on their own (needs a backend restart)
-> ⏱ **AI generation stops gambling the whole timeout**: the question count sets the output ceiling and the timeout budget is split across endpoints (a stalled dedicated domain falls over to the public one), and a timeout now says how long it waited and which endpoint it tried (needs a backend restart)
+**Chapters:** [Home and To-Dos](#ch-home) · [Teaching and Resources](#ch-teach) · [Learning and Practice](#ch-learn) · [Classroom Activities](#ch-practice) · [Analytics and Motivation](#ch-assess) · [System Management](#ch-manage)
 
 ---
 
-## 📋 Project Introduction
-
-**SmartKBS** is a fully-featured AI-powered smart teaching management platform designed for all grades and subjects, specifically tailored for primary, middle, and high school education scenarios. The system is not limited to any specific subject — through flexible configuration, it can adapt to mathematics, Chinese, English, physics, chemistry, biology, history, geography, information technology, general technology, artificial intelligence, and any other subject's teaching needs.
-
-Built with **FastAPI + React**, the system adopts a modern front-end/back-end separation architecture, deeply integrating Alibaba Cloud DashScope (Tongyi Qianwen/Tongyi Wanxiang) and DeepSeek large language model capabilities. Through a flexible AI invocation service offering three modes — knowledge-base-augmented model calls, Bailian Agent application, and direct model invocation — with automatic takeover by priority (knowledge base &gt; agent &gt; model), it provides teachers and students with a one-stop intelligent teaching and learning experience.
-
-**📦 Three ways to deploy**: one-click Windows desktop installer (no environment, no Python / Node.js) · source package deployment · Git clone deployment (with online incremental upgrades). See the [Deployment Guide](#-deployment-guide).
-
-> 💡 **Core Design Philosophy**
+> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-09)
 >
-> - **🧠 AI Native, Full-Scenario Integration**
->   AI is not an external tool, but a native capability running through teaching, learning, practice, assessment, and management.
->   Every conversation, every question, every report has deep AI involvement,
->   yet teachers and students "don't feel the presence of AI" — it blends naturally into the teaching flow.
+> - 🔊 **Speech synthesis and roll-call voice** — only voices verified to produce audio are offered, polyphonic surnames are corrected automatically, and nothing is billed while the feature is off
+> - 🧭 **Settings stop guessing** — one model catalogue behind dropdowns, self-test buttons for image and speech generation, size options filtered by measured limits, wrong values rejected on save
+> - 🧱 **One door into the question bank** — nine hand-written insert paths merged into a single exit: validate → de-duplicate → one transaction → link knowledge points
+> - 🔁 **One filling policy** — bank first → AI covers the shortfall → AI questions are stored before being returned; buzzer rounds no longer pad with repeats; composing can opt into shortfall filling (off by default)
+> - 📏 **Question counts mean what the teacher typed** — real parameters everywhere, out-of-range requests fail loudly instead of being silently rewritten
+> - 🎨 **Whiteboard usability and a rebuilt realtime path** — refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, dropped links reconnect on their own
+> - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports how long it waited and which endpoint it tried
+> - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
 >
-> - **🎯 Teach According to Aptitude · Personalized for Everyone**
->   The student-side AI companion dynamically adjusts conversation style and recommended content
->   based on grade, knowledge weak points, and learning habits; the teacher-side AI assistant
->   provides precise lesson preparation support and learning insights tailored to the teacher's classes, subjects, and time periods.
->
-> - **🔄 Teaching Loop · Data Flywheel**
->   From learning behavior collection → AI analysis → personalized feedback → behavior improvement,
->   forming a complete data flywheel. Every exam, practice, and conversation enriches
->   the student profile, which in turn feeds back into subsequent AI decisions.
->
-> - **⚡ Anti-Waste Architecture · Zero Idle AI**
->   All AI calls are triggered on demand — no access means no resource consumption.
->   Daily pick pool, trending news cache, AI summary lazy loading
->   ensure every bit of computing power is used where it matters.
->
-> - **👥 Role-Aware · Dual-Wheel Drive**
->   Student → AI Companion (accompanying learning), Teacher → AI Assistant
->   (workload reduction), Admin → Global intelligent control.
->   Each plays their part without interference.
->
-> - **🏆 Gamified Incentives · Intrinsic Drive**
->   12-level title system + achievement badges + points reward engine,
->   transforming the learning process into a rewarding growth journey.
->   Motivation comes not from external pressure, but from continuous positive feedback.
->
-> - **🌐 Subject-Agnostic · Flexible Adaptation**
->   Any subject, any grade level can be quickly adapted through configuration.
->   AI prompts are dynamically constructed — no code changes needed to switch curricula.
+> The whiteboard and generation batches **require a backend restart**. Full details in the [changelog](#changelog).
 
 ---
 
-## 🎮 Demo Environment
+<a id="intro"></a>
 
-> **🌐 Demo URL:**
->
-> **Development Environment:** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
->
-> **Deployment Environment:** [http://183.239.51.37:8086](http://183.239.51.37:8086) / [https://183.239.51.37:8085](https://183.239.51.37:8085)
->
-> **👤 Test Accounts:**
->
-> | Role | Username | Password |
-> | --- | --- | --- |
-> | Teacher | youufis | ultraultra |
-> | Student | s11001 ~ s11009 | 123456 |
-> | Student | s18001 ~ s19009 | 123456 |
+## Project Introduction
 
----
+**SmartKBS** puts lesson preparation, question authoring, classroom activities, practice, exams, learning analytics, honours and operations inside one account system and one data pipeline. A whole school, a single teaching group or one teacher can use it directly instead of stitching several tools together.
 
-## ✨ Complete Feature Overview
+The platform is **subject-agnostic**. The subject list, grades, classes, question types, titles, AI models and prompt templates all come from configuration (`backend/system_config.json` plus the database master tables), so switching curricula means changing configuration, not code. SmartKBS itself grew out of a single subject (Artificial Intelligence) and was later generalised — "no hard-coded subject" is an implemented fact, not a marketing line.
 
-### 📱 Mobile access
+Built-in grade master data covers **primary, junior secondary and senior secondary** stages: twelve preset grades from Grade 1 (一年级) to Senior 3 (高三). A teacher account can hold a multi-grade teaching scope such as `高一|高二` (Senior 1 | Senior 2), and every read and write is filtered by that scope. Preschool and higher-education stages have no built-in stage rules; they require extending the grade master data.
+
+AI capabilities go through a single invocation service offering three modes, taken over by priority and degrading step by step:
+
+1. **Retrieval-augmented generation** — once a knowledge base is ready it takes over the whole AI chain: retrieve first (Bailian knowledge base, or the local question bank and syllabus), generate from what was matched, show the cited sources in the UI, and fall back to the next level when retrieval fails
+2. **Bailian agent application** — call a pre-configured agent app directly
+3. **Direct model invocation** — the fallback path, compatible with DashScope and DeepSeek
+
+> 📦 **Three ways to deploy**: one-click Windows desktop installer (no environment, no Python / Node.js) · source package · Git clone (with online incremental upgrades). See the [Deployment Guide](#deployment).
+
+<a id="philosophy"></a>
+
+## Core Design Philosophy
+
+- **🧠 AI native, but bank first**
+  AI lives inside authoring, grading, Q&A, analysis and the whiteboard rather than as a bolted-on chat box. Anything already answerable from stored data never calls the model: generation and composing always go "question bank first → AI covers the gap → the AI question must be stored before it is returned", so every unit of compute turns into a reusable asset.
+- **🎯 Teach according to aptitude**
+  The student-side companion adapts its tone and recommendations to the persona the student chose (encouraging / rigorous / humorous), the knowledge points they keep missing, and their learning profile. The teacher-side assistant scopes its help to that teacher's classes and subject.
+- **🔄 A closed loop, driven by a data flywheel**
+  Behaviour collection → AI analysis → personalised feedback → behaviour change. Exams, practice, conversations and roll call enrich the learner profile, and the profile feeds the next round of AI decisions and recommendations.
+- **⚡ On-demand calls, zero idle spend**
+  Every AI call is triggered by actual use: the daily pick pool refills only once it is exhausted, news summaries load lazily, portraits are generated on visit, and speech synthesis bills nothing while switched off. No compute is burned on an empty classroom.
+
+**Product strengths**
+
+| Strength | How it is delivered |
+| --- | --- |
+| 👥 Three roles, each with its own AI | Students get a companion, teachers get an assistant, admins get global control — without interfering with each other |
+| 🏆 Gamified motivation | 12-level titles + achievement badges + an automatic points engine replace external pressure with steady positive feedback |
+| 🌐 Configuration-driven, subject-agnostic | Changing subject means editing configuration and prompt templates, never code |
+| 🔒 Local-first | Two SQLite databases plus local directories; runs fully offline, AI goes through endpoints reachable from China, pip mirrors available, student data never leaves the school |
+| 📱 Zero-install multi-device | Works in a phone browser with no app and no extra deployment |
+| 🖥️ One-click desktop edition | Electron shell with bundled backend and frontend, so the target machine needs no Python / Node.js |
+| ⬆️ Online incremental upgrade | Git deployments upgrade in place: fetch, migrate, install dependencies, restart — with automatic rollback on failure |
+
+<a id="demo"></a>
+
+## Demo Environment
+
+| Purpose | URL |
+| --- | --- |
+| Development | [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) · [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085) |
+| Deployment | [http://183.239.51.37:8086](http://183.239.51.37:8086) · [https://183.239.51.37:8085](https://183.239.51.37:8085) |
+
+**Test accounts**
+
+| Role | Username | Password |
+| --- | --- | --- |
+| Teacher | `youufis` | `ultraultra` |
+| Student | `s11001` ~ `s11009` | `123456` |
+| Student | `s18001` ~ `s19009` | `123456` |
+
+> ⚠️ **Shared demo environment** — every visitor works on the same database of test data, and your actions are visible to others. Do not enter real student names, real grades or any confidential school material.
+
+<a id="overview"></a>
+
+## Feature Overview
+
+The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entry is the layer that aggregates them all):
+
+| Track | Chapter | Covers | Areas |
+| --- | --- | --- | :---: |
+| 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 10 |
+| 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
+| 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 7 |
+| 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio | 10 |
+| ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, self-portrait, upgrade, about, other services | 9 |
+
+> The **permission note** at the end of each section states which roles can reach that feature; the full matrix is in the [Permissions Overview](#permissions).
+
+### Mobile access
 
 The platform runs directly in a phone browser - **no app to install**. On a phone the focus is "students practise and check, teachers review and approve"; heavy management pages stay desktop-only.
 
@@ -132,9 +151,13 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 
 Question bank management and paper composing, question maintenance, user management, system configuration, roll call, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
 
-#### 🏠 Home Overview
+<a id="ch-home"></a>
 
-### 📊 Dashboard (System Home)
+## Home and To-Dos
+
+What you see first after login — the role-aware dashboard and the student to-do list, the entry layer for all five tracks.
+
+### Dashboard (System Home)
 
 After login, the smart dashboard is displayed by default, aggregating key data by role:
 
@@ -165,7 +188,7 @@ After login, the smart dashboard is displayed by default, aggregating key data b
 
 ---
 
-### 📋 To-Do Items (Student Task Aggregation)
+### To-Do Items (Student Task Aggregation)
 
 Student-specific task aggregation board:
 
@@ -178,9 +201,13 @@ Student-specific task aggregation board:
 
 ---
 
-#### 📚 Teaching Management
+<a id="ch-teach"></a>
 
-### 📖 Course Syllabus (Course Guide)
+## Teaching and Resources
+
+The teacher's full path from preparation to shared resources: syllabus, authoring, composing, exams, AI-generated and shared content.
+
+### Course Syllabus (Course Guide)
 
 Course → Chapter → Section → Knowledge Point four-level tree structure:
 
@@ -196,68 +223,7 @@ Course → Chapter → Section → Knowledge Point four-level tree structure:
 
 ---
 
-### 📚 Course Exercises (Knowledge Point Practice)
-
-AI-powered practice system based on course syllabus knowledge points:
-
-- **🤖 AI Auto-Generated Questions**: Teachers generate 10 multiple-choice questions per knowledge point with one click
-  - AI intelligently searches and merges matching questions from the question bank
-  - Gaps are filled by AI-generated new questions
-  - New questions are automatically added to the question bank
-- **✍️ Student Online Answers**: Click on knowledge points in the course learning page to practice directly
-- **🏆 Auto Points Reward**:
-  - Participation base: 2 points
-  - Excellent (≥90%): +15 points
-  - Good (≥75%): +10 points
-  - Pass (≥60%): +5 points
-- **📊 Data Display**: Dashboard shows completion count and average accuracy rate
-- **📋 Growth Portfolio Integration**: Personal portfolio page integrates practice details
-
-> **Admin/Teacher can create questions; Student can participate in exercises**
-
----
-
-### 💬 AI Chat (Knowledge Q&A)
-
-Core intelligent Q&A interface based on SSE streaming, providing a smooth AI conversation experience:
-
-- **⚡ Streaming Dialogue**: AI outputs responses word by word in real time for instant feedback
-- **📎 File Upload**: Supports images (JPG/PNG/GIF) and documents (PDF/Word/Excel/PPT/TXT/MD, etc.)
-- **👁️ Image Understanding**: Upload images to invoke vision model for recognition and analysis
-- **🖼️ Multimodal Dialogue**: When multimodal is enabled, supports simultaneous image + text input, directly understood by the multimodal model without file summarization
-- **📄 File Summary Enhancement**: Automatically summarizes uploaded documents to enhance AI dialogue context
-- **🔍 RAG Knowledge Enhancement**: Retrieves relevant knowledge from question bank and course syllabus to improve answer accuracy
-- **📜 Chat History**: Auto-saved and shown by conversation title, grouped by today/yesterday/month, with title and full-text search, hover preview, rename and download
-- **👁️ HTML Preview**: One-click preview of HTML code blocks in conversations
-- **📋 Example Prompts**: Built-in multiple teaching scenario examples, one-click fill
-- **🎭 Three Modes**: Smart Answer Mode / Companion Mode (Student) / Assistant Mode (Teacher/Admin)
-- **🎤 Voice Input**: Supports microphone voice-to-text input
-- **📷 Photo Upload**: Supports camera photo capture and direct upload
-
-> **Available to all logged-in users**
-
----
-
-### 🧠 AI Companion (Student Exclusive)
-
-An intelligent upgrade of AI dialogue, providing personalized learning companionship for students:
-
-- **👤 Dedicated Learning Partner**: The AI companion knows the student's name, grade, learning progress, and weak knowledge points
-- **🔄 Three Personality Modes**:
-  - 🌟 **Encouraging**: Warm and enthusiastic, full of positive energy, uses encouraging language
-  - 📐 **Rigorous**: Precise and detailed, focuses on analyzing "why it's wrong" and "how to fix it", draws inferences
-  - 😄 **Humorous**: Witty and fun, appropriately uses memes and banter to make learning enjoyable
-- **📊 Learning Profile Sidebar**: Real-time display of title, points, weak knowledge points, exam trends, consecutive learning days
-- **🔔 Proactive Push**: Morning greetings, exam result analysis, title upgrade congratulations, learning reminders
-- **💾 Unified Chat History Management**: Shares the same chat history system as Smart Answer mode
-- **⚙️ Custom Settings**: Customizable companion name, personality, toggle companion on/off, daily wake-up time
-- **🎨 Visual Differentiation**: Purple companion-style chat bubbles and avatar
-
-> **Available to students (switch at the top of the Smart Answer page)**
-
----
-
-### 🎓 Teaching Assistant (Teacher/Admin Exclusive)
+### Teaching Assistant (Teacher/Admin Exclusive)
 
 AI-powered teaching tool assistant for teachers and administrators:
 
@@ -272,22 +238,7 @@ AI-powered teaching tool assistant for teachers and administrators:
 
 ---
 
-### 📝 Targeted Practice (AI-Directed Questioning)
-
-Teachers generate targeted practice questions from wrong answer books or knowledge points and push them to classes or specific students:
-
-- **🤖 AI Question Generation**: Automatically generates targeted practice questions from wrong answer books or knowledge points
-- **📤 Targeted Push**: Push to class or specific students
-- **✍️ Student Answering**: Online answering, supports multiple-choice and short-answer questions
-- **🤖 AI Auto-Grading**: Short-answer questions are automatically graded
-- **⚡ Async Question Generation**: Non-blocking, supports background generation
-- **📊 Practice Records**: View history and performance statistics
-
-> **Admin/Teacher can create questions; Student can participate**
-
----
-
-### 📝 Question Bank Management (Smart Question Bank)
+### Question Bank Management (Smart Question Bank)
 
 AI-powered smart question management system supporting multiple question types and multimedia:
 
@@ -308,7 +259,7 @@ AI-powered smart question management system supporting multiple question types a
 
 ---
 
-### 📝 Exam Publishing (Online Exam System)
+### Exam Publishing (Online Exam System)
 
 Complete online exam management system:
 
@@ -325,7 +276,7 @@ Complete online exam management system:
 
 ---
 
-### 📄 Smart Paper Generation & Word Export
+### Smart Paper Generation & Word Export
 
 Step-by-step guided paper generation wizard supporting smart selection and professional document export:
 
@@ -346,54 +297,7 @@ Step-by-step guided paper generation wizard supporting smart selection and profe
 
 ---
 
-### 📕 Wrong Answer Review
-
-Automatically collects student wrong answers for AI-assisted review:
-
-- **📋 Wrong Answer Collection**: Grouped by exam for display
-- **✅ Mark as Mastered**: Each wrong question can be marked mastered (and undone), with To review / Mastered / All filtering actually in sync
-- **📐 Multimedia Display**: Supports LaTeX formulas and image display
-- **🤖 AI Review Plan**: One-click generation of personalized review reports (wrong answer analysis, knowledge point review suggestions, targeted practice questions)
-- **👁️ Three-Level Linked Viewing (Teacher)**: Filter by grade → class → student
-- **📊 Wrong Answer Statistics**: Wrong answer count and accuracy rate by subject
-
-> **Student views their own; Teacher/Admin can view all students in a class**
-
----
-
-### 📁 Resource Center (Sharing Center)
-
-Displays HTML teaching resource files in a card grid:
-
-- **👁️ Card Browsing**: Thumbnail + file name
-- **🔗 Sharing Operations**:
-  - **Admin Sharing**: Can select "Everyone", "Specific Teacher", "Specific Grade/Class"
-  - **Teacher Sharing**: Select "Admin and Teachers" + "Own Classes"
-- **🔍 Search & Filter**: Search by file name
-- **🗂️ Unified Browser**: students' Shared Resources, teachers' Shared With Me and students' Shared Files share one browsing UI (unseen / time / type / course / sharer / audience facets + grid & list views + remembered preferences)
-- **🔗 Direct positioning**: opening a task-list or share notification lands straight on the right tab instead of the default one
-- **🤖 AI Generation**: 5 resource types (Animation Explanation, Interactive Quiz, Chapter Exercise, Lab Interaction, Custom HTML)
-- **👁️ Resource View Tracking**: Automatically records student viewing behavior
-
-> **Available to all logged-in users; Students can only view shared resources**
-
----
-
-### 📁 Resource Management
-
-Upload/delete/rename teaching resource files:
-
-- 📤 Upload files, directories (HTML/CSS/JS/images/documents, etc.)
-- 🗑️ Delete and rename
-- 📁 Each teacher has an independent resource directory
-- 🔗 File sharing operations (same as Resource Center sharing)
-- 📊 Quota management
-
-> **Available to Admin and Teacher**
-
----
-
-### 🤖 AI Teaching Resource Recommendations
+### AI Teaching Resource Recommendations
 
 Intelligently recommends teaching resources based on knowledge point content:
 
@@ -406,7 +310,7 @@ Intelligently recommends teaching resources based on knowledge point content:
 
 ---
 
-### 🤖 AI-Generated HTML Resources
+### AI-Generated HTML Resources
 
 Use AI directly in the Resource Center to generate HTML teaching resources:
 
@@ -422,7 +326,7 @@ Use AI directly in the Resource Center to generate HTML teaching resources:
 - **💾 AI New Questions Auto-Added**: AI-generated questions are automatically saved to the question bank
 - **🔗 Subject/Grade Smart Association**: Fetches corresponding question bank based on subject and grade
 
-#### 🧪 Lab Interaction Resource Details
+#### Lab Interaction Resource Details
 
 Covers **9 Subject Categories**:
 
@@ -444,7 +348,39 @@ Covers **9 Subject Categories**:
 
 ---
 
-### 📥 File Center
+### Resource Center (Sharing Center)
+
+Displays HTML teaching resource files in a card grid:
+
+- **👁️ Card Browsing**: Thumbnail + file name
+- **🔗 Sharing Operations**:
+  - **Admin Sharing**: Can select "Everyone", "Specific Teacher", "Specific Grade/Class"
+  - **Teacher Sharing**: Select "Admin and Teachers" + "Own Classes"
+- **🔍 Search & Filter**: Search by file name
+- **🗂️ Unified Browser**: students' Shared Resources, teachers' Shared With Me and students' Shared Files share one browsing UI (unseen / time / type / course / sharer / audience facets + grid & list views + remembered preferences)
+- **🔗 Direct positioning**: opening a task-list or share notification lands straight on the right tab instead of the default one
+- **🤖 AI Generation**: 5 resource types (Animation Explanation, Interactive Quiz, Chapter Exercise, Lab Interaction, Custom HTML)
+- **👁️ Resource View Tracking**: Automatically records student viewing behavior
+
+> **Available to all logged-in users; Students can only view shared resources**
+
+---
+
+### Resource Management
+
+Upload/delete/rename teaching resource files:
+
+- 📤 Upload files, directories (HTML/CSS/JS/images/documents, etc.)
+- 🗑️ Delete and rename
+- 📁 Each teacher has an independent resource directory
+- 🔗 File sharing operations (same as Resource Center sharing)
+- 📊 Quota management
+
+> **Available to Admin and Teacher**
+
+---
+
+### File Center
 
 Download directory file management:
 
@@ -459,9 +395,104 @@ Download directory file management:
 
 ---
 
-#### 🌐 Knowledge Expansion
+<a id="ch-learn"></a>
 
-### ⭐ Daily Picks & 📰 Trending News
+## Learning and Practice
+
+The student side: knowledge Q&A, the AI companion, syllabus and targeted practice, wrong-answer review, wider reading and hands-on coding.
+
+### AI Chat (Knowledge Q&A)
+
+Core intelligent Q&A interface based on SSE streaming, providing a smooth AI conversation experience:
+
+- **⚡ Streaming Dialogue**: AI outputs responses word by word in real time for instant feedback
+- **📎 File Upload**: Supports images (JPG/PNG/GIF) and documents (PDF/Word/Excel/PPT/TXT/MD, etc.)
+- **👁️ Image Understanding**: Upload images to invoke vision model for recognition and analysis
+- **🖼️ Multimodal Dialogue**: When multimodal is enabled, supports simultaneous image + text input, directly understood by the multimodal model without file summarization
+- **📄 File Summary Enhancement**: Automatically summarizes uploaded documents to enhance AI dialogue context
+- **🔍 RAG Knowledge Enhancement**: Retrieves relevant knowledge from question bank and course syllabus to improve answer accuracy
+- **📜 Chat History**: Auto-saved and shown by conversation title, grouped by today/yesterday/month, with title and full-text search, hover preview, rename and download
+- **👁️ HTML Preview**: One-click preview of HTML code blocks in conversations
+- **📋 Example Prompts**: Built-in multiple teaching scenario examples, one-click fill
+- **🎭 Three Modes**: Smart Answer Mode / Companion Mode (Student) / Assistant Mode (Teacher/Admin)
+- **🎤 Voice Input**: Supports microphone voice-to-text input
+- **📷 Photo Upload**: Supports camera photo capture and direct upload
+
+> **Available to all logged-in users**
+
+---
+
+### AI Companion (Student Exclusive)
+
+An intelligent upgrade of AI dialogue, providing personalized learning companionship for students:
+
+- **👤 Dedicated Learning Partner**: The AI companion knows the student's name, grade, learning progress, and weak knowledge points
+- **🔄 Three Personality Modes**:
+  - 🌟 **Encouraging**: Warm and enthusiastic, full of positive energy, uses encouraging language
+  - 📐 **Rigorous**: Precise and detailed, focuses on analyzing "why it's wrong" and "how to fix it", draws inferences
+  - 😄 **Humorous**: Witty and fun, appropriately uses memes and banter to make learning enjoyable
+- **📊 Learning Profile Sidebar**: Real-time display of title, points, weak knowledge points, exam trends, consecutive learning days
+- **🔔 Proactive Push**: Morning greetings, exam result analysis, title upgrade congratulations, learning reminders
+- **💾 Unified Chat History Management**: Shares the same chat history system as Smart Answer mode
+- **⚙️ Custom Settings**: Customizable companion name, personality, toggle companion on/off, daily wake-up time
+- **🎨 Visual Differentiation**: Purple companion-style chat bubbles and avatar
+
+> **Available to students (switch at the top of the Smart Answer page)**
+
+---
+
+### Course Exercises (Knowledge Point Practice)
+
+AI-powered practice system based on course syllabus knowledge points:
+
+- **🤖 AI Auto-Generated Questions**: Teachers generate 10 multiple-choice questions per knowledge point with one click
+  - AI intelligently searches and merges matching questions from the question bank
+  - Gaps are filled by AI-generated new questions
+  - New questions are automatically added to the question bank
+- **✍️ Student Online Answers**: Click on knowledge points in the course learning page to practice directly
+- **🏆 Auto Points Reward**:
+  - Participation base: 2 points
+  - Excellent (≥90%): +15 points
+  - Good (≥75%): +10 points
+  - Pass (≥60%): +5 points
+- **📊 Data Display**: Dashboard shows completion count and average accuracy rate
+- **📋 Growth Portfolio Integration**: Personal portfolio page integrates practice details
+
+> **Admin/Teacher can create questions; Student can participate in exercises**
+
+---
+
+### Targeted Practice (AI-Directed Questioning)
+
+Teachers generate targeted practice questions from wrong answer books or knowledge points and push them to classes or specific students:
+
+- **🤖 AI Question Generation**: Automatically generates targeted practice questions from wrong answer books or knowledge points
+- **📤 Targeted Push**: Push to class or specific students
+- **✍️ Student Answering**: Online answering, supports multiple-choice and short-answer questions
+- **🤖 AI Auto-Grading**: Short-answer questions are automatically graded
+- **⚡ Async Question Generation**: Non-blocking, supports background generation
+- **📊 Practice Records**: View history and performance statistics
+
+> **Admin/Teacher can create questions; Student can participate**
+
+---
+
+### Wrong Answer Review
+
+Automatically collects student wrong answers for AI-assisted review:
+
+- **📋 Wrong Answer Collection**: Grouped by exam for display
+- **✅ Mark as Mastered**: Each wrong question can be marked mastered (and undone), with To review / Mastered / All filtering actually in sync
+- **📐 Multimedia Display**: Supports LaTeX formulas and image display
+- **🤖 AI Review Plan**: One-click generation of personalized review reports (wrong answer analysis, knowledge point review suggestions, targeted practice questions)
+- **👁️ Three-Level Linked Viewing (Teacher)**: Filter by grade → class → student
+- **📊 Wrong Answer Statistics**: Wrong answer count and accuracy rate by subject
+
+> **Student views their own; Teacher/Admin can view all students in a class**
+
+---
+
+### Daily Picks & Trending News
 
 Dual knowledge expansion modules, allowing students to easily broaden their horizons beyond regular study:
 
@@ -476,9 +507,7 @@ Dual knowledge expansion modules, allowing students to easily broaden their hori
 
 ---
 
-#### 💻 Programming Practice
-
-### 💻 Programming Practice (Code Exercises)
+### Programming Practice (Code Exercises)
 
 Online programming practice and auto-grading system:
 
@@ -504,11 +533,15 @@ Online programming practice and auto-grading system:
 
 ---
 
-#### 🎪 Classroom Activities
+<a id="ch-practice"></a>
 
-### 🎯 Classroom Interaction Tools
+## Classroom Activities
 
-#### 📋 Class Quiz
+The real-time tools that run a single 40-minute lesson: quizzes, polls, questions, buzzer rounds, discussions, the whiteboard, roll call, quests and dialogue homework.
+
+### Classroom Interaction Tools
+
+#### Class Quiz
 
 Classroom instant quiz system:
 
@@ -518,7 +551,7 @@ Classroom instant quiz system:
 - 📐 Supports LaTeX formulas and images
 - 📤 Data export
 
-#### 📊 Classroom Voting
+#### Classroom Voting
 
 Classroom instant voting system:
 
@@ -527,7 +560,7 @@ Classroom instant voting system:
 - 📊 Real-time bar chart statistics
 - 👥 Real-time participant count display
 
-#### ❓ Question Management
+#### Question Management
 
 Integrated student Q&A and teacher approval management:
 
@@ -541,7 +574,7 @@ Integrated student Q&A and teacher approval management:
 
 ---
 
-### ⚡ Quick-Answer Competition
+### Quick-Answer Competition
 
 Real-time multiplayer online quick-answer competition system:
 
@@ -566,7 +599,7 @@ Real-time multiplayer online quick-answer competition system:
 
 ---
 
-### 👥 Group Discussion (AI Tutor)
+### Group Discussion (AI Tutor)
 
 AI tutor-assisted classroom group discussion system:
 
@@ -589,7 +622,7 @@ AI tutor-assisted classroom group discussion system:
 
 ---
 
-### 🖍️ Collaborative Whiteboard (AI Whiteboard Assistant)
+### Collaborative Whiteboard (AI Whiteboard Assistant)
 
 Real-time collaborative whiteboard system based on TLDraw, with built-in AI whiteboard assistant sidebar:
 
@@ -619,7 +652,7 @@ Real-time collaborative whiteboard system based on TLDraw, with built-in AI whit
 
 ---
 
-### 🎯 Attendance & Roll Call Management
+### Attendance & Roll Call Management
 
 Integrated smart roll call + attendance statistics management:
 
@@ -636,7 +669,7 @@ Integrated smart roll call + attendance statistics management:
 
 ---
 
-### ✅ Dialogue Homework
+### Dialogue Homework
 
 Teachers set a topic, students work it out with the AI and hand in the conversation transcript for per-student grading:
 
@@ -657,7 +690,7 @@ Teachers set a topic, students work it out with the AI and hand in the conversat
 
 ---
 
-### 🎮 Knowledge Challenge
+### Knowledge Challenge
 
 AI instant-question knowledge challenge:
 
@@ -676,9 +709,13 @@ AI instant-question knowledge challenge:
 
 ---
 
-#### 📊 Learning Analytics
+<a id="ch-assess"></a>
 
-### 🔬 AI-Powered Learning Analytics
+## Analytics and Motivation
+
+Behaviour becomes a learner profile, the profile feeds teaching, and points, titles and honours keep the loop positive.
+
+### AI-Powered Learning Analytics
 
 Utilizes AI for in-depth analysis of teaching data:
 
@@ -699,7 +736,7 @@ Utilizes AI for in-depth analysis of teaching data:
 
 ---
 
-### 📊 AI Classroom Summary
+### AI Classroom Summary
 
 AI comprehensively analyzes classroom interaction data:
 
@@ -712,7 +749,7 @@ AI comprehensively analyzes classroom interaction data:
 
 ---
 
-### 📊 Progress Details
+### Progress Details
 
 Comprehensive analysis of course progress and learning progress:
 
@@ -724,7 +761,7 @@ Comprehensive analysis of course progress and learning progress:
 
 ---
 
-### 📊 Activity Monitoring (Teaching Supervision)
+### Activity Monitoring (Teaching Supervision)
 
 Teachers view completion status of various teaching activities:
 
@@ -736,7 +773,7 @@ Teachers view completion status of various teaching activities:
 
 > **Available to Teacher and Admin**
 
-#### 🔄 Activity Data Reset (clear participation, keep content)
+#### Activity Data Reset (clear participation, keep content)
 
 All nine activity types (Exam, Smart Practice, Quick Quiz, Online Task, Class Quiz, Code Practice, Group Discussion, Quick Poll, Course Exercise) provide a "Reset" action:
 
@@ -754,7 +791,7 @@ All nine activity types (Exam, Smart Practice, Quick Quiz, Online Task, Class Qu
 
 ---
 
-### 👁️ Resource View Tracking
+### Resource View Tracking
 
 Tracks student viewing of HTML and download resources:
 
@@ -768,7 +805,7 @@ Tracks student viewing of HTML and download resources:
 
 ---
 
-### 📊 Data Export
+### Data Export
 
 Supports exporting various data to Excel/CSV:
 
@@ -783,7 +820,7 @@ Supports exporting various data to Excel/CSV:
 
 ---
 
-### 🏆 Points Reward System (Auto Reward Engine)
+### Points Reward System (Auto Reward Engine)
 
 Fully automated points incentive mechanism covering all classroom activities:
 
@@ -821,7 +858,7 @@ Fully automated points incentive mechanism covering all classroom activities:
 
 ---
 
-### 🏆 Classroom Points (Class Management)
+### Classroom Points (Class Management)
 
 Classroom points incentive system:
 
@@ -835,7 +872,7 @@ Classroom points incentive system:
 
 ---
 
-### 🏆 Hall of Glory (Student Honor Showcase Wall)
+### Hall of Glory (Student Honor Showcase Wall)
 
 Integrated student achievement display page, bringing together points, titles, badges, and other honors on one wall:
 
@@ -851,7 +888,7 @@ Integrated student achievement display page, bringing together points, titles, b
 
 ---
 
-### 👤 Student Growth Portfolio
+### Student Growth Portfolio
 
 Full-dimension learning data aggregation profile:
 
@@ -868,9 +905,13 @@ Full-dimension learning data aggregation profile:
 
 ---
 
-#### ⚙️ System Management
+<a id="ch-manage"></a>
 
-### 👥 User Management
+## System Management
+
+Accounts, configuration, AI skills, notifications, upgrades and operations.
+
+### User Management
 
 Complete account management system:
 
@@ -890,7 +931,7 @@ Complete account management system:
 
 ---
 
-### 📢 System Announcements
+### System Announcements
 
 Publish and manage system announcements:
 
@@ -904,7 +945,7 @@ Publish and manage system announcements:
 
 ---
 
-### ⚙️ System Configuration
+### System Configuration
 
 Centralized management of all system configuration parameters:
 
@@ -924,7 +965,7 @@ Centralized management of all system configuration parameters:
 
 ---
 
-### 🎯 Skill Management
+### Skill Management
 
 Modular AI Skill Document System — each skill is defined via YAML + Markdown, automatically injected into AI calls by scene:
 
@@ -939,7 +980,7 @@ Modular AI Skill Document System — each skill is defined via YAML + Markdown, 
 
 ---
 
-### 🔔 Notification Center
+### Notification Center
 
 Real-time message notification system:
 
@@ -958,7 +999,7 @@ Real-time message notification system:
 
 ---
 
-### 🎨 AI Self-Portrait
+### AI Self-Portrait
 
 Personalized AI portrait generated based on Tongyi Wanxiang model:
 
@@ -981,7 +1022,7 @@ Personalized AI portrait generated based on Tongyi Wanxiang model:
 
 ---
 
-### 🔄 Online Upgrade System (Version Management)
+### Online Upgrade System (Version Management)
 
 Git-based online incremental upgrade system:
 
@@ -998,7 +1039,7 @@ Git-based online incremental upgrade system:
 
 ---
 
-### ❓ About System
+### About System
 
 | Feature | Description |
 | --- | --- |
@@ -1006,7 +1047,7 @@ Git-based online incremental upgrade system:
 
 ---
 
-### 🛠️ Other System Services
+### Other System Services
 
 | Feature | Description |
 | --- | --- |
@@ -1014,9 +1055,27 @@ Git-based online incremental upgrade system:
 | 🔐 **Forgot Password** | Self-service password recovery via security questions |
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
-## 📦 Changelog
+<a id="changelog"></a>
+
+## Changelog
+
+Current version **8.6.0** (2026-10-05 ~ 10-09). The bullets below are the changes a user can notice; the complete entries are folded under each release.
 
 ### v8.6.0 (2026-10-05 ~ 10-09)
+
+- 🔊 Speech synthesis and roll-call voice landed; polyphonic surnames corrected; zero billing while off
+- 🧭 One model catalogue behind dropdowns, self-test buttons for image and speech, sizes filtered by measured limits, wrong settings rejected on save; the entry page is no longer cached; login-page visit statistics added
+- 🧱 Question storage merged into one exit: invalid questions refused, duplicates de-duplicated with ids backfilled, AI questions reach the selection engine the same day, figures cleaned on the way in
+- 🔁 One filling policy: bank first → AI covers the shortfall → AI questions stored before returning; buzzer rounds stop padding; composing can opt into shortfall filling (off by default)
+- 🧮 Paper score totals, the three selection engines, export rendering, drag-to-reorder and per-student shuffling all brought in line; AI generation moved to background jobs
+- 🎨 Whiteboard usability and realtime path rebuilt: refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
+- ⏱ Question generation scales its output ceiling to the question count and splits the timeout budget across endpoints; a timeout now reports the wait and the endpoint tried
+- 📱 Phone support landed, figure pipeline governed, points anti-farming, dashboard reworked, activity feed denoised, and system "reduce motion" respected
+- 🧪 134 regression tests added; full suite 802 passed, 1 skipped
+- ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error instead of being silently rewritten; the whiteboard and generation batches need a backend restart; retrying across endpoints may bill the same prompt twice
+
+<details>
+<summary>Expand the full v8.6.0 entries (27)</summary>
 
 - 🔊 **Speech synthesis lands**: a Speech section in System Settings (switch, model, voice, rate, volume); only voices verified to speak are listed, and nothing is billed while off
 - 🗣 **Roll call says the name**: the audio is fetched during the reveal animation so teachers notice nothing; cached per name, never blocks the roll call
@@ -1046,7 +1105,20 @@ Git-based online incremental upgrade system:
 - ⏱ **AI question generation no longer gambles the whole timeout**: the question count sets the output ceiling and the timeout budget is split per endpoint - a stalled dedicated domain falls over to the public one and retries once, all still inside the budget; a timeout now names how long it waited and which endpoint it tried instead of an empty message
 - ⚠️ **Breaking changes**: none - gap filling stays off by default, buzzer rounds may spend AI calls when the bank is short, and out-of-range counts now error instead of rewriting themselves. The whiteboard batch needs a backend restart: WS refusals now carry a reason after the handshake, register/write on an ended room return 409, and ending a room closes live sockets; permessage-deflate needs --ws websockets --ws-per-message-deflate on the command line. This batch also needs a backend restart; retrying on another endpoint can bill the same prompt twice, and that only happens when an output ceiling is declared and a backup endpoint is configured
 
+</details>
+
 ### v8.5.0 (2026-10-03 ~ 10-04)
+
+- 🧮 Paper score totals became a hard invariant; the paper health check only simulates until you confirm
+- 🔒 In-flight answers lock the paper: edits are refused while anyone is still answering, naming the student
+- 🎯 Three selection engines became one; drag-to-reorder and deterministic per-student shuffling finally apply
+- 🔢 Export rendering fixed (Chinese figures, formulas, blanks); paper header stored per exam
+- 📱 Phone support landed; 🖼 figure pipeline governed; 🏆 points anti-farming and honour cleanup
+- 🔐 Admin login history and three login kill switches; 🧠 skill injection restricted by scene; 🧪 130+ regression tests added
+- ⚠️ **Breaking changes**: none (when old papers already contain duplicates, the unique index degrades to a normal index with a log line — no data deleted)
+
+<details>
+<summary>Expand the full v8.5.0 entries (16)</summary>
 
 - 🧮 **Paper scores became a hard invariant**: the paper must add up to the target total, edits rebalance proportionally, and publishing runs a mandatory health check
 - 🩺 **Paper audit and repair**: dry run by default, per-question plan before any write, exams with students still answering are skipped
@@ -1064,6 +1136,8 @@ Git-based online incremental upgrade system:
 - 🧠 **Skill injection hardened**: structured outputs no longer receive skills, scenes mapped and whitelisted
 - 🧪 **Regression**: 130+ new tests for exams and paper composition
 - ⚠️ **Breaking changes**: none (if a historical paper already holds duplicates, the unique index degrades to a normal one and is logged; nothing is deleted)
+
+</details>
 
 ### v8.0 – v8.4 (2026-09-05 ~ 2026-09-29)
 
@@ -1083,10 +1157,11 @@ Git-based online incremental upgrade system:
 - 📰 **Knowledge and interaction**: daily discovery cards, RSS hot topics and a daily brief, three AI companion personalities, lesson and paper generation, collaborative whiteboard, auto grading
 - 🧱 **Platform rebuild**: subject hardcoding removed for any stage and subject, bulk import and grade promotion, learning analytics and portfolios, paper composition with Word export, full security audit
 
-
 ---
 
-## 📦 Deployment Guide
+<a id="deployment"></a>
+
+## Deployment Guide
 
 ### Method 1: One-Click Install · SmartKBS Desktop (no environment needed)
 
@@ -1155,28 +1230,39 @@ If deployed via `git clone`, system upgrades are fully automated:
 pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 ```
 
+**Optional enhancements**
+
+| Package | What it adds | Without it |
+| --- | --- | --- |
+| `matplotlib` | Renders LaTeX formulas in papers and handouts as images | Formulas degrade to Unicode text; everything else works |
+| `cairosvg` | Rasterises SVG figures | Falls back to svglib, with weaker Chinese label and gradient fidelity |
+
+Install them separately with `pip install matplotlib` when needed — they are left out of `requirements.txt` so the base install stays fast.
+
 ---
 
-## 🚀 Quick Start
+<a id="quickstart"></a>
 
-### Environment Requirements
+## Quick Start
 
-- Python 3.9+
+**Requirements**
 
-### 1️⃣ Start Backend Service
+- Python **3.11+** (3.11.9 is what development and packaging were tested on)
+- Node.js only if you want to develop the frontend; the desktop edition bundles everything
+
+### Step 1: start the backend
 
 ```bash
-# Method 1: Direct start
-cd D:\SmartKBS
+# Option 1: run directly
 python backend/main.py
 
-# Method 2: Start with Uvicorn
+# Option 2: run with Uvicorn (dev mode, hot reload)
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8086 --reload
 ```
 
-The backend service runs by default at `http://localhost:8086`, automatically serving frontend static files.
+The backend listens on `http://localhost:8086` and serves the prebuilt frontend in `frontend/dist`, so no extra setup is needed.
 
-### 2️⃣ Start Frontend Dev Server (Only needed when developing frontend)
+### Step 2: start the frontend dev server (only when developing the frontend)
 
 ```bash
 cd frontend
@@ -1184,85 +1270,103 @@ npm install
 npm run dev
 ```
 
-Frontend dev mode runs by default at `http://localhost:5173`
+The dev server runs on `http://localhost:5173` and proxies API calls to the backend.
 
-### 3️⃣ Default Admin Login
+### Step 3: sign in as the default administrator
 
 | Username | Password |
 | --- | --- |
-| root | root |
+| `root` | `root` |
 
-### 4️⃣ Configure AI Service
+> 🔑 Change this password and set security questions immediately — never leave the default credentials in a real deployment.
 
-Set the DashScope API Key in the "System Configuration" page.
+### Step 4: configure the AI service
+
+Open System Configuration and enter your DashScope API Key (plus the optional knowledge base / agent application and DeepSeek keys). The page lists candidate models and ships with connectivity self-tests, so you know right away whether a setting works.
+
+With no AI service configured, the core flows — question bank, exams, roll call, resources, points — still work; AI entry points simply explain what is missing.
 
 ---
 
-## 📁 Project Structure
+<a id="structure"></a>
+
+## Project Structure
+
+**Shipped with the source (tracked in the repository)**
 
 ```text
 SmartKBS/
-├── backend/                    # FastAPI Backend
-│   ├── main.py                 # Entry file (route mounting, static file serving)
-│   ├── config.py               # Global configuration constants
-│   ├── database.py             # Database connection management (smartkb.db)
-│   ├── question_db.py          # Question bank database (questions.db)
-│   ├── auth.py                 # JWT authentication + bcrypt password hashing + SSO
-│   ├── middleware.py           # Authentication middleware
-│   ├── logger.py               # Unified logging configuration
-│   ├── rag.py                  # RAG retrieval-augmented generation
-│   ├── paper_generator.py      # Word exam paper generation engine (python-docx)
-│   ├── reward_engine.py        # Points reward engine
-│   ├── ai_task_manager.py      # AI async task manager
-│   ├── permission_service.py   # Unified grade-class permission service
-│   ├── companion_memory.py     # AI companion memory engine
-│   ├── companion_profile.py    # AI companion configuration management
-│   ├── companion_push.py       # AI companion proactive push engine
-│   ├── title_system.py         # 12-level title + achievement badge system
-│   ├── score_utils.py          # Points utility functions
-│   ├── subject_config.py       # Subject configuration
-│   ├── code_grader.py          # Code auto-grading engine
-│   ├── code_runner.py          # Code sandbox execution engine
-│   ├── whiteboard_ws.py        # Collaborative whiteboard WebSocket manager
-│   ├── ws_manager.py           # WebSocket connection manager (discussion)
-│   ├── downloads_api.py        # File download API
-│   ├── system_config.json      # Runtime configuration
-│   ├── api/                    # API route modules
-│   │   ├── ai_service.py       # Unified AI invocation service (three modes, auto takeover)
-│   │   ├── image_gen_service.py# Tongyi Wanxiang image generation
-│   │   └── ... (route files)
-│   ├── prompts/                # AI Prompt templates
-│   │   ├── chat.py, exam.py, paper.py, quiz.py
-│   │   ├── companion.py, portrait.py, quest.py
-│   │   ├── practice.py, recommend.py, report.py
-│   │   ├── whiteboard_ai.py, html_generator.py
-│   │   └── ...
-│   └── migrations/             # Database migration scripts
-├── frontend/                   # React + Vite + TypeScript Frontend
+├── backend/                      # FastAPI backend
+│   ├── main.py                   # entry: routers, static hosting
+│   ├── config.py                 # global configuration constants
+│   ├── database.py               # business DB smartkb.db + grade/class master data
+│   ├── question_db.py            # question bank DB questions.db
+│   ├── auth.py                   # JWT · bcrypt · token-version SSO
+│   ├── middleware.py             # auth middleware and role correction
+│   ├── permission_service.py     # unified grade/class permissions
+│   ├── rag.py                    # retrieval over question bank and syllabus
+│   ├── bailian_kb.py             # Bailian knowledge-base search
+│   ├── ai_task_manager.py        # asynchronous AI jobs
+│   ├── question_fill.py          # filling policy (bank first, AI fills the gap)
+│   ├── question_select.py        # selection engine
+│   ├── paper_compose.py          # paper composing and score balancing
+│   ├── paper_generator.py        # Word paper generation (python-docx)
+│   ├── reward_engine.py          # points reward engine
+│   ├── title_system.py           # 12-level titles + achievement badges
+│   ├── companion_*.py            # AI companion: memory / settings / proactive push
+│   ├── code_grader.py            # automatic code grading
+│   ├── code_runner.py            # sandboxed code execution
+│   ├── whiteboard_ws.py          # whiteboard WebSocket manager
+│   ├── ws_manager.py             # discussion WebSocket manager
+│   ├── tts_service.py            # speech synthesis (roll-call voice)
+│   ├── model_catalog.py          # model catalogue and capability limits
+│   ├── skill_engine.py           # AI skill injection engine
+│   ├── api/                      # 48 modules: business routers + AI invocation and image service
+│   │   ├── ai_service.py         # unified AI invocation (three modes)
+│   │   ├── image_gen_service.py  # Wanxiang image generation
+│   │   └── *_router.py           # exams / bank / interaction / analytics / whiteboard …
+│   ├── prompts/                  # prompt templates grouped by scene
+│   ├── skills/                   # 20 skills: 8 core + 12 domain (*.skill.md)
+│   ├── locales/                  # backend messages zh-CN / en
+│   └── migrations/               # database migrations
+├── frontend/                     # React + Vite + TypeScript frontend
 │   ├── src/
-│   │   ├── api/                # API interface modules
-│   │   ├── components/         # Shared components
-│   │   ├── pages/              # Page components
-│   │   ├── stores/             # Zustand state management
-│   │   ├── types/              # TypeScript type definitions
-│   │   ├── hooks/              # Custom hooks
-│   │   └── styles/             # Theme styles
-│   └── dist/                   # Pre-built build output
-├── root/                       # Admin data directory
-│   ├── html/                   # Teaching resources
-│   └── ChatHistory/            # Chat history
-├── stu/                        # Student data directory
-├── question_media/             # Question image files
-├── temp_uploads/               # Temporary upload files (auto-cleaned)
-├── LogFiles/                   # Log files
-├── package.json                # Project configuration
-├── requirements.txt            # Python dependencies
-└── README.md
+│   │   ├── api/                  # API wrappers
+│   │   ├── components/           # shared components
+│   │   ├── pages/                # pages
+│   │   ├── stores/               # Zustand state
+│   │   ├── hooks/                # custom hooks
+│   │   ├── types/                # type definitions
+│   │   ├── i18n.ts               # language switch entry
+│   │   └── styles/               # themes
+│   └── dist/                     # prebuilt bundle served by the backend
+├── requirements.txt              # Python dependencies
+├── version.json                  # current version and changelog (read by the online upgrade)
+├── LICENSE                       # AGPL-3.0
+├── README.md · README.en.md      # Chinese and English docs
+└── .markdownlint.json            # documentation rules
 ```
+
+**Created at runtime, not shipped** (auto-created on first start; this is also what you back up)
+
+| Directory / file | Contents |
+| --- | --- |
+| `backend/smartkb.db` | users, points, roll call, tasks, notifications and other business data |
+| `backend/questions.db` | question bank and exam data |
+| `backend/system_config.json` | runtime configuration (subjects, models, API keys) — kept out of the repository because it holds secrets |
+| `root/`, `stu/` | admin and per-student data directories (chat history, teaching HTML, portraits) |
+| `question_media/` | question figures, one directory per question id |
+| `temp_uploads/` | temporary uploads, purged after 24 hours |
+| `LogFiles/`, `backend/logs/` | logs |
+| `db_backups/`, `.upgrade_backups/` | database backups and upgrade rollback snapshots |
+
+> 🖥️ The desktop edition (Electron + PyInstaller) is a local build and its project folder is not distributed with the source; installers are published through GitHub Releases and keep data in `%APPDATA%\SmartKBS\`.
 
 ---
 
-## 💾 Data Storage
+<a id="storage"></a>
+
+## Data Storage
 
 | Data Type | Storage Location |
 | --- | --- |
@@ -1279,7 +1383,13 @@ SmartKBS/
 
 ---
 
-## 👥 Permissions Overview
+> 💾 **Backup checklist** — to migrate or restore, keep `backend/smartkb.db`, `backend/questions.db`, `backend/system_config.json` and the `root/`, `stu/`, `question_media/` directories; for the desktop edition, back up the whole `%APPDATA%\SmartKBS\` folder.
+
+---
+
+<a id="permissions"></a>
+
+## Permissions Overview
 
 | Page / Feature | Student | Teacher | Admin |
 | --- | :---: | :---: | :---: |
@@ -1336,80 +1446,77 @@ SmartKBS/
 
 ---
 
-## 🔧 Tech Stack
+<a id="tech-stack"></a>
+
+## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| **Backend Framework** | Python 3.11+, FastAPI, Uvicorn |
-| **Frontend Framework** | React 19, TypeScript, Vite 6 |
-| **UI Component Library** | Ant Design 6, Ant Design Charts |
-| **State Management** | Zustand |
-| **Routing** | React Router 7 |
-| **Database** | SQLite (dual-database architecture) |
-| **Authentication** | JWT (bcrypt + PyJWT), Token Version SSO |
-| **AI Models** | Tongyi Qianwen DashScope (Qwen), DeepSeek |
-| **AI Invocation Modes** | Knowledge base + model / Bailian Agent Application / Direct model invocation (three modes with priority-based takeover, auto-degrading when the knowledge base is unavailable) |
-| **Image Generation** | Tongyi Wanxiang (wanx2.1/wan2.2) |
-| **Streaming** | Server-Sent Events (SSE) |
-| **Real-Time Communication** | WebSocket (Whiteboard / Discussion / Quick-Answer) |
-| **Document Export** | python-docx (Word), openpyxl (Excel) |
-| **Formula Rendering** | matplotlib (LaTeX → image) |
-| **Whiteboard Engine** | TLDraw |
-| **Security Sandbox** | AST static analysis + subprocess isolation |
+| Backend | Python 3.11+ · FastAPI · Uvicorn |
+| Frontend | React 19 · TypeScript · Vite 8 |
+| UI library | Ant Design 6 |
+| Charts | Recharts |
+| Markdown and formulas | react-markdown · KaTeX |
+| Code editor | Monaco Editor (code practice) |
+| Whiteboard engine | tldraw 5 |
+| State and routing | Zustand · React Router 7 |
+| Internationalisation | i18next (whole UI switchable zh/en, messages on both sides) |
+| Database | Two SQLite files (business + question bank), no external database |
+| Auth | JWT (bcrypt + PyJWT), token versioning for single sign-on |
+| AI models | Qwen via DashScope · DeepSeek |
+| AI invocation modes | knowledge-base RAG / Bailian agent app / direct model, taken over by priority with step-down fallback |
+| Image generation | Wanxiang (wanx2.1 / wanx2.2) |
+| Speech synthesis | DashScope TTS (roll-call voice, optional) |
+| Streaming and realtime | Server-Sent Events (AI streams) · WebSocket (whiteboard / discussions / buzzer) |
+| Export | python-docx (Word) · openpyxl (Excel) |
+| Formula images | matplotlib (optional enhancement, degrades to Unicode text) |
+| Code sandbox | AST static analysis + subprocess isolation |
+| Desktop edition | Electron + PyInstaller + Vite bundle (Windows x64 installer only) |
 
 ---
 
-## 📄 License
+<a id="license"></a>
 
-This project is open-sourced under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+## License
 
-Copyright © 2026 youufis
+This project is released under the **AGPL-3.0**; the full text lives in [LICENSE](LICENSE).
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+- ✅ You may use, modify and distribute it freely, including deploying it inside a school;
+- ⚠️ If you modify it and **offer it over a network**, you must publish your modified source under the same licence;
+- ℹ️ Systems that only talk to SmartKBS through its API and are independent of it are not affected.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
+Copyright © 2026 youufis (UNET)
 
 ---
 
-## ❓ FAQ
+<a id="faq"></a>
 
-**Q: What if I forget my password?**
-A: If you have set security questions, click "Forgot Password" on the login page to recover it yourself. Otherwise, contact an admin to reset it in "User Management".
+## FAQ
 
-**Q: AI chat is not responding?**
-A: Check whether a valid DashScope API Key has been filled in "System Configuration". If filled, check whether the API Key balance is sufficient.
-
-**Q: File upload failed?**
-A: Max document size is 10MB, max image size is 5MB. Check whether the file format is in the whitelist.
-
-**Q: Can't use AI Companion/Assistant?**
-A: Companion mode is only available to students; Assistant mode is only available to teachers/admins. Please verify your login role is correct.
-
-**Q: Can't submit an exam?**
-A: Check whether the current time is within the exam's valid time range and whether you have used up your allowed attempts.
-
-**Q: Classroom points not increasing?**
-A: Confirm you participated in an activity type that supports points. Points are automatically awarded after activity completion. Grade bonuses require corresponding score percentages.
-
-**Q: How to upgrade the system?**
-A: 1. After admin login, go to "System Configuration → Version Management", click "Check for Updates" and follow the prompts (Git deployment only).
-   2. Download the latest source code ZIP, extract and overwrite the original directory (preserve `backend/system_config.json` and database files), then restart the service.
+- **I forgot my password.** If security questions were set, use "Forgot password" on the login page; otherwise ask an administrator to reset it in User Management.
+- **The AI chat does not answer.** Confirm the API key is filled in and funded under System Configuration, then run the built-in connectivity self-test — it tells you whether the model, the knowledge base or the agent application is at fault.
+- **Uploads fail.** Documents are capped at 10 MB and images at 5 MB (the image cap is configurable), and the extension plus content whitelist must match.
+- **The companion or the assistant will not open.** The companion is student-only, the assistant is teacher/admin-only. A teacher also needs a grade and class scope set in User Management, otherwise the assistant has no teaching range to work with.
+- **The exam will not submit.** Check that the current time is inside the exam window and that attempts remain. If a teacher is refused while editing questions, that is the in-flight answer lock protecting students who are still writing.
+- **Classroom points did not increase.** Only activity types that support points award them, automatically on completion, and a configurable daily cap applies; teachers and admins are excluded from points and leaderboards. Title upgrades need the corresponding score percentage.
+- **I upgraded or edited code but the UI looks unchanged.** Hard-refresh (Ctrl+F5). Changes involving WebSocket, speech synthesis and AI timeout behaviour need a **backend restart**.
+- **How do I upgrade?**
+  1. Git deployment: as admin open System Configuration → Version Management, then Check for Updates and Incremental upgrade; failures roll back automatically.
+  2. Source package: unzip the new release over the old directory, keeping `backend/system_config.json` and the two `.db` files, then restart.
+  3. Desktop edition: run the new installer over the old one; data in `%APPDATA%\SmartKBS\` is preserved.
+- **A fresh machine refuses to start.** Confirm Python is 3.11+, reinstall dependencies with `pip install -r requirements.txt`, and if a module is reported missing check whether it is listed there.
 
 ---
 
-## 📬 About
+<a id="about"></a>
 
-**SmartKBS** — AI-Powered Smart Teaching Platform for All Grades and Subjects
+## About
 
-- 👨‍💻 **Author:** UNET
+**SmartKBS** — an AI-powered smart teaching platform for primary, junior secondary and senior secondary schools, with subjects, grades and classes driven by configuration.
+
+- 👨‍💻 **Author:** youufis (UNET)
 - 📧 **Contact:** [youufis@sina.com](mailto:youufis@sina.com)
 - 💬 **WeChat:** UNET-WX
+- 📄 **License:** [AGPL-3.0](LICENSE)
+
+The project is developed and maintained by one person, with its release rhythm shaped by real classroom use — that is where decisions such as "question bank before AI" and "no idle compute" come from. Open an issue or write an email for bugs and feature requests.
