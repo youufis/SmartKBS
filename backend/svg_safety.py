@@ -117,6 +117,92 @@ def extract_svg(text: str | None) -> str:
     return "" if _looks_double_escaped(svg) else svg
 
 
+_MARKER_ATTR_RE = re.compile(
+    r"""\b(marker(?:-(?:start|mid|end))?)\s*=\s*(["'])((?:[^"'()]|\([^"'()]*\))*)\2""",
+    re.IGNORECASE,
+)
+_URL_TOKEN_RE = re.compile(r"""url\(\s*([^)]*?)\s*\)""")
+_DEFINED_ID_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""")
+_SVG_OPEN_RE = re.compile(r"<svg\b[^<>]*?>", re.IGNORECASE)
+_SAFE_XML_ID_RE = re.compile(r"^[A-Za-z_][\w.\-]*$")
+_MISSING_MARKER_DEF = (
+    '<marker id="{mid}" viewBox="0 0 10 10" refX="9" refY="5" '
+    'markerWidth="6" markerHeight="6" orient="auto">'
+    '<path d="M 0 0 L 10 5 L 0 10 z" fill="#000"/></marker>'
+)
+
+
+def _marker_refs(value: str):
+    """迭代 marker 属性值里 url(#xxx) 引用的 id；内部只认 # 开头的本文档引用。"""
+    for tok in _URL_TOKEN_RE.finditer(value):
+        inner = tok.group(1).strip()
+        if inner.startswith("#"):
+            yield inner[1:]
+
+
+def repair_dangling_markers(svg: str) -> str:
+    """补齐 SVG 里被引用但未定义的 marker，让整张图还能栅格化。
+
+    AI 生成的流程框图非常常见的写法是 ``<path marker-end="url(#arrow)">``，
+    却忘了在 ``<defs>`` 里定义这个 marker。浏览器只是安静地不画箭头；
+    **cairosvg 会直接抛** ``AttributeError: 'NoneType' object has no attribute
+    'get'``（path.py::draw_markers 查不到节点仍去读属性）。于是试卷导出时
+    这一整张配图被 ``_svg_to_png`` 吞掉，Word 里那道题就没有图
+    （2026-10 古文专项 q1387 事故）；ChatGPT/Codex 侧「导出docx」工具链也在
+    这里报 *SVG2PNG service returned HTTP 500* 后**整卷导出失败**——同一根因。
+
+    修法：给每个"被引用却没定义"的 marker id 注入一个通用黑色小箭头，
+    线条、方向、位置全部保留（比删属性更接近作者本意）。id 不是合法 XML
+    token、或找不到可注入的 ``<svg>`` 开标签时，退回删掉对应的 url() 引用
+    （属性里其余合法引用保留）。幂等：补过一次再跑不会重复补。
+    """
+    if not svg or "marker" not in svg.lower() or "url(" not in svg.lower():
+        return svg
+
+    defined = set(_DEFINED_ID_RE.findall(svg))
+    missing: list[str] = []
+    for m in _MARKER_ATTR_RE.finditer(svg):
+        for rid in _marker_refs(m.group(3)):
+            if rid not in defined and rid not in missing:
+                missing.append(rid)
+    if not missing:
+        return svg
+
+    injectable = [i for i in missing if _SAFE_XML_ID_RE.match(i)]
+    dropped: list[str] = [i for i in missing if i not in set(injectable)]
+
+    if injectable:
+        head = _SVG_OPEN_RE.search(svg)
+        if head and not head.group(0).endswith("/>"):
+            defs = "<defs>" + "".join(
+                _MISSING_MARKER_DEF.format(mid=i) for i in injectable
+            ) + "</defs>"
+            svg = svg[: head.end()] + defs + svg[head.end():]
+        else:
+            dropped = list(missing)  # 没处注入，全部退回删引用
+
+    if dropped:
+        bad = set(dropped)
+
+        def _drop_dangling(match: re.Match) -> str:
+            value = match.group(3)
+            if not any(rid in bad for rid in _marker_refs(value)):
+                return match.group(0)
+            kept = _URL_TOKEN_RE.sub(
+                lambda u: "" if (
+                    u.group(1).strip().startswith("#")
+                    and u.group(1).strip()[1:] in bad
+                ) else u.group(0),
+                value,
+            ).strip()
+            if not kept or kept.lower() == "none":
+                return ""
+            return f"{match.group(1)}={match.group(2)}{kept}{match.group(2)}"
+
+        svg = _MARKER_ATTR_RE.sub(_drop_dangling, svg)
+    return svg
+
+
 def sanitize_svg(svg: str | None) -> str:
     """清洗 SVG：去掉可执行/可外联的内容，合法属性原样保留（幂等）"""
     if not svg:
@@ -151,7 +237,7 @@ def sanitize_svg(svg: str | None) -> str:
 
     cleaned = re.sub(r"<style\b[^>]*>([\s\S]*?)</style>", _clean_style,
                      cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()
+    return repair_dangling_markers(cleaned).strip()
 
 
 def _attr_value(part: str) -> str:

@@ -20,6 +20,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement, parse_xml
 
 from backend.logger import logger
+from backend.svg_safety import repair_dangling_markers
 
 # ── 公式渲染（matplotlib 数学文本引擎，无需 LaTeX 系统安装） ──
 _HAS_MPL = False
@@ -426,17 +427,21 @@ def _svg_text_unlatex(seg: str) -> str:
 
 
 def _prepare_svg(svg_content: str) -> str:
-    """导出前修两处配图 SVG 的老毛病：
+    """导出前修三处配图 SVG 的老毛病：
 
       1) 文本节点里残留的 LaTeX 源码 —— AI 生成配图时常把 $I_B=40\\mu A$ 直接写进
          <text>，导出后老师看到的就是这串源码；
       2) 含中文却没有可渲染中文的字体 —— 注入探针挑出来的字体族。用 <style> 里的
          CSS 规则，优先级高于 font-family 呈现属性，作者写的 sans-serif/Arial 一并盖掉
-         （中文字体本身带拉丁字形，拉丁部分不会变差）。
+         （中文字体本身带拉丁字形，拉丁部分不会变差）；
+      3) 引用了未定义 id 的 marker —— AI 流程图常写 marker-end="url(#arrow)"
+         却忘了定义 #arrow，浏览器只是不画箭头，cairosvg 却整张图抛
+         "'NoneType' object has no attribute 'get'"，配图直接消失（q1387 事故）。
     """
     if not svg_content:
         return svg_content
     out = svg_content
+    out = repair_dangling_markers(out)
     if "$" in out:
         out = re.sub(r">([^<>]*)<", lambda m: ">" + _svg_text_unlatex(m.group(1)) + "<", out)
     if _CJK_RE.search(out):
