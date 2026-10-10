@@ -95,6 +95,6 @@
   "skinSwitch": "登录页配色",
   "shuffleSkin": "🎲 随机换一个",
   "dailySkin": "📅 恢复今日配色",
-  "visitTodayText": "今日 {{users}}/{{times}}",
+  "visitTodayText": "今日 {{times}}",
   "visitTotalText": "累计 {{times}}"
 }

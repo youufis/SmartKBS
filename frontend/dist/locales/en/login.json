@@ -95,6 +95,6 @@
   "skinSwitch": "Login color scheme",
   "shuffleSkin": "🎲 Shuffle",
   "dailySkin": "📅 Today's palette",
-  "visitTodayText": "{{users}}/{{times}} today",
+  "visitTodayText": "{{times}} today",
   "visitTotalText": "{{times}} total"
 }

@@ -241,7 +241,7 @@ const LoginPage: React.FC = () => {
               </div>
 
               {/* 在线 + 访问统计。这一行必须永远只占一行：正文只留数字
-                  （今日是 人数/人次），累计按量级缩写，样式上 nowrap + 省略号兜底 */}
+                  （今日只给访问次数一个数），累计按量级缩写，样式上 nowrap + 省略号兜底 */}
               <div
                 className="login-online"
                 style={{
@@ -256,7 +256,7 @@ const LoginPage: React.FC = () => {
               >
                 🟢 {t('onlineCountText', { count: stats.online })}
                 <span> · </span>
-                {t('visitTodayText', { users: stats.today_users, times: stats.today_times })}
+                {t('visitTodayText', { times: stats.today_times })}
                 <span> · </span>
                 {t('visitTotalText', { times: formatBigCount(stats.total_times) })}
               </div>
