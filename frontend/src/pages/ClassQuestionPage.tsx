@@ -551,7 +551,11 @@ const ClassQuestionPage: React.FC = () => {
                       transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 10,
                     }}
                   >
-                    <span style={{ flex: 1 }}>{opt}</span>
+                    {/* 选项必须走 FormulaRenderer：题库里的选项常带 $...$ LaTeX
+                        （如 "D. $(10111)_2$"、"A. $t_1 \times 1.2$"），纯文本渲染会把源码原样显示 */}
+                    <span style={{ flex: 1 }}>
+                      <FormulaRenderer content={opt} inline />
+                    </span>
                     {active && !submitted && <Tag color="blue" style={{ marginInlineEnd: 0 }}>{t('selectedTag')}</Tag>}
                     {isCorrect && <Tag color="green" style={{ marginInlineEnd: 0 }}>✓ {t('correctTxt')}</Tag>}
                   </div>
@@ -635,7 +639,15 @@ const ClassQuestionPage: React.FC = () => {
                   <Text type="secondary" style={{ fontSize: 12, width: 60 }}>
                     {r.question_type === 'true_false' ? t('qtTrueFalse') : t('qtSingle')}
                   </Text>
-                  <Text ellipsis style={{ flex: 1, fontSize: 13 }} title={r.question_text}>{r.question_text}</Text>
+                  {/* 同上：流水里的题干也常带 LaTeX，用 CSS 截断 + 公式渲染（antd ellipsis 只吃纯字符串） */}
+                  <div
+                    title={r.question_text}
+                    style={{ flex: 1, fontSize: 13, overflow: 'hidden',
+                             textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                             color: 'var(--text-secondary, #595959)' }}
+                  >
+                    <FormulaRenderer content={r.question_text} inline />
+                  </div>
                   <Tag color={r.result === 'correct' ? 'green' : r.result === 'incorrect' ? 'orange' : 'default'}>
                     {r.result === 'correct' ? t('correctTxt') : r.result === 'incorrect' ? t('incorrectTxt') : t('skipTxt')}
                   </Tag>
