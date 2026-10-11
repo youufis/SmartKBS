@@ -234,6 +234,9 @@ export interface PodcastMeta {
   duration_options: number[];
   default_minutes: number;
   max_seconds: number;
+  /** 页面可选主题（生成时选一套，读者还能在页面右上角自己切） */
+  themes: { id: string; name: string; hint: string }[];
+  default_theme: string;
   voices: { A?: PodcastVoiceInfo; B?: PodcastVoiceInfo };
   model?: string;
 }
@@ -246,6 +249,7 @@ export interface PodcastTaskResult {
   seconds?: number;
   segments?: number;
   truncated?: boolean;
+  theme?: string;
   voices?: { A: string; B: string };
   error?: string;
 }
@@ -269,7 +273,7 @@ export async function getPodcastTopics(
 /** 提交播客生成任务（异步，用 pollAiTask 取结果） */
 export async function generatePodcast(
   kpId: number,
-  body: { topic?: string; minutes?: number },
+  body: { topic?: string; minutes?: number; theme?: string },
 ): Promise<{ task_id: string; message: string }> {
   const { data } = await apiClient.post(`/api/curriculum/ai-podcast/${kpId}`, body);
   return data;

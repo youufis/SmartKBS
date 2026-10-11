@@ -201,14 +201,35 @@ def cleanup_empty_dir_shares(owner_username: str | None = None):
 _VALID_SCOPES = {"all", "teacher", "staff", "class"}
 
 
+def _canon_rel_path(path: str, username: str, dir_name: str) -> str:
+    """把各种历史存储格式归一成"账号内相对路径"，用于判断两行是不是同一个文件。
+
+    出现过的格式：`x.html` / `html/x.html` / `<owner>/html/x.html` / `stu/<owner>/html/x.html`，
+    目录共享还会带子目录。归一只剥前缀，不去掉子目录 —— 子目录正是区分同名文件的关键。
+    """
+    p = str(path or "").replace("\\", "/").strip().lstrip("/")
+    for prefix in (f"stu/{username}/{dir_name}/", f"{username}/{dir_name}/", f"{dir_name}/"):
+        if p.startswith(prefix):
+            return p[len(prefix):]
+    return p
+
+
 def _find_share_rows_multi_format(username: str, resource_type: str, file_path: str):
     """多格式匹配同一资源的现有共享行（全路径/裸文件名/owner前缀等存储格式混用），
-    按 id 升序返回 (id, target_users, target_grade, target_class, share_scope, file_path)。"""
+    按 id 升序返回 (id, target_users, target_grade, target_class, share_scope, file_path)。
+
+    ⚠️ 匹配分两级（2026-10-11 修）：
+      ① **能唯一对上就用唯一的那几行** —— 归一后相对路径完全相等；
+      ② 一行都精确对不上（老客户端只传裸文件名）才回落到宽松匹配。
+    旧实现直接拿宽松结果去 UPDATE + 合并去重：`html/班级A/课件.html` 与 `html/班级B/课件.html`
+    同名不同目录，会被当成"同一个资源"合并，**并把前者的课程绑定改指到后者** ——
+    表现就是"改了共享范围后绑定显示残留、必须删掉重绑"。
+    """
     _dir = "html" if resource_type == "html" else "downloads"
     clean_fp = str(file_path).replace("\\", "/").rstrip("/")
     bn = clean_fp.split("/")[-1]
     prefixed = clean_fp if clean_fp.startswith(f"{username}/{_dir}/") else f"{username}/{_dir}/{clean_fp}"
-    return execute_query(
+    rows = execute_query(
         """SELECT id, target_users, target_grade, target_class, share_scope, file_path
            FROM shared_resources
            WHERE owner_username=? AND resource_type=?
@@ -217,6 +238,14 @@ def _find_share_rows_multi_format(username: str, resource_type: str, file_path: 
            ORDER BY id""",
         (username, resource_type, file_path, clean_fp, prefixed, f"%/{bn}", f"%/{clean_fp}"),
     )
+    if not rows:
+        return rows
+    want = _canon_rel_path(clean_fp or file_path, username, _dir)
+    exact = [r for r in rows if _canon_rel_path(r[5], username, _dir) == want]
+    if exact and len(exact) != len(rows):
+        logger.info(f"[共享] 同名不同目录的文件不再合并：精确命中 {len(exact)} 行，"
+                    f"宽松匹配到 {len(rows)} 行（path={clean_fp!r}）")
+    return exact or rows
 
 
 def _drop_share_row(rid: int, resource_type: str):

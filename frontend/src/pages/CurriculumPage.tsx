@@ -315,6 +315,7 @@ const CurriculumPage: React.FC = () => {
   const [podcastTopics, setPodcastTopics] = useState<string[]>([])
   const [podcastTopicsLoading, setPodcastTopicsLoading] = useState(false)
   const [podcastResult, setPodcastResult] = useState<curriculumApi.PodcastTaskResult | null>(null)
+  const [podcastTheme, setPodcastTheme] = useState('')
   // 语音合成总闸（与点名播报同一个开关）：关闭时入口置灰、点了也不发请求
   const podcastDisabled = podcastMeta ? !podcastMeta.tts_enabled : false
 
@@ -323,6 +324,7 @@ const CurriculumPage: React.FC = () => {
       .then((meta) => {
         setPodcastMeta(meta)
         setPodcastMinutes(meta.default_minutes || meta.duration_options?.[0] || 3)
+        setPodcastTheme((prev) => prev || meta.default_theme || meta.themes?.[0]?.id || '')
       })
       .catch(() => { /* 元信息拿不到时不拦入口，真正的拦截在后端（409） */ })
   }, [])
@@ -361,9 +363,10 @@ const CurriculumPage: React.FC = () => {
     setPodcastResult(null)
     try {
       const { task_id } = await curriculumApi.generatePodcast(podcastKpId, {
-        topic, minutes: podcastMinutes,
+        topic, minutes: podcastMinutes, theme: podcastTheme || undefined,
       })
-      const result = await pollAiTask(task_id, 180000) as curriculumApi.PodcastTaskResult | null
+      // 5 分钟档最坏情况：出稿（含检索）+ 8~11 段逐段合成，给足 5 分钟预算
+      const result = await pollAiTask(task_id, 300000) as curriculumApi.PodcastTaskResult | null
       if (result && result.file_url) {
         setPodcastUrl(result.file_url)
         setPodcastResult(result)
@@ -2188,6 +2191,24 @@ const CurriculumPage: React.FC = () => {
                 />
               </div>
             </div>
+
+            {/* 页面主题（生成后读者也能在页面右上角自己切） */}
+            {(podcastMeta?.themes?.length || 0) > 0 && (
+              <div>
+                <Typography.Text strong>{t('podcastTheme')}</Typography.Text>
+                <div style={{ marginTop: 6 }}>
+                  <Segmented
+                    value={podcastTheme}
+                    onChange={(v) => setPodcastTheme(String(v))}
+                    options={(podcastMeta?.themes || []).map((th) => {
+                      const key = `theme_${th.id}`
+                      const label = t(key)
+                      return { label: label === key ? th.name : label, value: th.id, title: th.hint }
+                    })}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* 双主播音色（只读展示，改音色去系统配置） */}
             <div style={{ background: 'var(--bg-layout, #fafafa)', borderRadius: 8, padding: '10px 12px', fontSize: 13 }}>

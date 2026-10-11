@@ -21,6 +21,7 @@ import asyncio
 import html as _html
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from backend.api.config_router import get_config_value
@@ -216,6 +217,16 @@ def target_chars(minutes: int) -> int:
     return int(CHARS_PER_MINUTE * max(1, minutes))
 
 
+def script_max_tokens(minutes: int) -> int:
+    """按档位估输出上限。
+
+    不给上限会走服务商默认值 —— 5 分钟档的稿子（约 1250 字 + JSON 结构）会被静默截断，
+    表现为"脚本解析失败"，白烧一次调用。口径与 question_router._estimate_generate_max_tokens 一致：
+    每分钟约 900 token（中文 + 字段名），下限 2000 防小额被截，上限 8000 防异常放大。
+    """
+    return int(min(8000, max(2000, max(1, int(minutes)) * 900)))
+
+
 _MD_JUNK = re.compile(r"(\*\*|__|`{1,3}|^#{1,6}\s*)", re.M)
 _SPACE = re.compile(r"[ \t\u3000]+")
 
@@ -372,6 +383,195 @@ def truncate_by_seconds(items: list[dict[str, Any]], limit: int) -> tuple[list[d
 
 # ══════════════════════════ 页面渲染 ══════════════════════════
 
+#: 播客页面主题（纯 CSS 变量，无外部资源）。id 会写进产出的 HTML，改 id 会让老页面的
+#: 默认主题失效（页面会回落到列表第一项），所以除非必要不要动。
+THEMES: list[dict[str, str]] = [
+    {"id": "midnight", "name": "暗夜紫", "hint": "深色，投影和夜间看着舒服（默认）"},
+    {"id": "light", "name": "明亮白", "hint": "白底深字，教室大屏/打印友好"},
+    {"id": "sepia", "name": "护眼米", "hint": "米黄底，长时间阅读不刺眼"},
+    {"id": "ocean", "name": "深海蓝", "hint": "蓝调渐变，冷静沉稳"},
+]
+DEFAULT_THEME = THEMES[0]["id"]
+
+#: 每套主题的变量（顺序固定：背景、卡片、正文、次要文字、描边、强调色、A 角、B 角、点缀）
+_THEME_VARS: dict[str, dict[str, str]] = {
+    "midnight": {
+        "bg": "linear-gradient(160deg,#0f172a,#1e293b 55%,#0f172a)",
+        "card": "rgba(30,41,59,.75)", "text": "#e2e8f0", "muted": "#94a3b8",
+        "border": "#334155", "chip": "#334155", "chipText": "#cbd5e1",
+        "accent": "linear-gradient(135deg,#8b5cf6,#6366f1)",
+        "accentBar": "linear-gradient(90deg,#8b5cf6,#22d3ee)",
+        "a": "#a78bfa", "b": "#22d3ee", "hl": "#312e81", "hlBorder": "#6366f1",
+        "btnOn": "#6366f1", "tagPurpleBg": "#4c1d95", "tagPurpleText": "#ddd6fe",
+        "topic": "#c4b5fd", "foot": "#64748b",
+    },
+    "light": {
+        "bg": "linear-gradient(160deg,#f8fafc,#eef2ff 55%,#f8fafc)",
+        "card": "rgba(255,255,255,.92)", "text": "#0f172a", "muted": "#64748b",
+        "border": "#e2e8f0", "chip": "#f1f5f9", "chipText": "#475569",
+        "accent": "linear-gradient(135deg,#6366f1,#4f46e5)",
+        "accentBar": "linear-gradient(90deg,#6366f1,#0ea5e9)",
+        "a": "#6d28d9", "b": "#0e7490", "hl": "#e0e7ff", "hlBorder": "#818cf8",
+        "btnOn": "#4f46e5", "tagPurpleBg": "#ede9fe", "tagPurpleText": "#5b21b6",
+        "topic": "#6d28d9", "foot": "#94a3b8",
+    },
+    "sepia": {
+        "bg": "linear-gradient(160deg,#fbf7ef,#f5efe1 55%,#fbf7ef)",
+        "card": "rgba(255,253,246,.95)", "text": "#3f3625", "muted": "#8a7a5e",
+        "border": "#e7dcc5", "chip": "#f3ead6", "chipText": "#6b5b3e",
+        "accent": "linear-gradient(135deg,#c2703a,#a85a2a)",
+        "accentBar": "linear-gradient(90deg,#c2703a,#e0a458)",
+        "a": "#a85a2a", "b": "#7a6a2a", "hl": "#f6ead3", "hlBorder": "#d9a86c",
+        "btnOn": "#b96a34", "tagPurpleBg": "#f0e2c8", "tagPurpleText": "#8a5a20",
+        "topic": "#a85a2a", "foot": "#a99a7c",
+    },
+    "ocean": {
+        "bg": "linear-gradient(160deg,#041c2c,#0b3a53 55%,#041c2c)",
+        "card": "rgba(9,44,64,.78)", "text": "#dbeafe", "muted": "#7fb3c8",
+        "border": "#155e75", "chip": "#0e4a63", "chipText": "#bae6fd",
+        "accent": "linear-gradient(135deg,#0891b2,#0369a1)",
+        "accentBar": "linear-gradient(90deg,#22d3ee,#38bdf8)",
+        "a": "#67e8f9", "b": "#93c5fd", "hl": "#0c4a6e", "hlBorder": "#0891b2",
+        "btnOn": "#0e7490", "tagPurpleBg": "#0c4a6e", "tagPurpleText": "#a5f3fc",
+        "topic": "#7dd3fc", "foot": "#5b8ba3",
+    },
+}
+
+
+def theme_css() -> str:
+    """把主题变量渲成 CSS（body[data-theme=...] 覆盖 :root 默认值）"""
+    out: list[str] = []
+    for theme in THEMES:
+        v = _THEME_VARS.get(theme["id"]) or {}
+        body = "".join(f"--{k}:{val};" for k, val in v.items())
+        out.append(f'body[data-theme="{theme["id"]}"]{{{body}}}')
+    return "\n".join(out)
+
+
+def normalize_theme(theme: Any) -> str:
+    """未知/空主题回落默认（老页面、手输值都走这里）"""
+    tid = str(theme or "").strip()
+    return tid if any(t["id"] == tid for t in THEMES) else DEFAULT_THEME
+
+
+# ══════════════════════════ 音频生命周期 ══════════════════════════
+#
+# 音频落在 tts_service 的内容寻址缓存里（question_media/tts/<hash>.mp3），键 = 文本+音色，
+# 所以同一段台词在多个播客之间会自动复用。代价是**删掉播客页面后音频不会自己消失**。
+# 这里的口径是"按引用计数回收"：只有**没有任何播客页面再引用**的文件才会被删，
+# 因此点名播报等其它用途的音频不会被误删；真要删也只是下次重新合成（几毛钱级）。
+
+#: 只回收"生成满 N 秒"的文件，避免误删正在生成/正在被写入的那几段
+AUDIO_ORPHAN_MIN_AGE_SECONDS = 600
+
+_AUDIO_URL_RE = re.compile(r"/api/files/question_media/tts/([A-Za-z0-9_.\-]+)")
+
+
+def tts_dir() -> "Path":
+    from backend.tts_service import _cache_dir
+    return _cache_dir()
+
+
+def page_audio_refs(page_path: Any) -> set[str]:
+    """从这个播客页面里抽出它引用的音频文件名"""
+    try:
+        text = Path(page_path).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return set()
+    return set(_AUDIO_URL_RE.findall(text))
+
+
+def referenced_audio_names(*, extra_pages: Any = ()) -> set[str]:
+    """扫**所有账号**的 html 目录，收集仍被任何播客页面引用的音频文件名。"""
+    from backend.config import DATA_DIR, STU_DIR
+    names: set[str] = set()
+    dirs = [DATA_DIR / STU_DIR, DATA_DIR]
+    pages: list[Path] = []
+    for base in dirs:
+        try:
+            pages.extend(base.glob("*/html/*_播客.html"))
+        except OSError:
+            continue
+    pages.extend(Path(p) for p in extra_pages)
+    for p in pages:
+        names |= page_audio_refs(p)
+    return names
+
+
+def _delete_audio(names: Any) -> dict[str, Any]:
+    """删除指定文件名的音频（逐一校验落在 tts 目录内，防路径穿越）"""
+    root = tts_dir()
+    deleted, freed, failed = 0, 0, []
+    for name in names:
+        target = (root / str(name)).resolve()
+        if target.parent != root.resolve() or not target.is_file():
+            continue
+        try:
+            size = target.stat().st_size
+            target.unlink()
+            deleted += 1
+            freed += size
+        except OSError as e:
+            failed.append(f"{name}: {e}")
+    if deleted:
+        logger.info(f"[podcast] 回收未被引用的音频 {deleted} 个，释放 {freed // 1024} KB")
+    return {"deleted": deleted, "bytes": freed, "failed": failed}
+
+
+def scan_audio_orphans(*, min_age_seconds: int = AUDIO_ORPHAN_MIN_AGE_SECONDS) -> dict[str, Any]:
+    """列出"没有任何播客页面引用"的音频（预览，不动文件）"""
+    import time as _t
+    root = tts_dir()
+    keep = referenced_audio_names()
+    now = _t.time()
+    items: list[dict[str, Any]] = []
+    for f in sorted(root.glob("*")):
+        if not f.is_file() or f.name in keep:
+            continue
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if now - st.st_mtime < min_age_seconds:
+            continue                       # 刚生成的先留着
+        items.append({"name": f.name, "bytes": st.st_size,
+                      "age_seconds": int(now - st.st_mtime)})
+    total = sum(i["bytes"] for i in items)
+    return {
+        "total": len(items),
+        "bytes": total,
+        "referenced": len(keep),
+        "min_age_seconds": min_age_seconds,
+        "items": items[:200],
+    }
+
+
+def cleanup_audio_orphans(*, min_age_seconds: int = AUDIO_ORPHAN_MIN_AGE_SECONDS,
+                          dry_run: bool = False) -> dict[str, Any]:
+    """回收孤儿音频。dry_run=True 只报数不删（默认先预览，与仓库其它清理入口同口径）。"""
+    preview = scan_audio_orphans(min_age_seconds=min_age_seconds)
+    out = {"total": preview["total"], "bytes": preview["bytes"], "deleted": 0, "dry_run": dry_run}
+    if dry_run or not preview["total"]:
+        return out
+    out.update(_delete_audio([i["name"] for i in preview["items"]]))
+    return out
+
+
+def cleanup_audio_for_page(page_path: Any, *, dry_run: bool = False) -> dict[str, Any]:
+    """删掉某个播客页面后调用：回收"只有它引用"的音频（被别的页面引用的保留）。"""
+    own = page_audio_refs(page_path)
+    if not own:
+        return {"deleted": 0, "bytes": 0, "candidates": 0, "dry_run": dry_run}
+    keep = referenced_audio_names()
+    victims = sorted(n for n in own if n not in keep)
+    if dry_run or not victims:
+        return {"deleted": 0, "bytes": 0, "candidates": len(victims), "dry_run": dry_run,
+                "names": victims[:50]}
+    out = _delete_audio(victims)
+    out.update({"candidates": len(victims), "dry_run": False})
+    return out
+
+
 _PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -380,44 +580,52 @@ _PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <title>%%PAGE_TITLE%%</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:linear-gradient(160deg,#0f172a,#1e293b 55%,#0f172a);color:#e2e8f0;
+body{margin:0;background:var(--bg);color:var(--text);
      font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;min-height:100vh;padding:20px}
+%%THEME_CSS%%
 .wrap{max-width:860px;margin:0 auto}
-.crumb{font-size:13px;color:#94a3b8;margin-bottom:8px}
+.crumb{font-size:13px;color:var(--muted);margin-bottom:8px}
 h1{font-size:24px;margin:0 0 6px;line-height:1.35}
-.sub{color:#94a3b8;font-size:14px;margin-bottom:14px}
-.topic{font-size:14px;color:#c4b5fd;margin:-6px 0 14px}
+.sub{color:var(--muted);font-size:14px;margin-bottom:14px}
+.topic{font-size:14px;color:var(--topic);margin:-6px 0 14px}
 .tags{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
-.tag{font-size:12px;padding:3px 10px;border-radius:999px;background:#334155;color:#cbd5e1}
-.tag.purple{background:#4c1d95;color:#ddd6fe}
-.card{background:rgba(30,41,59,.75);border:1px solid #334155;border-radius:16px;padding:18px;margin-bottom:16px}
+.tag{font-size:12px;padding:3px 10px;border-radius:999px;background:var(--chip);color:var(--chipText)}
+.tag.purple{background:var(--tagPurpleBg);color:var(--tagPurpleText)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px}
 .player{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .play{width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;font-size:22px;color:#fff;
-      background:linear-gradient(135deg,#8b5cf6,#6366f1)}
+      background:var(--accent)}
 .play:disabled{opacity:.5;cursor:default}
-.bar{flex:1;min-width:180px;height:8px;border-radius:999px;background:#334155;cursor:pointer;position:relative}
-.bar>i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#8b5cf6,#22d3ee)}
-.time{font-variant-numeric:tabular-nums;font-size:14px;color:#cbd5e1;min-width:96px;text-align:right}
+.bar{flex:1;min-width:180px;height:8px;border-radius:999px;background:var(--chip);cursor:pointer;position:relative}
+.bar>i{display:block;height:100%;width:0;border-radius:999px;background:var(--accentBar)}
+.time{font-variant-numeric:tabular-nums;font-size:14px;color:var(--chipText);min-width:96px;text-align:right}
 .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
-.btn{background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:10px;padding:6px 12px;
+.btn{background:var(--chip);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:6px 12px;
      font-size:13px;cursor:pointer}
-.btn.on{background:#6366f1;border-color:#818cf8}
+.btn.on{background:var(--btnOn);border-color:var(--hlBorder);color:#fff}
+.themeSel{background:var(--chip);border:1px solid var(--border);color:var(--text);border-radius:10px;
+          padding:5px 8px;font-size:12px;cursor:pointer}
 .pts{display:flex;flex-wrap:wrap;gap:8px}
-.pt{font-size:14px;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:8px 12px}
+.pt{font-size:14px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px}
 .line{display:flex;gap:10px;padding:10px 12px;border-radius:12px;cursor:pointer;margin-bottom:6px;
       border:1px solid transparent;transition:.15s}
-.line:hover{background:#1e293b}
-.line.cur{background:#312e81;border-color:#6366f1}
+.line:hover{background:var(--card)}
+.line.cur{background:var(--hl);border-color:var(--hlBorder)}
 .who{flex:0 0 76px;font-size:13px;font-weight:600}
-.who.a{color:#a78bfa}.who.b{color:#22d3ee}
-.txt{flex:1;font-size:15px;line-height:1.7;color:#cbd5e1}
-.foot{color:#64748b;font-size:12px;text-align:center;padding:6px 0 20px}
+.who.a{color:var(--a)}.who.b{color:var(--b)}
+.txt{flex:1;font-size:15px;line-height:1.7;color:var(--chipText)}
+.muted{color:var(--muted);font-size:13px}
+.foot{color:var(--foot);font-size:12px;text-align:center;padding:6px 0 20px}
+select.themeSel{max-width:150px}
 @media(max-width:560px){h1{font-size:20px}.who{flex-basis:60px;font-size:12px}.txt{font-size:14px}}
 </style>
 </head>
-<body>
+<body data-theme="%%THEME%%">
 <div class="wrap">
-  <div class="crumb">%%CRUMB%%</div>
+  <div class="crumb">
+    <span>%%CRUMB%%</span>
+    <select class="themeSel" id="themeSel" title="切换主题" style="float:right">%%THEME_OPTIONS%%</select>
+  </div>
   <h1>%%TITLE%%</h1>
   <div class="sub">%%SUMMARY%%</div>
   <div class="topic">🎯 话题：%%TOPIC%%</div>
@@ -432,22 +640,22 @@ h1{font-size:24px;margin:0 0 6px;line-height:1.35}
     <div class="ctl">
       <button class="btn" id="prev">⏮ 上一段</button>
       <button class="btn" id="next">下一段 ⏭</button>
-      <span style="color:#94a3b8;font-size:13px">倍速</span>
+      <span class="muted">倍速</span>
       <button class="btn spd" data-s="0.75">0.75x</button>
       <button class="btn spd on" data-s="1">1x</button>
       <button class="btn spd" data-s="1.25">1.25x</button>
       <button class="btn spd" data-s="1.5">1.5x</button>
-      <span id="seg" style="color:#94a3b8;font-size:13px"></span>
+      <span id="seg" class="muted"></span>
     </div>
   </div>
 
   <div class="card">
-    <div style="font-size:14px;color:#94a3b8;margin-bottom:10px">📌 要点</div>
+    <div class="muted" style="margin-bottom:10px">📌 要点</div>
     <div class="pts">%%POINTS%%</div>
   </div>
 
   <div class="card">
-    <div style="font-size:14px;color:#94a3b8;margin-bottom:10px">📝 对话文稿</div>
+    <div class="muted" style="margin-bottom:10px">📝 对话文稿</div>
     <div id="lines">%%LINES%%</div>
   </div>
 
@@ -456,14 +664,32 @@ h1{font-size:24px;margin:0 0 6px;line-height:1.35}
 <script>
 var DATA = %%DATA%%;
 (function(){
+  // ── 主题：默认取生成时选的那套，读者自己切过的选择会记住（file:// 下 localStorage 会被
+  //    浏览器拒绝，所以整段包在 try 里，切不了也不影响播放） ──
+  var themeSel = document.getElementById('themeSel'), THEME_KEY = 'smartkb_podcast_theme';
+  function applyTheme(id){
+    var v = id || DATA.theme || 'midnight';
+    document.body.setAttribute('data-theme', v);
+    if (themeSel) themeSel.value = v;
+  }
+  try { var saved = localStorage.getItem(THEME_KEY); if (saved) applyTheme(saved); } catch(e) {}
+  if (themeSel) themeSel.addEventListener('change', function(){
+    applyTheme(themeSel.value);
+    try { localStorage.setItem(THEME_KEY, themeSel.value); } catch(e) {}
+  });
+
   var segs = DATA.segments, n = segs.length, idx = 0, speed = 1;
   var audio = new Audio();
   var playBtn = document.getElementById('play'), fill = document.getElementById('fill'),
       bar = document.getElementById('bar'), timeEl = document.getElementById('time'),
-      segEl = document.getElementById('seg'), lines = DATA.lines;
+      segEl = document.getElementById('seg');
+  // 文稿行必须**从 DOM 取元素**（早先这里传的是下标数组，el.addEventListener 直接抛错，
+  //  把整个初始化打断，表现为"点播放不续播、首屏没有高亮"）
+  var lines = document.querySelectorAll('#lines .line');
   var starts = [], acc = 0;
   for (var i = 0; i < n; i++) { starts.push(acc); acc += segs[i].seconds; }
   var totalEst = acc;
+  var pendingSeek = -1;
 
   function fmt(s){ s = Math.max(0, Math.round(s)); var m = Math.floor(s/60);
     return (m<10?'0':'')+m+':'+((s%60)<10?'0':'')+(s%60); }
@@ -479,9 +705,20 @@ var DATA = %%DATA%%;
     idx = Math.max(0, Math.min(n-1, i));
     audio.src = segs[idx].url;
     audio.playbackRate = speed;
+    if (pendingSeek >= 0) {
+      var target = pendingSeek; pendingSeek = -1;
+      audio.addEventListener('loadedmetadata', function once(){
+        audio.removeEventListener('loadedmetadata', once);
+        try { audio.currentTime = target; } catch (err) {}
+      });
+    }
     paint();
     if (autoplay) audio.play().catch(function(){ playBtn.textContent = '▶'; });
   }
+  audio.addEventListener('loadedmetadata', function(){
+    // 元数据到手才知道真实时长，先把 UI 校准一次（估计值只差几个百分点）
+    paint();
+  });
   audio.addEventListener('timeupdate', paint);
   audio.addEventListener('ended', function(){
     // 用真实时长修正这一段（估计值有几 % 误差，逐段校正避免累积漂移）
@@ -495,8 +732,9 @@ var DATA = %%DATA%%;
     else { playBtn.textContent = '▶'; paint(); }
   });
   playBtn.addEventListener('click', function(){
-    if (audio.paused) { if (!audio.src) load(0, true); else { audio.play(); } playBtn.textContent = '⏸'; }
-    else { audio.pause(); playBtn.textContent = '▶'; }
+    // 按钮文案由 play/pause 事件统一维护，这里只管动作，避免 play() 被拒时文案说谎
+    if (audio.paused) { if (!audio.src) load(0, true); else audio.play().catch(function(){}); }
+    else audio.pause();
   });
   audio.addEventListener('play', function(){ playBtn.textContent = '⏸'; });
   audio.addEventListener('pause', function(){ playBtn.textContent = '▶'; });
@@ -506,12 +744,8 @@ var DATA = %%DATA%%;
     var r = bar.getBoundingClientRect(), ratio = (e.clientX - r.left) / r.width;
     var target = ratio * totalEst, i = 0;
     while (i < n-1 && target >= starts[i+1]) i++;
+    pendingSeek = Math.max(0, target - starts[i]);
     load(i, !audio.paused);
-    var into = target - starts[i];
-    if (into > 0) audio.addEventListener('loadedmetadata', function once(){
-      audio.removeEventListener('loadedmetadata', once);
-      try { audio.currentTime = into; } catch (err) {}
-    });
   });
   var spds = document.querySelectorAll('.spd');
   for (var k = 0; k < spds.length; k++) (function(btn){
@@ -567,15 +801,23 @@ def render_podcast_html(*, script: dict[str, Any], segments: list[dict[str, Any]
     if meta.get("truncated"):
         tags.append(f'<span class="tag">已按 {meta.get("max_minutes")} 分钟上限截断</span>')
 
+    theme = normalize_theme(meta.get("theme"))
     data = {
         "segments": [{"url": s.get("url") or "", "seconds": float(s.get("seconds") or 0)} for s in segments],
-        "lines": list(range(len(segments))),
+        "theme": theme,
     }
     # 嵌进 <script> 的 JSON：转义 </ 防提前闭合，并保证中文不转义
     data_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
+    theme_options = "".join(
+        f'<option value="{t["id"]}"{" selected" if t["id"] == theme else ""}>{t["name"]}</option>'
+        for t in THEMES)
+
     page = _PAGE_TEMPLATE
     for token, value in (
+        ("%%THEME_CSS%%", theme_css()),
+        ("%%THEME%%", theme),
+        ("%%THEME_OPTIONS%%", theme_options),
         ("%%PAGE_TITLE%%", _esc(script.get("title") or "知识播客")),
         ("%%CRUMB%%", _esc(meta.get("crumb") or "")),
         ("%%TITLE%%", _esc(script.get("title") or "知识播客")),
@@ -597,12 +839,13 @@ def render_podcast_html(*, script: dict[str, Any], segments: list[dict[str, Any]
 
 async def generate_podcast(*, kp: dict[str, Any], topic: str, minutes: int,
                            grade_hint: str, api_key: str,
-                           crumb: str = "", foot: str = "") -> dict[str, Any]:
+                           crumb: str = "", foot: str = "", theme: str = "") -> dict[str, Any]:
     """完整生成一条播客：出稿 → 合并分段 → 逐段合成 → 时长截断 → 渲染页面。"""
     if not tts_enabled():
         raise PodcastDisabled("语音合成未启用，请在「系统配置 → AI 与模型 → 语音合成」中开启")
 
     minutes = normalize_minutes(minutes)
+    theme = normalize_theme(theme)
     voices = podcast_voices()
     chars = target_chars(minutes)
     prompt = render_podcast_prompt(
@@ -623,7 +866,9 @@ async def generate_podcast(*, kp: dict[str, Any], topic: str, minutes: int,
 
     logger.info(f"[podcast] 开始出稿 kp={kp.get('name')} topic={topic!r} {minutes}min "
                 f"音色 A={voices['A']['voice']} B={voices['B']['voice']}")
+    # 必须显式给输出上限：默认上限会把长档的稿子截断，解析失败还看不出原因
     text = await call_ai_async(prompt, api_key, json_mode=True,
+                               max_tokens=script_max_tokens(minutes),
                                kb_query=f"{kp.get('course_name') or ''} {kp.get('name') or ''} {topic}")
     script = parse_script(text)
 
@@ -642,7 +887,7 @@ async def generate_podcast(*, kp: dict[str, Any], topic: str, minutes: int,
     page = render_podcast_html(
         script=script, segments=kept, voices=voices,
         meta={"minutes": minutes, "max_minutes": max(1, max_seconds() // 60),
-              "truncated": truncated, "crumb": crumb, "foot": foot,
+              "truncated": truncated, "crumb": crumb, "foot": foot, "theme": theme,
               "topic": script.get("topic") or topic},
     )
     return {
@@ -653,5 +898,6 @@ async def generate_podcast(*, kp: dict[str, Any], topic: str, minutes: int,
         "truncated": truncated,
         "voices": voices,
         "minutes": minutes,
+        "theme": theme,
         "cached_segments": sum(1 for s in kept if s.get("cached")),
     }

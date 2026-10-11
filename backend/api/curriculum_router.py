@@ -2811,6 +2811,8 @@ async def ai_podcast_meta(request: Request):
         "duration_options": options,
         "default_minutes": options[0],
         "max_seconds": podcast.max_seconds(),
+        "themes": podcast.THEMES,
+        "default_theme": podcast.DEFAULT_THEME,
         "voices": {},
     }
     if payload["tts_enabled"]:
@@ -2850,7 +2852,7 @@ async def ai_podcast_topics(kp_id: int, request: Request):
         learning_objectives=_fmt_safe(kp.get("learning_objectives")),
     )
     try:
-        text = await call_ai_async(prompt, api_key, json_mode=True,
+        text = await call_ai_async(prompt, api_key, json_mode=True, max_tokens=1200,
                                    kb_query=f"{kp.get('course_name') or ''} {kp.get('name') or ''}")
     except Exception as e:
         logger.warning(f"[podcast] 候选话题生成失败 kp={kp_id}: {e}")
@@ -2869,6 +2871,40 @@ async def ai_podcast_topics(kp_id: int, request: Request):
     return {"topics": topics[:6], "kp_name": kp.get("name") or ""}
 
 
+# ⚠️ 这两条必须定义在 `POST /ai-podcast/{kp_id}` **之前**：
+#    否则 /ai-podcast/audio-cleanup 会先被 {kp_id} 那条吃掉（kp_id 解析失败 → 422）。
+@router.get("/ai-podcast/audio-orphans", summary="预览：没被任何播客页面引用的音频（可回收）")
+async def podcast_audio_orphans(request: Request, min_age_hours: float = 1.0):
+    """回收前的预览。注意：tts 目录与点名播报共用（都按内容寻址），
+    所以列出的文件里也可能有点名播报的缓存 —— 删掉的代价只是**下次重新合成一次**，
+    不影响任何功能。默认只列"生成满 1 小时"的文件，避开正在进行的生成。"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
+    from backend import podcast_service as podcast
+    age = max(0, int(float(min_age_hours or 0) * 3600))
+    return podcast.scan_audio_orphans(min_age_seconds=age)
+
+
+@router.post("/ai-podcast/audio-cleanup", summary="回收没被引用的音频缓存（管理员，默认只预览）")
+async def podcast_audio_cleanup(request: Request):
+    user = get_current_user(request)
+    if not is_admin(user["username"]):
+        raise HTTPException(status_code=403, detail="仅管理员可执行音频回收")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    dry_run = bool(body.get("dry_run", True))
+    age = max(0, int(float(body.get("min_age_hours", 1) or 0) * 3600))
+    from backend import podcast_service as podcast
+    result = podcast.cleanup_audio_orphans(min_age_seconds=age, dry_run=dry_run)
+    if not dry_run:
+        logger.info(f"[podcast] {user['username']} 回收孤儿音频："
+                    f"{result.get('deleted')} 个 / {result.get('bytes', 0) // 1024} KB")
+    return result
+
+
 @router.post("/ai-podcast/{kp_id}", summary="AI 生成知识点播客（异步任务）")
 async def ai_generate_podcast(kp_id: int, request: Request):
     user = get_current_user(request)
@@ -2879,6 +2915,7 @@ async def ai_generate_podcast(kp_id: int, request: Request):
     body = await request.json()
     topic = str(body.get("topic") or "").strip()
     minutes = body.get("minutes")
+    theme = str(body.get("theme") or "").strip()
     if len(topic) > 60:
         raise HTTPException(status_code=400, detail="话题过长（60 字以内）")
 
@@ -2909,7 +2946,7 @@ async def ai_generate_podcast(kp_id: int, request: Request):
                         f"topic={topic!r} {minutes}min user={username}")
             result = await podcast.generate_podcast(
                 kp=kp, topic=topic, minutes=minutes, grade_hint=grade_hint,
-                api_key=api_key, crumb=crumb, foot=foot,
+                api_key=api_key, crumb=crumb, foot=foot, theme=theme,
             )
 
             html_dir = get_account_html_dir(username)
@@ -2940,6 +2977,7 @@ async def ai_generate_podcast(kp_id: int, request: Request):
                 "seconds": result["seconds"],
                 "segments": len(result["segments"]),
                 "truncated": result["truncated"],
+                "theme": result.get("theme") or podcast.DEFAULT_THEME,
                 "voices": {k: result["voices"][k]["label"] for k in ("A", "B")},
             }
         except podcast.PodcastDisabled as e:

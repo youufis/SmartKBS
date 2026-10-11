@@ -249,6 +249,16 @@ async def delete_resource(request: Request, path: str = Query(...)):
     if not os.path.exists(target_path):
         raise HTTPException(status_code=404, detail="文件不存在")
 
+    # AI 播客页面：删除前先记下它引用了哪些音频，删完再回收"只有它引用"的那些
+    # （音频是内容寻址缓存，不会被页面带走；不回收就会一直躺在 question_media/tts 里）
+    _podcast_refs: set[str] = set()
+    if os.path.isfile(target_path) and str(target_path).endswith("_播客.html"):
+        try:
+            from backend import podcast_service
+            _podcast_refs = podcast_service.page_audio_refs(target_path)
+        except Exception as e:
+            logger.warning(f"读取播客页面音频引用失败（跳过回收）: {e}")
+
     try:
         if os.path.isfile(target_path):
             os.remove(target_path)
@@ -260,6 +270,18 @@ async def delete_resource(request: Request, path: str = Query(...)):
             raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
 
         logger.info(f"资源已删除: {target_path}")
+
+        # 播客页面：回收"只有它引用"的音频（被别的播客页面引用的保留）
+        if _podcast_refs:
+            try:
+                from backend import podcast_service
+                still_used = podcast_service.referenced_audio_names()
+                dropped = podcast_service._delete_audio(
+                    [n for n in _podcast_refs if n not in still_used])
+                if dropped["deleted"]:
+                    msg += f"；已回收 {dropped['deleted']} 个音频（释放 {dropped['bytes'] // 1024} KB）"
+            except Exception as reap_err:
+                logger.warning(f"回收播客音频失败（不影响文件删除）: {reap_err}")
 
         # 同步清理资源分组中的引用
         rel_path = path if not os.path.isabs(path) else os.path.relpath(target_path, html_dir)
