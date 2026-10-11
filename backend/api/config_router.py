@@ -122,6 +122,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "TTS_VOICE": "qwen-audio-3.0-tts-flash-longnixiwei",   # 新闻联播·男（权威播报）
     "TTS_SPEECH_RATE": 1.0,
     "TTS_VOLUME": 50,
+    # ── AI 播客（backend/podcast_service.py）──
+    # 双主播：A 主讲（默认男声）、B 互动（默认女声）。留空 = 按当前 TTS 模型自动各挑一条
+    # 实测可用的音色（优先"讲解/旁白"风格）。两者必须与 TTS_MODEL 同模型，保存时校验。
+    "PODCAST_VOICE_A": "",
+    "PODCAST_VOICE_B": "",
+    "PODCAST_DURATION_OPTIONS": "3,4,5",   # 弹窗可选时长档位（分钟）
+    "PODCAST_MAX_SECONDS": 300,            # 硬上限（秒）：超了按上限截断，不产出超标页面
     # ── 课堂抽问（backend/api/class_drill_router.py）──
     # 页面上的「AI 生题」开关是否可用：关掉后课堂抽问只从题库取题，不再调用大模型（零 AI 计费）。
     # 页面开关是当堂临时选择，这里是全校总闸；两者都开才走 AI。
@@ -311,6 +318,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "MAX_IMAGE_SIZE_MB": (1, 200),
     "IMAGE_GEN_MAX_PLACEHOLDERS": (0, 8),
     "REWARD_DAILY_CHAT_POINTS": (0, 200),
+    "PODCAST_MAX_SECONDS": (60, 1800),
     "REWARD_DAILY_QUIZ_SESSIONS": (0, 20),
     "REWARD_DAILY_TOTAL_POINTS": (0, 500),
     "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
@@ -355,6 +363,7 @@ _STR_LIMITS: dict[str, int] = {
     "dashscope_api_key": 200, "APPID": 128,
     "KB_API_BASE": 300, "KB_AGENT_ID": 128,
     "TTS_MODEL": 80, "TTS_VOICE": 128,
+    "PODCAST_VOICE_A": 128, "PODCAST_VOICE_B": 128, "PODCAST_DURATION_OPTIONS": 32,
 }
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
                  "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64}
@@ -527,6 +536,28 @@ def _check_model_pairing(out: dict[str, Any], updates: dict[str, Any]) -> dict[s
                         f"与所选合成模型 {model} 不配对（实测调用会报 411）。"
                         "请先选合成模型，再从下拉里挑一个该模型的音色"))
         out["TTS_VOICE"] = resolved["voice"]      # 顺手归一（中文名/裸后缀 → 完整参数）
+
+    # AI 播客的两个音色同样必须与合成模型配对（跨模型实测报 411）；
+    # 留空是合法值 = 交给后端按模型自动各挑一条，所以这里只拦"明确错配"。
+    if {"PODCAST_VOICE_A", "PODCAST_VOICE_B", "TTS_MODEL"} & set(out):
+        from backend.tts_voices import DEFAULT_MODEL as _TT_DEFAULT_MODEL
+        from backend.tts_voices import resolve_voice as _resolve_voice
+
+        model = out.get("TTS_MODEL") or cfg.get("TTS_MODEL") or _TT_DEFAULT_MODEL
+        for key, role in (("PODCAST_VOICE_A", "主讲"), ("PODCAST_VOICE_B", "互动")):
+            raw = str(out.get(key, cfg.get(key, "")) or "").strip()
+            if not raw:
+                out[key] = ""
+                continue
+            res = _resolve_voice(raw, model)
+            if res["status"] == "mismatch":
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"播客{role}音色 {raw} 属于模型 {res['owner_model']}，"
+                            f"与所选合成模型 {model} 不配对（实测调用会报 411）。"
+                            "请先选合成模型，再从下拉里挑一个该模型的音色；"
+                            "留空则按模型自动选"))
+            out[key] = res["voice"]
 
     if "IMAGE_GEN_MODEL" in out or "IMAGE_GEN_SIZE" in out:
         # 延迟导入：image_gen_service 在模块级引用了本文件的 get_config_value

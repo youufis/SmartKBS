@@ -217,3 +217,65 @@ export async function setKpLinks(kpId: number, textbookKpIds: number[]): Promise
 export async function getAiPracticePreviewUrl(kpId: number): Promise<string> {
   return `/api/curriculum/ai-practice/${kpId}/preview`;
 }
+
+// ══════════════════════════ AI 播客 ══════════════════════════
+
+export interface PodcastVoiceInfo {
+  voice: string;
+  name: string;
+  style: string;
+  gender: string;
+  label: string;
+}
+
+export interface PodcastMeta {
+  /** 语音合成总闸（与点名播报同一个开关）：关闭时 AI 播客整功能禁用 */
+  tts_enabled: boolean;
+  duration_options: number[];
+  default_minutes: number;
+  max_seconds: number;
+  voices: { A?: PodcastVoiceInfo; B?: PodcastVoiceInfo };
+  model?: string;
+}
+
+export interface PodcastTaskResult {
+  kp_name?: string;
+  file_url?: string;
+  filename?: string;
+  registered?: boolean;
+  seconds?: number;
+  segments?: number;
+  truncated?: boolean;
+  voices?: { A: string; B: string };
+  error?: string;
+}
+
+/** 播客元信息：总闸状态 + 双主播音色 + 时长档位（弹窗一次拿齐） */
+export async function getPodcastMeta(): Promise<PodcastMeta> {
+  const { data } = await apiClient.get('/api/curriculum/ai-podcast/meta');
+  return data;
+}
+
+/** AI 依知识点生成候选话题 */
+export async function getPodcastTopics(
+  kpId: number,
+): Promise<{ topics: string[]; kp_name: string }> {
+  const { data } = await apiClient.get(`/api/curriculum/ai-podcast/topics/${kpId}`, {
+    timeout: 120000,
+  });
+  return data;
+}
+
+/** 提交播客生成任务（异步，用 pollAiTask 取结果） */
+export async function generatePodcast(
+  kpId: number,
+  body: { topic?: string; minutes?: number },
+): Promise<{ task_id: string; message: string }> {
+  const { data } = await apiClient.post(`/api/curriculum/ai-podcast/${kpId}`, body);
+  return data;
+}
+
+/** 预览已生成的播客页面（同一知识点他人已生成时后端会只读复用） */
+export function getPodcastPreviewUrl(kpId: number): string {
+  return `/api/curriculum/ai-podcast/${kpId}/preview`;
+}

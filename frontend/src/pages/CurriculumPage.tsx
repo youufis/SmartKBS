@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
-  Dropdown, Collapse,
+  Dropdown, Collapse, Segmented,
 } from 'antd'
 
 const { Sider, Content } = Layout
@@ -18,7 +18,7 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined,
   RightOutlined, DownOutlined, SettingOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
-  EyeOutlined, BulbOutlined,
+  EyeOutlined, BulbOutlined, SoundOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import * as curriculumApi from '../api/curriculum'
@@ -301,6 +301,79 @@ const CurriculumPage: React.FC = () => {
       setCwModal(false)
     } finally {
       setCwLoading(false)
+    }
+  }
+
+  // ── AI 播客（双主播对话式） ──
+  const [podcastMeta, setPodcastMeta] = useState<curriculumApi.PodcastMeta | null>(null)
+  const [podcastModal, setPodcastModal] = useState(false)
+  const [podcastLoading, setPodcastLoading] = useState(false)
+  const [podcastUrl, setPodcastUrl] = useState('')
+  const [podcastKpId, setPodcastKpId] = useState<number | null>(null)
+  const [podcastTopic, setPodcastTopic] = useState('')
+  const [podcastMinutes, setPodcastMinutes] = useState(3)
+  const [podcastTopics, setPodcastTopics] = useState<string[]>([])
+  const [podcastTopicsLoading, setPodcastTopicsLoading] = useState(false)
+  const [podcastResult, setPodcastResult] = useState<curriculumApi.PodcastTaskResult | null>(null)
+  // 语音合成总闸（与点名播报同一个开关）：关闭时入口置灰、点了也不发请求
+  const podcastDisabled = podcastMeta ? !podcastMeta.tts_enabled : false
+
+  useEffect(() => {
+    curriculumApi.getPodcastMeta()
+      .then((meta) => {
+        setPodcastMeta(meta)
+        setPodcastMinutes(meta.default_minutes || meta.duration_options?.[0] || 3)
+      })
+      .catch(() => { /* 元信息拿不到时不拦入口，真正的拦截在后端（409） */ })
+  }, [])
+
+  const loadPodcastTopics = useCallback(async (kpId: number) => {
+    setPodcastTopicsLoading(true)
+    try {
+      const data = await curriculumApi.getPodcastTopics(kpId)
+      const list = data.topics || []
+      setPodcastTopics(list)
+      setPodcastTopic((prev) => prev || list[0] || '')
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('podcastTopicsFailed'))
+    } finally {
+      setPodcastTopicsLoading(false)
+    }
+  }, [t])
+
+  const handleAiPodcast = (kpId: number) => {
+    if (podcastDisabled) { message.warning(t('podcastTtsDisabled')); return }
+    setPodcastKpId(kpId)
+    setPodcastUrl('')
+    setPodcastResult(null)
+    setPodcastTopic('')
+    setPodcastTopics([])
+    setPodcastModal(true)
+    loadPodcastTopics(kpId)
+  }
+
+  const handlePodcastGenerate = async () => {
+    if (!podcastKpId) return
+    const topic = podcastTopic.trim()
+    if (!topic) { message.warning(t('podcastTopicRequired')); return }
+    setPodcastLoading(true)
+    setPodcastUrl('')
+    setPodcastResult(null)
+    try {
+      const { task_id } = await curriculumApi.generatePodcast(podcastKpId, {
+        topic, minutes: podcastMinutes,
+      })
+      const result = await pollAiTask(task_id, 180000) as curriculumApi.PodcastTaskResult | null
+      if (result && result.file_url) {
+        setPodcastUrl(result.file_url)
+        setPodcastResult(result)
+      } else {
+        message.error(result?.error || t('podcastFailedTimeout'))
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('podcastFailed'))
+    } finally {
+      setPodcastLoading(false)
     }
   }
 
@@ -1567,11 +1640,18 @@ const CurriculumPage: React.FC = () => {
                                     if (key === 'lesson-plan') handleAiLessonPlan(selectedKp.id)
                                     else if (key === 'recommend') handleAiRecommend(selectedKp.id)
                                     else if (key === 'courseware') handleAiCourseware(selectedKp.id)
+                                    else if (key === 'podcast') handleAiPodcast(selectedKp.id)
                                   },
                                   items: [
                                     { key: 'lesson-plan', icon: <RobotOutlined />, label: t('aiLessonPlan'), disabled: lessonPlanLoading },
                                     { key: 'recommend', icon: <RobotOutlined />, label: t('aiRecommend') },
                                     { key: 'courseware', icon: <FileOutlined />, label: t('aiCourseware') },
+                                    {
+                                      key: 'podcast',
+                                      icon: <SoundOutlined />,
+                                      label: podcastDisabled ? `${t('aiPodcast')}（${t('podcastTtsOffShort')}）` : t('aiPodcast'),
+                                      disabled: podcastDisabled,
+                                    },
                                   ],
                                 }}
                               >
@@ -2030,6 +2110,117 @@ const CurriculumPage: React.FC = () => {
             <iframe src={cwUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
           </div>
         ) : null}
+      </Modal>
+
+      {/* ── AI 播客弹窗（双主播对话式） ── */}
+      <Modal
+        title={<><SoundOutlined style={{ color: '#1677ff' }} /> {t('aiPodcastTitle')} - {selectedKp?.name || ''}</>}
+        open={podcastModal}
+        onCancel={() => { if (podcastLoading) return; setPodcastModal(false) }}
+        width={900}
+        footer={
+          podcastLoading ? null : (
+            <Space>
+              <Button type="primary" icon={<ThunderboltOutlined />} onClick={handlePodcastGenerate}>
+                {podcastUrl ? t('podcastRegenerate') : t('podcastGenerate')}
+              </Button>
+              <Button icon={<FileTextOutlined />} disabled={!podcastUrl}
+                onClick={() => { if (podcastUrl) window.open(podcastUrl, '_blank') }}>
+                {t('cyOpenNewTab')}
+              </Button>
+              <Button onClick={() => setPodcastModal(false)}>{t('cyClose')}</Button>
+            </Space>
+          )
+        }
+      >
+        {podcastLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('podcastGenerating')}</div>
+            <div style={{ marginTop: 6, fontSize: 13, color: 'var(--text-tertiary)' }}>{t('podcastGeneratingHint')}</div>
+          </div>
+        ) : (
+          <Space orientation="vertical" style={{ width: '100%' }} size={14}>
+            {/* 话题：可点候选，也可手输 */}
+            <div>
+              <Typography.Text strong>{t('podcastTopic')} <span style={{ color: '#ff4d4f' }}>*</span></Typography.Text>
+              <Input
+                value={podcastTopic}
+                onChange={(e) => setPodcastTopic(e.target.value)}
+                placeholder={t('podcastTopicPlaceholder')}
+                maxLength={60} showCount
+                style={{ marginTop: 6 }}
+              />
+              <div style={{ marginTop: 8 }}>
+                {podcastTopicsLoading ? (
+                  <Space size={8}><Spin size="small" /><Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('podcastTopicsLoading')}</Typography.Text></Space>
+                ) : (
+                  <Space wrap size={8}>
+                    {podcastTopics.map((x) => (
+                      <Tag
+                        key={x}
+                        color={podcastTopic === x ? 'blue' : 'default'}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => setPodcastTopic(x)}
+                      >
+                        {x}
+                      </Tag>
+                    ))}
+                    <Button size="small" icon={<ReloadOutlined />}
+                      onClick={() => { if (podcastKpId) loadPodcastTopics(podcastKpId) }}>
+                      {t('podcastTopicsRefresh')}
+                    </Button>
+                  </Space>
+                )}
+              </div>
+            </div>
+
+            {/* 时长档位 */}
+            <div>
+              <Typography.Text strong>{t('podcastDuration')}</Typography.Text>
+              <div style={{ marginTop: 6 }}>
+                <Segmented
+                  value={podcastMinutes}
+                  onChange={(v) => setPodcastMinutes(Number(v))}
+                  options={(podcastMeta?.duration_options || [3, 4, 5]).map((m) => ({
+                    label: t('podcastMinutes', { n: m }), value: m,
+                  }))}
+                />
+              </div>
+            </div>
+
+            {/* 双主播音色（只读展示，改音色去系统配置） */}
+            <div style={{ background: 'var(--bg-layout, #fafafa)', borderRadius: 8, padding: '10px 12px', fontSize: 13 }}>
+              <Space orientation="vertical" size={2}>
+                <Typography.Text type="secondary">{t('podcastVoicesNote')}</Typography.Text>
+                <span>🎙 {t('podcastVoiceA')}：{podcastMeta?.voices?.A?.label || '—'}</span>
+                <span>🎧 {t('podcastVoiceB')}：{podcastMeta?.voices?.B?.label || '—'}</span>
+              </Space>
+            </div>
+
+            {podcastUrl && (
+              <div>
+                <Space size={8} style={{ marginBottom: 6 }}>
+                  <Typography.Text type="success">✅ {t('podcastReady')}</Typography.Text>
+                  {podcastResult?.seconds ? (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('podcastResultInfo', {
+                        segments: podcastResult.segments || 0,
+                        time: `${Math.floor((podcastResult.seconds || 0) / 60)}:${String(Math.round((podcastResult.seconds || 0) % 60)).padStart(2, '0')}`,
+                      })}
+                    </Typography.Text>
+                  ) : null}
+                  {podcastResult?.truncated ? (
+                    <Typography.Text type="warning" style={{ fontSize: 12 }}>{t('podcastTruncated')}</Typography.Text>
+                  ) : null}
+                </Space>
+                <div style={{ height: '60vh', border: '1px solid var(--border-color-secondary)', borderRadius: 8, overflow: 'hidden' }}>
+                  <iframe src={podcastUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={t('aiPodcastTitle')} />
+                </div>
+              </div>
+            )}
+          </Space>
+        )}
       </Modal>
 
       {/* ── AI 练习弹窗（参考资源中心 AI 生成样式） ── */}

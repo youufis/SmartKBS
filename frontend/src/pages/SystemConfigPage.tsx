@@ -53,6 +53,8 @@ interface ConfigField {
   scope?: EffScope
   /** model_select 用：向 /api/config/model-options 取哪一类候选 */
   optionsKind?: 'chat' | 'long' | 'vl' | 'image'
+  /** tts_voice 用：置顶一个「自动（按模型挑选）」空值选项（播客音色留空 = 交给后端自选） */
+  autoOption?: boolean
   /** 改动会影响安全面或难以挽回，保存前统一二次确认 */
   danger?: boolean
 }
@@ -221,6 +223,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'TTS_VOICE', labelKey: 'field_TTS_VOICE', descKey: 'field_TTS_VOICE_desc', type: 'tts_voice', group: 'tts' },
   { key: 'TTS_SPEECH_RATE', labelKey: 'field_TTS_SPEECH_RATE', descKey: 'field_TTS_SPEECH_RATE_desc', type: 'float', group: 'tts', required: false, unitKey: 'unitRate' },
   { key: 'TTS_VOLUME', labelKey: 'field_TTS_VOLUME', descKey: 'field_TTS_VOLUME_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitLevel' },
+  // AI 播客双主播音色：留空 = 按当前合成模型自动各挑一条（A 主讲默认男声、B 互动默认女声）
+  { key: 'PODCAST_VOICE_A', labelKey: 'field_PODCAST_VOICE_A', descKey: 'field_PODCAST_VOICE_A_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
+  { key: 'PODCAST_VOICE_B', labelKey: 'field_PODCAST_VOICE_B', descKey: 'field_PODCAST_VOICE_B_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
   // 课堂抽问（backend/api/class_drill_router.py）：总闸关掉后该页只从题库取题，零 AI 计费
   { key: 'CLASS_DRILL_AI_ENABLED', labelKey: 'field_CLASS_DRILL_AI_ENABLED', descKey: 'field_CLASS_DRILL_AI_ENABLED_desc', type: 'boolean', group: 'classdrill', required: false },
 
@@ -1825,10 +1830,19 @@ const SystemConfigPage: React.FC = () => {
     const list = ttsVoicesByModel[ttsModelValue] || []
     if (!list.length) return
     const cur = String(form.getFieldValue('TTS_VOICE') ?? '')
-    if (list.some((v) => v.voice === cur)) return
-    const next = ttsDefaultVoice[ttsModelValue] || list[0].voice
-    form.setFieldsValue({ TTS_VOICE: next })
-    message.info(t('ttsVoiceAutoSwitch', { voice: list.find((v) => v.voice === next)?.name || next }))
+    if (!list.some((v) => v.voice === cur)) {
+      const next = ttsDefaultVoice[ttsModelValue] || list[0].voice
+      form.setFieldsValue({ TTS_VOICE: next })
+      message.info(t('ttsVoiceAutoSwitch', { voice: list.find((v) => v.voice === next)?.name || next }))
+    }
+    // 播客 A/B 音色同样必须属于新模型 —— 留空 = 自动，所以换模型时直接清空，
+    // 而不是留着一个跨模型的旧值让保存被 400 拦下（那个报错对管理员很莫名其妙）
+    const patch: Record<string, string> = {}
+    for (const key of ['PODCAST_VOICE_A', 'PODCAST_VOICE_B']) {
+      const val = String(form.getFieldValue(key) ?? '')
+      if (val && !list.some((v) => v.voice === val)) patch[key] = ''
+    }
+    if (Object.keys(patch).length) form.setFieldsValue(patch)
   }, [ttsModelValue, ttsVoicesByModel, ttsDefaultVoice, form, t])
 
   // ── 生图模型 ↔ 尺寸 联动（两代端点的可用档位不同） ──
@@ -2087,7 +2101,10 @@ const SystemConfigPage: React.FC = () => {
                     showSearch
                     // 允许按「龙霓曦薇」这类中文名或风格关键词搜，值仍是完整 voice 参数
                     optionFilterProp="label"
-                    options={ttsVoiceOptions}
+                    options={field.autoOption
+                      ? [{ label: t('ttsGroupAuto'), options: [{ value: '', label: t('ttsVoiceAuto') }] },
+                         ...ttsVoiceOptions]
+                      : ttsVoiceOptions}
                     placeholder={t('placeholder_ttsVoice')}
                     notFoundContent={ttsVoiceOptions.length ? t('ttsNoMatch') : t('ttsVoicesLoading')}
                   />

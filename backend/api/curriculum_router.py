@@ -2768,6 +2768,219 @@ async def preview_courseware(kp_id: int, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════
+# AI 播客（知识点）：双主播对话式音频页面
+#   口径与「AI 课件」一致：教师/管理员生成、异步任务、落本账号 html 目录、
+#   登记为私有资源（可绑定到知识点）、G6 他人已生成可只读复用。
+#   唯一额外硬约束：语音合成总闸关闭时整功能禁用（与点名播报同口径）。
+# ═══════════════════════════════════════════════════════════
+
+
+def _podcast_kp(kp_id: int) -> dict[str, Any]:
+    """取播客要用的知识点信息（题目/年级一并带出，供提示词与面包屑用）"""
+    rows = execute_query(
+        """SELECT kp.id, kp.name, kp.description, kp.learning_objectives,
+                  c.name AS chapter_name, co.name AS course_name, co.grade AS course_grade
+           FROM knowledge_points kp
+           JOIN chapters c ON c.id = kp.chapter_id
+           JOIN courses co ON co.id = c.course_id
+           WHERE kp.id = ?""",
+        (kp_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    return rows[0]
+
+
+def _fmt_safe(value: Any) -> str:
+    """要塞进 .format() 模板的取值：字面花括号成对写两次"""
+    return str(value or "").replace("{", "{{").replace("}", "}}")
+
+
+def _podcast_disabled_detail() -> str:
+    return "语音合成未启用，AI 播客不可用。请到「系统配置 → AI 与模型 → 语音合成」打开总开关"
+
+
+@router.get("/ai-podcast/meta", summary="AI 播客元信息（总闸状态 / 双主播音色 / 时长档位）")
+async def ai_podcast_meta(request: Request):
+    get_current_user(request)
+    from backend import podcast_service as podcast
+
+    options = podcast.duration_options()
+    payload: dict[str, Any] = {
+        "tts_enabled": podcast.tts_enabled(),
+        "duration_options": options,
+        "default_minutes": options[0],
+        "max_seconds": podcast.max_seconds(),
+        "voices": {},
+    }
+    if payload["tts_enabled"]:
+        voices = podcast.podcast_voices()
+        payload["voices"] = {
+            "A": {k: voices["A"].get(k) for k in ("voice", "name", "style", "gender", "label")},
+            "B": {k: voices["B"].get(k) for k in ("voice", "name", "style", "gender", "label")},
+        }
+        payload["model"] = voices.get("model")
+    return payload
+
+
+@router.get("/ai-podcast/topics/{kp_id}", summary="按知识点生成候选话题（AI）")
+async def ai_podcast_topics(kp_id: int, request: Request):
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+    from backend import podcast_service as podcast
+    if not podcast.tts_enabled():
+        raise HTTPException(status_code=409, detail=_podcast_disabled_detail())
+
+    keys = get_api_keys(user["username"])
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    kp = _podcast_kp(kp_id)
+    from backend.prompts.teaching import PODCAST_TOPICS_PROMPT
+    from backend.api.ai_service import call_ai_async
+    from backend.utils import extract_json_from_text
+
+    prompt = PODCAST_TOPICS_PROMPT.format(
+        course_name=_fmt_safe(kp.get("course_name")),
+        chapter_name=_fmt_safe(kp.get("chapter_name")),
+        kp_name=_fmt_safe(kp.get("name")),
+        kp_description=_fmt_safe(kp.get("description")),
+        learning_objectives=_fmt_safe(kp.get("learning_objectives")),
+    )
+    try:
+        text = await call_ai_async(prompt, api_key, json_mode=True,
+                                   kb_query=f"{kp.get('course_name') or ''} {kp.get('name') or ''}")
+    except Exception as e:
+        logger.warning(f"[podcast] 候选话题生成失败 kp={kp_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"话题生成失败：{str(e)[:120]}")
+
+    data = extract_json_from_text(text or "")
+    if isinstance(data, dict):
+        data = data.get("topics") or []
+    topics: list[str] = []
+    for item in data or []:
+        line = str(item or "").strip().strip('"').strip("「」")
+        if line and line not in topics:
+            topics.append(line[:24])
+    if not topics:
+        raise HTTPException(status_code=502, detail="AI 未能给出可用话题，请重试或手动输入")
+    return {"topics": topics[:6], "kp_name": kp.get("name") or ""}
+
+
+@router.post("/ai-podcast/{kp_id}", summary="AI 生成知识点播客（异步任务）")
+async def ai_generate_podcast(kp_id: int, request: Request):
+    user = get_current_user(request)
+    username = user["username"]
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+
+    body = await request.json()
+    topic = str(body.get("topic") or "").strip()
+    minutes = body.get("minutes")
+    if len(topic) > 60:
+        raise HTTPException(status_code=400, detail="话题过长（60 字以内）")
+
+    from backend import podcast_service as podcast
+    if not podcast.tts_enabled():
+        raise HTTPException(status_code=409, detail=_podcast_disabled_detail())
+
+    keys = get_api_keys(username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    kp = _podcast_kp(kp_id)
+    topic = topic or str(kp.get("name") or "")
+    minutes = podcast.normalize_minutes(minutes)
+    grade_hint = str(kp.get("course_grade") or "")
+    crumb = " › ".join(x for x in (str(kp.get("course_name") or ""),
+                                   str(kp.get("chapter_name") or ""),
+                                   str(kp.get("name") or "")) if x)
+    foot = f"SmartKBS · AI 播客 · 双主播对话 · 生成于 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+    from backend.ai_task_manager import task_manager
+    from backend.utils import get_account_html_dir
+
+    async def _generate() -> dict[str, Any]:
+        try:
+            logger.info(f"[podcast] 开始生成 kp_id={kp_id} kp={kp.get('name')} "
+                        f"topic={topic!r} {minutes}min user={username}")
+            result = await podcast.generate_podcast(
+                kp=kp, topic=topic, minutes=minutes, grade_hint=grade_hint,
+                api_key=api_key, crumb=crumb, foot=foot,
+            )
+
+            html_dir = get_account_html_dir(username)
+            os.makedirs(html_dir, exist_ok=True)
+            filename = f"{kp_id}_{_safe_artifact_name(kp.get('name'))}_播客.html"
+            filepath = os.path.join(html_dir, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(result["html"])
+
+            from backend.config import BASE_DIR
+            rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+            file_url = f"/api/files/{rel_path}"
+
+            registered = False
+            try:
+                _register_personal_resources(username, "html")
+                registered = True
+            except Exception as reg_err:
+                logger.warning(f"[podcast] 播客页面自动登记失败（文件已生成）: {reg_err}")
+
+            logger.info(f"[podcast] 完成 kp_id={kp_id} 段数={len(result['segments'])} "
+                        f"时长≈{result['seconds']}s 截断={result['truncated']} → {filepath}")
+            return {
+                "kp_name": kp.get("name") or "",
+                "file_url": file_url,
+                "filename": filename,
+                "registered": registered,
+                "seconds": result["seconds"],
+                "segments": len(result["segments"]),
+                "truncated": result["truncated"],
+                "voices": {k: result["voices"][k]["label"] for k in ("A", "B")},
+            }
+        except podcast.PodcastDisabled as e:
+            logger.warning(f"[podcast] 总闸关闭，任务中止 kp_id={kp_id}: {e}")
+            return {"error": str(e)}
+        except podcast.PodcastError as e:
+            logger.warning(f"[podcast] 生成失败 kp_id={kp_id}: {e}")
+            return {"error": str(e)}
+        except Exception as e:
+            logger.error(f"[podcast] 生成异常 kp_id={kp_id}: {e}", exc_info=True)
+            return {"error": f"播客生成失败: {str(e)[:160]}"}
+
+    task_id = await task_manager.create_task(description="AI 播客生成", coro_factory=_generate)
+    return {"task_id": task_id, "message": "AI 播客生成已开始，请稍候..."}
+
+
+@router.get("/ai-podcast/{kp_id}/preview", summary="预览已生成的播客页面")
+async def preview_podcast(kp_id: int, request: Request):
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可预览播客")
+    # G6 同课件：本人没有就复用他人已生成的版本（只读），避免同一知识点被反复烧 AI + TTS
+    from backend.utils import get_account_html_dir
+    import glob as _glob
+
+    files = _glob.glob(os.path.join(get_account_html_dir(user["username"]),
+                                    f"{kp_id}_*_播客.html"))
+    if not files:
+        shared = _find_shared_artifact(kp_id, "_播客.html")
+        files = [shared] if shared else []
+    if not files:
+        raise HTTPException(status_code=404, detail="尚未生成播客，请先使用 AI 生成")
+    latest = max(files, key=os.path.getmtime)
+    with open(latest, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=content)
+
+
+# ═══════════════════════════════════════════════════════════
 # AI 练习生成
 # ═══════════════════════════════════════════════════════════
 
