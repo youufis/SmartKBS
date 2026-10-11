@@ -4,12 +4,12 @@
 >
 > **An AI-powered smart teaching platform for primary, junior secondary and senior secondary schools** — subjects, grades and classes are all configuration-driven, **with no subject hard-coded anywhere**.
 >
-> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 46 feature areas and 50+ capabilities:
+> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 47 feature areas and 50+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
-> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
+> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, AI self-portrait, online incremental upgrade, multi-theme appearance
 >
@@ -76,7 +76,7 @@ AI capabilities go through a single invocation service offering three modes, tak
 - **🎯 Teach according to aptitude**
   The student-side companion adapts its tone and recommendations to the persona the student chose (encouraging / rigorous / humorous), the knowledge points they keep missing, and their learning profile. The teacher-side assistant scopes its help to that teacher's classes and subject.
 - **🔄 A closed loop, driven by a data flywheel**
-  Behaviour collection → AI analysis → personalised feedback → behaviour change. Exams, practice, conversations and roll call enrich the learner profile, and the profile feeds the next round of AI decisions and recommendations.
+  Behaviour collection → AI analysis → personalised feedback → behaviour change. Exams, practice, conversations, roll call and class drills enrich the learner profile, and the profile feeds the next round of AI decisions and recommendations.
 - **⚡ On-demand calls, zero idle spend**
   Every AI call is triggered by actual use: the daily pick pool refills only once it is exhausted, news summaries load lazily, portraits are generated on visit, and speech synthesis bills nothing while switched off. No compute is burned on an empty classroom.
 
@@ -122,7 +122,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
 | 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 10 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
-| 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 7 |
+| 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 8 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio | 10 |
 | ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, self-portrait, upgrade, about, other services | 9 |
 
@@ -148,7 +148,7 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 
 #### Desktop only
 
-Question bank management and paper composing, question maintenance, user management, system configuration, roll call, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
+Question bank management and paper composing, question maintenance, user management, system configuration, roll call, class drill, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
 
 <a id="ch-home"></a>
 
@@ -536,7 +536,7 @@ Online programming practice and auto-grading system:
 
 ## Classroom Activities
 
-The real-time tools that run a single 40-minute lesson: quizzes, polls, questions, buzzer rounds, discussions, the whiteboard, roll call, quests and dialogue homework.
+The real-time tools that run a single 40-minute lesson: quizzes, polls, questions, drills, buzzer rounds, discussions, the whiteboard, roll call, quests and dialogue homework.
 
 ### Classroom Interaction Tools
 
@@ -665,6 +665,23 @@ Integrated smart roll call + attendance statistics management:
 - **👁️ Permission Control**: Teachers view only their own class, Admin can view all
 
 > **Available to Admin and Teacher**
+
+---
+
+### Class Drill
+
+A big-screen "draw a question → pick a student → answer" loop for warm-ups and in-class questioning, repeatable as long as you like:
+
+- **🎲 Two ways to get questions**: pick a course knowledge point (searchable dropdown) or type one, then draw from the question bank; limited to single-choice and true/false
+- **🤖 AI generation behind a switch**: when on, the bank still comes first and AI only fills the gap — **those questions are stored**, so next lesson the same knowledge point hits the bank directly; the admin can turn this feature's AI off in System Settings (zero AI cost while off)
+- **👤 Fair picking**: the same weighted algorithm as roll call (weight decays once picked, resets after covering over 60%), with optional voice announcement of the name
+- **✍️ Tap to answer**: the student taps an option; on submit the server judges it and reveals the answer and explanation
+- **🏆 Instant scoring**: correct +5, wrong +2, skipped 0 — points go to the existing classroom points and show up in points management
+- **♻️ Loop as long as you like**: picking a new student clears the previous choice and the revealed answer, so one lesson can keep going
+- **⌨️ Keyboard friendly**: `Space` pick, `1-4` choose, `Enter` submit, `0` skip, `N` next
+- **🖥 Built for the projector**: students never use their own devices; phones show a "use the desktop app" notice
+
+> **Teachers and admins (teachers limited to their own classes)**
 
 ---
 
@@ -1266,7 +1283,7 @@ SmartKBS/
 │   ├── tts_service.py            # speech synthesis (roll-call voice)
 │   ├── model_catalog.py          # model catalogue and capability limits
 │   ├── skill_engine.py           # AI skill injection engine
-│   ├── api/                      # 48 modules: business routers + AI invocation and image service
+│   ├── api/                      # 49 modules: business routers + AI invocation and image service
 │   │   ├── ai_service.py         # unified AI invocation (three modes)
 │   │   ├── image_gen_service.py  # Wanxiang image generation
 │   │   └── *_router.py           # exams / bank / interaction / analytics / whiteboard …
@@ -1361,6 +1378,7 @@ SmartKBS/
 | Points Reward System | ✅ View | ✅ Own Class | ✅ All |
 | Roll Call Management | ❌ | ✅ Own Class | ✅ All |
 | Attendance Statistics | ❌ | ✅ Own Class | ✅ All |
+| Class Drill | ❌ | ✅ Own Class | ✅ All |
 | Class Quiz | ✅ Answer | ✅ Create | ✅ Create |
 | Classroom Voting | ✅ Vote | ✅ Create | ✅ Create |
 | Question Management | ✅ Ask | ✅ Approve | ✅ Manage |
