@@ -66,7 +66,7 @@ interface ConfigZone {
 
 const CONFIG_ZONES: ConfigZone[] = [
   { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward'] },
-  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts'] },
+  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
   { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
@@ -86,6 +86,7 @@ const SECTION_TITLES: Record<string, string> = {
   grading: 'group_grading',
   imagegen: 'group_imagegen',
   tts: 'group_tts',
+  classdrill: 'group_classdrill',
   upload: 'group_upload',
   quota: 'group_quota',
   session: 'group_session',
@@ -220,6 +221,8 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'TTS_VOICE', labelKey: 'field_TTS_VOICE', descKey: 'field_TTS_VOICE_desc', type: 'tts_voice', group: 'tts' },
   { key: 'TTS_SPEECH_RATE', labelKey: 'field_TTS_SPEECH_RATE', descKey: 'field_TTS_SPEECH_RATE_desc', type: 'float', group: 'tts', required: false, unitKey: 'unitRate' },
   { key: 'TTS_VOLUME', labelKey: 'field_TTS_VOLUME', descKey: 'field_TTS_VOLUME_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitLevel' },
+  // 课堂抽问（backend/api/class_drill_router.py）：总闸关掉后该页只从题库取题，零 AI 计费
+  { key: 'CLASS_DRILL_AI_ENABLED', labelKey: 'field_CLASS_DRILL_AI_ENABLED', descKey: 'field_CLASS_DRILL_AI_ENABLED_desc', type: 'boolean', group: 'classdrill', required: false },
 
   // 积分防刷：每日上限（0 = 不限制）
   { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },

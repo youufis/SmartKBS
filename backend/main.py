@@ -220,10 +220,12 @@ register_middleware(app)
 # 重构后的遗留模块路由
 from backend.api.score_router import router as score_router
 from backend.api.rollcall_router import router as rollcall_router
+from backend.api.class_drill_router import router as class_drill_router
 from backend.api.downloads_router import router as downloads_router
 
 app.include_router(score_router, prefix="/api/scores", tags=["课堂积分"])
 app.include_router(rollcall_router, prefix="/api/rollcall", tags=["智能点名"])
+app.include_router(class_drill_router, prefix="/api/class-drill", tags=["课堂抽问"])
 app.include_router(downloads_router, prefix="/api/downloads", tags=["文件下载"])
 # ── 新架构 API 路由 ──
 from backend.api.auth_router import router as auth_router

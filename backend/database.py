@@ -373,6 +373,60 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass
 
+            # ── 课堂抽问（随机抽问）会话表 ──
+            # 与点名同源但**各自独立**：抽人算法与计分口径复用点名，会话与流水不写进点名单，
+            # 老师查看点名记录时不会混进抽问，反之亦然。
+            c.execute("""CREATE TABLE IF NOT EXISTS class_drill_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_username TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                subject TEXT DEFAULT '',
+                topic TEXT DEFAULT '',
+                ai_enabled INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                weights TEXT DEFAULT '{}',
+                picked_in_round TEXT DEFAULT '[]',
+                last_time REAL,
+                current_question TEXT DEFAULT '',
+                correct_count INTEGER DEFAULT 0,
+                incorrect_count INTEGER DEFAULT 0,
+                skip_count INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cds_active ON class_drill_sessions(teacher_username, grade, class_name, status)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 课堂抽问流水表（一条 = 一道题 × 一名学生 × 一个判定）──
+            c.execute("""CREATE TABLE IF NOT EXISTS class_drill_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                teacher_username TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                student_name TEXT,
+                question_id INTEGER,
+                question_text TEXT DEFAULT '',
+                question_type TEXT DEFAULT '',
+                options TEXT DEFAULT '',
+                correct_answer TEXT DEFAULT '',
+                student_answer TEXT DEFAULT '',
+                explanation TEXT DEFAULT '',
+                source TEXT DEFAULT 'bank',
+                result TEXT,
+                points INTEGER DEFAULT 0,
+                created_at TEXT
+            )""")
+            # 兼容已有部署：老库里的 class_drill_records 没有 student_answer 列
+            _ensure_column(c, "class_drill_records", "student_answer", "TEXT DEFAULT ''")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cdr_session ON class_drill_records(session_id)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY,

@@ -122,6 +122,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "TTS_VOICE": "qwen-audio-3.0-tts-flash-longnixiwei",   # 新闻联播·男（权威播报）
     "TTS_SPEECH_RATE": 1.0,
     "TTS_VOLUME": 50,
+    # ── 课堂抽问（backend/api/class_drill_router.py）──
+    # 页面上的「AI 生题」开关是否可用：关掉后课堂抽问只从题库取题，不再调用大模型（零 AI 计费）。
+    # 页面开关是当堂临时选择，这里是全校总闸；两者都开才走 AI。
+    "CLASS_DRILL_AI_ENABLED": True,
     # 积分防刷：每日上限（0 = 不限制）
     "REWARD_DAILY_CHAT_POINTS": 10,
     "REWARD_DAILY_QUIZ_SESSIONS": 3,
@@ -341,7 +345,7 @@ _BOOL_KEYS = {
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
-    "TTS_ENABLED",
+    "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
 }
 _STR_LIMITS: dict[str, int] = {

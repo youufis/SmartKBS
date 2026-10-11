@@ -29,6 +29,7 @@ import {
   GlobalOutlined,
   CrownOutlined,
   DownloadOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -138,6 +139,7 @@ function buildTeacherMenu(t: (k: string) => string) {
       { key: '/discussion', icon: <TeamOutlined />, label: g('discussion') },
       { key: '/whiteboard', icon: <EditOutlined />, label: g('whiteboard') },
       { key: '/rollcall', icon: <AuditOutlined />, label: g('rollcallManage') },
+      { key: '/class-question', icon: <QuestionCircleOutlined />, label: g('classQuestion') },
       { key: '/student-questions', icon: <MessageOutlined />, label: g('questionManage') },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: g('taskManage') },
       { key: '/quest-records', icon: <TrophyOutlined />, label: g('questManage'), adminOrTeacherOnly: true },
