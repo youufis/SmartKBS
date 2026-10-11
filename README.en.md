@@ -35,13 +35,14 @@
 
 ---
 
-> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-09)
+> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-11)
 >
 > - 🔊 **Speech synthesis and roll-call voice** — only voices verified to produce audio are offered, polyphonic surnames are corrected automatically, and nothing is billed while the feature is off
 > - 🧭 **Settings stop guessing** — one model catalogue behind dropdowns, self-test buttons for image and speech generation, size options filtered by measured limits, wrong values rejected on save
 > - 🧱 **One door into the question bank** — nine hand-written insert paths merged into a single exit: validate → de-duplicate → one transaction → link knowledge points
 > - 🔁 **One filling policy** — bank first → AI covers the shortfall → AI questions are stored before being returned; buzzer rounds no longer pad with repeats; composing can opt into shortfall filling (off by default)
 > - 📏 **Question counts mean what the teacher typed** — real parameters everywhere, out-of-range requests fail loudly instead of being silently rewritten
+> - 🎯 **New: Class Drill** — choose a grade/class and a knowledge point, draw from the question bank first (AI generation behind a switch, questions stored for reuse), pick a student fairly, and the student taps an answer that is judged and scored on submit (correct +5 / wrong +2 / skipped 0) — warm-ups and in-class questioning, loop as long as you like
 > - 🎨 **Whiteboard usability and a rebuilt realtime path** — refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, dropped links reconnect on their own
 > - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports how long it waited and which endpoint it tried
 > - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
@@ -1057,14 +1058,15 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.6.0** (2026-10-05 ~ 10-09). Each release lists the changes a user can notice; per-commit detail lives in the git history.
+Current version **8.6.0** (2026-10-05 ~ 10-11). Each release lists the changes a user can notice; per-commit detail lives in the git history.
 
-### v8.6.0 (2026-10-05 ~ 10-09)
+### v8.6.0 (2026-10-05 ~ 10-11)
 
 - 🔊 Speech synthesis and roll-call voice landed; polyphonic surnames corrected; zero billing while off
 - 🧭 One model catalogue behind dropdowns, self-test buttons for image and speech, sizes filtered by measured limits, wrong settings rejected on save; the entry page is no longer cached; login-page visit statistics added
 - 🧱 Question storage merged into one exit: invalid questions refused, duplicates de-duplicated with ids backfilled, AI questions reach the selection engine the same day, figures cleaned on the way in
 - 🔁 One filling policy: bank first → AI covers the shortfall → AI questions stored before returning; buzzer rounds stop padding; composing can opt into shortfall filling (off by default)
+- 🎯 New "Class Drill": draw questions from the bank by course knowledge point (or a typed topic), optional AI generation covering the shortfall (stored for reuse); after a fair student pick the student taps an answer, and submitting judges and scores it instantly (correct 5 / wrong 2 / skipped 0), with points going into the existing points system
 - 🧮 Paper score totals, the three selection engines, export rendering, drag-to-reorder and per-student shuffling all brought in line; AI generation moved to background jobs
 - 🎨 Whiteboard usability and realtime path rebuilt: refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
 - ⏱ Question generation scales its output ceiling to the question count and splits the timeout budget across endpoints; a timeout now reports the wait and the endpoint tried
