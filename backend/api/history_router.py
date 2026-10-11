@@ -10,7 +10,6 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
-from typing import Any
 
 from backend.api.dependencies import get_current_user
 from backend.utils import get_account_chat_history_dir, path_within, like_escape as _like_prefix_escape
@@ -525,6 +524,172 @@ async def delete_history_file(request: Request, path: str = Query(...)):
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
+# ═══════════════════════════════════════════════════════════
+# 自动保存的幂等语义（V8.6.1 修"问一遍，写两条"）
+# ═══════════════════════════════════════════════════════════
+#
+# 前端 chatStore / companionStore 每次触发保存时提交的是**整段对话快照**
+# （messages.map(...).join("---")），而 /save 一直是追加写 ——
+# 于是第 2 轮把第 1 轮再抄一遍，第 3 轮把前两轮再抄一遍：
+# 实测 root 会话 3 轮问答落盘成 6 轮（`root/ChatHistory/2026-10-11/conversation_20261011_221033.md`），
+# 与 chat_turns 里的 3 组真实问答对不上。
+#
+# 这里按"快照"语义收敛，同时不破坏只提交增量的老客户端：
+#   skip      —— 内容与已存内容一致（重复提交/重试），什么都不做
+#   overwrite —— 来的是更长的完整快照（快照式客户端），整份替换
+#   append    —— 来的是新的一小段（增量式客户端），照旧追加
+_SEP_BLOCK = "\n\n---\n\n"
+
+
+def _history_body(raw: str) -> str:
+    """取历史文件正文（去掉「创建时间:」头、首尾分隔线）
+
+    每次落盘都会在结尾留一条 `---`，比对前必须剥掉，否则"同一份快照重复提交"
+    会因为尾部这条分隔线被判成内容变了而白写一遍（幂等就失效了）。
+    """
+    body = re.sub(r"^\s*创建时间:.*\n*", "", raw or "", count=1)
+    body = re.sub(r"^\s*---\s*\n*", "", body, count=1)
+    body = re.sub(r"(\s*\n\s*---\s*)+$", "", body)
+    return body.strip()
+
+
+def _block_count(text: str) -> int:
+    """数消息块：按「**角色**:」行计（与 _derive_title_and_count 同口径）"""
+    n = 0
+    for line in (text or "").splitlines():
+        if _ROLE_LINE.match(line.strip()):
+            n += 1
+    return n
+
+
+def plan_history_write(existing_raw: str, incoming: str) -> tuple[str, str]:
+    """返回 (动作, 应写入的正文)。动作 ∈ skip / overwrite / append。
+
+    existing_raw 为空表示文件还不存在（首次落盘 → overwrite）。
+    """
+    incoming = (incoming or "").strip()
+    existing = _history_body(existing_raw)
+    if not existing:
+        return ("overwrite", incoming)
+    if not incoming or existing == incoming:
+        return ("skip", existing)
+    # 快照式客户端：来的是同一段的加长版（或老文件被重复追加过的脏快照）
+    if _block_count(incoming) >= _block_count(existing):
+        return ("overwrite", incoming)
+    if existing.endswith(incoming):
+        return ("skip", existing)      # 增量重复提交（网络重试等）
+    return ("append", existing + _SEP_BLOCK + incoming)
+
+
+def split_role_blocks(text: str) -> list[str]:
+    """按「**角色**:」行切消息块（一条消息 = 角色行 + 其后所有行）
+
+    不能按 `\n\n---\n\n` 切：助手回答里经常自带 `---` 分隔线（Markdown 水平线），
+    会把一条消息劈成两块，清洗时既认错重复又可能删掉正文。
+    """
+    blocks: list[str] = []
+    cur: list[str] = []
+
+    def flush() -> None:
+        if not cur:
+            return
+        # 块尾常挂着上一段留下的分隔线（"---"）与空行：留着它们再按 SEP 拼回去
+        # 会变成两条分隔线，清洗出来的文件就比原文多一层横线
+        while cur and (not cur[-1].strip() or cur[-1].strip() in ("---", "***", "—", "——")):
+            cur.pop()
+        if cur:
+            blocks.append("\n".join(cur).strip())
+
+    for line in (text or "").splitlines():
+        if _ROLE_LINE.match(line.strip()):
+            flush()
+            cur = [line]
+        elif cur:
+            cur.append(line)
+    flush()
+    return [b for b in blocks if b]
+
+
+def is_snapshot_accumulation(dirty_text: str, clean_text: str) -> bool:
+    """证明脏文件 = 若干"从头 growing 的前缀快照"依次拼接（清洗可逆性的硬校验）
+
+    逐段贪心匹配 clean 的前缀：能一段不多一段不少地拼回 dirty，说明被删掉的每一块
+    都确实是旧快照重发；拼不出来就判为不可信，宁可留着重复也不删内容。
+    """
+    dirty = split_role_blocks(dirty_text)
+    clean = split_role_blocks(clean_text)
+    if not clean or len(dirty) <= len(clean):
+        return False        # 没有"更长"就谈不上重发，等长的两份是同一份快照
+    i, segs = 0, 0
+    while i < len(dirty):
+        for m in range(min(len(clean), len(dirty) - i), 0, -1):
+            if dirty[i:i + m] == clean[:m]:
+                i += m
+                segs += 1
+                break
+        else:
+            return False
+    return segs >= 2
+
+
+def collapse_snapshot_repeats(text: str) -> tuple[str, int]:
+    """把「整段快照被反复追加」的历史折叠回真实轮次。返回 (清洗后正文, 丢弃块数)
+
+    判据（三条同时成立才动刀，宁可漏洗不误删）：
+    1. 文件开头的一整段，紧接着被**原样**重复了一遍 → 那一份是旧快照，删前者；
+    2. 反复剥离后至少剩下一段不重复的尾巴（累计快照的形状：2、4、6… 递增）；
+    3. 若整个文件只是"两段一模一样"（n = 2m 且只剥一次），判为**用户真的问了同样的问题**，
+       不洗 —— 这种情况无法与"单轮被重复提交"区分，保留原样更安全。
+    """
+    blocks = split_role_blocks(text)
+    original_n = len(blocks)
+    strips: list[int] = []
+    while len(blocks) >= 4:
+        n = len(blocks)
+        cut = 0
+        for m in range(n // 2, 0, -1):
+            if blocks[:m] == blocks[m:2 * m]:
+                cut = m
+                break
+        if not cut:
+            break
+        strips.append(cut)
+        blocks = blocks[cut:]
+    if not strips:
+        return (text or "").strip(), 0
+    if len(strips) == 1 and strips[0] * 2 == original_n:
+        return (text or "").strip(), 0          # 形状与"真重复提问"无法区分 → 不洗
+    return _SEP_BLOCK.join(blocks), sum(strips)
+
+
+def save_history_snapshot(file_path: str, content: str) -> str:
+    """按快照语义落盘一份对话历史，返回实际动作：skip / overwrite / append
+
+    单独成函数是为了能被离线单测直接喂 tmp_path 验"问一遍不会写两条"。
+    """
+    from datetime import datetime
+    existing_raw = ""
+    if os.path.isfile(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                existing_raw = f.read()
+        except OSError as e:
+            logger.warning(f"历史文件预读失败，按整份写入: {file_path} - {e}")
+    action, body = plan_history_write(existing_raw, content)
+    if action == "skip":
+        return action
+
+    # 「创建时间」沿用文件里原有的那份，整份替换时不把它冲掉
+    m_created = re.match(r"^\s*创建时间:\s*(.+?)\s*$", existing_raw or "")
+    created = m_created.group(1) if m_created else ""
+    header = f"创建时间: {created or datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n"
+    tmp_path = f"{file_path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(f"{header}{body}\n\n---\n\n")
+    os.replace(tmp_path, file_path)       # 原子替换：中途断电也不会留下半份快照
+    return action
+
+
 @router.post("/save")
 async def save_conversation(request: Request):
     """保存对话记录到文件 + 写入索引"""
@@ -567,11 +732,7 @@ async def save_conversation(request: Request):
         raise HTTPException(status_code=400, detail="文件名不合法")
 
     try:
-        file_exists = os.path.exists(file_path)
-        with open(file_path, "a", encoding="utf-8") as f:
-            if not file_exists:
-                f.write(f"创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n")
-            f.write(f"{content}\n\n---\n\n")
+        action = save_history_snapshot(file_path, payload)
 
         # 更新 DB 索引(统一用相对 chat_dir 的路径)
         rel_path = os.path.relpath(file_path, chat_dir).replace("\\", "/")
@@ -598,7 +759,10 @@ async def save_conversation(request: Request):
         )
 
         # H4: 不再回传服务器绝对路径
-        return {"message": "对话已保存", "path": rel_path, "filename": os.path.basename(file_path)}
+        brief = {"skip": "对话已是最新（未重复写入）", "overwrite": "对话已保存（整份快照）",
+                 "append": "对话已保存（追加）"}
+        return {"message": brief.get(action, "对话已保存"), "path": rel_path,
+                "filename": os.path.basename(file_path), "action": action}
     except Exception as e:
         logger.error(f"保存对话记录失败: {e}")
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")

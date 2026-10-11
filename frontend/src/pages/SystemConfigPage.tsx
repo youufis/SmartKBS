@@ -193,10 +193,16 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'KB_TOP_K', labelKey: 'field_KB_TOP_K', descKey: 'field_KB_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'KB_MIN_SCORE', labelKey: 'field_KB_MIN_SCORE', descKey: 'field_KB_MIN_SCORE_desc', type: 'float', group: 'knowledgebase', required: false },
   { key: 'KB_TIMEOUT_MS', labelKey: 'field_KB_TIMEOUT_MS', descKey: 'field_KB_TIMEOUT_MS_desc', type: 'number', group: 'knowledgebase', required: false, unitKey: 'unitMilliSecond' },
+  { key: 'KB_REL_GAP', labelKey: 'field_KB_REL_GAP', descKey: 'field_KB_REL_GAP_desc', type: 'float', group: 'knowledgebase', required: false },
   // AI 对话权限与每日限额：前者管"谁能用"，后者管"能用多少次"，同一件事的两个维度，放在一节
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat' },
   { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', type: 'boolean', group: 'chat' },
   { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'chat', unitKey: 'unitTime' },
+  // V8.6.1 知识问答输出质量闸门（backend/chat_intent.py / chat_prompts.py）
+  { key: 'CHAT_META_GUARD_ENABLED', labelKey: 'field_CHAT_META_GUARD_ENABLED', descKey: 'field_CHAT_META_GUARD_ENABLED_desc', type: 'boolean', group: 'chat', required: false },
+  { key: 'CHAT_IDENTITY_GUARD_ENABLED', labelKey: 'field_CHAT_IDENTITY_GUARD_ENABLED', descKey: 'field_CHAT_IDENTITY_GUARD_ENABLED_desc', type: 'boolean', group: 'chat', required: false },
+  { key: 'CHAT_SKILL_SEGMENT_MODE', labelKey: 'field_CHAT_SKILL_SEGMENT_MODE', descKey: 'field_CHAT_SKILL_SEGMENT_MODE_desc', type: 'text', group: 'chat', required: false, placeholderKey: 'placeholder_CHAT_SKILL_SEGMENT_MODE' },
+  { key: 'CHAT_META_MAX_TOKENS', labelKey: 'field_CHAT_META_MAX_TOKENS', descKey: 'field_CHAT_META_MAX_TOKENS_desc', type: 'number', group: 'chat', required: false },
   // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
   { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', type: 'boolean', group: 'memory' },
   { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitTurn' },

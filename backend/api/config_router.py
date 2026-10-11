@@ -93,7 +93,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 技能系统：已启用的技能名称列表（空列表=关闭所有技能）
     "enabled_skills": [],
     # 场景×技能映射：{场景: {"exclude":[...], "include":[...]}}，未列出的场景行为不变
-    "skill_scene_map": {},
+    "skill_scene_map": {
+        # V8.6.1：对话链路只留"对话直答节奏 + 语言自适应 + 安全过滤 + 实例驱动"，
+        # 三阶增强/分步推理/可视化表达留给出题、教案、报告这类生成物场景
+        "chat": {"include": ["chat-conversation", "language-control", "safety-guard", "example-driven"]},
+        "companion": {"include": ["chat-conversation", "language-control", "safety-guard", "socratic-tutor"]},
+    },
     # 课程名称列表
     "SUBJECTS": ["人工智能"],
     # 启用的试题题型（可在此增删，前端自动同步）
@@ -170,8 +175,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "KB_API_BASE": "",       # 业务空间专属域名（https://llm-xxx.cn-beijing.maas.aliyuncs.com），须与 API Key 同空间
     "KB_AGENT_ID": "",       # 知识检索服务 ID（aid-xxx），控制台"知识服务→知识检索"创建并发布后获得
     "KB_TOP_K": 5,           # 每次检索最多注入的资料条数
-    "KB_MIN_SCORE": 0.5,     # 相关度阈值（0.01~1.00），低分切片丢弃
+    "KB_MIN_SCORE": 0.65,    # 相关度阈值（0.01~1.00），低分切片丢弃。
+    #                        V8.6.1 由 0.5 提到 0.65：实测「你好/你是谁」这类元问题
+    #                        在 0.5 档照样命中 5/5 条教材切片，是"身份问题答成讲稿"的主因
+    "KB_REL_GAP": 0.8,       # 相对分差裁剪（0.0~1.0）：低于最高分×系数的切片一并丢弃，
+    #                        避免 5 条里混进蹭分的无关资料（0=关闭）
     "KB_TIMEOUT_MS": 5000,   # 检索超时（毫秒），超时静默降级本地检索，不阻塞对话
+    # ── 知识问答（AI 对话）输出质量（backend/chat_intent.py / chat_prompts.py）──
+    "CHAT_META_GUARD_ENABLED": True,     # 元问题闸门：身份/寒暄/低信息量不检索、不套质量模板
+    "CHAT_IDENTITY_GUARD_ENABLED": True,  # 平台身份 system 提示：修"自报通义千问/ChatGPT"
+    "CHAT_SKILL_SEGMENT_MODE": "system",  # 技能段位置：system=放进系统消息；inline=退回拼进正文
+    "CHAT_META_MAX_TOKENS": 600,          # 元问题回答的输出上限（闲聊不必长）
 }
 
 
@@ -340,12 +354,15 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     # ── 百炼知识库检索（backend/bailian_kb.py）──
     "KB_TOP_K": (1, 20),
     "KB_TIMEOUT_MS": (500, 30000),
+    # ── 知识问答输出质量（backend/chat_intent.py / chat_prompts.py）──
+    "CHAT_META_MAX_TOKENS": (100, 4000),
     # ── 语音合成（backend/tts_service.py）──
     "TTS_VOLUME": (0, 100),
 }
 # 浮点范围校验（_NUM_RANGES 会取整，0.01~1.00 的阈值必须走这里）
 _FLOAT_RANGES: dict[str, tuple[float, float]] = {
     "KB_MIN_SCORE": (0.01, 1.00),
+    "KB_REL_GAP": (0.0, 1.00),
     "TTS_SPEECH_RATE": (0.5, 2.00),
 }
 _BOOL_KEYS = {
@@ -354,6 +371,7 @@ _BOOL_KEYS = {
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
     "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED",
+    "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
 }
 _STR_LIMITS: dict[str, int] = {
@@ -362,6 +380,7 @@ _STR_LIMITS: dict[str, int] = {
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
     "dashscope_api_key": 200, "APPID": 128,
     "KB_API_BASE": 300, "KB_AGENT_ID": 128,
+    "CHAT_SKILL_SEGMENT_MODE": 16,
     "TTS_MODEL": 80, "TTS_VOICE": 128,
     "PODCAST_VOICE_A": 128, "PODCAST_VOICE_B": 128, "PODCAST_DURATION_OPTIONS": 32,
 }

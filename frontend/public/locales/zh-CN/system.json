@@ -1185,5 +1185,20 @@
   "ttsTestMismatch": "配置里写的音色是 {{configured}}，与实际用的不一致（音色与模型不配对，已自动回落）—— 请重新选音色",
   "placeholder_ttsModel": "选择语音合成模型",
   "modelTierAlternative": "同类备选",
-  "imageSizeRuleHint": "（当前模型：{{hint}}）"
+  "imageSizeRuleHint": "（当前模型：{{hint}}）",
+  "field_KB_REL_GAP": "相对分差裁剪",
+  "field_KB_REL_GAP_desc": "低于本批最高分×该系数的切片一并丢弃（0~1，0=关闭）。百炼固定返回前 K 条，只靠绝对阈值时“你是谁”这类问句也能凑够 5 条教材切片，压过提问本身。",
+  "field_CHAT_META_GUARD_ENABLED": "元问题闸门",
+  "field_CHAT_META_GUARD_ENABLED_desc": "“你是谁 / 你好 / 111 / 今天天气”这类问句不再查知识库、也不再注入质量技能段，避免一句寒暄被写成带标题的讲稿。关闭即退回 8.6.0 的旧行为。",
+  "field_CHAT_IDENTITY_GUARD_ENABLED": "平台身份提示",
+  "field_CHAT_IDENTITY_GUARD_ENABLED_desc": "给知识问答加一条系统身份（“你是本平台的 AI 老师/学习助手”），禁止自报底层大模型名称；同时把参考资料移入系统提示，用户原话单独成一条消息。",
+  "field_CHAT_SKILL_SEGMENT_MODE": "技能段位置",
+  "field_CHAT_SKILL_SEGMENT_MODE_desc": "system=技能要求放进系统提示（默认）；inline=退回拼在提问正文前面。填其他值按 system 处理。",
+  "placeholder_CHAT_SKILL_SEGMENT_MODE": "system 或 inline",
+  "field_CHAT_META_MAX_TOKENS": "元问题输出上限",
+  "field_CHAT_META_MAX_TOKENS_desc": "身份/寒暄类问题的回答长度上限（100~4000 token，默认 600），防止一句话被扩成千字教案。",
+  "tag_dialogue": "对话",
+  "tag_concision": "简洁",
+  "tag_relevance": "相关性",
+  "tag_adaptive": "自适应"
 }

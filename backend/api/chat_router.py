@@ -411,7 +411,22 @@ def _chat_event_generator(
     rag_enabled = (_mode == "kb_direct")
 
     try:
-        enhanced_prompt = enhance_prompt_with_user_context(prompt, user_payload)
+        # ── V8.6.1 对话分层组稿 ──
+        # 只接管 scene=="chat"（知识问答）：身份、回答要求、技能段、参考资料一律进
+        # system，用户原话单独成一条 user 消息；学伴/教学助手/白板仍走原有
+        # "人设拼进 prompt" 的路径，避免连带改动它们的画像与多轮上下文口径。
+        from backend import chat_prompts
+        layered = scene == "chat" and bool(get_config_value("CHAT_IDENTITY_GUARD_ENABLED", True))
+        meta_reason: Optional[str] = None
+        may_retrieve, may_skill = True, True
+        system_text = ""
+        kb_context = ""
+        if layered:
+            meta_reason, may_retrieve, may_skill = chat_prompts.decide_turn(
+                prompt, bool(get_config_value("CHAT_META_GUARD_ENABLED", True)))
+            enhanced_prompt = prompt or ""
+        else:
+            enhanced_prompt = enhance_prompt_with_user_context(prompt, user_payload)
         valid_file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
 
         # ── V6.7 RAG 增强：由「知识」开关(rag_enabled)控制 ──
@@ -426,34 +441,47 @@ def _chat_event_generator(
                 chat_kb_takeover = bool(kb_ok)
                 if kb_ok and use_agent:
                     use_agent = False
-                from backend.rag import retrieve_knowledge, retrieve_knowledge_v2
-                if kb_ok:
-                    rag_context, kb_hit_refs = retrieve_knowledge_v2(prompt, username)
+
+                # V8.6.1 检索闸门：「你是谁 / 你好 / 111」这类元问题不查知识库。
+                # 百炼对这种问句照样返回 top_k 条过线切片（实测 refs=5、2585 字），
+                # 压在 3 个字的提问前面，模型只能围绕教材把身份问题答成讲稿。
+                skip_reason = "" if may_retrieve else (
+                    f"元问题({meta_reason})" if meta_reason else "过短/无实体词")
+                if skip_reason:
+                    logger.info(f"[RAG] 跳过知识检索 (user={username}): {skip_reason}")
                 else:
-                    rag_context, kb_hit_refs = retrieve_knowledge(prompt, username), []
-                logger.info(f"[RAG] 知识检索已执行 (user={username}, cloud={'on' if kb_ok else 'off'}, "
-                            f"refs={len(kb_hit_refs)}, context_len={len(rag_context or '')})")
-                if kb_hit_refs:
-                    yield f"data: {json.dumps({'type': 'references', 'items': kb_hit_refs}, ensure_ascii=False)}\n\n"
-                if rag_context:
-                    from backend.prompts import build_ai_role
-                    from backend.permission_service import get_teacher_subjects
-                    from backend.auth import get_user_role
-                    # 教师/管理员：使用其任教学科；学生：使用通用角色
-                    user_role = get_user_role(username)
-                    teacher_subjects = get_teacher_subjects(username) if user_role in (0, 1) else []
-                    ai_role = build_ai_role(subjects=teacher_subjects) if teacher_subjects else build_ai_role()
-                    if "【知识库参考资料】" in rag_context:
-                        system_role = (f"{ai_role}请优先依据【知识库参考资料】作答，引用资料内容时可注明《文档名》；"
-                                       f"资料未覆盖的部分可结合学科常识补充，但不得与资料矛盾；资料与问题无关时忽略资料。")
-                        context_block = f"以下是从教师知识库中检索到的资料：\n\n{rag_context}"
-                    elif "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
-                        system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
-                        context_block = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
+                    from backend.rag import retrieve_knowledge, retrieve_knowledge_v2
+                    if kb_ok:
+                        rag_context, kb_hit_refs = retrieve_knowledge_v2(prompt, username)
                     else:
-                        system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
-                        context_block = rag_context
-                    enhanced_prompt = f"{system_role}\n\n{context_block}\n\n用户问题：{enhanced_prompt}"
+                        rag_context, kb_hit_refs = retrieve_knowledge(prompt, username), []
+                    logger.info(f"[RAG] 知识检索已执行 (user={username}, cloud={'on' if kb_ok else 'off'}, "
+                                f"refs={len(kb_hit_refs)}, context_len={len(rag_context or '')})")
+                    if kb_hit_refs:
+                        yield f"data: {json.dumps({'type': 'references', 'items': kb_hit_refs}, ensure_ascii=False)}\n\n"
+                    if rag_context:
+                        if layered:
+                            # 资料进 system（带使用规则），提问不再被资料淹没
+                            kb_context = rag_context
+                        else:
+                            from backend.prompts import build_ai_role
+                            from backend.permission_service import get_teacher_subjects
+                            from backend.auth import get_user_role
+                            # 教师/管理员：使用其任教学科；学生：使用通用角色
+                            user_role = get_user_role(username)
+                            teacher_subjects = get_teacher_subjects(username) if user_role in (0, 1) else []
+                            ai_role = build_ai_role(subjects=teacher_subjects) if teacher_subjects else build_ai_role()
+                            if "【知识库参考资料】" in rag_context:
+                                system_role = (f"{ai_role}请优先依据【知识库参考资料】作答，引用资料内容时可注明《文档名》；"
+                                               f"资料未覆盖的部分可结合学科常识补充，但不得与资料矛盾；资料与问题无关时忽略资料。")
+                                context_block = f"以下是从教师知识库中检索到的资料：\n\n{rag_context}"
+                            elif "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
+                                system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
+                                context_block = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
+                            else:
+                                system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
+                                context_block = rag_context
+                            enhanced_prompt = f"{system_role}\n\n{context_block}\n\n用户问题：{enhanced_prompt}"
             except Exception as e:
                 logger.warning(f"RAG 检索失败: {e}")
 
@@ -473,7 +501,47 @@ def _chat_event_generator(
                 _summaries_generated = True
 
         # ── 技能注入 ──
-        enhanced_prompt = apply_skills(enhanced_prompt, "chat")
+        # 知识问答：技能段作为"工作方式"放进 system，并且元问题一律不注入
+        # （「输出质量三阶增强」这类结构化模板正是把"你是谁"写成讲稿的另一半原因）。
+        # 其余场景（学伴/教学助手）沿用把技能段前置拼进任务正文的老口径，
+        # 但按各自的 scene 取映射：白板 AI 有自己的注入点、不经这里，故不受影响。
+        skill_segment = ""
+        skill_in_system = False
+        if layered:
+            # 元问题（may_skill=False）一律不注入：一句"你是谁"不需要质量模板，
+            # 注入了反而会被当成答案骨架抄出来。
+            if may_skill:
+                seg_mode = str(get_config_value("CHAT_SKILL_SEGMENT_MODE", "system") or "system").strip().lower()
+                if seg_mode == "system":
+                    from backend.prompts import build_skills_segment
+                    skill_segment = build_skills_segment("chat")
+                    skill_in_system = bool(skill_segment)
+                if not skill_in_system:
+                    enhanced_prompt = apply_skills(enhanced_prompt, "chat")
+        else:
+            enhanced_prompt = apply_skills(enhanced_prompt, scene or "chat")
+
+        if layered:
+            system_text, user_text = chat_prompts.compose_chat_turn(
+                enhanced_prompt,
+                username=username, user_payload=user_payload,
+                kb_context=kb_context, skill_segment=skill_segment,
+                meta_reason=meta_reason,
+            )
+            # 附件摘要/文件分支仍需要一个"含身份"的单条文本，这里给智能体与
+            # 多模态路径准备合并版（它们各自的 messages 结构不支持独立 system）。
+            merged_prompt = f"{system_text}\n\n【用户的问题】\n{user_text}"
+            if meta_reason:
+                skill_state = "跳过(元问题)"
+            else:
+                skill_state = "system" if skill_in_system else "正文前置(inline)"
+            logger.info(f"[对话组稿] user={username} 分层=on meta={meta_reason or '-'} "
+                        f"技能段={skill_state} system={len(system_text)}字 user={len(user_text)}字 "
+                        f"资料={len(kb_context)}字")
+        else:
+            user_text = enhanced_prompt
+            merged_prompt = enhanced_prompt
+            system_text = ""
 
         # ── 直连模式多轮记忆 ──
         # APPID 留空（或本次强制直连）时，百炼侧没有 session 记忆，这里由平台自己
@@ -490,6 +558,11 @@ def _chat_event_generator(
                 if hist:
                     mem_history = hist
                     logger.info(f"[对话记忆] scene={scene} user={username} 带上 {len(hist)} 条历史")
+                    # V8.6.1：同一会话里重复提问，模型会逐字复读上一轮（实测 True）。
+                    # 带一条"换个角度"的指令，让第二问有价值而不是复制粘贴。
+                    if layered and chat_prompts.is_repeat_question(prompt, hist):
+                        system_text = f"{system_text}\n\n{chat_prompts.REPEAT_HINT}"
+                        logger.info(f"[对话组稿] user={username} 检测到重复提问，追加换角度指令")
         except Exception as e:
             mem_active = False
             logger.warning(f"[对话记忆] 上下文加载失败，按单轮继续: {e}")
@@ -505,7 +578,7 @@ def _chat_event_generator(
             full_text = ""
             _prev = ""
             for chunk in call_multimodal_stream(
-                prompt=enhanced_prompt,
+                prompt=merged_prompt,
                 api_key=dashscope_api_key,
                 model=model,
                 api_base=api_base,
@@ -527,7 +600,7 @@ def _chat_event_generator(
                         doc_content = ""
                         _prev2 = ""
                         yield f"data: {json.dumps({'type': 'delta', 'content': _sep}, ensure_ascii=False)}\n\n"
-                        for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
+                        for chunk in _agent_chat_document_stream(fp, merged_prompt, dashscope_api_key):
                             doc_content = chunk['text']
                             inc2 = doc_content[len(_prev2):] if doc_content.startswith(_prev2) else doc_content
                             _prev2 = doc_content
@@ -551,9 +624,12 @@ def _chat_event_generator(
             _final_text = ""
             _finish_status = "ok"
             try:
-                for chunk in _agent_chat_stream(enhanced_prompt, mem_key, dashscope_api_key, username,
+                for chunk in _agent_chat_stream(user_text, mem_key, dashscope_api_key, username,
                                                 use_agent=use_agent, history=mem_history,
-                                                enable_thinking=False if chat_kb_takeover else None):
+                                                # 元问题与知识库接管都关思考链：闲聊不必烧 2000 隐藏 token
+                                                enable_thinking=False if (chat_kb_takeover or meta_reason) else None,
+                                                system=system_text or None,
+                                                max_tokens=_meta_max_tokens(meta_reason)):
                     _full = chunk["text"]
                     # 增量推送：仅发送相对上一帧的新增片段（回退切换等场景下前缀不匹配时整段补发）
                     inc = _full[len(_prev):] if _full.startswith(_prev) else _full
@@ -581,7 +657,7 @@ def _chat_event_generator(
             if is_image_file(fp):
                 content = ""
                 _prev3 = ""
-                for chunk in _agent_chat_image_stream(fp, enhanced_prompt, dashscope_api_key):
+                for chunk in _agent_chat_image_stream(fp, merged_prompt, dashscope_api_key):
                     _f3 = chunk['text']
                     inc3 = _f3[len(_prev3):] if _f3.startswith(_prev3) else _f3
                     _prev3 = _f3
@@ -592,7 +668,7 @@ def _chat_event_generator(
             elif is_document_file(fp):
                 content = ""
                 _prev3 = ""
-                for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
+                for chunk in _agent_chat_document_stream(fp, merged_prompt, dashscope_api_key):
                     _f3 = chunk['text']
                     inc3 = _f3[len(_prev3):] if _f3.startswith(_prev3) else _f3
                     _prev3 = _f3
@@ -636,15 +712,31 @@ def _remember_turn(session_id: Optional[str], username: str, user_text: str,
         logger.warning(f"[对话记忆] 落库失败(不影响本次回答): {e}")
 
 
+def _meta_max_tokens(meta_reason: Optional[str]) -> Optional[int]:
+    """元问题（身份/寒暄/低信息量）限制输出长度，避免一句话被扩成教案"""
+    if not meta_reason:
+        return None
+    try:
+        return int(get_config_value("CHAT_META_MAX_TOKENS", 600) or 600)
+    except (TypeError, ValueError):
+        return 600
+
+
 def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = "",
                         use_agent: bool = True, history: Optional[list] = None,
-                        enable_thinking: Optional[bool] = None):
-    """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式（history 仅直连生效）"""
+                        enable_thinking: Optional[bool] = None,
+                        system: Optional[str] = None, max_tokens: Optional[int] = None):
+    """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式（history 仅直连生效）
+
+    system: V8.6.1 身份/规则段，直连模式走独立 system 角色；智能体模式由
+    ai_service 内联到问题前（百炼 Application 的 messages 不收 system）。
+    """
     from backend.api.ai_service import call_ai_stream
 
     try:
         for chunk in call_ai_stream(prompt, api_key, session_id, use_agent=use_agent, history=history,
-                                    enable_thinking=enable_thinking):
+                                    enable_thinking=enable_thinking,
+                                    system=system, max_tokens=max_tokens):
             yield chunk
     except Exception as e:
         logger.error(f"AI chat error: {e}")

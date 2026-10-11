@@ -1185,5 +1185,20 @@
   "ttsTestMismatch": "The saved voice is {{configured}} but a different one was used (voice/model mismatch, fell back automatically) — please pick a voice again",
   "placeholder_ttsModel": "Choose the synthesis model",
   "modelTierAlternative": "Alternatives",
-  "imageSizeRuleHint": " (current model: {{hint}})"
+  "imageSizeRuleHint": " (current model: {{hint}})",
+  "field_KB_REL_GAP": "Relative score cutoff",
+  "field_KB_REL_GAP_desc": "Drop chunks scoring below (top score x ratio); 0 disables. Bailian always returns top-K, so an absolute floor alone still let “who are you” pull 5 textbook chunks ahead of a 3-character question.",
+  "field_CHAT_META_GUARD_ENABLED": "Meta-question guard",
+  "field_CHAT_META_GUARD_ENABLED_desc": "For “who are you / hello / 111 / weather” skip knowledge-base retrieval and skill injection so a greeting is not expanded into a lecture. Turning it off restores 8.6.0 behavior.",
+  "field_CHAT_IDENTITY_GUARD_ENABLED": "Platform identity prompt",
+  "field_CHAT_IDENTITY_GUARD_ENABLED_desc": "Inject a system identity (“you are this platform’s AI teacher / study companion”) that forbids self-reporting the underlying model name, and move retrieved material into the system prompt so the user’s question stands alone.",
+  "field_CHAT_SKILL_SEGMENT_MODE": "Skill segment location",
+  "field_CHAT_SKILL_SEGMENT_MODE_desc": "system = put skill guidance in the system message (default); inline = prepend it to the question text. Other values fall back to system.",
+  "placeholder_CHAT_SKILL_SEGMENT_MODE": "system or inline",
+  "field_CHAT_META_MAX_TOKENS": "Meta answer token cap",
+  "field_CHAT_META_MAX_TOKENS_desc": "Output cap for identity/greeting answers (100-4000 tokens, default 600) so a one-line question never becomes a 1000-word lesson.",
+  "tag_dialogue": "Dialogue",
+  "tag_concision": "Concision",
+  "tag_relevance": "Relevance",
+  "tag_adaptive": "Adaptive"
 }

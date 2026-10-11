@@ -10,11 +10,14 @@
 - KB_AGENT_ID    知识检索服务 ID（aid-xxx，控制台"知识服务→知识检索"发布后获得）
 - KB_TOP_K       召回切片数（1~20）
 - KB_MIN_SCORE   相关度阈值（0.01~1.00），低分切片丢弃
+- KB_REL_GAP     相对分差裁剪（0.0~1.00）：低于本批最高分×系数的切片丢弃，0=关闭
 - KB_TIMEOUT_MS  检索超时（毫秒）。超时/失败静默降级，绝不阻塞对话
 
 接口文档：https://help.aliyun.com/zh/model-studio/knowledgesearch
 """
 from typing import Any, Optional
+
+import httpx  # 模块级绑定：_get_client() 里只是函数内导入，except httpx.TimeoutException 需要模块作用域可见
 
 from backend.logger import logger
 
@@ -49,7 +52,8 @@ def _get_cfg() -> dict[str, Any]:
         "base": str(get_config_value("KB_API_BASE", "") or "").strip().rstrip("/"),
         "agent_id": str(get_config_value("KB_AGENT_ID", "") or "").strip(),
         "top_k": int(get_config_value("KB_TOP_K", 5) or 5),
-        "min_score": float(get_config_value("KB_MIN_SCORE", 0.5) or 0.5),
+        "min_score": float(get_config_value("KB_MIN_SCORE", 0.65) or 0.65),
+        "rel_gap": float(get_config_value("KB_REL_GAP", 0.8) or 0),
         "timeout_ms": int(get_config_value("KB_TIMEOUT_MS", 5000) or 5000),
     }
 
@@ -76,6 +80,48 @@ def _search_url(base: str) -> str:
             base = base[: -len(suffix)]
             break
     return base + _SEARCH_PATH
+
+
+def select_chunks(nodes: list[dict[str, Any]], top_k: int, min_score: float,
+                  rel_gap: float = 0.0) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """从检索节点里挑出可用切片（纯函数，便于单测）。返回 (切片, 统计)。
+
+    两道过滤（V8.6.1）：
+    - 绝对阈值 `min_score`：低于它的一律丢弃；
+    - 相对分差 `rel_gap`：百炼固定返回 top_k 条，"你好/你是谁"这类元问题也能凑够
+      5 条过线切片（实测 top1=0.71、refs=5、2585 字压在 3 字提问前面，身份问题
+      答成讲稿）。绝对阈值挡不住蹭线的，再按"与最相关一条的差距"裁一刀。
+    """
+    kept: list[dict[str, Any]] = []
+    top1 = 0.0
+    for n in (nodes or [])[: max(0, int(top_k))]:
+        score = float(n.get("score") or 0.0)
+        if score < min_score:
+            continue
+        meta = n.get("metadata") or {}
+        text = str(n.get("text") or meta.get("content") or "").strip()
+        if not text:
+            continue
+        top1 = max(top1, score)
+        kept.append({
+            "text": text,
+            "score": round(score, 3),
+            "doc_name": str(meta.get("doc_name") or "知识库文档"),
+            "title": str(meta.get("hier_title") or meta.get("title") or ""),
+        })
+
+    chunks = kept
+    gap = float(rel_gap or 0.0)
+    if gap and kept and top1 > 0:
+        floor = top1 * gap
+        chunks = [c for c in kept if c["score"] >= floor]
+    stats = {
+        "top1": round(top1, 3),
+        "rel_gap": gap,
+        "dropped_by_gap": len(kept) - len(chunks),
+        "dropped_by_min_score": max(0, len(nodes or []) - len(kept)),
+    }
+    return chunks, stats
 
 
 def kb_ready() -> tuple[bool, str]:
@@ -129,23 +175,10 @@ def kb_search(query: str, api_key: Optional[str] = None) -> list[dict[str, Any]]
             )
             return []
         nodes = (data.get("data") or {}).get("nodes") or []
-        chunks: list[dict[str, Any]] = []
-        for n in nodes[: cfg["top_k"]]:
-            score = float(n.get("score") or 0.0)
-            if score < cfg["min_score"]:
-                continue
-            meta = n.get("metadata") or {}
-            text = str(n.get("text") or meta.get("content") or "").strip()
-            if not text:
-                continue
-            chunks.append({
-                "text": text,
-                "score": round(score, 3),
-                "doc_name": str(meta.get("doc_name") or "知识库文档"),
-                "title": str(meta.get("hier_title") or meta.get("title") or ""),
-            })
+        chunks, stats = select_chunks(nodes, cfg["top_k"], cfg["min_score"], cfg["rel_gap"])
         logger.info(f"[KB] 检索命中 {len(chunks)}/{len(nodes)} 条 "
-                    f"(query={query[:40]}…, min_score={cfg['min_score']})")
+                    f"(query={query[:40]}…, min_score={cfg['min_score']}, "
+                    f"top1={stats['top1']}, rel_gap={stats['rel_gap']}, 相对裁剪={stats['dropped_by_gap']})")
         return chunks
     except httpx.TimeoutException:
         logger.warning(f"[KB] 检索超时（{cfg['timeout_ms']}ms），降级本地检索")

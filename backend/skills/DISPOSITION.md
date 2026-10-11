@@ -20,3 +20,11 @@
 
 ## 已决策保留的观察项
 - `resources_router.py` html-generation 注入点：有完整护栏（html_is_complete/题目回解析）且日志零失败，保留观察，不盲目摘除。
+
+## V8.6.1 对话链路（知识问答）注入治理
+- 新增 `core/chat-conversation`（对话直答节奏），`compatible_with: [chat, companion]`，只进对话链路。
+- `chat / companion` 场景改为白名单注入：三阶增强 / 分步推理 / 可视化表达不再进对话；
+  配置里没有该场景规则时，`prompts._DIALOGUE_SCENE_DEFAULT` 在代码侧兜底（浅合并会整体覆盖默认值，故必须留这层）。
+- 所有技能段统一加「工作方式（禁止外显）」前言；`quality-enhancer` 三个阶段也各自声明不得外显。
+- 知识问答链路把身份、回答要求、技能段、参考资料全部放 system，用户原话单独一条 user
+  （`backend/chat_prompts.py` + `backend/chat_intent.py`，闸门开关见系统配置 `CHAT_*`）。

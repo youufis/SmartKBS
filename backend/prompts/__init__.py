@@ -142,6 +142,95 @@ def resolve_scene_skills(scene_type: str, enabled: list[str], scene_map: dict) -
     return eff
 
 
+# ═══════════════════════════════════════════════
+# 技能段：外显护栏 + 场景合成（V8.6.1）
+# ═══════════════════════════════════════════════
+
+_SKILL_SEGMENT_GUARD_HEAD = (
+    "【工作方式（仅供内部遵循，禁止外显）】\n"
+    "下列要点是你组织答案时的内在标准，不是答案模板。"
+    "严禁把这些小标题、条目、编号或勾选符号（- [ ] / - [x]）原样写进回答，"
+    "也不要宣称\"我已完成深度分析/自我审查\"。"
+)
+
+
+# 对话场景的技能白名单兜底（V8.6.1）。
+# 老部署的 system_config.json 里已有 skill_scene_map 但没有 chat/companion 条目，
+# load_config 是浅合并（文件里的键整体覆盖默认值），只改 DEFAULT_CONFIG 管不到它们；
+# 这里在代码侧再兜一层：没有显式规则时，对话场景绝不回灌
+# 「输出质量三阶增强 / 分步推理 / 可视化表达」这类会把寒暄写成讲稿的模板技能。
+# 管理员在「系统配置 → 技能管理 → 场景映射」里显式写出 chat/companion 规则即可覆盖本兜底。
+_DIALOGUE_SCENE_DEFAULT: dict[str, list[str]] = {
+    "chat": ["chat-conversation", "language-control", "safety-guard", "example-driven"],
+    "companion": ["chat-conversation", "language-control", "safety-guard", "socratic-tutor"],
+}
+
+
+def resolve_dialogue_fallback(scene_type: str, enabled: list[str], scene_map: dict) -> tuple[list[str], bool]:
+    """返回 (生效技能列表, 是否用了兜底白名单)。显式配置了该场景就完全听配置的。"""
+    rule = (scene_map or {}).get(scene_type)
+    if isinstance(rule, dict):
+        return resolve_scene_skills(scene_type, enabled, scene_map), False
+    allow = _DIALOGUE_SCENE_DEFAULT.get(scene_type)
+    if not allow:
+        return list(enabled), False
+    ordered = [n for n in allow if n in set(enabled)]
+    return ordered, True
+
+
+def compose_scene_segment(scene_type: str) -> tuple[str, list[str]]:
+    """按场景合成技能段（带禁止外显前言），返回 (段文本, 实际注入的技能名)。
+
+    供两条链路复用：
+    - apply_skills()：老场景，段文本前置拼进任务 prompt（行为不变，只多了护栏）
+    - chat_router：对话场景，段文本放进 system，不再与用户原话混在一条消息里
+    """
+    from backend.api.config_router import get_config_value
+    from backend.skill_engine import build_skill_prompt_segment, get_engine
+
+    enabled = get_config_value("enabled_skills", [])
+    scene_map = get_config_value("skill_scene_map", {})
+    effective, used_fallback = resolve_dialogue_fallback(scene_type, enabled, scene_map)
+    if not effective:
+        return "", []
+    if used_fallback:
+        from backend.logger import logger
+        logger.info(f"技能场景映射未配置 {scene_type}，启用对话白名单兜底: {effective}")
+
+    raw = build_skill_prompt_segment(
+        skill_names=effective,
+        context={"type": scene_type},
+        enabled_names=enabled,
+    )
+    if not raw:
+        return "", []
+
+    eng = get_engine()
+    fired = [n for n in effective
+             if (lambda s: bool(s) and f"<!-- {s.display_name} v" in raw)(eng.get(n))]
+    guarded = f"{_SKILL_SEGMENT_GUARD_HEAD}\n\n{raw}"
+    return guarded, (fired or effective)
+
+
+def build_skills_segment(scene_type: str) -> str:
+    """只取某场景的技能段文本（不拼任务正文），并记录一次使用统计。异常返回空串。
+
+    对话链路（V8.6.1）用它把技能段放进 system，而不是拼进用户正文；
+    统计口径与 apply_skills 一致：记"实际注入"的技能。
+    """
+    try:
+        guarded, fired = compose_scene_segment(scene_type)
+        if guarded:
+            try:
+                from backend import skill_stats
+                skill_stats.record_usage(scene_type, fired, len(guarded))
+            except Exception:
+                pass
+        return guarded
+    except Exception:
+        return ""
+
+
 def apply_skills(base_prompt: str, scene_type: str) -> str:
     """一键注入：读取已启用的技能并按场景过滤后注入到 Prompt
 
@@ -155,25 +244,15 @@ def apply_skills(base_prompt: str, scene_type: str) -> str:
         注入技能后的 Prompt（出错时返回原始 base_prompt）
     """
     try:
-        from backend.api.config_router import get_config_value
-        enabled = get_config_value("enabled_skills", [])
-        scene_map = get_config_value("skill_scene_map", {})
-        effective = resolve_scene_skills(scene_type, enabled, scene_map)
-        out = build_prompt_with_skills(
-            base_prompt=base_prompt,
-            skill_names=effective,
-            context={"type": scene_type},
-            enabled_names=enabled,
-        )
-        if out != base_prompt and effective:
-            # C: 使用统计(内部自带 try/except, 失败静默, 不影响主流程)
-            # 口径: 记录"实际注入"的技能(以段落标记为准), 而非仅候选列表
+        guarded, fired = compose_scene_segment(scene_type)
+        if not guarded:
+            return base_prompt
+        out = f"{guarded}\n\n---\n\n{base_prompt}"
+        try:  # C: 使用统计(内部自带 try/except, 失败静默, 不影响主流程)
             from backend import skill_stats
-            from backend.skill_engine import get_engine
-            _eng = get_engine()
-            fired = [n for n in effective
-                     if (lambda s: bool(s) and f"<!-- {s.display_name} v" in out)(_eng.get(n))]
-            skill_stats.record_usage(scene_type, fired or effective, len(out) - len(base_prompt))
+            skill_stats.record_usage(scene_type, fired, len(out) - len(base_prompt))
+        except Exception:
+            pass
         return out
     except Exception:
         return base_prompt

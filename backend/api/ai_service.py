@@ -295,13 +295,18 @@ def get_ai_config(use_agent: bool = True):
     }
 
 
-def _hist_messages(history: Optional[list], prompt: str) -> list[dict]:
+def _hist_messages(history: Optional[list], prompt: str, system: Optional[str] = None) -> list[dict]:
     """把 [{role, content}] 历史 + 当前提问 归一成 OpenAI messages 数组
 
     只接受 user/assistant 两种角色（丢弃客户端伪造的 system），空内容跳过，
     最后一条固定是本次提问，保证与模型 API 的角色交替要求一致。
+
+    V8.6.1：`system` 是**服务端**注入的身份/规则段（对话链路用），放在最前；
+    客户端历史里夹带的 system 仍按原来的口径丢弃。
     """
     msgs: list[dict] = []
+    if system:
+        msgs.append({"role": "system", "content": system})
     for item in (history or []):
         if not isinstance(item, dict):
             continue
@@ -310,6 +315,16 @@ def _hist_messages(history: Optional[list], prompt: str) -> list[dict]:
         if role in ("user", "assistant") and content:
             msgs.append({"role": role, "content": content})
     msgs.append({"role": "user", "content": prompt or ""})
+    return msgs
+
+
+def _user_pair(content: str, system: Optional[str] = None, array: bool = False) -> list[dict]:
+    """单轮（无历史）messages：可选 system + 一条 user；array=True 时 content 用数组格式"""
+    user_content: Any = [{"type": "text", "text": content}] if array else content
+    msgs: list[dict] = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.append({"role": "user", "content": user_content})
     return msgs
 
 
@@ -472,7 +487,8 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                      enable_thinking: Optional[bool] = None,
                      history: Optional[list] = None,
                      max_tokens: Optional[int] = None,
-                     json_mode: bool = False) -> str:
+                     json_mode: bool = False,
+                     system: Optional[str] = None) -> str:
     """直接调用大模型（同步，OpenAI 兼容接口）
 
     enable_thinking=None 保持现状（由模型默认决定）；传 False 关闭思考链。
@@ -483,7 +499,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
     # 构建消息内容（兼容 content 字符串和数组两种格式）
     content = prompt if prompt else ""
     # 带历史时直接走多轮 messages（一次请求，不做 str/array 双格式轮询）
-    messages = _hist_messages(history, content) if history else [{"role": "user", "content": content}]
+    messages = _hist_messages(history, content, system) if history else _user_pair(content, system)
     fmts = ["hist"] if history else ["str", "array"]
     last_error = None
     payload: dict = {}
@@ -491,7 +507,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
         t0 = time.monotonic()
         if fmt == "array":
             # 部分 DashScope 模型要求 content 为数组格式
-            messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
+            messages = _user_pair(content, system, array=True)
         try:
             payload = {
                 "model": model,
@@ -566,7 +582,8 @@ def call_ai_sync_direct(prompt: str, api_key: str,
 def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
                    use_agent: bool = True, history: Optional[list] = None,
                    enable_thinking: Optional[bool] = None,
-                   use_kb: bool = True, kb_query: str = ""):
+                   use_kb: bool = True, kb_query: str = "",
+                   system: Optional[str] = None, max_tokens: Optional[int] = None):
     """流式调用 AI，返回 (text_generator, get_session_id)
 
     Args:
@@ -578,15 +595,20 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
     if cfg["mode"] == "agent":
+        # 百炼智能体应用的 messages 只收 user 轮，独立 system 送不进去 → 身份段内联到问题前
+        if system:
+            prompt = f"{system}\n\n【用户的问题】\n{prompt}"
         return _call_agent_stream(prompt, api_key, cfg["app_id"], session_id)
     elif cfg["mode"] == "kb_direct":
         prompt = _augment_with_kb(prompt, kb_query)
         d = get_ai_config(use_agent=False)
         return _call_model_stream(prompt, api_key, d["model"], d["api_base"], history=history,
-                                  enable_thinking=False if enable_thinking is None else enable_thinking)
+                                  enable_thinking=False if enable_thinking is None else enable_thinking,
+                                  system=system, max_tokens=max_tokens)
     else:
         return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
-                                  enable_thinking=False if not use_kb else enable_thinking)
+                                  enable_thinking=False if not use_kb else enable_thinking,
+                                  system=system, max_tokens=max_tokens)
 
 
 def _call_agent_stream(prompt: str, api_key: str, app_id: str,
@@ -639,25 +661,35 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
 
 def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
                        history: Optional[list] = None,
-                       enable_thinking: Optional[bool] = None):
-    """直接调用大模型（流式，OpenAI 兼容接口），yield {"text": str, "session_id": None}"""
+                       enable_thinking: Optional[bool] = None,
+                       system: Optional[str] = None,
+                       max_tokens: Optional[int] = None,
+                       json_mode: bool = False):
+    """直接调用大模型（流式，OpenAI 兼容接口），yield {"text": str, "session_id": None}
+
+    system：服务端注入的身份/规则段，走独立 system 角色而不是混进用户正文。
+    max_tokens：长输出上限；V8.6.1 顺手补上——原来 400 降级分支引用了签名里
+    不存在的 json_mode/max_tokens，任何一次 HTTP 400 都会先 NameError 再报"调用失败"。
+    """
     import requests as sync_requests
     content = prompt if prompt else ""
     # 带历史时直接走多轮 messages；否则先试字符串格式，失败再降级数组格式
     fmts = ["hist"] if history else ["str", "array"]
     for fmt in fmts:
         if fmt == "hist":
-            messages = _hist_messages(history, content)
+            messages = _hist_messages(history, content, system)
         elif fmt == "str":
-            messages = [{"role": "user", "content": content}]
+            messages = _user_pair(content, system)
         else:
-            messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
+            messages = _user_pair(content, system, array=True)
         try:
             payload = {
                 "model": model,
                 "messages": messages,
                 "stream": True,
             }
+            if max_tokens:
+                payload["max_tokens"] = int(max_tokens)
             if enable_thinking is not None and "qwen" in model.lower():
                 # 仅 qwen 系列支持 enable_thinking；其他模型传了会被网关拒 400
                 payload["enable_thinking"] = bool(enable_thinking)
@@ -668,9 +700,13 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
             )
             if resp.status_code == 400 and json_mode:
                 logger.warning("AI 网关拒绝 response_format=json_object，降级为普通调用重试")
-                return _call_model_sync(prompt, api_key, model, api_base,
-                                        enable_thinking=enable_thinking, history=history,
-                                        max_tokens=max_tokens, json_mode=False)
+                # 注意：生成器里 `return x` 不会把 x 交出去（原实现把同步结果吞了），
+                # 这里改为 yield 降级结果后结束。
+                fallback = _call_model_sync(prompt, api_key, model, api_base,
+                                            enable_thinking=enable_thinking, history=history,
+                                            max_tokens=max_tokens, system=system)
+                yield {"text": fallback, "session_id": None}
+                return
             if resp.status_code == 400 and fmt == "str":
                 continue  # 尝试数组格式
             if resp.status_code != 200:
