@@ -4,10 +4,10 @@
 >
 > **An AI-powered smart teaching platform for primary, junior secondary and senior secondary schools** — subjects, grades and classes are all configuration-driven, **with no subject hard-coded anywhere**.
 >
-> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 47 feature areas and 50+ capabilities:
+> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 48 feature areas and 50+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio, plus 12-level titles, achievement badges and the automatic points engine
@@ -43,6 +43,7 @@
 > - 🔁 **One filling policy** — bank first → AI covers the shortfall → AI questions are stored before being returned; buzzer rounds no longer pad with repeats; composing can opt into shortfall filling (off by default)
 > - 📏 **Question counts mean what the teacher typed** — real parameters everywhere, out-of-range requests fail loudly instead of being silently rewritten
 > - 🎯 **New: Class Drill** — choose a grade/class and a knowledge point, draw from the question bank first (AI generation behind a switch, questions stored for reuse), pick a student fairly, and the student taps an answer that is judged and scored on submit (correct +5 / wrong +2 / skipped 0) — warm-ups and in-class questioning, loop as long as you like
+> - 🎧 **New: AI Podcast** — one click turns a knowledge point into a **two-host dialogue** audio page (male / female voices) at 3 / 4 / 5 minutes; the model only writes the script while the backend renders the player page, and anything past the limit is truncated; the page carries the transcript and four themes, and once bound to the knowledge point students can listen right away
 > - 🎨 **Whiteboard usability and a rebuilt realtime path** — refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, dropped links reconnect on their own
 > - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports how long it waited and which endpoint it tried
 > - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
@@ -120,7 +121,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 10 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 11 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 8 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio | 10 |
@@ -148,7 +149,7 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 
 #### Desktop only
 
-Question bank management and paper composing, question maintenance, user management, system configuration, roll call, class drill, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
+Question bank management and paper composing, question maintenance, user management, system configuration, roll call, class drill, AI podcast generation, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
 
 <a id="ch-home"></a>
 
@@ -306,6 +307,24 @@ Intelligently recommends teaching resources based on knowledge point content:
 - **📄 AI-Generated Courseware**: AI can automatically generate complete HTML courseware based on knowledge points
 
 > **Available to Admin and Teacher**
+
+---
+
+### AI Podcast (Two-Host Dialogue)
+
+One click turns a knowledge point into an HTML podcast page you can actually listen to:
+
+- **🎧 Two-host dialogue**: a host (male voice by default) and a guest (female voice by default); both voices are configurable in System Settings, and when left empty the backend picks one male and one female voice for the current speech model
+- **🎚 Pick a duration**: 3 / 4 / 5 minutes, 3 by default; the script length is budgeted per tier (about 250 characters per minute for dialogue)
+- **🧠 Two ways to pick a topic**: let AI suggest a batch of topics for the knowledge point (rerollable), or type your own
+- **📄 The model writes the script, the backend renders the page**: speech is synthesised per segment, played in order, the transcript highlights the current line, and clicking a line jumps there
+- **⏱ Duration is computed, not guessed**: seconds come from the audio byte size, anything past the limit is truncated and labelled on the page
+- **🎨 Four themes**: Midnight / Light / Sepia / Ocean — choose one when generating, and readers can switch on the page (top-right)
+- **♻️ Saves compute**: identical lines are reused across podcasts (content-addressed cache), and a knowledge point someone else already generated is reused read-only
+- **📎 Born as a resource**: the generated page lands in "My Resources"; bind it to a knowledge point and students can open and listen (phone browsers work too)
+- **🔒 Shares the master switch with roll-call voice**: turning speech synthesis off in System Settings disables AI Podcast as well (zero billing)
+
+> **Available to Admin and Teacher (the admin must enable speech synthesis first)**
 
 ---
 
@@ -1084,6 +1103,7 @@ Current version **8.6.0** (2026-10-05 ~ 10-11). Each release lists the changes a
 - 🧱 Question storage merged into one exit: invalid questions refused, duplicates de-duplicated with ids backfilled, AI questions reach the selection engine the same day, figures cleaned on the way in
 - 🔁 One filling policy: bank first → AI covers the shortfall → AI questions stored before returning; buzzer rounds stop padding; composing can opt into shortfall filling (off by default)
 - 🎯 New "Class Drill": draw questions from the bank by course knowledge point (or a typed topic), optional AI generation covering the shortfall (stored for reuse); after a fair student pick the student taps an answer, and submitting judges and scores it instantly (correct 5 / wrong 2 / skipped 0), with points going into the existing points system
+- 🎧 New "AI Podcast": one click turns a knowledge point into a two-host dialogue audio page (male / female voices, 3 / 4 / 5 minutes, four themes); the model only writes the script and the backend renders the player page; speech is synthesised per segment and the duration is computed from the audio size and truncated at the limit; the generated page can be bound to the knowledge point for students to listen to; it shares the speech-synthesis master switch with roll-call announcements
 - 🧮 Paper score totals, the three selection engines, export rendering, drag-to-reorder and per-student shuffling all brought in line; AI generation moved to background jobs
 - 🎨 Whiteboard usability and realtime path rebuilt: refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
 - ⏱ Question generation scales its output ceiling to the question count and splits the timeout budget across endpoints; a timeout now reports the wait and the endpoint tried
@@ -1398,6 +1418,7 @@ SmartKBS/
 | Resource View Tracking | ❌ | ✅ | ✅ |
 | AI Resource Recommendations | ❌ | ✅ | ✅ |
 | AI-Generated HTML Resources | ❌ | ✅ | ✅ |
+| AI Podcast (generate) | ❌ | ✅ | ✅ |
 | Data Export | ❌ | ✅ | ✅ |
 | User Management | Change Password Only | ✅ Partial | ✅ Full |
 | System Announcements | ✅ View | ✅ Publish | ✅ Publish |
