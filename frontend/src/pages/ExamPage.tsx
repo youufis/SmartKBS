@@ -784,12 +784,14 @@ const ExamPage: React.FC = () => {
       title: t('examTitle'),
       dataIndex: 'title',
       key: 'title',
-      ellipsis: true,
+      ellipsis: { showTitle: false },
       render: (text: string, record: ExamInfo) => (
-        <Space>
-          <span style={{ fontWeight: record.status === 'published' ? 500 : 'normal' }}>{text}</span>
-          <Tag color={STATUS_COLORS[record.status]}>{STATUS_LABELS[record.status]}</Tag>
-        </Space>
+        <Tooltip title={text} placement="topLeft">
+          <Space>
+            <span style={{ fontWeight: record.status === 'published' ? 500 : 'normal' }}>{text}</span>
+            <Tag color={STATUS_COLORS[record.status]}>{STATUS_LABELS[record.status]}</Tag>
+          </Space>
+        </Tooltip>
       ),
     },
     {
@@ -1229,6 +1231,7 @@ const ExamPage: React.FC = () => {
         {!isStudent && (
           <Table dataSource={exams} columns={teacherColumns} rowKey="id"
             loading={loading} size="small"
+            scroll={{ x: 1480 }}
             pagination={{
               current: page, pageSize, total,
               showSizeChanger: true,
