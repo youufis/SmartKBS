@@ -628,12 +628,14 @@ const QuestionBankPage: React.FC = () => {
     },
     {
       title: t('creator'),
-      dataIndex: 'creator_name',
-      key: 'creator_name',
+      // C-CREATOR: 统一显示用户名 —— 库里 creator_name 历史混存了姓名/角色名/空值,
+      // 导致同一批题的创建者一会儿 root、一会儿 管理员、一会儿 UNET; creator_username 恒有值且唯一
+      dataIndex: 'creator_username',
+      key: 'creator_username',
       width: 100,
-      render: (name: string, record: QuestionInfo) => (
+      render: (username: string, record: QuestionInfo) => (
         <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-          {name || record.creator_username}
+          {username || record.creator_name}
         </span>
       ),
     },
@@ -1183,7 +1185,7 @@ const QuestionBankPage: React.FC = () => {
                   )}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-tertiary)' }}>
-                  {t('knowledgePointColon')}{record.knowledge_points || '-'} | {t('creator')}：{record.creator_name || record.creator_username}
+                  {t('knowledgePointColon')}{record.knowledge_points || '-'} | {t('creator')}：{record.creator_username || record.creator_name}
                 </div>
               </div>
             ),
