@@ -244,8 +244,8 @@ const ActivityMonitorPage: React.FC = () => {
     },
     {
       title: t('activityMonitor.columns.creator'),
-      dataIndex: 'creator_name',
-      key: 'creator_name',
+      dataIndex: 'creator_username',
+      key: 'creator_username',
       width: 100,
       ellipsis: true,
     },

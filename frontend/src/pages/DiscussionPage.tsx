@@ -516,7 +516,7 @@ const DiscussionPage: React.FC = () => {
                       {disc.duration_minutes > 0 && (
                         <span><FieldTimeOutlined /> {t('duration')}：{disc.duration_minutes} {t('minutes')}</span>
                       )}
-                      <span><UserOutlined /> {t('creator')}：{disc.creator_name || disc.creator_username || '-'}</span>
+                      <span><UserOutlined /> {t('creator')}：{disc.creator_username || disc.creator_name || '-'}</span>
                       {disc.grade && <span>{t('applicableGrade')}：{disc.grade}</span>}
                       {disc.classes && <span>{t('applicableClass')}：{disc.classes}</span>}
                       {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (

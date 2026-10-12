@@ -857,7 +857,7 @@ const ExamPage: React.FC = () => {
       dataIndex: 'creator_name',
       key: 'creator_name',
       width: 100,
-      render: (name: string, record: ExamInfo) => name || record.creator_username,
+      render: (name: string, record: ExamInfo) => record.creator_username || name,
     },
     {
       title: t('createdAt'),
@@ -983,7 +983,7 @@ const ExamPage: React.FC = () => {
       dataIndex: 'creator_name',
       key: 'creator_name',
       width: 90,
-      render: (name: string, record: ExamInfo) => <Tag color="blue">{name || record.creator_username || '-'}</Tag>,
+      render: (name: string, record: ExamInfo) => <Tag color="blue">{record.creator_username || name || '-'}</Tag>,
     },
     {
       title: t('duration'),
@@ -1178,7 +1178,7 @@ const ExamPage: React.FC = () => {
                   columns={[
                     { title: t('examTitle'), dataIndex: 'exam_title', key: 'exam_title', ellipsis: true },
                     { title: t('subject'), dataIndex: 'exam_subject', key: 'exam_subject', width: 80 },
-                    { title: t('publisher'), dataIndex: 'creator_name', key: 'creator_name', width: 90,
+                    { title: t('publisher'), dataIndex: 'creator_username', key: 'creator_name', width: 90,
                       render: (name: string) => <Tag color="blue">{name || '-'}</Tag> },
                     {
                       title: t('score'), key: 'score', width: 100,
@@ -1241,7 +1241,7 @@ const ExamPage: React.FC = () => {
                 <div style={{ padding: '8px 0', maxWidth: 800 }}>
                   <Typography.Text style={{ fontSize: 14 }}>{record.description || t('noDescription')}</Typography.Text>
                   <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-tertiary)' }}>
-                    {t('creatorColon')}{record.creator_name || record.creator_username} |
+                    {t('creatorColon')}{record.creator_username || record.creator_name} |
                     {t('durationColon')}{record.duration}{t('minutes')} |
                     {t('passingScoreColon')}{record.pass_score}{t('scoreUnit')}
                   </div>

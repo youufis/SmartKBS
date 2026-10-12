@@ -626,6 +626,7 @@ async def list_teacher_sessions(request: Request):
             "target_students": target_students,
             "status": r["status"],
             "source": r.get("source") or "teacher",
+            "creator_username": r.get("creator_username", "") or "",
             "creator_name": creator_map.get(r.get("creator_username", ""), {}).get("name") or r.get("creator_username", ""),
             "student_count": student_count,
             "submitted_count": sub_map.get(r["id"], 0),

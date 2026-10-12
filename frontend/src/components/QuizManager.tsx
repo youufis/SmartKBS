@@ -71,7 +71,7 @@ const QuizManager: React.FC = () => {
             ...q,
             _quizId: quiz.id,
             _quizTitle: quiz.title,
-            _creatorName: quiz.creator_name || quiz.creator_username || '',
+            _creatorName: quiz.creator_username || quiz.creator_name || '',
             _key: `${quiz.id}_${idx}`,
           })
         })

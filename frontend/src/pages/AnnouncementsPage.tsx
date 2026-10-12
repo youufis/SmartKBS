@@ -221,8 +221,8 @@ const AnnouncementsPage: React.FC = () => {
     },
     {
       title: t('publisher'),
-      dataIndex: 'creator_name',
-      key: 'creator_name',
+      dataIndex: 'creator_username',
+      key: 'creator_username',
       width: 100,
       render: (name: string) => name || '-',
     },
@@ -309,7 +309,7 @@ const AnnouncementsPage: React.FC = () => {
                 </div>
                 <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }} className="page-header-flex">
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {record.creator_name || '-'} · {record.created_at ? new Date(record.created_at).toLocaleString('zh-CN') : '-'}
+                    {record.creator_username || record.creator_name || '-'} · {record.created_at ? new Date(record.created_at).toLocaleString('zh-CN') : '-'}
                   </Text>
                   <Space size={4}>
                     <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => setDetailModal(record)} />
@@ -377,7 +377,7 @@ const AnnouncementsPage: React.FC = () => {
               {detailModal.target_class && <Tag>{classText(detailModal.target_class)}</Tag>}
             </Space>
             <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginBottom: 16 }}>
-              {t('anPublisher')}{detailModal.creator_name || detailModal.creator_username}
+              {t('anPublisher')}{detailModal.creator_username || detailModal.creator_name}
               &nbsp;|&nbsp;
               {detailModal.created_at ? new Date(detailModal.created_at).toLocaleString('zh-CN') : ''}
             </div>

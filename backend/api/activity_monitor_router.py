@@ -263,6 +263,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
             "id": b["binding_id"],
             "title": practice_name,
             "creator_name": _owner_name,
+            "creator_username": owner or teacher_username,
             "status": b["course_status"],
             "created_at": b["created_at"],
             "updated_at": b["updated_at"],
@@ -300,6 +301,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     for act in activities:
         if act.get("activity_type") != "course":
             act["creator_name"] = _creator_name
+            act["creator_username"] = teacher_username
     return activities
 
 

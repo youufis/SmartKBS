@@ -867,7 +867,7 @@ def _summary_sheet_rows(data: dict) -> dict[str, tuple[list[str], list[list[str]
           "得分", "满分", "得分率(%)", "状态", "时间"]
     r1 = [[
         rec["grade"], rec["class_name"], rec["student_name"], rec["username"],
-        rec["type_label"], rec["activity_title"], rec["creator_name"],
+        rec["type_label"], rec["activity_title"], rec.get("creator_username") or rec["creator_name"],
         _s(rec["score"]), _s(rec["total_score"]), _s(rec["rate"]),
         rec["status"], rec["time"],
     ] for rec in data["records"]]
@@ -910,7 +910,7 @@ def _summary_sheet_rows(data: dict) -> dict[str, tuple[list[str], list[list[str]
     h3 = ["活动类型", "活动ID", "活动名称", "创建者", "应参与人数", "实参与人数",
           "参与率(%)", "平均得分率(%)", "最高得分率(%)", "最低得分率(%)", "及格率(%)", "最后参与时间"]
     r3 = [[
-        a["type_label"], _s(a["activity_id"]), a["activity_title"], a["creator_name"],
+        a["type_label"], _s(a["activity_id"]), a["activity_title"], a.get("creator_username") or a["creator_name"],
         _s(a["expected"]), _s(a["participants"]), _s(a["participation_rate"]),
         _s(a["avg_rate"]), _s(a["max_rate"]), _s(a["min_rate"]),
         _s(a["pass_rate"]), a["last_time"],

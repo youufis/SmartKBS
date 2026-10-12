@@ -235,7 +235,7 @@ const ResetActivityButton: React.FC<Props> = ({
                     children: <Space><Tag color="blue">{tv(preview.activity.type_i18n_key || preview.activity.type, preview.activity.type_label)}</Tag><Text strong>{preview.activity.title_plain || preview.activity.title}</Text></Space> },
                   { key: 'meta', label: t('activityMonitor.reset.belong'),
                     children: [
-                      preview.activity.creator_name || preview.activity.creator || '-',
+                      preview.activity.creator || preview.activity.creator_name || '-',
                       sv(preview.activity.status, preview.activity.status_label) || '-',
                     ].join(' / ') },
                   { key: 'keep', label: t('activityMonitor.reset.keepTitle'),

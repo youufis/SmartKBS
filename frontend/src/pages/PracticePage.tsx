@@ -414,7 +414,7 @@ const StudentView: React.FC = () => {
                 extra={s.attempted ? <Tag color="processing">{t('submitted')}</Tag> : <Tag color="default">{t('notStarted')}</Tag>}>
                 <Text strong>{s.title}</Text>
                 <div><Text type="secondary">{s.knowledge_points}</Text></div>
-                <div><Text type="secondary">{t('publisher')}：{s.creator_name} · {s.question_count} {t('questionCount')}
+                <div><Text type="secondary">{t('publisher')}：{s.creator_username || s.creator_name} · {s.question_count} {t('questionCount')}
                   {s.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}
                 </Text></div>
               </Card>
@@ -724,7 +724,7 @@ const TeacherView: React.FC = () => {
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }), pageSizeOptions: ['5', '10', '20', '50'] }}
             columns={[
               { title: t('title_'), dataIndex: 'title', ellipsis: true },
-              { title: t('publisher'), dataIndex: 'creator_name', width: 90 },
+              { title: t('publisher'), dataIndex: 'creator_username', width: 90 },
               { title: t('gradeClass'), width: 130, render: (_, r) => 
                 r.target_students?.length > 0 
                   ? <Tag color="green">{t('targeted')} {r.target_students.length} {t('people')}</Tag>

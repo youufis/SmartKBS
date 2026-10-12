@@ -198,7 +198,7 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
                     <Space size={8} style={{ marginLeft: 'auto', flexShrink: 0 }}>
                       <Tag color={st.color} style={{ fontSize: 11, marginInlineEnd: 0 }}>{st.label}</Tag>
                       {isAdmin && (
-                        <Text type="secondary" style={{ fontSize: 11 }}>{exam.creator_name || exam.creator_username || ''}</Text>
+                        <Text type="secondary" style={{ fontSize: 11 }}>{exam.creator_username || exam.creator_name || ''}</Text>
                       )}
                       <Text type="secondary" style={{ fontSize: 11 }}>{exam.created_at?.slice(0, 10)}</Text>
                     </Space>

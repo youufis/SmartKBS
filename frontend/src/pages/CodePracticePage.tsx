@@ -811,7 +811,7 @@ const CodePracticePage: React.FC = () => {
               style: { whiteSpace: 'nowrap' },
               render: (_: any, record: any) => (
                 <Space size="small" style={{ justifyContent: 'flex-end' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{record.creator_name || record.creator_username}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{record.creator_username || record.creator_name}</Text>
                   <Tag>{record.language?.toUpperCase()}</Tag>
                   {isTeacherOrAdmin && record.total_submissions != null && (
                     <Button type="text" size="small" icon={<BarChartOutlined />}

@@ -346,7 +346,7 @@ const InteractionPage: React.FC = () => {
                           <Tag color={quiz.status === 'active' ? 'green' : 'default'}>
                             {quiz.status === 'active' ? t('started') : t('ended')}
                           </Tag>
-                          <Tag color="blue">{quiz.creator_name || quiz.creator_username}</Tag>
+                          <Tag color="blue">{quiz.creator_username || quiz.creator_name}</Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>{t('peopleCount', { count: quiz.answer_count || 0 })}</Text>
                         </div>
                       </div>

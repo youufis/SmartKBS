@@ -202,7 +202,7 @@ const WhiteboardPage: React.FC = () => {
       ),
     },
     { title: t('title'), dataIndex: 'title', key: 'title' },
-    { title: t('creator'), dataIndex: 'creator_name', key: 'creator_name', width: 100,
+    { title: t('creator'), dataIndex: 'creator_username', key: 'creator_username', width: 100,
       render: (n: string) => n || '-',
     },
     { title: t('mode'), dataIndex: 'mode', key: 'mode', width: 80,

@@ -193,7 +193,7 @@ const QuickQuizPage: React.FC = () => {
         <span><TeamOutlined /> {r.player_count || 0}</span>
       )
     },
-    { title: t('creator'), dataIndex: 'creator_name', key: 'creator', width: 80 },
+    { title: t('creator'), dataIndex: 'creator_username', key: 'creator', width: 80 },
     { title: t('createdAt'), dataIndex: 'created_at', key: 'created', width: 150,
       render: (t: string) => t?.split('.')[0]?.replace('T', ' ') || t
     },
@@ -276,7 +276,7 @@ const QuickQuizPage: React.FC = () => {
     { title: t('timeLimit'), dataIndex: 'time_limit', key: 'time', width: 60,
       render: (t: number) => `${t}s`
     },
-    { title: t('teacher'), dataIndex: 'creator_name', key: 'teacher', width: 80 },
+    { title: t('teacher'), dataIndex: 'creator_username', key: 'teacher', width: 80 },
     { title: t('createdAt'), dataIndex: 'created_at', key: 'created', width: 150,
       render: (t: string) => t?.split('.')[0]?.replace('T', ' ') || t
     },
@@ -329,7 +329,7 @@ const QuickQuizPage: React.FC = () => {
                 { title: t('maxStreak'), dataIndex: 'max_streak', key: 'streak',
                   render: (s: number) => s > 1 ? <Tag color="volcano">🔥 x{s}</Tag> : '-'
                 },
-                { title: t('teacher'), dataIndex: 'creator_name', key: 'teacher' },
+                { title: t('teacher'), dataIndex: 'creator_username', key: 'teacher' },
                 {
                   title: t('actions'), key: 'action',
                   render: (_: any, r: any) => (

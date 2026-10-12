@@ -243,7 +243,7 @@ const QuickPollPage: React.FC = () => {
                           <Tag color={isMultiple ? 'purple' : 'blue'}>
                             {isMultiple ? t('multiple') : t('single')}
                           </Tag>
-                          <Tag color="blue">{poll.creator_name || poll.creator_username}</Tag>
+                          <Tag color="blue">{poll.creator_username || poll.creator_name}</Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>{t('peopleCount', { count: poll.unique_voters || poll.total_votes })}</Text>
                         </div>
                       </div>
