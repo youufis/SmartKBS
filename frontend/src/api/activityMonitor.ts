@@ -16,6 +16,7 @@ export interface ActivityItem {
   duration: number;
   subject: string;
   creator_name?: string;
+  creator_username?: string;
   target_grade?: string;
   target_class?: string;
   created_at: string;

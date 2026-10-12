@@ -163,7 +163,8 @@
       "class": "Class",
       "completionStatus": "Status",
       "score": "Score",
-      "submittedAt": "Submitted At"
+      "submittedAt": "Submitted At",
+      "gradeClass": "Grade/Class"
     },
     "filters": {
       "activityType": "Activity Type: ",

@@ -114,16 +114,18 @@ const SessionRoster: React.FC<{
       </Space>
       <Table size="small" rowKey="username" dataSource={rows}
         locale={{ emptyText: t('noStudentSubmissions') }}
-        scroll={{ x: 900 }}
+        scroll={{ x: 850 }}
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }) }}
         columns={[
-          { title: t('studentId'), dataIndex: 'username', width: 100, ellipsis: true },
-          { title: t('studentName'), dataIndex: 'name', width: 110, ellipsis: true },
-          { title: t('grade'), dataIndex: 'grade', width: 80, render: (v: string) => v || '-' },
-          {
-            title: t('studentClass'), dataIndex: 'class', width: 80,
-            render: (v: string) => classText(v) || '-',
-          },
+          { title: t('studentName'), key: 'student', width: 140,
+            render: (_: any, r: any) => (
+              <div>
+                <div>{r.name || '-'}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{r.username}</div>
+              </div>
+            ) },
+          { title: t('gradeClass'), key: 'grade_class', width: 120,
+            render: (_: any, r: any) => [r.grade, classText(String(r.class ?? ''))].filter(Boolean).join(' ') || '-' },
           {
             title: t('status'), dataIndex: 'submitted', width: 90,
             render: (v: boolean) => (v ? <Tag color="success">{t('submitted')}</Tag> : <Tag>{t('notStarted')}</Tag>),

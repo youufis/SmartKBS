@@ -163,7 +163,8 @@
       "class": "班级",
       "completionStatus": "完成状态",
       "score": "得分",
-      "submittedAt": "提交时间"
+      "submittedAt": "提交时间",
+      "gradeClass": "年级/班级"
     },
     "filters": {
       "activityType": "活动类型：",

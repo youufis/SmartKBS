@@ -20,6 +20,7 @@ import { useAuthStore } from '../stores/authStore';
 import ResourceViewStatsPage from './ResourceViewStatsPage';
 import ResetActivityButton from '../components/ResetActivityButton';
 import { reportLoadError } from '../utils/loadError'
+import { classText } from '../utils/studentLabel'
 
 const { Title, Text } = Typography;
 
@@ -239,15 +240,20 @@ const ActivityMonitorPage: React.FC = () => {
       title: t('activityMonitor.columns.subject'),
       dataIndex: 'subject',
       key: 'subject',
-      width: 120,
+      width: 100,
       render: (v: string) => v || '-',
     },
     {
+      // 创建者+创建时间双行, 少占一列
       title: t('activityMonitor.columns.creator'),
-      dataIndex: 'creator_username',
-      key: 'creator_username',
-      width: 100,
-      ellipsis: true,
+      key: 'creator_time',
+      width: 120,
+      render: (_: any, record: ActivityItem) => (
+        <div>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{record.creator_username || '-'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{record.created_at ? String(record.created_at).slice(0, 16) : '-'}</div>
+        </div>
+      ),
     },
     {
       title: t('activityMonitor.columns.status'),
@@ -267,12 +273,6 @@ const ActivityMonitorPage: React.FC = () => {
       width: 100,
       sorter: (a, b) => a.submitted_count - b.submitted_count,
       render: (count: number) => <Text strong>{count}</Text>,
-    },
-    {
-      title: t('activityMonitor.columns.createdAt'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 170,
     },
     {
       title: t('activityMonitor.columns.action'),
@@ -316,16 +316,11 @@ const ActivityMonitorPage: React.FC = () => {
       width: 120,
     },
     {
-      title: t('activityMonitor.columns.grade'),
-      dataIndex: 'grade',
-      key: 'grade',
-      width: 100,
-    },
-    {
-      title: t('activityMonitor.columns.class'),
-      dataIndex: 'class_name',
-      key: 'class_name',
-      width: 100,
+      title: t('activityMonitor.columns.gradeClass'),
+      key: 'grade_class',
+      width: 120,
+      render: (_: any, record: StudentStatus) =>
+        [record.grade, classText(String(record.class_name ?? ''))].filter(Boolean).join(' ') || '-',
     },
     {
       title: t('activityMonitor.columns.completionStatus'),
@@ -357,7 +352,7 @@ const ActivityMonitorPage: React.FC = () => {
       title: t('activityMonitor.columns.submittedAt'),
       dataIndex: 'submitted_at',
       key: 'submitted_at',
-      width: 170,
+      width: 150,
       render: (v: string) => v || '-',
     },
   ];

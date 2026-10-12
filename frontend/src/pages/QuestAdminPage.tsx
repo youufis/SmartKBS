@@ -4,7 +4,7 @@
  *   1. 闯关记录 — 查看学生闯关记录
  *   2. 题库管理 — 闯关题目的 CRUD 管理
  */
-import { studentLabel } from '../utils/studentLabel'
+import { studentLabel, classText } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, startTransition } from 'react'
 import {
   Card, Table, Tag, Typography, Space, Input, Select,
@@ -188,17 +188,14 @@ const QuestRecordsTab: React.FC = () => {
     {
       title: t('student'),
       key: 'student',
-      width: 200,
+      width: 180,
       render: (_: any, r: QuestRecord) => (
-        <Text strong>{studentLabel(r)}</Text>
-      ),
-    },
-    {
-      title: t('class'),
-      key: 'class',
-      width: 120,
-      render: (_: any, r: QuestRecord) => (
-        <Text type="secondary">{r.grade} {r.class_name}</Text>
+        <div>
+          <Text strong>{studentLabel(r)}</Text>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+            {[r.grade, classText(String(r.class_name ?? ''))].filter(Boolean).join(' ')}
+          </div>
+        </div>
       ),
     },
     {
@@ -212,20 +209,19 @@ const QuestRecordsTab: React.FC = () => {
       },
     },
     {
-      title: t('correctTotal'),
-      key: 'count',
-      width: 100,
+      title: `${t('score')} · ${t('correctTotal')}`,
+      key: 'score_count',
+      width: 130,
       render: (_: any, r: QuestRecord) => {
         const c = SCORE_COLORS[Math.min(Math.floor(r.correct_count / 3), 5)]
-        return <Text strong style={{ color: c }}>{r.correct_count} / {r.answered_count}</Text>
+        return (
+          <span>
+            <Text strong>{r.score}</Text>
+            <Text type="secondary"> · </Text>
+            <Text strong style={{ color: c }}>{r.correct_count} / {r.answered_count}</Text>
+          </span>
+        )
       },
-    },
-    {
-      title: t('score'),
-      dataIndex: 'score',
-      key: 'score',
-      width: 70,
-      render: (s: number) => <Text strong>{s}</Text>,
     },
     {
       title: t('wrongQuestion'),
@@ -873,7 +869,7 @@ const QuestBankTab: React.FC = () => {
             expandedRowRender,
             rowExpandable: () => true,
           }}
-          scroll={{ x: 1200 }}
+          scroll={{ x: 900 }}
         />
       </Card>
 

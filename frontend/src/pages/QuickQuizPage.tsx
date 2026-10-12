@@ -29,6 +29,9 @@ import { reportLoadError } from '../utils/loadError'
 const { Title, Text } = Typography
 const { TextArea } = Input
 
+/** 房间创建时间: 列表双行显示用 */
+const fmtRoomTime = (v?: string) => v?.split('.')[0]?.replace('T', ' ').slice(0, 16) || '-'
+
 const QuickQuizPage: React.FC = () => {
   const { t } = useTranslation('interaction')
   // 窄屏：活动列表与历史记录改卡片渲染（桌面仍为 Table）
@@ -193,9 +196,13 @@ const QuickQuizPage: React.FC = () => {
         <span><TeamOutlined /> {r.player_count || 0}</span>
       )
     },
-    { title: t('creator'), dataIndex: 'creator_username', key: 'creator', width: 80 },
-    { title: t('createdAt'), dataIndex: 'created_at', key: 'created', width: 150,
-      render: (t: string) => t?.split('.')[0]?.replace('T', ' ') || t
+    { title: t('creator'), key: 'creator_time', width: 120,
+      render: (_: any, r: any) => (
+        <div>
+          <div>{r.creator_username || '-'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{fmtRoomTime(r.created_at)}</div>
+        </div>
+      )
     },
     {
       title: t('actions'), key: 'action', width: 200,
@@ -276,9 +283,13 @@ const QuickQuizPage: React.FC = () => {
     { title: t('timeLimit'), dataIndex: 'time_limit', key: 'time', width: 60,
       render: (t: number) => `${t}s`
     },
-    { title: t('teacher'), dataIndex: 'creator_username', key: 'teacher', width: 80 },
-    { title: t('createdAt'), dataIndex: 'created_at', key: 'created', width: 150,
-      render: (t: string) => t?.split('.')[0]?.replace('T', ' ') || t
+    { title: t('teacher'), key: 'teacher_time', width: 120,
+      render: (_: any, r: any) => (
+        <div>
+          <div>{r.creator_username || '-'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{fmtRoomTime(r.created_at)}</div>
+        </div>
+      )
     },
     {
       title: t('actions'), key: 'action', width: 120,
