@@ -51,6 +51,7 @@
   "loginSettings": "Login Settings",
   "securitySettings": "Security Settings",
   "changePassword": "Change Password",
+  "teacherResetPwdHint": "Teachers can enter the username of a student in their classes to reset that student's password; leave the default to change your own.",
   "oldPassword": "Old Password",
   "newPassword": "New Password",
   "confirmPassword": "Confirm Password",

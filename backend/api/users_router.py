@@ -141,8 +141,11 @@ def _teacher_can_assign_class(teacher: str, grade_name: str, class_val: str) -> 
     return all(w in allowed for w in want)
 
 
-def _assert_can_manage_target(user: dict, target: str, action: str = "管理") -> None:
-    """教师可以管用户, 但仅限自己任教范围内的学生; role!=2 的账号只能由管理员动"""
+def _assert_can_manage_target(user: dict, target: str, action: str = "管理", *, any_student: bool = False) -> None:
+    """教师可以管用户; any_student=True 时任意学生账号都可操作(查看/编辑信息),
+    否则仅限自己任教范围内的学生; role!=2 的账号只能由管理员动。
+    E-SCOPE(V8.6.1): 应校方要求放开教师查看/编辑全校学生信息(转班、改名等年级组事务);
+    删除账号、重置密码仍限定任教范围, 教师/管理员账号仍只有管理员能动。"""
     if _caller_role(user) == 0:
         return
     teacher = user.get("username", "")
@@ -153,29 +156,15 @@ def _assert_can_manage_target(user: dict, target: str, action: str = "管理") -
         raise HTTPException(status_code=404, detail=f"用户 '{target}' 不存在")
     if rows[0][0] != 2:
         raise HTTPException(status_code=403, detail="教师只能管理学生账号，教师与管理员账号请联系管理员")
-    if not is_student_in_teacher_scope(target, teacher):
+    if not any_student and not is_student_in_teacher_scope(target, teacher):
         raise HTTPException(status_code=403, detail=f"该学生不在您的任教范围内，无法{action}")
 
 
 def _teacher_visibility_filter(teacher: str) -> tuple[str, list]:
-    """教师可见记录 = 非学生账号(同事目录) + 自己任教范围内的学生"""
-    from backend.permission_service import get_teacher_assignments
-    parts: list[str] = []
-    params: list = []
-    for a in (get_teacher_assignments(teacher) or []):
-        gid = a.get("grade_id")
-        cid = a.get("class_id")
-        if not gid:
-            continue
-        if cid:
-            parts.append("(role=2 AND grade_id=? AND class_id=?)")
-            params.extend([gid, cid])
-        else:
-            parts.append("(role=2 AND grade_id=?)")
-            params.append(gid)
-    if not parts:
-        return "role IN (0,1)", []
-    return "role IN (0,1) OR " + " OR ".join(parts), params
+    """教师可见记录 = 全部用户 (E-SCOPE V8.6.1: 应校方要求放开, 教师需查询/编辑全校学生信息;
+    学生调用方在列表/导出入口仍被 403 拦截, 删除/重置密码等敏感操作的任教范围校验
+    在 _assert_can_manage_target 保留)"""
+    return "1=1", []
 
 
 def _scoped_usernames_for_teacher(teacher: str) -> set[str]:
@@ -530,7 +519,7 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
         if (req.grade or "") != old_grade or _normalize_class(req.class_val or "") != _normalize_class(old_class):
             raise HTTPException(status_code=403, detail="任教范围只能由管理员调整")
     else:
-        _assert_can_manage_target(current_user, username, "更新")
+        _assert_can_manage_target(current_user, username, "更新", any_student=True)
 
     gender_num = _standardize_gender(req.gender)
     class_val = _normalize_class(req.class_val or "")
@@ -590,7 +579,7 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
 
 @router.put("/password")
 async def change_password(req: ChangePasswordRequest, request: Request):
-    """修改密码（管理员可改任何用户，普通用户仅改自己）"""
+    """修改密码（管理员可改任何用户；教师可重置任教范围内学生的密码；普通用户仅改自己）"""
     current_user = get_current_user(request)
     current_username = current_user["username"]
 
@@ -602,8 +591,10 @@ async def change_password(req: ChangePasswordRequest, request: Request):
 
     # U-PWD: 以角色判定管理员(旧实现把管理员用户名写死成 "root", 换部署即失效)
     is_admin_caller = _caller_role(current_user) == 0
-    if not is_admin_caller and username != current_username:
-        raise HTTPException(status_code=403, detail="权限不足：只能修改自己的密码")
+    changed_other = username != current_username
+    if changed_other and not is_admin_caller:
+        # U-PWD-TEACHER: 教师可为任教范围内的学生重置密码; 越范围/改教师账号/学生越权均在此拦下
+        _assert_can_manage_target(current_user, username, "重置密码")
 
     hashed = hash_password(new_password)
 
@@ -612,8 +603,8 @@ async def change_password(req: ChangePasswordRequest, request: Request):
             "UPDATE users SET password=? WHERE username=?",
             (hashed, username),
         )
-        # U-PWD: 管理员代改他人密码后, 让对方已有的会话立即失效(自己改密则不断线, 避免正在用的窗口被踢)
-        if is_admin_caller and username != current_username:
+        # U-PWD: 代改他人密码后(管理员或教师), 让对方已有的会话立即失效(自己改密则不断线, 避免正在用的窗口被踢)
+        if changed_other:
             increment_token_version(username)
             remove_active_token_by_username(username)
         logger.info(f"密码已修改: {username}")
@@ -701,10 +692,10 @@ async def export_users(request: Request, keyword: Optional[str] = None):
 
 @router.get("/{username}")
 async def get_user_info(username: str, request: Request):
-    """查询用户信息(U-SCOPE: 本人或管理员不限; 教师限自己任教范围内的学生)"""
+    """查询用户信息(E-SCOPE: 本人或管理员不限; 教师可查看全部学生, 教师/管理员账号仍受限)"""
     current_user = get_current_user(request)
     if _caller_role(current_user) != 0 and username != current_user.get("username", ""):
-        _assert_can_manage_target(current_user, username, "查看")
+        _assert_can_manage_target(current_user, username, "查看", any_student=True)
 
     rows = execute_query(
         "SELECT username, class, name, gender, role, grade FROM users WHERE username=?",

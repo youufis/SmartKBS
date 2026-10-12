@@ -196,8 +196,8 @@ const UserMgmtPage: React.FC = () => {
       message.warning(t('usernamePasswordRequired'))
       return
     }
-    // 普通用户只能改自己的
-    if (!isAdmin && v.username !== user?.username) {
+    // 普通学生只能改自己的; 教师可代改任教范围内学生(后端 U-SCOPE 校验), 管理员不限
+    if (!isAdmin && !isTeacher && v.username !== user?.username) {
       message.error(t('permissionDenied') + '：' + t('selfPasswordOnly'))
       return
     }
@@ -750,8 +750,9 @@ const UserMgmtPage: React.FC = () => {
       label: t('changePassword'),
       children: (
         <Form form={pwdForm} layout="vertical" onFinish={handleChangePwd} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}>
-            <Input placeholder={t('usernameLabel')} disabled={!isAdmin} />
+          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}
+            extra={isTeacher ? t('teacherResetPwdHint') : undefined}>
+            <Input placeholder={t('usernameLabel')} disabled={!isAdmin && !isTeacher} />
           </Form.Item>
           <Form.Item name="new_password" label={t('newPassword')} rules={[{ required: true }]}>
             <Input.Password placeholder={t('newPassword')} />

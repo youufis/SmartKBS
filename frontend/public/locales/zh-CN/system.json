@@ -51,6 +51,7 @@
   "loginSettings": "登录设置",
   "securitySettings": "安全设置",
   "changePassword": "修改密码",
+  "teacherResetPwdHint": "教师可直接输入任教班级内学生的用户名，为其重置密码；改自己密码请保持默认。",
   "oldPassword": "旧密码",
   "newPassword": "新密码",
   "confirmPassword": "确认密码",
