@@ -804,7 +804,7 @@ const ExamPage: React.FC = () => {
       // 与同步练习一致: 列表直接展示考试目标范围(年级/班级)
       title: t('gradeClass'),
       key: 'grade_class',
-      width: 150,
+      width: 130,
       render: (_: unknown, r: ExamInfo) => {
         const scope = r.target_scope || 'teacher_classes'
         if (scope === 'individual') {
@@ -855,18 +855,17 @@ const ExamPage: React.FC = () => {
       },
     },
     {
+      // 创建者+创建时间双行显示, 少占一列宽度
       title: t('creator'),
       dataIndex: 'creator_name',
       key: 'creator_name',
-      width: 100,
-      render: (name: string, record: ExamInfo) => record.creator_username || name,
-    },
-    {
-      title: t('createdAt'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 140,
-      render: (t: string) => t ? t.slice(0, 16) : '-',
+      width: 110,
+      render: (name: string, record: ExamInfo) => (
+        <div>
+          <div>{record.creator_username || name || '-'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{record.created_at ? record.created_at.slice(0, 16) : '-'}</div>
+        </div>
+      ),
     },
     {
       title: t('actions'),
@@ -1231,7 +1230,7 @@ const ExamPage: React.FC = () => {
         {!isStudent && (
           <Table dataSource={exams} columns={teacherColumns} rowKey="id"
             loading={loading} size="small"
-            scroll={{ x: 1480 }}
+            scroll={{ x: 1100 }}
             pagination={{
               current: page, pageSize, total,
               showSizeChanger: true,

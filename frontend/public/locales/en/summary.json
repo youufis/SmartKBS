@@ -58,8 +58,10 @@
       "passRate": "Pass rate",
       "lastTime": "Last submit",
       "studentCount": "Students",
-      "pointsTotal": "Class points"
-    },
+      "pointsTotal": "Class points",
+      "gradeClass": "Grade/Class",
+      "participation": "Took/Should (rate)",
+      "rateStats": "Score rates"    },
     "type": {
       "exam": "Exam",
       "quiz": "In-class Quiz",

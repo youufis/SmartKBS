@@ -30,6 +30,7 @@ export interface SummaryRecord {
   activity_id: number | string | null
   activity_title: string
   creator_name: string
+  creator_username?: string
   username: string
   student_name: string
   grade: string
@@ -59,6 +60,7 @@ export interface ActivityAggRow {
   activity_id: number | string | null
   activity_title: string
   creator_name: string
+  creator_username?: string
   expected: number
   participants: number
   participation_rate: number | null

@@ -58,8 +58,10 @@
       "passRate": "及格率",
       "lastTime": "最后参与时间",
       "studentCount": "学生人数",
-      "pointsTotal": "课堂积分总计"
-    },
+      "pointsTotal": "课堂积分总计",
+      "gradeClass": "年级/班级",
+      "participation": "实/应参与（参与率）",
+      "rateStats": "得分率统计"    },
     "type": {
       "exam": "考试",
       "quiz": "随堂测验",

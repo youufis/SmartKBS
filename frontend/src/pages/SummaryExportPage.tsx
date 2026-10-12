@@ -22,6 +22,7 @@ import {
   type SummaryMeta, type SummaryPreview, type SummaryRecord, type SummaryTypeMeta,
 } from '../api/summaryExport'
 import MobileCardTable from '../components/MobileCardTable'
+import { classText } from '../utils/studentLabel'
 import { useIsMobile } from '../hooks/useIsMobile'
 
 const { Title, Text } = Typography
@@ -159,31 +160,48 @@ const SummaryExportPage: React.FC = () => {
   )
 
   // ── 明细表列 ──
+  const gradeClassCell = (grade: string, cls: string | number) => {
+    const g = String(grade || '').trim()
+    const c = classText(String(cls ?? '').trim())
+    return [g, c].filter(Boolean).join(' ') || '-'
+  }
   const recordColumns: ColumnsType<SummaryRecord> = [
-    { title: t('summaryExport.col.grade'), dataIndex: 'grade', width: 80 },
-    { title: t('summaryExport.col.class'), dataIndex: 'class_name', width: 70 },
-    { title: t('summaryExport.col.student'), dataIndex: 'student_name', width: 100 },
-    { title: t('summaryExport.col.username'), dataIndex: 'username', width: 100 },
+    { title: t('summaryExport.col.gradeClass'), key: 'grade_class', width: 110,
+      render: (_, r) => gradeClassCell(r.grade, r.class_name) },
+    { title: t('summaryExport.col.student'), key: 'student', width: 120,
+      render: (_, r) => (
+        <div>
+          <div>{r.student_name || '-'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{r.username}</div>
+        </div>
+      ) },
     {
       title: t('summaryExport.col.type'), dataIndex: 'type_label', width: 110,
       render: (_: string, r) => <Tag color={KIND_COLORS[r.kind]}>{r.type_label}</Tag>,
     },
-    { title: t('summaryExport.col.activity'), dataIndex: 'activity_title', ellipsis: true },
+    { title: t('summaryExport.col.activity'), dataIndex: 'activity_title', ellipsis: { showTitle: false },
+      render: (v: string) => <Tooltip title={v} placement="topLeft">{v}</Tooltip> },
     { title: t('summaryExport.col.creator'), dataIndex: 'creator_username', width: 90 },
-    { title: t('summaryExport.col.score'), dataIndex: 'score', width: 80, render: numOr },
-    { title: t('summaryExport.col.total'), dataIndex: 'total_score', width: 80, render: numOr },
-    { title: t('summaryExport.col.rate'), dataIndex: 'rate', width: 90, render: rateOr },
-    { title: t('summaryExport.col.status'), dataIndex: 'status', width: 130 },
-    { title: t('summaryExport.col.time'), dataIndex: 'time', width: 160 },
+    { title: t('summaryExport.col.score'), key: 'score', width: 140,
+      render: (_, r) => (r.total_score != null
+        ? `${numOr(r.score)} / ${numOr(r.total_score)}（${rateOr(r.rate)}）`
+        : numOr(r.score)) },
+    { title: t('summaryExport.col.status'), dataIndex: 'status', width: 120 },
+    { title: t('summaryExport.col.time'), dataIndex: 'time', width: 150 },
   ]
 
   // ── 学生汇总列 (动态类型矩阵) ──
   const studentColumns: ColumnsType<StudentAggRow> = useMemo(() => {
     const base: ColumnsType<StudentAggRow> = [
-      { title: t('summaryExport.col.grade'), dataIndex: 'grade', width: 80, fixed: 'left' },
-      { title: t('summaryExport.col.class'), dataIndex: 'class_name', width: 70, fixed: 'left' },
-      { title: t('summaryExport.col.student'), dataIndex: 'name', width: 100, fixed: 'left' },
-      { title: t('summaryExport.col.username'), dataIndex: 'username', width: 100 },
+      { title: t('summaryExport.col.gradeClass'), key: 'grade_class', width: 110, fixed: 'left',
+        render: (_, r) => gradeClassCell(r.grade, r.class_name) },
+      { title: t('summaryExport.col.student'), key: 'student', width: 120, fixed: 'left',
+        render: (_, r) => (
+          <div>
+            <div>{r.name || r.username}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{r.username}</div>
+          </div>
+        ) },
     ]
     const dyn: ColumnsType<StudentAggRow> = Object.keys(data?.types || {}).map((k) => ({
       title: typeLabel(k),
@@ -208,24 +226,33 @@ const SummaryExportPage: React.FC = () => {
   // ── 按活动汇总列 ──
   const activityColumns: ColumnsType<ActivityAggRow> = [
     { title: t('summaryExport.col.type'), dataIndex: 'type_label', width: 110, render: (v: string, r) => <Tag color={KIND_COLORS[r.kind]}>{v}</Tag> },
-    { title: 'ID', dataIndex: 'activity_id', width: 70, render: numOr },
-    { title: t('summaryExport.col.activity'), dataIndex: 'activity_title', ellipsis: true },
+    { title: t('summaryExport.col.activity'), dataIndex: 'activity_title', ellipsis: { showTitle: false },
+      render: (v: string, r) => (
+        <Tooltip title={v} placement="topLeft">
+          <div>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>ID: {String(r.activity_id ?? '-')}</div>
+          </div>
+        </Tooltip>
+      ) },
     { title: t('summaryExport.col.creator'), dataIndex: 'creator_username', width: 90 },
-    { title: t('summaryExport.col.expected'), dataIndex: 'expected', width: 90, render: numOr },
-    { title: t('summaryExport.col.participants'), dataIndex: 'participants', width: 90, render: numOr },
-    { title: t('summaryExport.col.participationRate'), dataIndex: 'participation_rate', width: 100, render: rateOr },
-    { title: t('summaryExport.col.avgRate'), dataIndex: 'avg_rate', width: 100, render: rateOr },
-    { title: t('summaryExport.col.maxRate'), dataIndex: 'max_rate', width: 90, render: rateOr },
-    { title: t('summaryExport.col.minRate'), dataIndex: 'min_rate', width: 90, render: rateOr },
-    { title: t('summaryExport.col.passRate'), dataIndex: 'pass_rate', width: 90, render: rateOr },
-    { title: t('summaryExport.col.lastTime'), dataIndex: 'last_time', width: 160, render: (v: string) => v || '-' },
+    { title: t('summaryExport.col.participation'), key: 'participation', width: 130,
+      render: (_, r) => `${numOr(r.participants)} / ${numOr(r.expected)}（${rateOr(r.participation_rate)}）` },
+    { title: t('summaryExport.col.rateStats'), key: 'rate_stats', width: 190,
+      render: (_, r) => (
+        <div>
+          <div>{t('summaryExport.col.avgRate')}: {rateOr(r.avg_rate)} · {t('summaryExport.col.passRate')}: {rateOr(r.pass_rate)}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{t('summaryExport.col.maxRate')}: {rateOr(r.max_rate)} · {t('summaryExport.col.minRate')}: {rateOr(r.min_rate)}</div>
+        </div>
+      ) },
+    { title: t('summaryExport.col.lastTime'), dataIndex: 'last_time', width: 150, render: (v: string) => v || '-' },
   ]
 
   // ── 按班级汇总列 ──
   const classColumns: ColumnsType<ClassAggRow> = useMemo(() => {
     const base: ColumnsType<ClassAggRow> = [
-      { title: t('summaryExport.col.grade'), dataIndex: 'grade', width: 80 },
-      { title: t('summaryExport.col.class'), dataIndex: 'class_name', width: 70 },
+      { title: t('summaryExport.col.gradeClass'), key: 'grade_class', width: 120,
+        render: (_, r) => gradeClassCell(r.grade, r.class_name) },
       { title: t('summaryExport.col.studentCount'), dataIndex: 'students', width: 90 },
     ]
     const dyn: ColumnsType<ClassAggRow> = Object.keys(data?.types || {}).map((k) => ({
@@ -384,7 +411,7 @@ const SummaryExportPage: React.FC = () => {
                   <Table<SummaryRecord>
                     rowKey={(r) => `${r.username}|${r.type}|${r.activity_id}|${r.time}`}
                     size="small" columns={recordColumns} dataSource={data.records}
-                    scroll={{ x: 1300 }}
+                    scroll={{ x: 1080 }}
                     pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (x) => `${x}` }}
                   />
                 ),
@@ -397,7 +424,7 @@ const SummaryExportPage: React.FC = () => {
                     cardList(data.by_student, pickCols(studentColumns, ['name', 'username', 'total_done', 'overall_avg_rate'], true), 'username') :
                   <Table<StudentAggRow>
                     rowKey="username" size="small" columns={studentColumns}
-                    dataSource={data.by_student} scroll={{ x: 1600 }}
+                    dataSource={data.by_student} scroll={{ x: 1300 }}
                     pagination={{ pageSize: 20, showSizeChanger: true }}
                   />
                 ),
@@ -411,7 +438,7 @@ const SummaryExportPage: React.FC = () => {
                       (r: ActivityAggRow) => `${r.type}|${r.activity_id}`) :
                   <Table<ActivityAggRow>
                     rowKey={(r) => `${r.type}|${r.activity_id}`} size="small"
-                    columns={activityColumns} dataSource={data.by_activity} scroll={{ x: 1400 }}
+                    columns={activityColumns} dataSource={data.by_activity} scroll={{ x: 1000 }}
                     pagination={{ pageSize: 20, showSizeChanger: true }}
                   />
                 ),
@@ -425,7 +452,7 @@ const SummaryExportPage: React.FC = () => {
                       (r: ClassAggRow) => `${r.grade}|${r.class_name}`) :
                   <Table<ClassAggRow>
                     rowKey={(r) => `${r.grade}|${r.class_name}`} size="small"
-                    columns={classColumns} dataSource={data.by_class} scroll={{ x: 1500 }}
+                    columns={classColumns} dataSource={data.by_class} scroll={{ x: 1250 }}
                     pagination={false}
                   />
                 ),
