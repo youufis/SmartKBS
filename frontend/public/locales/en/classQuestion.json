@@ -32,7 +32,7 @@
   "nextQuestion": "Next ▶",
   "selectedTag": "Selected",
   "drawStudent": "🎲 Pick",
-  "submitAnswer": "✓ Submit",
+  "submitAnswer": "Submit",
   "pickAnswerFirst": "Select an answer first",
   "pointsAdded": "+{{points}} for this question",
   "skipBtn": "Skip {{points}}",

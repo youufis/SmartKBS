@@ -25,17 +25,22 @@ import type { Components } from 'react-markdown'
  * 代码块内部原样保留，避免把示例代码里的 $$ 也改了。
  */
 /**
- * 屏蔽成对的 $$ 定界符后，把「既无 LaTeX 特征、又含数字或中文」的 $…$ 当货币/裸文本转义。
- * 只按「无特征」判会误伤 $x$、$f(x)$ 这类纯字母公式，所以再加数字/中文这一条：
- *   $x$、$f(x)$      -> 保留（仍是公式）
- *   $5和$6、$1.2 万亿 -> 转义（是钱，不是公式）
+ * 屏蔽成对的 $$ 定界符后，把**明显是钱/散文**的 $…$ 转义成字面量，别让 remark-math 当公式。
+ *
+ * ⚠️ 判据只保留"包裹内容里含中文"这一条（2026-10-12 修）：
+ *   旧实现还额外按"含数字"转义，结果把**纯数值公式**一起误伤 ——
+ *   老师实测：题干 `$1011000$`、选项 `$88$`（进制/数值题）在页面上原样显示成了 `$88$`。
+ *   这类"数字在 $ 里"在教学材料里绝大多数就是公式，必须渲染。
+ *   而真正的货币/散文写法（价格$5和$6、$1.2 万亿）包裹内容里一定有中文，那条判据已经兜住了。
+ *   $x$、$f(x)$、$88$、$1011000$  -> 保留（是公式）
+ *   $5和$6、$1.2 万亿             -> 转义（是钱，不是公式）
  */
 function maskDollars(text: string): string {
   const MASK = '\u0000'
   const masked = text.replace(/\$\$/g, MASK + MASK)
   const fixed = masked.replace(/\$([^$\n]+)\$/g, (whole, body) => {
     if (/[\\^_{}=]/.test(body)) return whole
-    if (/\d/.test(body) || /[\u4e00-\u9fff]/.test(body)) return '\\$' + body + '\\$'
+    if (/[\u4e00-\u9fff]/.test(body)) return '\\$' + body + '\\$'
     return whole
   })
   return fixed.split(MASK + MASK).join('$$')

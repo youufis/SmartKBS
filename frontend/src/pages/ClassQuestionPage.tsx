@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 import { reportLoadError } from '../utils/loadError'
 import {
   DrillConfig, DrillQuestion, DrillRecord,
@@ -532,6 +533,14 @@ const ClassQuestionPage: React.FC = () => {
             <div style={{ fontSize: 26, lineHeight: 1.6, marginBottom: 16, fontWeight: 600 }}>
               <FormulaRenderer content={question.question} />
             </div>
+            {/* 配图（SVG 流程图/电路图 或 万相生图）：题库里约 1/8 的选择题带图，
+                "如右图所示"这类题干没有图就没法作答；点图可放大（投影用） */}
+            <MediaDisplay
+              svgContent={question.svg_content}
+              hasSvg={question.has_svg}
+              mediaFiles={question.media_files}
+              size="large"
+            />
             {/* 选项可直接点选：选中后点「提交作答」由服务端判对错（答对 +5 / 答错 +2） */}
             <Space orientation="vertical" style={{ width: '100%' }} size={10}>
               {(question.options || []).map((opt, i) => {

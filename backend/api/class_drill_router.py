@@ -238,6 +238,13 @@ def _normalize_client_question(item: dict[str, Any]) -> dict[str, Any]:
         out_opts = ["对", "错"]
     answer = str(item.get("answer") or item.get("correct_answer") or "").strip()
     letters = ("A", "B", "C", "D", "E", "F")
+    # 配图必须一起下发：题库里 1/8 的选择题带图（SVG 流程图/电路图，或万相生图 + 上传图），
+    # 页面按"如右图所示"出题却没图，老师只能干瞪眼。三个字段与 MediaDisplay 的入参一一对应。
+    svg_content = item.get("svg_content") or item.get("svg_code") or ""
+    media_files = item.get("media_files") or ""
+    has_svg = item.get("has_svg")
+    if has_svg is None:
+        has_svg = 1 if svg_content else 0
     return {
         "id": item.get("id"),
         "type": qtype,
@@ -246,6 +253,10 @@ def _normalize_client_question(item: dict[str, Any]) -> dict[str, Any]:
         "answer": answer.upper() if answer.upper() in letters else answer,
         "explanation": item.get("explanation") or "",
         "source": item.get("_source") or "bank",
+        "svg_content": svg_content,
+        "has_svg": int(has_svg or 0),
+        "media_files": media_files,
+        "media_placeholders": item.get("media_placeholders") or "",
     }
 
 

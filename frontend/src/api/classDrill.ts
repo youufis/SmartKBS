@@ -5,6 +5,7 @@
  * 抽人算法与积分口径复用「智能点名」，但会话与流水独立，不写进点名单。
  */
 import apiClient from './client'
+import type { MediaFile } from '../types'
 
 export interface DrillQuestion {
   id: number | null
@@ -14,6 +15,12 @@ export interface DrillQuestion {
   answer: string
   explanation: string
   source: string
+  /** 配图：SVG 源码（流程图/电路图等），has_svg=1 时才渲染 */
+  svg_content?: string
+  has_svg?: number
+  /** 配图：万相生图 / 上传图（JSON 字符串或数组，交给 MediaDisplay 解析） */
+  media_files?: MediaFile[] | string | null
+  media_placeholders?: MediaFile[] | string | null
 }
 
 export interface DrillSession {

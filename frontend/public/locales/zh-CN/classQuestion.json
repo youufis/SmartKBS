@@ -32,7 +32,7 @@
   "nextQuestion": "下一题 ▶",
   "selectedTag": "已选",
   "drawStudent": "🎲 抽人",
-  "submitAnswer": "✓ 提交作答",
+  "submitAnswer": "提交",
   "pickAnswerFirst": "请先点选一个答案",
   "pointsAdded": "本题得分 +{{points}}",
   "skipBtn": "跳过 {{points}}",
