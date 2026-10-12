@@ -94,6 +94,7 @@
   "confirmDeleteDesc": "This action cannot be undone",
   "generateMoreThan20Warn": "Generating more than 20 questions may take a while. Consider reducing the count.",
   "inputKnowledgePoints": "Enter knowledge points, e.g.: TCP/IP, IP addressing, subnet mask (separate with commas)",
+  "selectOrInputKnowledgePoints": "Pick course knowledge points, or type your own (comma separated)",
   "count": "Count",
   "knowledgePoints": "Knowledge Points",
   "referenceAnswer": "Reference Answer",

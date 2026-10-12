@@ -3,6 +3,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button, Card, Empty, Space, Spin, Timeline, Typography } from 'antd'
 import {
+  AimOutlined,
   AuditOutlined, BarChartOutlined, CheckCircleOutlined, ClockCircleOutlined,
   CustomerServiceOutlined, EyeOutlined, FileAddOutlined, FireOutlined,
   ReloadOutlined, TeamOutlined, ThunderboltOutlined, TrophyOutlined,
@@ -17,6 +18,7 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   score: { color: '#52c41a', icon: <TrophyOutlined /> },
   task: { color: '#faad14', icon: <CheckCircleOutlined /> },
   rollcall: { color: '#722ed1', icon: <AuditOutlined /> },
+  class_drill: { color: '#eb2f96', icon: <AimOutlined /> },
   quiz: { color: '#ff4d4f', icon: <ThunderboltOutlined /> },
   poll: { color: '#722ed1', icon: <BarChartOutlined /> },
   discussion: { color: '#1677ff', icon: <TeamOutlined /> },

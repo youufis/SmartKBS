@@ -1460,6 +1460,32 @@ async def recent_activity(request: Request):
                 "detail": f"{act[3]} - {result_label}",
             })
 
+        # 最近的课堂抽问记录（抽到谁 + 作答结果，与智能点名同一进feed口径）
+        if role == 0:
+            drill_acts = _act_q(
+                """SELECT created_at, student_name, result, grade, class_name, points
+                   FROM class_drill_records
+                   ORDER BY created_at DESC LIMIT 5""",
+            )
+        else:
+            drill_acts = _act_q(
+                """SELECT created_at, student_name, result, grade, class_name, points
+                   FROM class_drill_records WHERE teacher_username = ?
+                   ORDER BY created_at DESC LIMIT 5""",
+                (username,),
+            )
+        _drill_map = {"correct": "答对", "incorrect": "答错", "skip": "跳过"}
+        for act in drill_acts:
+            _res = str(act[2] or "").strip().lower()
+            label = _drill_map.get(_res, act[2] or "已抽问")
+            pts = f"（+{act[5]}分）" if act[5] else ""
+            activities.append({
+                "time": act[0],
+                "type": "class_drill",
+                "title": f"抽问 {act[1]}",
+                "detail": f"{act[4]} - {label}{pts}",  # class_name 自带年级前缀(高一1班), 不再拼 grade
+            })
+
         # 最近的随堂测验提交
         if role == 0:
             quiz_acts = _act_q(

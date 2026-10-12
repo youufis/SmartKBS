@@ -120,6 +120,7 @@
   "confirm": "确认",
   "generateMoreThan20Warn": "超过 20 题生成时间较长，建议减少数量",
   "inputKnowledgePoints": "输入知识点，如：TCP/IP协议、IP地址分类、子网掩码（多个知识点用逗号分隔）",
+  "selectOrInputKnowledgePoints": "下拉选择课程知识点，也可直接输入（多个用逗号或顿号分隔）",
   "count": "数量",
   "knowledgePoints": "知识点",
   "referenceAnswer": "参考答案",
