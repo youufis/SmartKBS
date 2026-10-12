@@ -206,6 +206,8 @@
   "addSingleChoice": "Add Single Choice",
   "addMultipleChoice": "Add Multiple Choice",
   "addTrueFalse": "Add True/False",
+  "quizSingleChoice": "Single Choice",
+  "quizMultipleChoice": "Multiple Choice",
   "clickToAddQuestion": "Click buttons above to add questions",
   "deleteQuestionConfirm": "Delete this question?",
   "questionContentPlaceholder": "Enter question content (supports $...$ LaTeX)...",

@@ -177,8 +177,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
   const questionTypeLabel = (type: string) => {
     const map: Record<string, string> = {
-      single: t('singleChoice'),
-      multiple: t('multipleChoice'),
+      single: t('quizSingleChoice'),
+      multiple: t('quizMultipleChoice'),
       true_false: t('trueFalse'),
     }
     return map[type] || type
@@ -278,8 +278,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                   size="small"
                   style={{ width: 90 }}
                 >
-                  <Select.Option value="single">{t('singleChoice')}</Select.Option>
-                  <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
+                  <Select.Option value="single">{t('quizSingleChoice')}</Select.Option>
+                  <Select.Option value="multiple">{t('quizMultipleChoice')}</Select.Option>
                   <Select.Option value="true_false">{t('trueFalse')}</Select.Option>
                 </Select>
               </Space>

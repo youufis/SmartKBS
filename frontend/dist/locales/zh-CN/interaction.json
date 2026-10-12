@@ -210,6 +210,8 @@
   "addSingleChoice": "添加单选题",
   "addMultipleChoice": "添加多选题",
   "addTrueFalse": "添加判断题",
+  "quizSingleChoice": "单选题",
+  "quizMultipleChoice": "多选题",
   "clickToAddQuestion": "点击上方按钮添加题目",
   "deleteQuestionConfirm": "删除此题？",
   "questionContentPlaceholder": "输入题目内容（支持 $...$ LaTeX 公式）...",
