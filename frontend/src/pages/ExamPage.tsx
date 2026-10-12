@@ -24,6 +24,7 @@ import type { ExamInfo, ExamAttempt } from '../types'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
+import { classText } from '../utils/studentLabel'
 import MediaDisplay from '../components/MediaDisplay'
 import { TYPE_OPTIONS } from '../constants/questionTypes'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
@@ -796,6 +797,25 @@ const ExamPage: React.FC = () => {
       dataIndex: 'subject',
       key: 'subject',
       width: 100,
+    },
+    {
+      // 与同步练习一致: 列表直接展示考试目标范围(年级/班级)
+      title: t('gradeClass'),
+      key: 'grade_class',
+      width: 150,
+      render: (_: unknown, r: ExamInfo) => {
+        const scope = r.target_scope || 'teacher_classes'
+        if (scope === 'individual') {
+          const n = (r.target_users || '').split(',').map(x => x.trim()).filter(Boolean).length
+          return <Tag color="green">{t('targetedN', { n })}</Tag>
+        }
+        if (scope === 'teacher_classes') return <Tag color="blue">{tc('scopeTeacherClasses')}</Tag>
+        if (scope === 'all') return <Tag color="purple">{tc('scopeAll')}</Tag>
+        const grade = (r.target_grade || '').trim()
+        const cls = classText((r.target_class || '').trim())
+        if (grade || cls) return <span>{[grade, cls].filter(Boolean).join(' · ')}</span>
+        return <span style={{ color: 'var(--text-tertiary)' }}>-</span>
+      },
     },
     {
       title: t('duration'),
