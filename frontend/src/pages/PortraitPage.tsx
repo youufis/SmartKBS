@@ -1,6 +1,7 @@
 import FormulaRenderer from '../components/FormulaRenderer'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import ScopeTag from '../components/ScopeTag'
 import {
   Card, Row, Col, Typography, Spin, Button, Tag, Space, Tabs,
   Select, message, Modal, Empty, Tooltip, Divider,
@@ -17,7 +18,6 @@ import {
 import { useAuthStore } from '../stores/authStore'
 import { usePortraitStore } from '../stores/portraitStore'
 import type { PortraitData } from '../api/portrait'
-import { classText } from '../utils/studentLabel'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -735,7 +735,9 @@ const PortraitPage: React.FC = () => {
                     title={
                       <Space>
                         <Text strong>{portrait.student_name || portrait.username}</Text>
-                        {(portrait.grade || portrait.class_name) && <Tag>{[portrait.grade, classText(portrait.class_name)].filter(Boolean).join(' ')}</Tag>}
+                        {(portrait.grade || portrait.class_name) && (
+                          <ScopeTag variant="text" grade={portrait.grade} classes={String(portrait.class_name ?? '')} />
+                        )}
                       </Space>
                     }
                     description={

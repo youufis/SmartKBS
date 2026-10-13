@@ -17,6 +17,7 @@ import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import { classText } from '../utils/studentLabel'
+import ScopeTag from '../components/ScopeTag'
 import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTypes'
 
 /** 详情/答卷里显示题型名(与做题页同一份映射) */
@@ -125,7 +126,9 @@ const SessionRoster: React.FC<{
               </div>
             ) },
           { title: t('gradeClass'), key: 'grade_class', width: 120,
-            render: (_: any, r: any) => [r.grade, classText(String(r.class ?? ''))].filter(Boolean).join(' ') || '-' },
+            render: (_: any, r: any) => (
+              <ScopeTag variant="text" grade={r.grade} classes={String(r.class ?? '')} />
+            ) },
           {
             title: t('status'), dataIndex: 'submitted', width: 90,
             render: (v: boolean) => (v ? <Tag color="success">{t('submitted')}</Tag> : <Tag>{t('notStarted')}</Tag>),
@@ -727,11 +730,22 @@ const TeacherView: React.FC = () => {
             columns={[
               { title: t('title_'), dataIndex: 'title', ellipsis: true },
               { title: t('publisher'), dataIndex: 'creator_username', width: 90 },
-              { title: t('gradeClass'), width: 130, render: (_, r) => 
-                r.target_students?.length > 0 
-                  ? <Tag color="green">{t('targeted')} {r.target_students.length} {t('people')}</Tag>
-                  : <>{`${r.target_grade || t('all')} ${r.target_class ? classText(r.target_class) : t('all')}`}
-                    {r.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}</>
+              {
+                // 与其它活动列表同口径: 目标范围(年级/班级 / 指定N人), 定向名单优先
+                title: t('gradeClass'), key: 'scope', width: 160,
+                render: (_: any, r: any) => {
+                  const students: string[] = r.target_students || []
+                  const scope = students.length
+                    ? 'individual'
+                    : (r.target_scope || (String(r.target_grade || '').trim() ? 'grade' : 'teacher_classes'))
+                  return (
+                    <Space size={4}>
+                      <ScopeTag scope={scope} grade={r.target_grade} classes={r.target_class}
+                        users={students.join(',')} />
+                      {r.source === 'wrong_book' && <Tag color="purple">{t('sourceWrongBook')}</Tag>}
+                    </Space>
+                  )
+                },
               },
               { title: t('questionCount'), dataIndex: 'question_count', width: 56 },
               { title: t('status'), render: (_, r) => r.status === 'active' ? <Tag color="processing">{t('inProgress')}</Tag> : <Tag>{t('endedSuccess')}</Tag>, width: 76 },

@@ -623,6 +623,7 @@ async def list_teacher_sessions(request: Request):
             "subject": r["subject"], "question_count": r["question_count"],
             "total_score": r["total_score"],
             "target_grade": r["target_grade"], "target_class": r["target_class"],
+            "target_scope": (r.get("target_scope") or "").strip(),
             "target_students": target_students,
             "status": r["status"],
             "source": r.get("source") or "teacher",

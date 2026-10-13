@@ -93,7 +93,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     quick_quiz_rows = db_query_dict(
         """SELECT qr.id, qr.title, qr.status, qr.created_at,
                   COALESCE(qr.started_at, qr.created_at) as updated_at,
-                  qr.target_grade, qr.target_class, qr.subject,
+                  qr.target_scope, qr.target_grade, qr.target_class, qr.target_users, qr.subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
                   'quick_quiz' as activity_type
            FROM quick_quiz_rooms qr
@@ -171,6 +171,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     # ── 7. 分组讨论（smartkb.db）──
     disc_rows = db_query_dict(
         """SELECT d.id, d.title, d.status, d.created_at, d.updated_at,
+                  d.target_scope, d.target_grade, d.target_class, d.target_users,
                   d.subject, 0 as total_score, 0 as pass_score, 0 as duration,
                   'discussion' as activity_type
            FROM discussions d
@@ -298,10 +299,15 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         activities.append(p)
 
     # 统一设置创建者姓名（课程练习已有独立的 creator_name，不覆盖）
+    # 同时兜底范围字段: 课程练习按资源归属(年级来自课程)且非班级定向, 其余活动取各自表值
     for act in activities:
         if act.get("activity_type") != "course":
             act["creator_name"] = _creator_name
             act["creator_username"] = teacher_username
+        act.setdefault("target_scope", "")
+        act.setdefault("target_grade", "")
+        act.setdefault("target_class", "")
+        act.setdefault("target_users", "")
     return activities
 
 

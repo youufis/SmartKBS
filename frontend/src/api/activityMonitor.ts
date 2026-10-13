@@ -17,8 +17,10 @@ export interface ActivityItem {
   subject: string;
   creator_name?: string;
   creator_username?: string;
+  target_scope?: string;
   target_grade?: string;
   target_class?: string;
+  target_users?: string;
   created_at: string;
   updated_at: string;
 }

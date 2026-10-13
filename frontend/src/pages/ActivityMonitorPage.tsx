@@ -20,7 +20,7 @@ import { useAuthStore } from '../stores/authStore';
 import ResourceViewStatsPage from './ResourceViewStatsPage';
 import ResetActivityButton from '../components/ResetActivityButton';
 import { reportLoadError } from '../utils/loadError'
-import { classText } from '../utils/studentLabel'
+import ScopeTag from '../components/ScopeTag'
 
 const { Title, Text } = Typography;
 
@@ -244,6 +244,16 @@ const ActivityMonitorPage: React.FC = () => {
       render: (v: string) => v || '-',
     },
     {
+      // 与其它活动列表同口径: 目标范围(年级/班级)
+      title: t('activityMonitor.columns.gradeClass'),
+      key: 'scope',
+      width: 160,
+      render: (_: any, record: ActivityItem) => (
+        <ScopeTag scope={record.target_scope} grade={record.target_grade}
+          classes={record.target_class} users={record.target_users} />
+      ),
+    },
+    {
       // 创建者+创建时间双行, 少占一列
       title: t('activityMonitor.columns.creator'),
       key: 'creator_time',
@@ -320,7 +330,7 @@ const ActivityMonitorPage: React.FC = () => {
       key: 'grade_class',
       width: 120,
       render: (_: any, record: StudentStatus) =>
-        [record.grade, classText(String(record.class_name ?? ''))].filter(Boolean).join(' ') || '-',
+        <ScopeTag variant="text" grade={record.grade} classes={String(record.class_name ?? '')} />,
     },
     {
       title: t('activityMonitor.columns.completionStatus'),

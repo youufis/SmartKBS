@@ -4,7 +4,7 @@
  *   1. 闯关记录 — 查看学生闯关记录
  *   2. 题库管理 — 闯关题目的 CRUD 管理
  */
-import { studentLabel, classText } from '../utils/studentLabel'
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, startTransition } from 'react'
 import {
   Card, Table, Tag, Typography, Space, Input, Select,
@@ -22,6 +22,7 @@ import PlaceholderManager from '../components/PlaceholderManager'
 import MobileCardTable from '../components/MobileCardTable'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useTranslation } from 'react-i18next'
+import ScopeTag from '../components/ScopeTag'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -193,7 +194,7 @@ const QuestRecordsTab: React.FC = () => {
         <div>
           <Text strong>{studentLabel(r)}</Text>
           <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-            {[r.grade, classText(String(r.class_name ?? ''))].filter(Boolean).join(' ')}
+            <ScopeTag variant="text" grade={r.grade} classes={String(r.class_name ?? '')} placeholder={false} />
           </div>
         </div>
       ),

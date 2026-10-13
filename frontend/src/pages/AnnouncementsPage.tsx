@@ -16,7 +16,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
-import { classText } from '../utils/studentLabel'
+import ScopeTag from '../components/ScopeTag'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -235,8 +235,9 @@ const AnnouncementsPage: React.FC = () => {
           {record.target_role !== 'all' && (
             <Tag>{record.target_role === 'teacher' ? t('anRoleTeacher') : record.target_role === 'student' ? t('anRoleStudent') : record.target_role}</Tag>
           )}
-          {record.target_grade && <Tag>{record.target_grade}</Tag>}
-          {record.target_class && <Tag>{classText(record.target_class)}</Tag>}
+          {(record.target_grade || record.target_class) && (
+            <ScopeTag variant="text" grade={record.target_grade} classes={record.target_class} />
+          )}
         </Space>
       ),
     },
@@ -304,8 +305,9 @@ const AnnouncementsPage: React.FC = () => {
                   {record.target_role !== 'all' && (
                     <Tag>{record.target_role === 'teacher' ? t('anRoleTeacher') : record.target_role === 'student' ? t('anRoleStudent') : record.target_role}</Tag>
                   )}
-                  {record.target_grade && <Tag>{record.target_grade}</Tag>}
-                  {record.target_class && <Tag>{classText(record.target_class)}</Tag>}
+                  {(record.target_grade || record.target_class) && (
+                    <ScopeTag variant="text" grade={record.target_grade} classes={record.target_class} />
+                  )}
                 </div>
                 <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }} className="page-header-flex">
                   <Text type="secondary" style={{ fontSize: 12 }}>
@@ -373,8 +375,9 @@ const AnnouncementsPage: React.FC = () => {
               {detailModal.target_role !== 'all' && (
                 <Tag>{detailModal.target_role === 'teacher' ? t('anRoleTeacher') : detailModal.target_role === 'student' ? t('anRoleStudent') : detailModal.target_role}</Tag>
               )}
-              {detailModal.target_grade && <Tag>{detailModal.target_grade}</Tag>}
-              {detailModal.target_class && <Tag>{classText(detailModal.target_class)}</Tag>}
+              {(detailModal.target_grade || detailModal.target_class) && (
+                <ScopeTag variant="text" grade={detailModal.target_grade} classes={detailModal.target_class} />
+              )}
             </Space>
             <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginBottom: 16 }}>
               {t('anPublisher')}{detailModal.creator_username || detailModal.creator_name}

@@ -24,6 +24,8 @@ export interface ScopeTagProps {
   placeholder?: boolean
   /** 文本最大宽度(px), 超出截断并悬停看全文; 默认 150 */
   maxWidth?: number
+  /** 'scope'=按学生范围语义渲染(默认); 'text'=只渲染年级班级文本(公告等另有角色维度的场景) */
+  variant?: 'scope' | 'text'
 }
 
 /** 拆分逗号/顿号/斜杠分隔的多值并去重（"高一,高二" → ["高一","高二"]） */
@@ -55,9 +57,22 @@ export function formatScopeText(grade?: string, classes?: string): string {
 }
 
 const ScopeTag: React.FC<ScopeTagProps> = ({
-  scope = 'teacher_classes', grade, classes, users, placeholder = true, maxWidth = 150,
+  scope = 'teacher_classes', grade, classes, users, placeholder = true, maxWidth = 150, variant = 'scope',
 }) => {
   const { t } = useTranslation('common')
+
+  if (variant === 'text') {
+    const onlyText = formatScopeText(grade, classes)
+    if (!onlyText) return placeholder ? <Tag color="geekblue">-</Tag> : null
+    return (
+      <Tooltip title={onlyText} placement="topLeft">
+        <Tag color="geekblue" style={{
+          maxWidth, marginInlineEnd: 0,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle',
+        }}>{onlyText}</Tag>
+      </Tooltip>
+    )
+  }
 
   if (scope === 'individual') {
     const n = String(users || '').split(',').map((s) => s.trim()).filter(Boolean).length

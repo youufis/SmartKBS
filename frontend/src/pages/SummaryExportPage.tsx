@@ -22,7 +22,7 @@ import {
   type SummaryMeta, type SummaryPreview, type SummaryRecord, type SummaryTypeMeta,
 } from '../api/summaryExport'
 import MobileCardTable from '../components/MobileCardTable'
-import { classText } from '../utils/studentLabel'
+import ScopeTag from '../components/ScopeTag'
 import { useIsMobile } from '../hooks/useIsMobile'
 
 const { Title, Text } = Typography
@@ -160,11 +160,10 @@ const SummaryExportPage: React.FC = () => {
   )
 
   // ── 明细表列 ──
-  const gradeClassCell = (grade: string, cls: string | number) => {
-    const g = String(grade || '').trim()
-    const c = classText(String(cls ?? '').trim())
-    return [g, c].filter(Boolean).join(' ') || '-'
-  }
+  // 年级/班级统一走 ScopeTag(variant='text'): 同一套格式化 + 限宽截断 + 悬停全文
+  const gradeClassCell = (grade: string, cls: string | number) => (
+    <ScopeTag variant="text" grade={String(grade ?? '')} classes={String(cls ?? '')} />
+  )
   const recordColumns: ColumnsType<SummaryRecord> = [
     { title: t('summaryExport.col.gradeClass'), key: 'grade_class', width: 110,
       render: (_, r) => gradeClassCell(r.grade, r.class_name) },
