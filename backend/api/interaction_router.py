@@ -876,6 +876,7 @@ async def list_quizzes(
     else:
         rows = execute_query(
             f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at,
+                        q.target_scope, q.target_grade, q.target_class, q.target_users,
                         COALESCE(u.name, u.username) AS creator_name
                 FROM interaction_quizzes q
                 LEFT JOIN users u ON q.creator_username = u.username
@@ -886,7 +887,7 @@ async def list_quizzes(
 
     quizzes = []
     for r in rows:
-        # 兼容学生路径（含 target_* 列，creator_name 在 12）和教师/管理员路径（不含 target_*，creator_name 在 8）
+        # 学生/教师两条路径现同为 13 列布局(target_* 在 8-11, creator_name 在 12); 保留 len 兜底防旧查询混入
         creator_name_idx = 12 if len(r) > 12 else (8 if len(r) > 8 else 1)
         q = {
             "id": r[0],
@@ -898,6 +899,10 @@ async def list_quizzes(
             "created_at": r[6],
             "updated_at": r[7],
             "creator_name": r[creator_name_idx],
+            "target_scope": r[8] if len(r) > 12 else "teacher_classes",
+            "target_grade": (r[9] if len(r) > 12 else "") or "",
+            "target_class": (r[10] if len(r) > 12 else "") or "",
+            "target_users": (r[11] if len(r) > 12 else "") or "",
         }
         # 统一字段名：svg_code → svg_content
         questions = q.get("questions", [])

@@ -512,6 +512,7 @@
   "qeNewOption": "{{letter}}. 新选项{{n}}",
   "ipQuizSuffix": "{{topic}} - 随堂测验",
   "ipNCount": "{{count}} 题",
+  "ipTargetedN": "指定 {{n}} 人",
   "ipExport": "导出",
   "ipEdit": "编辑",
   "ipScoreOf": "{{score}} / {{total}} 分",

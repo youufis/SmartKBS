@@ -512,6 +512,7 @@
   "qeNewOption": "{{letter}}. New option {{n}}",
   "ipQuizSuffix": "{{topic}} - Quiz",
   "ipNCount": "{{count}} questions",
+  "ipTargetedN": "For {{n}} student(s)",
   "ipExport": "Export",
   "ipEdit": "Edit",
   "ipScoreOf": "{{score}} / {{total}} pts",
