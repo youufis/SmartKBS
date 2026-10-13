@@ -211,6 +211,7 @@
   "totalDiscussions": "Total {{total}} discussions",
   "groupN": "Group {{n}}",
   "participation": "Participation",
+  "gradeClass": "Grade/Class",
   "actions": "Actions",
   "viewDetails": "View Details",
   "startDiscussionTooltip": "Start Discussion",

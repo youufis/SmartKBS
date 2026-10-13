@@ -804,7 +804,7 @@ const ExamPage: React.FC = () => {
       // 与其它活动列表同口径: 目标范围(年级/班级)
       title: t('gradeClass'),
       key: 'grade_class',
-      width: 130,
+      width: 160,
       render: (_: unknown, r: ExamInfo) => (
         <ScopeTag scope={r.target_scope} grade={r.target_grade}
           classes={r.target_class} users={r.target_users} />

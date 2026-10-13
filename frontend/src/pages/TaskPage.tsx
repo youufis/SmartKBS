@@ -413,7 +413,7 @@ const TaskPage: React.FC = () => {
       ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>--</Typography.Text>,
     },
     { title: t('taskCreator'), dataIndex: 'creator', key: 'creator', width: 80 },
-    { title: t('gradeClass'), key: 'scope', width: 130,
+    { title: t('gradeClass'), key: 'scope', width: 160,
       render: (_: any, r: any) => (
         <ScopeTag scope={r.target_scope} grade={r.target_grade} classes={r.target_class} users={r.target_users} />
       ),

@@ -296,79 +296,6 @@ const DiscussionPage: React.FC = () => {
     </Form>
   )
 
-  // ── 讨论卡片 ──
-  const renderDiscussionCard = (disc: any) => {
-    const statusInfo = STATUS_MAP[disc.status] || { label: t('unknown'), color: 'default' }
-    return (
-      <Card
-        key={disc.id}
-        size="small"
-        style={{ marginBottom: 12 }}
-        actions={
-          isTeacherOrAdmin
-            ? [
-                <Tooltip title={t('viewDetails')}><TeamOutlined onClick={() => handleDetail(disc.id)} /></Tooltip>,
-                ...(disc.status === 'pending' ? [
-                  <Tooltip title={t('startDiscussionTooltip')}><PlayCircleOutlined style={{ color: '#52c41a' }} onClick={() => handleStart(disc.id)} /></Tooltip>,
-                ] : []),
-                ...(disc.status === 'active' ? [
-                  <Popconfirm title={t('confirmEnd')} onConfirm={() => handleEnd(disc.id)}>
-                    <Tooltip title={t('endDiscussionTooltip')}><StopOutlined style={{ color: '#ff4d4f' }} /></Tooltip>
-                  </Popconfirm>,
-                ] : []),
-                ...(disc.status === 'ended' ? [
-                  <Tooltip title={t('restartDiscussionTooltip')}><ReloadOutlined style={{ color: '#52c41a' }} onClick={() => handleRestart(disc.id)} /></Tooltip>,
-                  <Popconfirm title={t('confirmDeleteAll')} onConfirm={() => handleDelete(disc.id)}>
-                    <Tooltip title={t('deleteDiscussionTooltip')}><DeleteOutlined style={{ color: '#ff4d4f' }} /></Tooltip>,
-                  </Popconfirm>,
-                ] : []),
-              ]
-            : [
-                ...(disc.has_joined && disc.status === 'active'
-                  ? [<Tooltip title={disc.group_mode === 'none' ? t('enterDiscussion') : t('enterGroup')}><TeamOutlined onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)} /></Tooltip>]
-                  : disc.status === 'active' && !disc.has_joined
-                  ? [<Tooltip title={t('joinDiscussion')}><MessageOutlined onClick={() => handleJoin(disc.id)} /></Tooltip>]
-                  : []),
-              ]
-        }
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <Space>
-              <div className="markdown-content" style={{ fontWeight: 600 }}>
-                <FormulaRenderer content={disc.title} components={{ p: ({children}) => <>{children}</> }} />
-              </div>
-              <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-              {disc.subject && <Tag>{disc.subject}</Tag>}
-            </Space>
-            {disc.description && (
-              <div className="markdown-content" style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 4 }}>
-                <FormulaRenderer content={disc.description} />
-              </div>
-            )}
-          </div>
-        </div>
-        <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 13, color: 'var(--text-tertiary)' }}>
-          <span><TeamOutlined /> {disc.total_members || 0}{t('people')}{t('participants')}</span>
-          <span><MessageOutlined /> {disc.total_messages || 0}{t('messages_')}</span>
-          <span><RobotOutlined /> {getAiRoleLabel(disc.ai_role)}</span>
-          {isTeacherOrAdmin && (
-            <ScopeTag scope={disc.target_scope} grade={disc.target_grade}
-              classes={disc.target_class} users={disc.target_users} />
-          )}
-          {disc.duration_minutes > 0 && (
-            <span><FieldTimeOutlined /> {disc.duration_minutes}{t('minutes')}</span>
-          )}
-        </div>
-        {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (
-          <div style={{ marginTop: 4 }}>
-            <Tag color="blue">{disc.group_mode === 'none' ? t('joinedChat') : `${t('myGroup')}: ${disc.my_group.name || t('groupIndexName', { index: disc.my_group.group_index })}`}</Tag>
-          </div>
-        )}
-      </Card>
-    )
-  }
-
   // 列定义（桌面表格与窄屏卡片共用同一套）
   const discColumns = [
     {
@@ -394,6 +321,14 @@ const DiscussionPage: React.FC = () => {
         </Text>
       ),
     },
+    ...(isTeacherOrAdmin ? [{
+      // 与其它活动列表同口径: 讨论目标范围(年级/班级)
+      title: t('gradeClass'), key: 'scope', width: 160,
+      render: (_: any, disc: any) => (
+        <ScopeTag scope={disc.target_scope} grade={disc.target_grade}
+          classes={disc.target_class} users={disc.target_users} />
+      ),
+    }] : []),
     {
       title: t('actions'), key: 'actions', width: 200,
       render: (_: any, disc: any) => (
@@ -453,7 +388,7 @@ const DiscussionPage: React.FC = () => {
         <Tag color="blue">{disc.group_mode === 'none' ? t('joinedChat') : (disc.my_group.name || t('groupN', { n: disc.my_group.group_index }))}</Tag>
       ) : null),
     },
-    discColumns[2],
+    ...discColumns.slice(2),
   ]
 
   return (

@@ -811,7 +811,7 @@ const CodePracticePage: React.FC = () => {
             {
               title: t('gradeClass'),
               key: 'scope',
-              width: 130,
+              width: 160,
               render: (_: any, record: any) => (
                 <ScopeTag scope={record.target_scope} grade={record.target_grade}
                   classes={record.target_class} users={record.target_users} />

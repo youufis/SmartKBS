@@ -7,7 +7,7 @@
  * 文案与颜色集中在这里，避免各页面各写一份、口径漂移。
  */
 import React from 'react'
-import { Tag } from 'antd'
+import { Tag, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { classText } from '../utils/studentLabel'
 
@@ -22,10 +22,40 @@ export interface ScopeTagProps {
   users?: string
   /** 无范围信息时是否显示占位 "-"(默认 true) */
   placeholder?: boolean
+  /** 文本最大宽度(px), 超出截断并悬停看全文; 默认 150 */
+  maxWidth?: number
+}
+
+/** 拆分逗号/顿号/斜杠分隔的多值并去重（"高一,高二" → ["高一","高二"]） */
+function splitMulti(v: unknown): string[] {
+  const out: string[] = []
+  for (const part of String(v ?? '').split(/[,，、/]/)) {
+    const s = part.trim()
+    if (s && !out.includes(s)) out.push(s)
+  }
+  return out
+}
+
+/**
+ * 把目标范围拼成一行可读文本。
+ *
+ * 关键点：班级名常自带年级前缀（"高一6班"），此时再拼 target_grade 就成了
+ * "高一,高二 高一6班,高一7班" 这种又长又啰嗦的串；只要每个班级都自带年级，
+ * 就只显示班级本身。此外多值统一用「、」连接，比英文逗号紧凑也好读。
+ */
+export function formatScopeText(grade?: string, classes?: string): string {
+  const grades = splitMulti(grade)
+  const classList = splitMulti(classes).map((c) => classText(c)).filter(Boolean)
+
+  const classesCarryGrade = classList.length > 0
+    && classList.every((c) => grades.some((g) => c.startsWith(g)))
+
+  if (classesCarryGrade) return classList.join('、')
+  return [grades.join('、'), classList.join('、')].filter(Boolean).join(' ')
 }
 
 const ScopeTag: React.FC<ScopeTagProps> = ({
-  scope = 'teacher_classes', grade, classes, users, placeholder = true,
+  scope = 'teacher_classes', grade, classes, users, placeholder = true, maxWidth = 150,
 }) => {
   const { t } = useTranslation('common')
 
@@ -33,14 +63,27 @@ const ScopeTag: React.FC<ScopeTagProps> = ({
     const n = String(users || '').split(',').map((s) => s.trim()).filter(Boolean).length
     return <Tag color="green">{t('scopeTargetedN', { n })}</Tag>
   }
-  if (scope === 'teacher_classes') return <Tag color="geekblue">{t('scopeTeacherClasses')}</Tag>
+  if (scope === 'teacher_classes') return <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>{t('scopeTeacherClasses')}</Tag>
   if (scope === 'all') return <Tag color="purple">{t('scopeAll')}</Tag>
 
-  // grade / class（含历史脏数据的其它取值）: 直接展示年级+班级文本
-  const txt = [String(grade || '').trim(), classText(String(classes || '').trim())]
-    .filter(Boolean).join(' ')
+  // grade / class（含历史脏数据的其它取值）: 展示年级+班级文本
+  const txt = formatScopeText(grade, classes)
   if (!txt) return placeholder ? <Tag color="geekblue">-</Tag> : null
-  return <Tag color="geekblue">{txt}</Tag>
+
+  // 多班级时文本会很长, 一律限宽截断, 悬停看全文
+  return (
+    <Tooltip title={txt} placement="topLeft">
+      <Tag
+        color="geekblue"
+        style={{
+          maxWidth, marginInlineEnd: 0,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle',
+        }}
+      >
+        {txt}
+      </Tag>
+    </Tooltip>
+  )
 }
 
 export default ScopeTag

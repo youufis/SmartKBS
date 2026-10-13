@@ -211,6 +211,7 @@
   "totalDiscussions": "共 {{total}} 个讨论",
   "groupN": "第{{n}}组",
   "participation": "参与",
+  "gradeClass": "年级/班级",
   "actions": "操作",
   "viewDetails": "查看详情",
   "startDiscussionTooltip": "开始讨论",
