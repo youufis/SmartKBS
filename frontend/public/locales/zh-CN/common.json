@@ -148,6 +148,7 @@
   "scopeClass": "指定班级",
   "scopeClassDesc": "对选中的具体班级学生可见",
   "scopeAll": "全体学生",
+  "scopeTargetedN": "指定 {{n}} 人",
   "scopeAllDesc": "对所有学生可见",
   "selectGradeColon": "选择年级：",
   "selectGrade": "选择年级",

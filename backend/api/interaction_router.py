@@ -1426,6 +1426,7 @@ async def list_polls(request: Request):
         # 教师：只看自己创建的投票
         rows = execute_query(
             """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
+                        p.target_scope, p.target_grade, p.target_class, p.target_users,
                         COALESCE(u.name, u.username) AS creator_name
                FROM interaction_polls p
                LEFT JOIN users u ON p.creator_username = u.username
@@ -1436,6 +1437,7 @@ async def list_polls(request: Request):
     else:
         rows = execute_query(
             """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
+                        p.target_scope, p.target_grade, p.target_class, p.target_users,
                         COALESCE(u.name, u.username) AS creator_name
                FROM interaction_polls p
                LEFT JOIN users u ON p.creator_username = u.username
@@ -1447,7 +1449,7 @@ async def list_polls(request: Request):
     for r in rows:
         options = json.loads(r[3]) if isinstance(r[3], str) else r[3]
         poll_type = r[4] if r[4] else "single"
-        # 兼容学生路径（含 target_* 列，creator_name 在 11）和教师/管理员路径（不含 target_*，creator_name 在 7）
+        # 学生/教师/管理员三条路径现同为同一列布局: 7-10 = target_*(scope/grade/class/users), 11 = creator_name
         creator_name = r[11] if len(r) > 11 else (r[7] if len(r) > 7 else r[1])
         vote_counts = []
         for i in range(len(options)):
@@ -1487,6 +1489,11 @@ async def list_polls(request: Request):
             "unique_voters": unique_voters or total_votes,
             "voted": voted,
             "created_at": r[6],
+            # 列表展示目标范围(年级/班级), 与考试/测验同口径
+            "target_scope": (r[7] if len(r) > 10 else "") or "teacher_classes",
+            "target_grade": (r[8] if len(r) > 10 else "") or "",
+            "target_class": (r[9] if len(r) > 10 else "") or "",
+            "target_users": (r[10] if len(r) > 10 else "") or "",
         })
 
     return {"polls": polls}

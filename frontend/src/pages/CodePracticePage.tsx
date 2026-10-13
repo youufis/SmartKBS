@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import ScopeTag from '../components/ScopeTag'
+
 import {
   Card, Typography, Button, Space, Tag, Modal, Spin,
   message, Tabs, Empty, Select, Statistic, Row, Col,
@@ -804,6 +806,15 @@ const CodePracticePage: React.FC = () => {
                     {record.difficulty === 'easy' ? t('easy') : record.difficulty === 'hard' ? t('hard') : t('medium')}
                   </Tag>
                 </Space>
+              ),
+            },
+            {
+              title: t('gradeClass'),
+              key: 'scope',
+              width: 130,
+              render: (_: any, record: any) => (
+                <ScopeTag scope={record.target_scope} grade={record.target_grade}
+                  classes={record.target_class} users={record.target_users} />
               ),
             },
             {

@@ -18,6 +18,7 @@ import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
+import ScopeTag from '../components/ScopeTag'
 import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
 import MobileCardTable from '../components/MobileCardTable'
@@ -351,6 +352,10 @@ const DiscussionPage: React.FC = () => {
           <span><TeamOutlined /> {disc.total_members || 0}{t('people')}{t('participants')}</span>
           <span><MessageOutlined /> {disc.total_messages || 0}{t('messages_')}</span>
           <span><RobotOutlined /> {getAiRoleLabel(disc.ai_role)}</span>
+          {isTeacherOrAdmin && (
+            <ScopeTag scope={disc.target_scope} grade={disc.target_grade}
+              classes={disc.target_class} users={disc.target_users} />
+          )}
           {disc.duration_minutes > 0 && (
             <span><FieldTimeOutlined /> {disc.duration_minutes}{t('minutes')}</span>
           )}

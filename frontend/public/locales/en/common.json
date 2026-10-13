@@ -145,6 +145,7 @@
   "scopeClass": "Specify Class",
   "scopeClassDesc": "Visible to students in selected classes",
   "scopeAll": "All Students",
+  "scopeTargetedN": "For {{n}} student(s)",
   "scopeAllDesc": "Visible to all students",
   "selectGradeColon": "Select Grade: ",
   "selectGrade": "Select Grade",

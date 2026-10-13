@@ -23,6 +23,7 @@ import useSubjectOptions from '../hooks/useSubjectOptions'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
+import ScopeTag from '../components/ScopeTag'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
 
@@ -194,6 +195,11 @@ const QuickQuizPage: React.FC = () => {
     { title: t('players'), key: 'players', width: 60,
       render: (_: any, r: any) => (
         <span><TeamOutlined /> {r.player_count || 0}</span>
+      )
+    },
+    { title: t('gradeClass'), key: 'scope', width: 120,
+      render: (_: any, r: any) => (
+        <ScopeTag scope={r.target_scope} grade={r.target_grade} classes={r.target_class} users={r.target_users} />
       )
     },
     { title: t('creator'), key: 'creator_time', width: 120,

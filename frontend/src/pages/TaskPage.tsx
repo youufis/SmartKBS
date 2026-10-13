@@ -13,6 +13,8 @@ import * as tasksApi from '../api/tasks'
 import { useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import ScopeTag from '../components/ScopeTag'
+
 import type { TaskInfo } from '../types'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
@@ -411,6 +413,11 @@ const TaskPage: React.FC = () => {
       ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>--</Typography.Text>,
     },
     { title: t('taskCreator'), dataIndex: 'creator', key: 'creator', width: 80 },
+    { title: t('gradeClass'), key: 'scope', width: 130,
+      render: (_: any, r: any) => (
+        <ScopeTag scope={r.target_scope} grade={r.target_grade} classes={r.target_class} users={r.target_users} />
+      ),
+    },
     {
       title: t('status'), dataIndex: 'status', key: 'status', width: 70,
       render: (s: string) => (

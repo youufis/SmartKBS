@@ -21,6 +21,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
 import { RowList } from '../components/RowList'
+import ScopeTag from '../components/ScopeTag'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -244,6 +245,10 @@ const QuickPollPage: React.FC = () => {
                             {isMultiple ? t('multiple') : t('single')}
                           </Tag>
                           <Tag color="blue">{poll.creator_username || poll.creator_name}</Tag>
+                          {isTeacherOrAdmin && (
+                            <ScopeTag scope={poll.target_scope} grade={poll.target_grade}
+                              classes={poll.target_class} users={poll.target_users} />
+                          )}
                           <Text type="secondary" style={{ fontSize: 12 }}>{t('peopleCount', { count: poll.unique_voters || poll.total_votes })}</Text>
                         </div>
                       </div>

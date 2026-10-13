@@ -287,7 +287,7 @@ async def list_code_problems(
     else:
         total = (q_one(f"SELECT COUNT(*) as cnt FROM code_problems cp WHERE {where}", tuple(params)) or {}).get("cnt", 0)
         rows = q_query(
-            f"SELECT cp.id as problem_id,cp.title,cp.subject,cp.knowledge_points,cp.difficulty,cp.created_at,cp.creator_username,cp.creator_name,cp.language,cp.time_limit,cp.starter_code FROM code_problems cp WHERE {where} ORDER BY cp.id DESC LIMIT ? OFFSET ?",
+            f"SELECT cp.id as problem_id,cp.title,cp.subject,cp.knowledge_points,cp.difficulty,cp.created_at,cp.creator_username,cp.creator_name,cp.language,cp.time_limit,cp.starter_code,cp.target_scope,cp.target_grade,cp.target_class,cp.target_users FROM code_problems cp WHERE {where} ORDER BY cp.id DESC LIMIT ? OFFSET ?",
             tuple(params + [page_size, (page - 1) * page_size]))
 
     for r in rows:

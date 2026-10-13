@@ -206,6 +206,7 @@
   "addSingleChoice": "Add Single Choice",
   "addMultipleChoice": "Add Multiple Choice",
   "addTrueFalse": "Add True/False",
+  "gradeClass": "Grade/Class",
   "quizSingleChoice": "Single Choice",
   "quizMultipleChoice": "Multiple Choice",
   "clickToAddQuestion": "Click buttons above to add questions",
