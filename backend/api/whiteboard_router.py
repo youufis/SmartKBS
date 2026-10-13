@@ -302,7 +302,7 @@ async def list_rooms(
         rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
-                      r.status, r.student_count, r.created_at
+                      r.status, r.student_count, r.grade, r.class_name, r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                ORDER BY r.created_at DESC
@@ -314,7 +314,7 @@ async def list_rooms(
         rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
-                      r.status, r.student_count, r.created_at
+                      r.status, r.student_count, r.grade, r.class_name, r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.creator_username=?
@@ -334,7 +334,7 @@ async def list_rooms(
         all_rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
-                      r.status, r.student_count, r.created_at
+                      r.status, r.student_count, r.grade, r.class_name, r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.status='active'
@@ -388,7 +388,8 @@ async def list_rooms(
         {
             "id": r[0], "room_code": r[1], "title": r[2], "room_type": r[3],
             "mode": r[4], "creator_username": r[5], "creator_name": r[6],
-            "status": r[7], "student_count": r[8], "created_at": r[9],
+            "status": r[7], "student_count": r[8],
+            "grade": r[9] or "", "class_name": r[10] or "", "created_at": r[11],
         }
         for r in rows
     ]

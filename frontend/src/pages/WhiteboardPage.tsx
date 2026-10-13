@@ -17,6 +17,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import * as whiteboardApi from '../api/whiteboard'
 import type { WhiteboardRoom, WhiteboardMode } from '../types'
+import { fetchGrades, fetchClasses } from '../api/gradeClass'
+import ScopeTag from '../components/ScopeTag'
 
 const { Title, Text } = Typography
 
@@ -36,11 +38,27 @@ const WhiteboardPage: React.FC = () => {
   const [title, setTitle] = useState('')
   const [mode, setMode] = useState<WhiteboardMode>('demo')
   const [roomType, setRoomType] = useState<'classroom' | 'course' | 'temporary'>('classroom')
+  // 白板绑定到具体年级/班级(可选): 与其它活动一致, 创建时可直接指定
+  const [wbGrade, setWbGrade] = useState('')
+  const [wbClass, setWbClass] = useState('')
+  const [wbGrades, setWbGrades] = useState<string[]>([])
+  const [wbClasses, setWbClasses] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
 
   // 加入表单
   const [joinCode, setJoinCode] = useState('')
   const [joining, setJoining] = useState(false)
+
+  // 任教范围内的年级/班级(级联: 选年级 -> 载入该年级班级)
+  useEffect(() => {
+    if (!isTeacher) return
+    fetchGrades().then(setWbGrades).catch(() => { /* 拿不到时仍可不指定 */ })
+  }, [isTeacher])
+
+  useEffect(() => {
+    if (!wbGrade) { setWbClasses([]); return }
+    fetchClasses(wbGrade).then(setWbClasses).catch(() => setWbClasses([]))
+  }, [wbGrade])
 
   const loadRooms = useCallback(async () => {
     setLoading(true)
@@ -72,10 +90,14 @@ const WhiteboardPage: React.FC = () => {
         title: title.trim(),
         mode,
         room_type: roomType,
+        grade: wbGrade,
+        class_name: wbClass,
       })
       message.success(t('roomCreated', { code: res.room_code }))
       setCreateOpen(false)
       setTitle('')
+      setWbGrade('')
+      setWbClass('')
       loadRooms()
 
       // 教师自动进入房间
@@ -204,6 +226,11 @@ const WhiteboardPage: React.FC = () => {
     { title: t('title'), dataIndex: 'title', key: 'title' },
     { title: t('creator'), dataIndex: 'creator_username', key: 'creator_username', width: 100,
       render: (n: string) => n || '-',
+    },
+    { title: t('gradeClass'), key: 'scope', width: 160,
+      render: (_: any, r: any) => (
+        <ScopeTag variant="text" grade={r.grade} classes={String(r.class_name ?? '')} />
+      ),
     },
     { title: t('mode'), dataIndex: 'mode', key: 'mode', width: 80,
       render: (m: string) => (
@@ -339,6 +366,31 @@ const WhiteboardPage: React.FC = () => {
                 { value: 'course', label: t('courseWhiteboard') },
               ]}
             />
+          </div>
+          <div>
+            <Text strong>{t('gradeClass')}</Text>
+            <Space style={{ marginTop: 8 }}>
+              <Select
+                allowClear
+                value={wbGrade || undefined}
+                onChange={(v) => { setWbGrade(v || ''); setWbClass('') }}
+                placeholder={t('wpGradePlaceholder')}
+                style={{ width: 150 }}
+                options={wbGrades.map((g) => ({ value: g, label: g }))}
+              />
+              <Select
+                allowClear
+                value={wbClass || undefined}
+                onChange={(v) => setWbClass(v || '')}
+                placeholder={t('wpClassPlaceholder')}
+                style={{ width: 150 }}
+                disabled={!wbGrade}
+                options={wbClasses.map((c) => ({ value: c, label: c }))}
+              />
+            </Space>
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginTop: 4 }}>
+              {t('wpScopeHint')}
+            </div>
           </div>
         </Space>
       </Modal>
