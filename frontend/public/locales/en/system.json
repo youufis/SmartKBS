@@ -20,6 +20,7 @@
   "promoteAdminOnly": "Grade promotion is for administrators only",
   "title": "System Management",
   "userManagement": "User Management",
+  "gradeClass": "Grade/Class",
   "addUser": "Add User",
   "editUser": "Edit User",
   "deleteUser": "Delete User",

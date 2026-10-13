@@ -15,7 +15,7 @@ import {
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
-import { classText } from '../utils/studentLabel'
+import ScopeTag from '../components/ScopeTag'
 import AnswerLine from '../components/AnswerLine'
 import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
@@ -37,7 +37,6 @@ const isQuizPending = (r: any) => r?.grading === 'pending' || r?.graded_by === '
 
 const InteractionPage: React.FC = () => {
   const { t } = useTranslation('interaction')
-  const { t: tc } = useTranslation('common')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -349,18 +348,10 @@ const InteractionPage: React.FC = () => {
                             {quiz.status === 'active' ? t('started') : t('ended')}
                           </Tag>
                           <Tag color="blue">{quiz.creator_username || quiz.creator_name}</Tag>
-                          {isTeacherOrAdmin && (() => {
-                            // 与考试列表同口径: 展示测验目标范围(年级/班级)
-                            const scope = quiz.target_scope || 'teacher_classes'
-                            if (scope === 'individual') {
-                              const n = String(quiz.target_users || '').split(',').map((x: string) => x.trim()).filter(Boolean).length
-                              return <Tag color="green">{t('ipTargetedN', { n })}</Tag>
-                            }
-                            if (scope === 'teacher_classes') return <Tag color="geekblue">{tc('scopeTeacherClasses')}</Tag>
-                            if (scope === 'all') return <Tag color="purple">{tc('scopeAll')}</Tag>
-                            const txt = [quiz.target_grade, classText(String(quiz.target_class || ''))].filter(Boolean).join(' ')
-                            return <Tag color="geekblue">{txt || '-'}</Tag>
-                          })()}
+                          {isTeacherOrAdmin && (
+                            <ScopeTag scope={quiz.target_scope} grade={quiz.target_grade}
+                              classes={quiz.target_class} users={quiz.target_users} />
+                          )}
                           <Text type="secondary" style={{ fontSize: 12 }}>{t('peopleCount', { count: quiz.answer_count || 0 })}</Text>
                         </div>
                       </div>
