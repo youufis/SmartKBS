@@ -1641,6 +1641,10 @@ def init_db():
                 course_kp_id INTEGER REFERENCES knowledge_points(id),
                 grade TEXT DEFAULT '',
                 class_name TEXT DEFAULT '',
+                target_scope TEXT DEFAULT '',
+                target_grade TEXT DEFAULT '',
+                target_class TEXT DEFAULT '',
+                target_users TEXT DEFAULT '',
                 allow_student_draw INTEGER DEFAULT 0,
                 max_pages INTEGER DEFAULT 20,
                 auto_save_interval INTEGER DEFAULT 30,
@@ -1655,6 +1659,11 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_wbr_kp ON whiteboard_rooms(course_kp_id)")
             except sqlite3.OperationalError:
                 pass
+            # 旧库补列: 白板与其它活动统一的目标范围(P2: 学生按范围可见)
+            _ensure_column(c, "whiteboard_rooms", "target_scope", "TEXT DEFAULT ''")
+            _ensure_column(c, "whiteboard_rooms", "target_grade", "TEXT DEFAULT ''")
+            _ensure_column(c, "whiteboard_rooms", "target_class", "TEXT DEFAULT ''")
+            _ensure_column(c, "whiteboard_rooms", "target_users", "TEXT DEFAULT ''")
 
             # ── 协作白板：页面表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS whiteboard_pages (

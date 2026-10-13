@@ -93,7 +93,28 @@ def _teacher_covers_room(teacher: str, room: dict) -> bool:
 
 
 def _student_can_join_room(user: dict, room: dict) -> bool:
-    """学生可访问判定, 与 join-by-code 完全一致(管理员房间不限/未设范围不限/年级班级需匹配)"""
+    """学生可访问判定(列表可见性与 join-by-code 共用同一份):
+    · P2 起创建的房间带 target_scope -> 走全站统一的 check_activity_visibility
+      (全体学生 / 任教班级 / 指定年级 / 指定班级 / 指定学生)
+    · 旧房间(无 target_scope) -> 沿用"创建者任教范围"文本匹配, 行为与改造前完全一致
+    """
+    scope = (room.get("target_scope") or "").strip()
+    if scope:
+        from backend.permission_service import check_activity_visibility
+        srow = execute_query("SELECT grade, class FROM users WHERE username=?", (user.get("username", ""),))
+        s_grade = (srow[0][0] or "").strip() if srow else ""
+        s_class = str(srow[0][1] or "").strip() if srow else ""
+        return check_activity_visibility(
+            student_username=user.get("username", ""),
+            student_grade=s_grade,
+            student_class=s_class,
+            creator_username=room.get("creator_username") or "",
+            target_scope=scope,
+            target_grade=room.get("target_grade") or "",
+            target_class=room.get("target_class") or "",
+            target_users=room.get("target_users") or "",
+        )
+
     creator = room.get("creator_username") or ""
     crow = execute_query("SELECT role, grade, class FROM users WHERE username=?", (creator,))
     if crow and crow[0][0] == 0:
@@ -225,6 +246,11 @@ class CreateRoomRequest(BaseModel):
     course_kp_id: int | None = None
     grade: str = ""
     class_name: str = ""
+    # P2: 与其它活动统一的目标范围(学生按此可见)
+    target_scope: str = ""
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
     max_pages: int = 20
 
 
@@ -271,15 +297,37 @@ async def create_room(req: CreateRoomRequest, request: Request):
         if grades:
             grade = grades[0]["name"]
 
+    # P2: 统一目标范围(与考试/测验/投票等同一套); 老客户端只传 grade/class_name 时按旧字段回填
+    scope = (req.target_scope or "").strip()
+    t_grade = (req.target_grade or "").strip()
+    t_class = (req.target_class or "").strip()
+    t_users = (req.target_users or "").strip()
+    if not scope:
+        if t_users:
+            scope = "individual"
+        elif t_class:
+            scope = "class"
+        elif t_grade:
+            scope = "grade"
+        else:
+            scope = "teacher_classes"
+    # 列表展示用的旧字段与范围保持一致(取首个值)
+    if t_grade:
+        grade = t_grade.split(",")[0].strip()
+    if t_class:
+        class_name = t_class.split(",")[0].strip()
+
     room_code = whiteboard_manager.generate_room_code()
     now = _now()
     room_id = execute_insert_update(
         """INSERT INTO whiteboard_rooms
            (room_code, title, room_type, mode, creator_username, course_kp_id,
-            grade, class_name, max_pages, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            grade, class_name, target_scope, target_grade, target_class, target_users,
+            max_pages, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (room_code, req.title, req.room_type, req.mode, user["username"],
-         req.course_kp_id, grade, class_name, req.max_pages, now),
+         req.course_kp_id, grade, class_name, scope, t_grade, t_class, t_users,
+         req.max_pages, now),
     )
     # 创建默认第1页
     execute_insert_update(
@@ -302,7 +350,9 @@ async def list_rooms(
         rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
-                      r.status, r.student_count, r.grade, r.class_name, r.created_at
+                      r.status, r.student_count, r.grade, r.class_name,
+                      r.target_scope, r.target_grade, r.target_class, r.target_users,
+                      r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                ORDER BY r.created_at DESC
@@ -314,7 +364,9 @@ async def list_rooms(
         rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
-                      r.status, r.student_count, r.grade, r.class_name, r.created_at
+                      r.status, r.student_count, r.grade, r.class_name,
+                      r.target_scope, r.target_grade, r.target_class, r.target_users,
+                      r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.creator_username=?
@@ -323,61 +375,31 @@ async def list_rooms(
             (user["username"], size, (page - 1) * size),
         )
     else:
-        # 学生：和考试发布一样的权限逻辑
-        student_rows = execute_query(
-            "SELECT grade, class FROM users WHERE username=?", (user["username"],),
-        )
-        student_grade = (student_rows[0][0] or "").strip() if student_rows else ""
-        student_class = str(student_rows[0][1] or "").strip() if student_rows else ""
-
+        # 学生：只列出对自己开放的房间(判定统一在 _student_can_join_room)
         # 获取所有活跃房间
         all_rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
-                      r.status, r.student_count, r.grade, r.class_name, r.created_at
+                      r.status, r.student_count, r.grade, r.class_name,
+                      r.target_scope, r.target_grade, r.target_class, r.target_users,
+                      r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.status='active'
                ORDER BY r.created_at DESC""",
         )
 
-        # 管理员列表
-        admin_rows = execute_query("SELECT username FROM users WHERE role=0")
-        admin_set = set(row[0] for row in admin_rows) if admin_rows else set()
-
-        creator_cache: dict[str, tuple] = {}
+        # 可见性: 与"凭码加入"共用同一份判定(新房间按目标范围, 旧房间按创建者任教范围),
+        # 学生因此只看到对自己开放的房间 —— 两处口径不会再打架
         filtered = []
         for room in all_rows:
-            creator = room[5]  # creator_username
-            # 管理员创建的房间 → 全部可见
-            if creator in admin_set:
-                filtered.append(room)
-                continue
-            # 查询创建者的年级班级信息(同房间多个学生共享缓存, 避免逐条查库)
-            if creator not in creator_cache:
-                creator_cache[creator] = execute_query(
-                    "SELECT grade, class FROM users WHERE username=?", (creator,),
-                )
-            teacher_rows = creator_cache[creator]
-            if not teacher_rows:
-                filtered.append(room)
-                continue
-            t_grade = (teacher_rows[0][0] or "").strip()
-            t_class = str(teacher_rows[0][1] or "").strip()
-            # 教师未设置年级班级 → 对所有学生可见（兼容旧数据）
-            if not t_grade and not t_class:
-                filtered.append(room)
-                continue
-            # 用和考试一致的解析函数
-            grade_class_map = parse_legacy_teacher_grade_class(t_grade, t_class)
-            matched = False
-            if student_grade and student_grade in grade_class_map:
-                allowed_classes = grade_class_map[student_grade]
-                if not allowed_classes:
-                    matched = True  # 有年级无班级限制 → 该年级全部可见
-                elif student_class in allowed_classes:
-                    matched = True
-            if matched:
+            if _student_can_join_room(user, {
+                "creator_username": room[5],
+                "target_scope": room[11] or "",
+                "target_grade": room[12] or "",
+                "target_class": room[13] or "",
+                "target_users": room[14] or "",
+            }):
                 filtered.append(room)
 
         # 分页
@@ -389,7 +411,10 @@ async def list_rooms(
             "id": r[0], "room_code": r[1], "title": r[2], "room_type": r[3],
             "mode": r[4], "creator_username": r[5], "creator_name": r[6],
             "status": r[7], "student_count": r[8],
-            "grade": r[9] or "", "class_name": r[10] or "", "created_at": r[11],
+            "grade": r[9] or "", "class_name": r[10] or "",
+            "target_scope": r[11] or "", "target_grade": r[12] or "",
+            "target_class": r[13] or "", "target_users": r[14] or "",
+            "created_at": r[15],
         }
         for r in rows
     ]
@@ -551,7 +576,8 @@ async def join_by_code(req: JoinByCodeRequest, request: Request):
     code = req.room_code.upper().strip()
     # 同一个房间码可能命中多条记录（旧房间结束后新房间复用了码），优先取进行中的
     rows = execute_query(
-        """SELECT id, title, mode, grade, class_name, creator_username, status
+        """SELECT id, title, mode, grade, class_name, creator_username, status,
+                  target_scope, target_grade, target_class, target_users
            FROM whiteboard_rooms WHERE room_code=?
            ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC""",
         (code,),
@@ -565,40 +591,17 @@ async def join_by_code(req: JoinByCodeRequest, request: Request):
         raise HTTPException(
             status_code=409, detail=f"白板 {code} 已结束，请老师重新开启后再加入")
 
-    # 学生权限：和考试发布一致的逻辑
+    # 学生权限: 与房间列表共用同一份判定(新房间按目标范围, 旧房间按创建者任教范围),
+    # 不再是这里自己复制一份 —— 两处口径一致, 否则会出现"列表里有、点进去 403"
     if _get_user_role(user) == 2:  # student
-        # 检查创建者是否为管理员
-        creator_rows = execute_query(
-            "SELECT role FROM users WHERE username=?", (r[5],),
-        )
-        is_admin_room = creator_rows and creator_rows[0][0] == 0
-        if not is_admin_room:
-            student_rows = execute_query(
-                "SELECT grade, class FROM users WHERE username=?",
-                (user["username"],),
-            )
-            if student_rows:
-                s_grade = (student_rows[0][0] or "").strip()
-                s_class = str(student_rows[0][1] or "").strip()
-                # 查询创建者的年级班级
-                t_rows = execute_query(
-                    "SELECT grade, class FROM users WHERE username=?", (r[5],),
-                )
-                if t_rows:
-                    t_grade = (t_rows[0][0] or "").strip()
-                    t_class = str(t_rows[0][1] or "").strip()
-                    if t_grade or t_class:
-                        from backend.permission_service import parse_legacy_teacher_grade_class
-                        gcm = parse_legacy_teacher_grade_class(t_grade, t_class)
-                        matched = False
-                        if s_grade and s_grade in gcm:
-                            allowed = gcm[s_grade]
-                            if not allowed:
-                                matched = True
-                            elif s_class in allowed:
-                                matched = True
-                        if not matched:
-                            raise HTTPException(status_code=403, detail="该白板房间不属于你的年级或班级")
+        if not _student_can_join_room(user, {
+            "creator_username": r[5],
+            "target_scope": r[7] or "",
+            "target_grade": r[8] or "",
+            "target_class": r[9] or "",
+            "target_users": r[10] or "",
+        }):
+            raise HTTPException(status_code=403, detail="该白板房间未对您所在的年级/班级开放")
 
     # 插入或更新成员记录
     execute_insert_update(
