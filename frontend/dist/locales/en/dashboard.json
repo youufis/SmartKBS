@@ -572,7 +572,7 @@
   "activityLoadFailed": "Failed to load activity, please retry",
   "retry": "Retry",
   "banner": {
-    "portraitHint": "View this week's AI learning portrait"
+    "portraitHint": "View my AI portrait"
   },
   "todoCard": {
     "title": "Today's Focus",

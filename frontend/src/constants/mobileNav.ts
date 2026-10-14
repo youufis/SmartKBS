@@ -21,7 +21,7 @@ const STUDENT_ALLOWED = [
   '/task-todo',            // 首页「任务清单 N」徽标
   '/score',                // 首页「我的积分 / 称号」（学生侧为 RewardPage）
   '/exam',                 // 首页「待完成考试 / 考试成绩」（教师侧考试管理仍不开放）
-  '/portrait',             // 首页「AI 周画像」
+  '/portrait',             // 首页「AI 画像」
   '/companion-settings',   // 学伴设置
   // ── 第二批 B 档：刷题与课堂活动 ──
   '/quest',                // 知识闯关（学生侧 QuestPage；教师侧闯关管理仍不开放）

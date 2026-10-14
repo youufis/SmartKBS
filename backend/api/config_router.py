@@ -147,6 +147,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ENABLE_SUBJECT_TITLES": True,
     # 闯关挑战出题模式：false=AI 出题（默认）, true=从题库出题
     "QUEST_USE_BANK": True,  # 闯关优先从题库取题(used_count 轮换)，题库取不到才调 AI 生成 —— 成本随题量而非人数增长；可在系统配置-激励与闯关改回
+    # ── AI 画像（backend/api/portrait_router.py）──
+    # 总闸：关掉后画像页只读，任何人都不能再生成（零 AI 计费）。
+    "PORTRAIT_ENABLED": True,
+    # 周期：false=每周（默认）、true=每月。周期同时决定"免费额度"与"画像吃哪一段数据"。
+    "PORTRAIT_PERIOD_MONTHLY": False,
+    # 额外生成一次消耗的积分（每周期第 1 次免费）
+    "PORTRAIT_EXTRA_POINTS": 100,
+    # 学生每周期额外生成次数上限（不含免费那次）
+    "PORTRAIT_EXTRA_MAX": 2,
+    # 教师/管理员每周期生成上限（他们不参与积分体系，旧实现完全不设限）
+    "PORTRAIT_STAFF_MAX": 2,
+    # 每到新周期自动为上一周期有活动的学生生成一张（默认关：会自动消耗 AI 额度）
+    "PORTRAIT_AUTO_PUSH": False,
     # 版本管理：后台检测到新提交时，是否自动快进同步运行代码。
     # 涉及数据库迁移或 requirements.txt 变更时不会自动同步，仍走人工升级。
     "auto_pull_enabled": True,
@@ -332,6 +345,10 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "MAX_IMAGE_SIZE_MB": (1, 200),
     "IMAGE_GEN_MAX_PLACEHOLDERS": (0, 8),
     "REWARD_DAILY_CHAT_POINTS": (0, 200),
+    # ── AI 画像 ──
+    "PORTRAIT_EXTRA_POINTS": (0, 1000),
+    "PORTRAIT_EXTRA_MAX": (0, 20),
+    "PORTRAIT_STAFF_MAX": (0, 20),
     "PODCAST_MAX_SECONDS": (60, 1800),
     "REWARD_DAILY_QUIZ_SESSIONS": (0, 20),
     "REWARD_DAILY_TOTAL_POINTS": (0, 500),
@@ -371,6 +388,7 @@ _BOOL_KEYS = {
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
     "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED",
+    "PORTRAIT_ENABLED", "PORTRAIT_PERIOD_MONTHLY", "PORTRAIT_AUTO_PUSH",
     "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
 }

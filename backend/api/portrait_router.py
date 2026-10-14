@@ -3,6 +3,7 @@
 每日生成一张 AI 画像 + 创意寄语，支持画廊、分享与点赞
 """
 import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -145,10 +146,20 @@ def _format_portrait_row(row: tuple, include_path: bool = True) -> dict[str, Any
         "share_scope": row[10] or "private",
         "like_count": row[11] or 0,
         "status": row[12] if len(row) > 12 else "active",
+        # P-3/P-6: 这张画像覆盖哪个周期（旧数据留空 → 前端按"历史"展示）
+        "period_type": (row[13] if len(row) > 13 else "") or "",
+        "period_start": (row[14] if len(row) > 14 else "") or "",
+        "period_end": (row[15] if len(row) > 15 else "") or "",
     }
     if include_path:
         result["image_path"] = row[4] or ""
     return result
+
+
+# 本人视角的画像查询统一列顺序（_format_portrait_row 按位置解析，0..15）
+_P_COLS = ("id, username, created_date, style, image_path, ai_comment, prompt, generated_at, "
+           "view_count, is_shared, share_scope, like_count, status, "
+           "period_type, period_start, period_end")
 
 
 def _enrich_with_student_info(portrait: dict[str, Any]) -> dict[str, Any]:
@@ -209,14 +220,21 @@ def _safe_count(
         return 0
 
 
-def _enrich_role_data(profile: dict[str, Any]) -> None:
-    """根据角色补充累计动态数据"""
+def _enrich_role_data(profile: dict[str, Any], since: str = "", until: str = "",
+                      period_label: str = "本周") -> None:
+    """按角色补充数据。
+
+    P-6：`since/until` 是**当前周期**（周或月，见 _get_period_range）。累计量进 student_stats/teach_stats，
+    周期量进 period_stats —— 画像内容因此真正反映"这个周期"，与名字里的周期/配置一致。
+    """
     role = profile.get("role", 2)
     username = profile.get("username", "")
+    since = since or _get_period_range()[0]
+    until = until or _get_period_range()[1]
 
     try:
         if role == 2:  # 学生累计数据
-            week_start, week_end = _get_week_range()
+            week_start, week_end = since, until
 
             # 累计考试数（考试数据在试题库 questions.db，主库同名表是历史遗留空壳）
             total_exams = _safe_count(
@@ -316,8 +334,55 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
                 "total_news": total_news,
             }
 
+            # ── P-6：本期（周 / 月，随系统配置）表现 —— 画像内容主体 ──
+            def _cnt(sql: str, params: tuple, use_question_db: bool = False) -> int:
+                try:
+                    rows_ = q_execute_query(sql, params) if use_question_db else execute_query(sql, params)
+                    return int(rows_[0][0]) if rows_ and rows_[0][0] is not None else 0
+                except Exception as e:
+                    logger.warning(f"[portrait] 本期统计失败({username}): {e}")
+                    return 0
+
+            period_act_rows = execute_query(
+                """SELECT activity_type, COUNT(*) FROM activity_rewards
+                   WHERE student_username=? AND created_at BETWEEN ? AND ?
+                   GROUP BY activity_type ORDER BY 2 DESC""",
+                (username, since, until),
+            ) or []
+            period_detail = {str(r[0]): r[1] for r in period_act_rows}
+            profile["period_stats"] = {
+                "label": period_label,
+                "start": since,
+                "end": until,
+                "points": week_points,            # 本期新增积分
+                "activities": sum(period_detail.values()),
+                "activity_detail": period_detail,
+                "exams": _cnt(
+                    """SELECT COUNT(*) FROM exam_attempts
+                       WHERE student_username=? AND status IN ('submitted','graded')
+                         AND submitted_at BETWEEN ? AND ?""",
+                    (username, since, until), use_question_db=True),
+                "wrong": _cnt(
+                    "SELECT COUNT(*) FROM wrong_book WHERE student_username=? AND created_at BETWEEN ? AND ?",
+                    (username, since, until)),
+                "chats": _cnt(
+                    "SELECT COUNT(*) FROM conversations WHERE username=? AND date BETWEEN ? AND ?",
+                    (username, since, until)),
+                "discussions": _cnt(
+                    "SELECT COUNT(*) FROM discussion_messages WHERE username=? AND created_at BETWEEN ? AND ?",
+                    (username, since, until)),
+                "resource_views": week_resource_views,
+                "discovery": _cnt(
+                    "SELECT COUNT(*) FROM discovery_view_log WHERE username=? AND created_at BETWEEN ? AND ?",
+                    (username, since, until)),
+                "news": _cnt(
+                    "SELECT COUNT(*) FROM news_view_log WHERE username=? AND created_at BETWEEN ? AND ?",
+                    (username, since, until)),
+            }
+            profile["period_label"] = period_label
+
         elif role == 1:  # 教师累计数据
-            week_start, week_end = _get_week_range()
+            week_start, week_end = since, until
 
             # 任教班级数：以任教关系表为准（users.grade/class 只是注册时留下的文本快照）
             class_total = _safe_count(
@@ -378,11 +443,7 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
 
         elif role == 0:  # 管理员累计数据
             total_users = execute_query("SELECT COUNT(*) FROM users", ())
-            week_start, week_end = _get_week_range()
-            new_this_week = execute_query(
-                "SELECT COUNT(*) FROM users WHERE rowid IN (SELECT rowid FROM users ORDER BY rowid DESC LIMIT 100) AND username NOT IN ('root','admin')",
-                (),
-            )
+            week_start, week_end = since, until
             active_users = execute_query(
                 "SELECT COUNT(DISTINCT username) FROM login_logs WHERE login_time >= date('now', '-7 days')",
                 (),
@@ -403,12 +464,46 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
         logger.warning(f"补充角色数据失败: {e}")
 
 
-# ── 获取 AI API Key ──
+# ── 周期与配置（P-2：周期可配）──
+
+def _cfg(key: str, default: Any = None) -> Any:
+    """读系统配置。配置读取异常一律回落默认值 —— 画像不该因配置层异常整体不可用。"""
+    try:
+        return get_config_value(key, default)
+    except Exception:
+        return default
+
+
+def _portrait_enabled() -> bool:
+    """画像总闸（系统配置 PORTRAIT_ENABLED）"""
+    return bool(_cfg("PORTRAIT_ENABLED", True))
+
+
+def _period_type() -> str:
+    """画像周期：weekly（默认）/ monthly（系统配置 PORTRAIT_PERIOD_MONTHLY）"""
+    return "monthly" if _cfg("PORTRAIT_PERIOD_MONTHLY", False) else "weekly"
+
+
+def _get_period_range(period: str | None = None, today: datetime | None = None) -> tuple[str, str]:
+    """当前周期起止：周 = 周一 ~ 周日（全站唯一口径，见 backend.utils.week_range_str）；
+    月 = 当月 1 号 ~ 月末。（today 仅供测试注入）"""
+    if (period or _period_type()) == "monthly":
+        today = today or datetime.now()
+        first = today.replace(day=1)
+        nxt = (first + timedelta(days=32)).replace(day=1)
+        return first.strftime("%Y-%m-%d"), (nxt - timedelta(days=1)).strftime("%Y-%m-%d")
+    from backend.utils import week_range_str
+    return week_range_str(now=today)
+
+
+def _period_label(period: str | None = None) -> str:
+    """周期的中文说法（寄语/提示文案用）"""
+    return "本月" if (period or _period_type()) == "monthly" else "本周"
+
 
 def _get_week_range() -> tuple[str, str]:
-    """获取当前周的起止日期 (周一, 周日)；口径统一到 backend.utils.week_range_str"""
-    from backend.utils import week_range_str
-    return week_range_str()
+    """兼容旧调用点：等价于「当前周期」（周期可配后不再专指一周）"""
+    return _get_period_range()
 
 
 def _get_api_key() -> str:
@@ -451,27 +546,35 @@ async def serve_portrait_image(portrait_id: int, request: Request):
 
 @router.get("/today")
 async def get_today_portrait(request: Request):
-    """获取本周画像（如果已生成）"""
+    """获取「本期画像」（如果已生成）。
+
+    P-3: 旧实现按周取 `rows[0]` 且**没有 ORDER BY**（同一周期用积分多生成过时可能返回更旧的那张），
+    SELECT 里也**没有 status**，导致前端「画像已删除」分支永远不触发。两者一并修掉。
+    """
     user = get_current_user(request)
     username = user["username"]
-    week_start, week_end = _get_week_range()
+    period = _period_type()
+    period_start, period_end = _get_period_range(period)
 
     rows = execute_query(
-        """SELECT id, username, created_date, style, image_path, ai_comment,
-                  prompt, generated_at, view_count, is_shared, share_scope, like_count
-           FROM student_portraits
-           WHERE username=? AND created_date BETWEEN ? AND ?""",
-        (username, week_start, week_end),
+        f"""SELECT {_P_COLS}
+            FROM student_portraits
+            WHERE username=? AND created_date BETWEEN ? AND ?
+            ORDER BY created_date DESC, id DESC LIMIT 1""",
+        (username, period_start, period_end),
     )
     if not rows:
-        return {"exists": False}
+        return {"exists": False, "period": {"type": period, "start": period_start, "end": period_end,
+                                            "label": _period_label(period)}}
 
     portrait = _format_portrait_row(rows[0])
     portrait = _enrich_with_student_info(portrait)
+    period_info = {"type": period, "start": period_start, "end": period_end,
+                   "label": _period_label(period)}
 
     # 如果已软删除，标记不可用但仍告知已生成
     if portrait.get("status") == "deleted":
-        return {"exists": True, "portrait": {**portrait, "deleted": True}}
+        return {"exists": True, "portrait": {**portrait, "deleted": True}, "period": period_info}
 
     # 增加浏览次数
     execute_insert_update(
@@ -479,7 +582,7 @@ async def get_today_portrait(request: Request):
         (portrait["id"],),
     )
     portrait["liked"] = _check_liked(portrait["id"], username)
-    return {"exists": True, "portrait": portrait}
+    return {"exists": True, "portrait": portrait, "period": period_info}
 
 
 @router.get("/styles")
@@ -520,108 +623,98 @@ async def set_theme(request: Request, body: ThemeRequest):
     return {"theme": body.theme}
 
 
-@router.post("/generate")
-async def generate_portrait(request: Request, body: GenerateRequest):
-    """生成本周画像（每周一次免费，可用 100 积分兑换额外机会）"""
-    user = get_current_user(request)
-    username = user["username"]
-
-    week_start, week_end = _get_week_range()
-
-    # R2: 先确认 AI 可用, 避免"扣了分却什么都生成不出来"
-    api_key = _get_api_key()
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 AI 服务 Key，暂时无法生成画像，请联系管理员")
-
-    # 检查本周是否已生成
-    existing = execute_query(
-        "SELECT id FROM student_portraits WHERE username=? AND created_date BETWEEN ? AND ?",
-        (username, week_start, week_end),
+def _count_period_portraits(username: str, period_start: str, period_end: str) -> int:
+    """本周期已生成几张（软删除的不占额度：与旧行为一致，删掉可以再来一张）"""
+    rows = execute_query(
+        """SELECT COUNT(*) FROM student_portraits
+           WHERE username=? AND created_date BETWEEN ? AND ?
+             AND COALESCE(status,'active')='active'""",
+        (username, period_start, period_end),
     )
-    charged = 0
-    if existing:
-        if not body.use_points:
-            raise HTTPException(status_code=400, detail="本周画像已生成，消耗 100 积分可再生成一次 ✨")
+    return int(rows[0][0]) if rows else 0
 
-        # 用 100 积分兑换本周额外生成机会。
-        # 注意角色分支：教师/管理员不在积分体系内（恒为 0 分，也不该给他们建分），
-        # 若一律走"积分不足"就变成**永久无法再次生成画像**——那是守卫引入的新问题。
-        # 所以非学生仍需显式点"兑换额外生成"，只是不设积分门槛。
-        from backend.permission_service import is_student_account
-        if is_student_account(username):
-            from backend.reward_engine import deduct_points, get_student_total
-            total = get_student_total(username)
-            if total < 100:
-                raise HTTPException(status_code=400, detail=f"积分不足，当前仅有 {total} 积分，需要 100 积分才能兑换额外生成机会 📉")
-            charged = deduct_points(username, "消耗100积分兑换画像生成", 100)
-            if charged <= 0:
-                raise HTTPException(status_code=400, detail="积分扣除未成功（可用积分不足），请刷新后重试")
-            logger.info(f"学生 {username} 消耗 {charged} 积分兑换了本周额外画像生成")
-        else:
-            logger.info(f"非学生账号 {username} 免积分兑换本周额外画像生成（教师/管理员不参与积分体系）")
 
-    # 确定风格
-    style = body.style or "random"
-    if style not in PORTRAIT_STYLES:
-        style = "random"
+def _log_generation(username: str, period_start: str, *, ok: bool, comment_ok: bool,
+                    image_ok: bool, seconds: float, charged: int, error: str = "") -> None:
+    """P-5：生成健康度落一条 —— 失败也要落，否则"成功率"无从统计"""
+    try:
+        execute_insert_update(
+            """INSERT INTO portrait_gen_log
+               (username, created_at, period_start, ok, comment_ok, image_ok, seconds,
+                charged_points, error)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (username, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), period_start,
+             1 if ok else 0, 1 if comment_ok else 0, 1 if image_ok else 0,
+             round(float(seconds or 0), 1), int(charged or 0), str(error or "")[:300]),
+        )
+    except Exception as e:
+        logger.warning(f"[portrait] 健康度落库失败({username}): {e}")
 
-    # 当前日期字符串
+
+def _fetch_portrait_of(username: str, created_date: str) -> dict[str, Any]:
+    """取某天那条画像（同日再生成 = 覆盖当天记录）"""
+    rows = execute_query(
+        f"SELECT {_P_COLS} FROM student_portraits WHERE username=? AND created_date=? LIMIT 1",
+        (username, created_date),
+    )
+    return _format_portrait_row(rows[0]) if rows else {}
+
+
+async def _run_generation(*, username: str, role: int, style: str, period: str,
+                          period_start: str, period_end: str, api_key: str,
+                          charged: int) -> dict[str, Any]:
+    """后台任务体：本期数据 → 寄语 → 配图 → 落库（失败退款 + 健康度）。
+
+    P-5：原来这一切都压在一个 HTTP 请求里（大模型 timeout=150 + 生图），前端挂 300 秒，
+    反代常常先超时 —— 学生会看到"失败"，而后端其实已经把图存下来了。
+    """
+    t0 = time.time()
+    comment_ok = False
+    img_ok = False
+    img_err = ""
+    label = _period_label(period)
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     try:
-        # 1. 聚合用户数据
+        # 1. 聚合数据（P-6：本期窗口交给 _enrich_role_data，画像吃的就是这个周期）
         profile = get_student_profile(username)
         profile["username"] = username
-        profile["role"] = user.get("role", 2)
-        role_names = {0: "管理员", 1: "教师", 2: "学生"}
-        profile["role_name"] = role_names.get(profile["role"], "用户")
+        profile["role"] = role
+        profile["role_name"] = {0: "管理员", 1: "教师", 2: "学生"}.get(role, "用户")
+        _enrich_role_data(profile, since=period_start, until=period_end, period_label=label)
 
-        # 1b. 补充教师/管理员特有数据
-        _enrich_role_data(profile)
-
-        # 2. 构建生图 Prompt（直接用于通义万相，无需 LLM 二次处理）
-        logger.info(f"构建生图 prompt: username={username}, role={profile['role_name']}, style={style}")
+        # 2. 生图 Prompt（直接给通义万相，无需 LLM 二次处理）
         img_prompt = build_portrait_image_prompt(profile, style)
 
-        # 3. LLM 生成创意寄语（失败有兜底文案, 不影响出图）
-        logger.info(f"开始生成寄语: username={username}")
+        # 3. 创意寄语（失败有兜底文案，不影响出图）
         try:
             comment_prompt = apply_skills(build_portrait_comment_prompt(profile, style), "portrait")
             comment = await call_ai_sync_with_timeout(comment_prompt, api_key, timeout=150, use_kb=False)
             comment = comment.strip().strip('"\'')
             comment_ok = True
         except Exception as e:
-            logger.error(f"生成寄语失败: {e}")
-            role_name = profile.get('role_name', '用户')
-            fallbacks = {
-                '教师': '三尺讲台育桃李，一支粉笔写春秋。今日的你依然在发光发热 🌟',
-                '管理员': '运筹帷幄之中，决胜千里之外。平台因你而精彩 🚀',
-            }
-            comment = fallbacks.get(role_name, '今日份的努力，是明日惊喜的铺垫！继续加油哦 🌟')
-            comment_ok = False
+            logger.error(f"生成寄语失败({username}): {e}")
+            comment = {
+                "教师": "三尺讲台育桃李，一支粉笔写春秋。今日的你依然在发光发热 🌟",
+                "管理员": "运筹帷幄之中，决胜千里之外。平台因你而精彩 🚀",
+            }.get(profile.get("role_name", ""), "今日份的努力，是明日惊喜的铺垫！继续加油哦 🌟")
 
         # 4. 通义万相生图
-        logger.info(f"开始生成图片: username={username}")
         save_dir = _get_portrait_dir(username)
-        style_key = style
-        filename = f"{today_str}_{style_key}"
-        img_err = ""
         try:
             image_path = await generate_and_save_image(
-                prompt=img_prompt,
-                save_dir=str(save_dir),
-                filename=filename,
+                prompt=img_prompt, save_dir=str(save_dir), filename=f"{today_str}_{style}",
             )
-            if not image_path:
-                logger.warning(f"生图失败: username={username}")
+            img_ok = bool(image_path)
+            if not img_ok:
                 img_err = "配图服务未返回图片"
                 image_path = ""
         except Exception as e:
-            logger.error(f"生图异常: {e}")
+            logger.error(f"生图异常({username}): {e}")
             img_err = str(e)[:120]
             image_path = ""
 
-        # 5. 保存到数据库（R2: 同一天再次生成 = 覆盖当天记录, 不再撞 UNIQUE(username, created_date)）
+        # 5. 落库（同日覆盖当天记录；同时写入周期字段，历史列表按周期展示）
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         old_row = execute_query(
             "SELECT id, image_path FROM student_portraits WHERE username=? AND created_date=?",
@@ -631,66 +724,221 @@ async def generate_portrait(request: Request, body: GenerateRequest):
             keep_path = old_row[0][1] if (image_path == "" and old_row[0][1]) else image_path
             execute_insert_update(
                 """UPDATE student_portraits
-                   SET style=?, image_path=?, ai_comment=?, prompt=?, generated_at=?, status='active'
+                   SET style=?, image_path=?, ai_comment=?, prompt=?, generated_at=?,
+                       status='active', period_type=?, period_start=?, period_end=?
                    WHERE id=?""",
-                (style_key, keep_path, comment, img_prompt, now_str, old_row[0][0]),
+                (style, keep_path, comment, img_prompt, now_str,
+                 period, period_start, period_end, old_row[0][0]),
             )
             image_path = keep_path
         else:
             execute_insert_update(
                 """INSERT INTO student_portraits
-                   (username, created_date, style, image_path, ai_comment, prompt, generated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (username, today_str, style_key, image_path, comment, img_prompt, now_str),
+                   (username, created_date, style, image_path, ai_comment, prompt, generated_at,
+                    period_type, period_start, period_end)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (username, today_str, style, image_path, comment, img_prompt, now_str,
+                 period, period_start, period_end),
             )
-    except HTTPException:
-        if charged:
-            _refund_points(username, charged, "画像生成中断")
-        raise
+
+        # 6. 退款口径与旧实现一致：本次没出图 → 退还本次积分
+        if charged and not img_ok:
+            _refund_points(username, charged, "本次配图未产出")
+            message = f"本次未生成新配图，{charged} 积分已退还 🙏（{img_err}）"
+            charged = 0
+        elif not image_path:
+            if charged:
+                _refund_points(username, charged, "配图未产出")
+                message = f"配图未生成，本次积分已退还 🙏（{img_err or '请稍后再试'}）"
+                charged = 0
+            else:
+                message = "寄语已生成，但配图未成功，可点「重试配图」再试一次 ✨"
+        elif not comment_ok:
+            message = "画像已生成（寄语使用了默认文案）🎨"
+        else:
+            message = f"{label}画像生成成功 🎉"
+
+        portrait = _fetch_portrait_of(username, today_str)
+        portrait["liked"] = False
+        _log_generation(username, period_start, ok=bool(image_path), comment_ok=comment_ok,
+                        image_ok=img_ok, seconds=time.time() - t0, charged=charged, error=img_err)
+        return {"portrait": portrait, "message": message, "charged_points": charged}
     except Exception as e:
-        # R2: 任何失败都冲正积分, 绝不白扣学生积分
         if charged:
             _refund_points(username, charged, "画像生成失败")
+        _log_generation(username, period_start, ok=False, comment_ok=comment_ok, image_ok=False,
+                        seconds=time.time() - t0, charged=charged, error=str(e)[:200])
         logger.error(f"画像生成失败({username}): {e}")
-        raise HTTPException(status_code=502, detail=f"画像生成失败，已退还 {charged} 积分，请稍后再试")
+        raise
 
-    # 重新查询本次结果(优先当天那条: 同日再生成会覆盖当天记录, 周内有多个历史画像时不能取到旧的那条)
-    rows = execute_query(
-        """SELECT id, username, created_date, style, image_path, ai_comment,
-                  prompt, generated_at, view_count, is_shared, share_scope, like_count
-           FROM student_portraits WHERE username=? AND created_date=?""",
-        (username, today_str),
-    ) or execute_query(
-        """SELECT id, username, created_date, style, image_path, ai_comment,
-                  prompt, generated_at, view_count, is_shared, share_scope, like_count
-           FROM student_portraits WHERE username=? AND created_date BETWEEN ? AND ?
-           ORDER BY created_date DESC""",
-        (username, week_start, week_end),
-    )
-    portrait = _format_portrait_row(rows[0]) if rows else {}
-    portrait["liked"] = False
 
-    # R11: 不再一律高喊"成功", 如实反映配图/寄语状态
-    #      付费兑换却本次没出图 → 无论库里是否还留着旧图, 都退还本次积分
-    if charged and img_err:
-        _refund_points(username, charged, "本次配图未产出")
-        message = f"本次未生成新配图，{charged} 积分已退还 🙏（{img_err}）"
-        charged = 0
-    elif not portrait.get("image_path"):
-        if charged:
-            _refund_points(username, charged, "配图未产出")
-            message = f"配图未生成，本次积分已退还 🙏（{img_err or '请稍后再试'}）"
+@router.post("/generate")
+async def generate_portrait(request: Request, body: GenerateRequest):
+    """生成「本期画像」：每周期 1 次免费，额外次数按系统配置兑换。
+
+    P-5：改为后台任务 —— 配额与积分在请求内判定并扣除，立即返回 task_id；
+    出图与落库在任务体里做，失败自动冲正积分，并向 portrait_gen_log 落健康度。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if not _portrait_enabled():
+        raise HTTPException(status_code=403, detail="AI 画像功能已在系统配置中关闭")
+
+    # 先确认 AI 可用，避免"扣了分却什么都生成不出来"
+    api_key = _get_api_key()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 AI 服务 Key，暂时无法生成画像，请联系管理员")
+
+    period = _period_type()
+    period_start, period_end = _get_period_range(period)
+    label = _period_label(period)
+    used = _count_period_portraits(username, period_start, period_end)
+
+    extra_points = int(_cfg("PORTRAIT_EXTRA_POINTS", 100) or 0)
+    extra_max = int(_cfg("PORTRAIT_EXTRA_MAX", 2) or 0)
+    staff_max = int(_cfg("PORTRAIT_STAFF_MAX", 2) or 0)
+
+    charged = 0
+    if used > 0:
+        if not body.use_points:
+            raise HTTPException(status_code=400,
+                                detail=f"{label}画像已生成，消耗 {extra_points} 积分可再生成一次 ✨")
+
+        # 角色分支：教师/管理员不在积分体系内（恒 0 分），但仍要显式点"兑换"，
+        # 并有每周期上限 —— 旧实现对他们完全不设限，等于开放了一个免费生图接口。
+        from backend.permission_service import is_student_account
+        if is_student_account(username):
+            if used - 1 >= extra_max:
+                raise HTTPException(status_code=400,
+                                    detail=f"{label}额外生成次数已达上限（{extra_max} 次）")
+            from backend.reward_engine import deduct_points, get_student_total
+            total = get_student_total(username)
+            if total < extra_points:
+                raise HTTPException(status_code=400, detail=f"积分不足，当前仅有 {total} 积分，需要 {extra_points} 积分才能兑换额外生成机会 📉")
+            charged = deduct_points(username, f"消耗{extra_points}积分兑换画像生成", extra_points)
+            if charged <= 0:
+                raise HTTPException(status_code=400, detail="积分扣除未成功（可用积分不足），请刷新后重试")
+            logger.info(f"学生 {username} 消耗 {charged} 积分兑换了{label}额外画像生成")
         else:
-            message = "寄语已生成，但配图未成功，稍后可再试一次 ✨"
-    elif not comment_ok:
-        message = "画像已生成（寄语使用了默认文案）🎨"
-    else:
-        message = "今日画像生成成功 🎉"
+            if used >= staff_max:
+                raise HTTPException(status_code=400,
+                                    detail=f"{label}生成次数已达上限（{staff_max} 次），请下个周期再来")
+            logger.info(f"非学生账号 {username} 免积分兑换{label}额外画像生成（教师/管理员不参与积分体系）")
+
+    # 确定风格
+    style = body.style or "random"
+    if style not in PORTRAIT_STYLES:
+        style = "random"
+
+    from backend.ai_task_manager import task_manager
+    try:
+        task_id = await task_manager.create_task(
+            description=f"AI 画像生成（{username} · {label}）",
+            coro_factory=lambda: _run_generation(
+                username=username, role=role, style=style, period=period,
+                period_start=period_start, period_end=period_end,
+                api_key=api_key, charged=charged),
+            owner_username=username,
+            # 同周期同用户：进行中的重复点击复用（防误触重复计费），
+            # 已完成的**不复用** —— 否则加购的第二次会拿到上一次的回执，学生白花积分。
+            dedupe_key=f"portrait:{username}:{period_start}",
+            reuse_completed=False,
+            max_concurrent=4,
+        )
+    except Exception as e:
+        if charged:
+            _refund_points(username, charged, "画像任务创建失败")
+        logger.error(f"画像任务创建失败({username}): {e}")
+        raise HTTPException(status_code=502, detail="画像任务创建失败，积分已退还，请稍后再试")
 
     return {
-        "message": message,
-        "portrait": portrait,
+        "task_id": task_id,
         "charged_points": charged,
+        "period": {"type": period, "start": period_start, "end": period_end, "label": label},
+        "used": used,
+        "message": f"{label}画像生成已开始，请稍候…",
+    }
+
+
+@router.post("/{portrait_id}/retry-image")
+async def retry_portrait_image(portrait_id: int, request: Request):
+    """P-5：只重试配图 —— 不占周期额度、不扣积分。
+
+    生图失败但寄语成功时，学生不该为了补一张图再花积分重来一次。
+    （单张图调用，耗时可控，这里保持同步；生成整张画像仍走后台任务。）
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    rows = execute_query(
+        "SELECT id, username, image_path, prompt, status FROM student_portraits WHERE id=?",
+        (portrait_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="画像不存在")
+    row = rows[0]
+    if row[1] != username and user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="只能补自己的画像配图")
+    if (row[4] or "active") != "active":
+        raise HTTPException(status_code=400, detail="该画像已删除")
+    if row[2] and os.path.exists(row[2]):
+        return {"message": "这张画像已有配图，无需重试", "image_ok": True}
+    prompt = row[3] or ""
+    if not prompt:
+        raise HTTPException(status_code=400, detail="这张画像没有可用的生图描述，请重新生成")
+    if not _get_api_key():
+        raise HTTPException(status_code=400, detail="未配置 AI 服务 Key，暂时无法补图")
+
+    t0 = time.time()
+    try:
+        image_path = await generate_and_save_image(
+            prompt=prompt, save_dir=str(_get_portrait_dir(username)),
+            filename=f"retry_{portrait_id}",
+        )
+    except Exception as e:
+        _log_generation(username, "", ok=False, comment_ok=True, image_ok=False,
+                        seconds=time.time() - t0, charged=0, error=str(e)[:200])
+        raise HTTPException(status_code=502, detail=f"补图失败：{str(e)[:80]}")
+    if not image_path:
+        _log_generation(username, "", ok=False, comment_ok=True, image_ok=False,
+                        seconds=time.time() - t0, charged=0, error="配图服务未返回图片")
+        raise HTTPException(status_code=502, detail="配图服务未返回图片，请稍后再试")
+
+    execute_insert_update(
+        "UPDATE student_portraits SET image_path=? WHERE id=?", (image_path, portrait_id))
+    _log_generation(username, "", ok=True, comment_ok=True, image_ok=True,
+                    seconds=time.time() - t0, charged=0)
+    return {"message": "配图已补上 🎉", "image_ok": True}
+
+
+@router.get("/health")
+async def portrait_health(request: Request, days: int = Query(7, ge=1, le=90)):
+    """P-5：画像生成健康度（管理员）—— 近 N 天成功率 / 平均耗时 / 常见失败原因"""
+    user = get_current_user(request)
+    if user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="仅管理员可查看")
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = execute_query(
+        """SELECT COUNT(*), COALESCE(SUM(ok),0), COALESCE(SUM(image_ok),0), COALESCE(AVG(seconds),0)
+           FROM portrait_gen_log WHERE created_at >= ?""",
+        (since,),
+    ) or []
+    total, ok_n, img_n, avg_s = (rows[0][0], rows[0][1], rows[0][2], rows[0][3]) if rows else (0, 0, 0, 0)
+    errs = execute_query(
+        """SELECT error, COUNT(*) FROM portrait_gen_log
+           WHERE created_at >= ? AND error <> ''
+           GROUP BY error ORDER BY 2 DESC LIMIT 5""",
+        (since,),
+    ) or []
+    return {
+        "days": days,
+        "total": total,
+        "success": ok_n,
+        "success_rate": round(ok_n / total * 100, 1) if total else None,
+        "image_ok": img_n,
+        "avg_seconds": round(float(avg_s or 0), 1),
+        "top_errors": [{"error": r[0], "count": r[1]} for r in errs],
     }
 
 
@@ -702,11 +950,10 @@ async def list_portraits(request: Request, include_deleted: bool = Query(False))
 
     status_sql = "" if include_deleted else "AND status='active'"
     rows = execute_query(
-        f"""SELECT id, username, created_date, style, image_path, ai_comment,
-                  prompt, generated_at, view_count, is_shared, share_scope, like_count
-           FROM student_portraits
-           WHERE username=? {status_sql}
-           ORDER BY created_date DESC""",
+        f"""SELECT {_P_COLS}
+            FROM student_portraits
+            WHERE username=? {status_sql}
+            ORDER BY created_date DESC, id DESC""",
         (username,),
     )
 
@@ -727,9 +974,7 @@ async def get_portrait_detail(portrait_id: int, request: Request):
     username = user["username"]
 
     rows = execute_query(
-        """SELECT id, username, created_date, style, image_path, ai_comment,
-                  prompt, generated_at, view_count, is_shared, share_scope, like_count, status
-           FROM student_portraits WHERE id=?""",
+        f"""SELECT {_P_COLS} FROM student_portraits WHERE id=?""",
         (portrait_id,),
     )
     if not rows or (rows[0][12] or "active") != "active":

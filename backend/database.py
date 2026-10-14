@@ -1760,6 +1760,41 @@ def init_db():
                 c.execute("ALTER TABLE student_portraits ADD COLUMN status TEXT DEFAULT 'active'")
             except sqlite3.OperationalError:
                 pass
+            # ── 周期化（AI 画像）──
+            # period_type/period_start/period_end：这张画像覆盖哪个周期（weekly/monthly）。
+            # 旧数据留空，按 created_date 反推展示为"历史"。
+            for col_def in [
+                ("period_type", "TEXT DEFAULT ''"),
+                ("period_start", "TEXT DEFAULT ''"),
+                ("period_end", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE student_portraits ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_portrait_period"
+                          " ON student_portraits(username, period_start)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 画像生成健康度（P-5）：每次生成/重试配图落一条，供管理员看成功率与耗时 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS portrait_gen_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                period_start TEXT DEFAULT '',
+                ok INTEGER DEFAULT 0,
+                comment_ok INTEGER DEFAULT 0,
+                image_ok INTEGER DEFAULT 0,
+                seconds REAL DEFAULT 0,
+                charged_points INTEGER DEFAULT 0,
+                error TEXT DEFAULT ''
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_pgl_time ON portrait_gen_log(created_at)")
+            except sqlite3.OperationalError:
+                pass
 
             # ═══════════════════════════════════════════════
             # 每日精选 — 智能知识池（按需补充，不过期）

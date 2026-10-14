@@ -11,7 +11,7 @@
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio, plus 12-level titles, achievement badges and the automatic points engine
-> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, AI self-portrait, online incremental upgrade, multi-theme appearance
+> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, AI portrait, online incremental upgrade, multi-theme appearance
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
@@ -48,6 +48,7 @@
 > - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports the wait and the endpoint tried
 > - 📊 **Exercise detail gains AI analysis and per-question accuracy** — the detail dialog became three tabs (Overview / Questions / Roster); the overview carries participation, average score, score rate, pass rate and per-question accuracy (graded-away questions stay out of the denominator), with AI analysis, export and a reminder for non-submitters
 > - 💯 **Scores are on a 100-point scale everywhere** — quizzes no longer read "3 / 5": results, exports and the dashboard feed show 60 / 100 with a grade tag and the raw score, new quizzes spread their points across 100, matching exercises and exams; four score bugs fixed (summary export treating the raw score as out of 100 — 5 questions, 3 right: 3% → 60%; the CSV export marking short answers wrong; two different accuracies between AI analysis and the results page; no full-score reference in the dashboard feed)
+> - 🎨 **"Weekly Portrait" becomes "AI Portrait" and speaks in periods** — the period is configurable (weekly by default, switchable to monthly), and the portrait separates lifetime identity from **this period's** performance, so name and content finally agree; generation moved to a background task (no more 300-second request), a failed image can be retried alone without spending allowance or points, the image prompt drops the real name and gender for stylised illustration, and admins get a generation-health line
 > - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
 
 ---
@@ -81,7 +82,7 @@ AI capabilities go through a single invocation service offering three modes, tak
 - **🔄 A closed loop, driven by a data flywheel**
   Behaviour collection → AI analysis → personalised feedback → behaviour change. Exams, practice, conversations, roll call and class drills enrich the learner profile, and the profile feeds the next round of AI decisions and recommendations.
 - **⚡ On-demand calls, zero idle spend**
-  Every AI call is triggered by actual use: the daily pick pool refills only once it is exhausted, news summaries load lazily, portraits are generated on visit, and speech synthesis bills nothing while switched off. No compute is burned on an empty classroom.
+  Every AI call is triggered by actual use: the daily pick pool refills only once it is exhausted, news summaries load lazily, a portrait is generated only when someone asks for one (or when the opt-in per-period job is enabled), and speech synthesis bills nothing while switched off. No compute is burned on an empty classroom.
 
 **Product strengths**
 
@@ -127,7 +128,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 8 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio | 10 |
-| ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, self-portrait, upgrade, about, other services | 9 |
+| ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, AI portrait, upgrade, about, other services | 9 |
 
 > The **permission note** at the end of each section states which roles can reach that feature; the full matrix is in the [Permissions Overview](#permissions).
 
@@ -1036,7 +1037,7 @@ Real-time message notification system:
 
 ---
 
-### AI Self-Portrait
+### AI Portrait
 
 Personalized AI portrait generated based on Tongyi Wanxiang model:
 
@@ -1047,13 +1048,16 @@ Personalized AI portrait generated based on Tongyi Wanxiang model:
   🦸 Superhero | ⚔️ Temple Knight | 🦋 Cyber Elf | 🐚 Ocean Explorer | ⏳ Time Traveler
 - **📝 Creative Messages**: Large model automatically generates stylized messages based on user data (martial arts, interstellar, classical, etc.)
 - **👤 Role-Aware**: Automatically adjusts portrait identity and message tone based on Student/Teacher/Admin
-- **♀️♂️ Gender Accuracy**: Reads user gender information to ensure correct portrait gender
-- **🖼️ Personal Gallery**: Historical portraits displayed chronologically
+- **🗓️ Configurable period**: one portrait per week by default, switchable to monthly in system configuration; the period decides both the free allowance and which slice of data the portrait is built from (this week / this month), so the name matches the content
+- **📊 Data attribution**: identity comes from lifetime data (title, total points, streak) while performance comes from **this period** (points earned, activities, exams, new wrong answers, chats, resource views) — lifetime numbers are never described as "this week"
+- **🖼️ Personal Gallery**: Historical portraits displayed chronologically, tagged with the period they cover
 - **🌐 Sharing Gallery**:
   - School-wide gallery / Class gallery / Popular recommendations
   - Like interaction
   - Three privacy scopes: Public / Class-visible / Private
-- **⏰ Generation Limit**: Once per week
+- **🔒 Image compliance**: stylised illustrations only — the image prompt carries no real name or gender and never aims at a photorealistic face (K12 context)
+- **⏰ Generation Limit**: one free portrait per period, then points as configured; teachers/admins are free but capped per period
+- **🩺 Generation health**: admins see the last 7 days' success rate, average duration and common failures; a failed image can be retried without spending allowance or points
 
 > **Available to all logged-in users**
 
@@ -1113,6 +1117,8 @@ Current version **8.6.0** (2026-10-05 ~ 10-14). Each release lists the changes a
 - 📱 Phone support landed, figure pipeline governed, points anti-farming, dashboard reworked, activity feed denoised, and system "reduce motion" respected
 - 📊 Exercise detail gained AI analysis, per-question accuracy and class statistics, plus a CSV result export (including non-submitters) and a "remind pending" action; the dialog became three tabs
 - 💯 Quiz scores are on a 100-point scale (results / exports / dashboard feed show 60 / 100 with a grade tag and the raw score, new quizzes spread their points across 100, questions still being graded no longer count as wrong); grading and full-score rules collapsed into one implementation, and four score-reporting bugs were fixed
+- 🎨 "Weekly Portrait" renamed to **AI Portrait**: the period is switchable to monthly in system configuration and the portrait separates lifetime identity from this period's performance; three copy blocks that contradicted the code were fixed (no scheduler, yet the UI claimed a Sunday auto-generation; lifetime data described as "this week's data")
+- 🩺 Portrait pipeline tightened: generation is a background task with polling (no more 300-second request); a failed image can be retried alone without spending allowance or points; teachers/admins got a per-period cap; the image prompt drops the real name and gender for stylised illustration; an opt-in per-period auto-generation switch (off by default) and an admin-visible generation-health line were added
 - 🧪 145 regression tests added; full suite 972 passed, 1 skipped
 - ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error instead of being silently rewritten; the whiteboard and generation batches need a backend restart; retrying across endpoints may bill the same prompt twice
 
@@ -1357,7 +1363,7 @@ SmartKBS/
 | User API Key | Environment variable `DASHSCOPE_API_KEY` / System Configuration |
 | Question images | `question_media/` organized by question ID |
 | Temporary upload files | `temp_uploads/` (auto-cleaned after 24 hours) |
-| Self-portraits | `<user_dir>/portraits/` |
+| AI portraits | `<user_dir>/portraits/` |
 | Whiteboard snapshots | Database `whiteboard_pages` table |
 
 ---
@@ -1408,7 +1414,7 @@ SmartKBS/
 | Progress Details | ❌ | ✅ Own Class | ✅ All |
 | Growth Portfolio | ✅ Own | ✅ Whole Class | ✅ Whole Class |
 | AI Classroom Summary | ❌ | ✅ | ✅ |
-| AI Self-Portrait | ✅ | ✅ | ✅ |
+| AI Portrait | ✅ | ✅ | ✅ |
 | Collaborative Whiteboard | ✅ Participate | ✅ Create | ✅ Create |
 | Activity Monitoring | ❌ | ✅ | ✅ |
 | Activity Data Reset | ❌ | ✅ (own activities only) | ✅ (all activities) |

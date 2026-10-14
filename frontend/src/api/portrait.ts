@@ -1,4 +1,4 @@
-/** 自我画像 API */
+/** AI 画像 API（原「每周画像 / 自我画像」，2026-10 统一命名） */
 import apiClient from './client';
 
 export interface PortraitData {
@@ -18,6 +18,10 @@ export interface PortraitData {
   liked?: boolean;
   deleted?: boolean;
   status?: string;
+  /** P-6：这张画像覆盖的周期（旧数据为空 → 按"历史"展示） */
+  period_type?: string;
+  period_start?: string;
+  period_end?: string;
   /** 补充信息 */
   student_name?: string;
   grade?: string;
@@ -32,14 +36,45 @@ export interface PortraitStyle {
   desc: string;
 }
 
+/** 周期信息（后端按系统配置给出：每周 / 每月） */
+export interface PeriodInfo {
+  type: 'weekly' | 'monthly' | string;
+  start: string;
+  end: string;
+  label: string;
+}
+
+/** 生成改为后台任务（P-5）：先拿 task_id，再轮询 */
 export interface GenerateResponse {
   message: string;
+  task_id: string;
+  charged_points: number;
+  used: number;
+  period: PeriodInfo;
+}
+
+/** 任务体返回（轮询拿到） */
+export interface GenerateTaskResult {
   portrait: PortraitData;
+  message: string;
+  charged_points: number;
 }
 
 export interface TodayResponse {
   exists: boolean;
   portrait?: PortraitData;
+  period?: PeriodInfo;
+}
+
+/** 画像生成健康度（管理员） */
+export interface PortraitHealth {
+  days: number;
+  total: number;
+  success: number;
+  success_rate: number | null;
+  image_ok: number;
+  avg_seconds: number;
+  top_errors: { error: string; count: number }[];
 }
 
 export interface PortraitListResponse {
@@ -71,9 +106,24 @@ export async function getPortraitStyles(): Promise<StylesResponse> {
   return data;
 }
 
-/** 生成今日画像（超时 300 秒，因需调用 LLM + 通义万相） */
+/**
+ * 生成本期画像：后端已改为后台任务，这里只等"任务创建"（很快），
+ * 真正的出图进度由 pollAiTask 轮询（见 stores/portraitStore）。
+ */
 export async function generatePortrait(style: string = 'random', usePoints: boolean = false): Promise<GenerateResponse> {
-  const { data } = await apiClient.post('/api/portrait/generate', { style, use_points: usePoints }, { timeout: 300000 });
+  const { data } = await apiClient.post('/api/portrait/generate', { style, use_points: usePoints }, { timeout: 30000 });
+  return data;
+}
+
+/** 只补配图：不占周期额度、不扣积分 */
+export async function retryPortraitImage(id: number): Promise<{ message: string; image_ok: boolean }> {
+  const { data } = await apiClient.post(`/api/portrait/${id}/retry-image`, {}, { timeout: 300000 });
+  return data;
+}
+
+/** 画像生成健康度（管理员） */
+export async function getPortraitHealth(days = 7): Promise<PortraitHealth> {
+  const { data } = await apiClient.get(`/api/portrait/health`, { params: { days } });
   return data;
 }
 

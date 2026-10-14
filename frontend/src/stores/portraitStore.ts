@@ -1,12 +1,20 @@
-/** 自我画像状态管理 (Zustand) */
+/** AI 画像状态管理 (Zustand) */
 import { create } from 'zustand';
-import type { PortraitData, PortraitStyle } from '../api/portrait';
+import type { PeriodInfo, PortraitData, PortraitStyle } from '../api/portrait';
 import * as portraitApi from '../api/portrait';
+import { pollAiTask } from '../api/aiTask';
+import i18n from '../i18n';
+
+/** 状态层没有 hook，文案走 i18n 直取（与 submitGuard 同一做法） */
+const tt = (key: string, opts?: Record<string, unknown>): string =>
+  String(i18n.t(`score:${key}`, opts ?? {}));
 
 interface PortraitStore {
-  // 今日画像
+  // 本期画像
   todayPortrait: PortraitData | null;
   todayExists: boolean;
+  /** 本期是哪一段（周 / 月，后端按系统配置给出） */
+  period: PeriodInfo | null;
   // 历史列表
   historyList: PortraitData[];
   // 画廊
@@ -24,7 +32,9 @@ interface PortraitStore {
   fetchToday: () => Promise<void>;
   fetchHistory: () => Promise<void>;
   fetchStyles: () => Promise<void>;
-  generate: (style?: string, usePoints?: boolean) => Promise<PortraitData | null>;
+  generate: (style?: string, usePoints?: boolean) => Promise<{ portrait: PortraitData | null; message: string } | null>;
+  /** 只补配图（生图失败时用；不占额度、不扣积分） */
+  retryImage: (id: number) => Promise<string | null>;
   toggleLike: (id: number) => Promise<{ action: string; count: number } | null>;
   share: (id: number, scope: string) => Promise<void>;
   unshare: (id: number) => Promise<void>;
@@ -37,6 +47,7 @@ interface PortraitStore {
 export const usePortraitStore = create<PortraitStore>()((set, get) => ({
   todayPortrait: null,
   todayExists: false,
+  period: null,
   historyList: [],
   publicGallery: [],
   classGallery: [],
@@ -53,10 +64,11 @@ export const usePortraitStore = create<PortraitStore>()((set, get) => ({
       set({
         todayExists: res.exists,
         todayPortrait: res.portrait || null,
+        period: res.period || null,
         loading: false,
       });
     } catch (e: any) {
-      set({ loading: false, error: e?.message || '获取今日画像失败' });
+      set({ loading: false, error: e?.message || tt('loadPortraitFailed') });
     }
   },
 
@@ -81,18 +93,36 @@ export const usePortraitStore = create<PortraitStore>()((set, get) => ({
   generate: async (style = 'random', usePoints = false) => {
     set({ generating: true, error: null });
     try {
+      // P-5: 后端已改后台任务 —— 先创建任务，再轮询；出图/落库都在任务体里
       const res = await portraitApi.generatePortrait(style, usePoints);
-      set({
-        todayPortrait: res.portrait,
-        todayExists: true,
-        generating: false,
-      });
-      // 刷新历史列表
+      const out: any = await pollAiTask(res.task_id, 300000);
+      set({ generating: false });
+      if (!out || out.error) {
+      const msg = out?.error || tt('generateTimeoutHint');
+        set({ error: msg });
+        // 超时不代表失败（后端可能已出图），仍刷新一次
+        await get().fetchToday();
+        return { portrait: null, message: msg };
+      }
+      const portrait: PortraitData = out.portrait || null;
+      set({ todayPortrait: portrait, todayExists: !!portrait });
+      await get().fetchToday();
       get().fetchHistory();
-      return res.portrait;
+      return { portrait, message: out.message || '生成完成' };
     } catch (e: any) {
-      const msg = e?.response?.data?.detail || e?.message || '生成失败';
+      const msg = e?.response?.data?.detail || e?.message || tt('generateFailed');
       set({ generating: false, error: msg });
+      return { portrait: null, message: msg };
+    }
+  },
+
+  retryImage: async (id: number) => {
+    try {
+      const res = await portraitApi.retryPortraitImage(id);
+      await get().fetchToday();
+      get().fetchHistory();
+      return res.message || '配图已补上';
+    } catch (e: any) {
       return null;
     }
   },

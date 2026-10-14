@@ -68,7 +68,7 @@ interface ConfigZone {
 
 const CONFIG_ZONES: ConfigZone[] = [
   { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward'] },
-  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill'] },
+  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill', 'portrait'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
   { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
@@ -89,6 +89,7 @@ const SECTION_TITLES: Record<string, string> = {
   imagegen: 'group_imagegen',
   tts: 'group_tts',
   classdrill: 'group_classdrill',
+  portrait: 'group_portrait',
   upload: 'group_upload',
   quota: 'group_quota',
   session: 'group_session',
@@ -234,6 +235,14 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'PODCAST_VOICE_B', labelKey: 'field_PODCAST_VOICE_B', descKey: 'field_PODCAST_VOICE_B_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
   // 课堂抽问（backend/api/class_drill_router.py）：总闸关掉后该页只从题库取题，零 AI 计费
   { key: 'CLASS_DRILL_AI_ENABLED', labelKey: 'field_CLASS_DRILL_AI_ENABLED', descKey: 'field_CLASS_DRILL_AI_ENABLED_desc', type: 'boolean', group: 'classdrill', required: false },
+
+  // AI 画像（backend/api/portrait_router.py）：周期决定"免费额度"与"画像吃哪一段数据"
+  { key: 'PORTRAIT_ENABLED', labelKey: 'field_PORTRAIT_ENABLED', descKey: 'field_PORTRAIT_ENABLED_desc', type: 'boolean', group: 'portrait', required: false },
+  { key: 'PORTRAIT_PERIOD_MONTHLY', labelKey: 'field_PORTRAIT_PERIOD_MONTHLY', descKey: 'field_PORTRAIT_PERIOD_MONTHLY_desc', type: 'boolean', group: 'portrait', required: false },
+  { key: 'PORTRAIT_EXTRA_POINTS', labelKey: 'field_PORTRAIT_EXTRA_POINTS', descKey: 'field_PORTRAIT_EXTRA_POINTS_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitPoint' },
+  { key: 'PORTRAIT_EXTRA_MAX', labelKey: 'field_PORTRAIT_EXTRA_MAX', descKey: 'field_PORTRAIT_EXTRA_MAX_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitTime' },
+  { key: 'PORTRAIT_STAFF_MAX', labelKey: 'field_PORTRAIT_STAFF_MAX', descKey: 'field_PORTRAIT_STAFF_MAX_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitTime' },
+  { key: 'PORTRAIT_AUTO_PUSH', labelKey: 'field_PORTRAIT_AUTO_PUSH', descKey: 'field_PORTRAIT_AUTO_PUSH_desc', type: 'boolean', group: 'portrait', required: false },
 
   // 积分防刷：每日上限（0 = 不限制）
   { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },

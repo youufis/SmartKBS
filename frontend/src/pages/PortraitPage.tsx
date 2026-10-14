@@ -13,7 +13,7 @@ import {
   DownloadOutlined, EyeOutlined, CalendarOutlined,
   ThunderboltOutlined, StarOutlined,
   FireOutlined, PictureOutlined, WarningOutlined,
-  ExclamationCircleOutlined,
+  ExclamationCircleOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { usePortraitStore } from '../stores/portraitStore'
@@ -94,13 +94,18 @@ const PortraitPage: React.FC = () => {
   }
   const currentUser = useAuthStore((s) => s.user)
   const {
-    todayPortrait, todayExists, historyList,
+    todayPortrait, todayExists, period, historyList,
     publicGallery, classGallery, hotGallery,
     styles, loading, generating, error,
     fetchToday, fetchHistory, fetchStyles,
     generate, toggleLike, share, unshare,
-    deletePortrait, fetchPublicGallery, fetchClassGallery, fetchHotGallery,
+    deletePortrait, retryImage, fetchPublicGallery, fetchClassGallery, fetchHotGallery,
   } = usePortraitStore()
+
+  /** 本期说法（后端按系统配置给"本周/本月"，兜底用文案键） */
+  const periodLabel = period?.label || t('thisPeriod')
+  const [retryingImage, setRetryingImage] = useState(false)
+  const [health, setHealth] = useState<any>(null)
 
   const [activeTab, setActiveTab] = useState('today')
   const [selectedStyle, setSelectedStyle] = useState('random')
@@ -163,6 +168,15 @@ const PortraitPage: React.FC = () => {
     fetchHistory()
   }, [fetchStyles, fetchToday, fetchHistory])
 
+  // P-5: 管理员看生成健康度（成功率/平均耗时），普通用户不请求
+  useEffect(() => {
+    if (currentUser?.role !== 'admin') return
+    import('../api/portrait')
+      .then(m => m.getPortraitHealth(7))
+      .then(setHealth)
+      .catch(() => { /* 健康度取不到不影响画像页 */ })
+  }, [currentUser?.role])
+
   useEffect(() => {
     if (activeTab === 'gallery') {
       fetchPublicGallery()
@@ -173,7 +187,7 @@ const PortraitPage: React.FC = () => {
 
   const handleGenerate = async () => {
     if (todayExists) {
-      // 本周已生成过 → 确认是否消耗 100 积分
+      // 本期已生成过 → 确认是否消耗积分
       Modal.confirm({
         title: t('confirmRegenerate'),
         icon: <ExclamationCircleOutlined />,
@@ -187,17 +201,26 @@ const PortraitPage: React.FC = () => {
         cancelText: t('cancelRegenerate'),
         onOk: async () => {
           const result = await generate(selectedStyle, true)
-          if (result) {
-            message.success(t('generateSuccess', { points: 100 }))
-          }
+          // P-5: 如实显示后端结果（可能是"配图未产出、积分已退还"）
+          if (result?.portrait) message.success(result.message)
+          else if (result?.message) message.warning(result.message)
         },
       })
       return
     }
     const result = await generate(selectedStyle)
-    if (result) {
-      message.success(t('generateSuccess', { points: 0 }))
-    }
+    if (result?.portrait) message.success(result.message)
+    else if (result?.message) message.warning(result.message)
+  }
+
+  /** P-5: 只补配图（不占额度、不扣积分） */
+  const handleRetryImage = async () => {
+    if (!todayPortrait) return
+    setRetryingImage(true)
+    const msg = await retryImage(todayPortrait.id)
+    setRetryingImage(false)
+    if (msg) message.success(msg)
+    else message.error(t('ptRetryImageFailed'))
   }
 
   const handleLike = async (id: number) => {
@@ -264,7 +287,7 @@ const PortraitPage: React.FC = () => {
   const canGenerate = !generating
 
   // ─────────────────────────────────────────
-  // Tab 1: 本周创作
+  // Tab 1: 本期创作
   // ─────────────────────────────────────────
   const renderTodayTab = () => (
     <Card style={{ borderRadius: 8 }}>
@@ -275,7 +298,21 @@ const PortraitPage: React.FC = () => {
             year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
           })}
         </Title>
-        <Text type="secondary">{t('weeklyPortraitDesc')}</Text>
+        {/* P-1: 文案与配置一致 —— 周期由后端给定（本周/本月），不再写死"每周日自动生成"（本来就没有调度器） */}
+        <Text type="secondary">
+          {t('portraitPeriodDesc', { label: periodLabel })}
+          {period?.start ? ` · ${period.start} ~ ${period.end}` : ''}
+        </Text>
+        {currentUser?.role === 'admin' && health && (
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t('healthLine', {
+                days: health.days, total: health.total,
+                rate: health.success_rate ?? '-', sec: health.avg_seconds,
+              })}
+            </Text>
+          </div>
+        )}
       </Card>
 
       {loading ? (
@@ -327,6 +364,12 @@ const PortraitPage: React.FC = () => {
               <Space orientation="vertical" style={{ width: '100%' }} size="small">
                 <Space>
                   <Tag icon={<CalendarOutlined />}>{todayPortrait.created_date}</Tag>
+                  {/* P-6: 标明这张画像覆盖哪一段（周 / 月），与配置一致 */}
+                  {todayPortrait.period_start && (
+                    <Tag color="processing">
+                      {periodLabel} · {todayPortrait.period_start} ~ {todayPortrait.period_end}
+                    </Tag>
+                  )}
                   <Tag icon={STYLE_EMOJI[todayPortrait.style] || '🎨'}>
                     {styles.find(s => s.key === todayPortrait.style)?.name || todayPortrait.style}
                   </Tag>
@@ -363,6 +406,17 @@ const PortraitPage: React.FC = () => {
                       download
                     >
                       {t('ptDownload')}
+                    </Button>
+                  )}
+                  {/* P-5: 生图失败时只补图，不占额度也不扣分 */}
+                  {!todayPortrait.image_url && (
+                    <Button
+                      type="text"
+                      icon={<ReloadOutlined />}
+                      loading={retryingImage}
+                      onClick={handleRetryImage}
+                    >
+                      {t('ptRetryImage')}
                     </Button>
                   )}
                 </Space>
@@ -597,8 +651,14 @@ const PortraitPage: React.FC = () => {
                 >
                   <Card.Meta
                     title={
-                      <Space>
+                      <Space wrap>
                         <Tag>{portrait.created_date}</Tag>
+                        {/* P-3/P-6: 历史按周期标注（旧数据没有周期字段就不显示） */}
+                        {portrait.period_start && (
+                          <Tag color="processing">
+                            {portrait.period_type === 'monthly' ? t('ptMonthly') : t('ptWeekly')}
+                          </Tag>
+                        )}
                         <Tag>{STYLE_EMOJI[portrait.style] || '🎨'}{' '}
                           {styles.find(s => s.key === portrait.style)?.name || portrait.style}
                         </Tag>

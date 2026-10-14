@@ -120,15 +120,12 @@ def build_portrait_image_prompt(
     Returns:
         英文生图 Prompt
     """
-    name = profile.get("name", "用户")
     grade = profile.get("grade", "")
     cls = profile.get("class", "")
     role = profile.get("role", 2)
-    role_name = profile.get("role_name", "用户")
     main_title = profile.get("titles", {}).get("main", "初窥门径")
     points = profile.get("total_points", 0)
     streak = profile.get("streak_days", 0)
-    gender = profile.get("gender", "")
 
     # 弱点描述
     weakness = profile.get("weakness", [])
@@ -157,18 +154,17 @@ def build_portrait_image_prompt(
     else:
         identity = "a Chinese student, young learner"
 
-    # 性别描述
-    gender_desc = {"male": "male", "female": "female"}.get(gender, "")
-    identity_with_gender = identity
-    if gender_desc:
-        identity_with_gender = f"{gender_desc} {identity}"
-
+    # 合规（P-4）：不再把「真实姓名 + 性别」送进生图 prompt。
+    #   - 姓名对万相无信息量（模型不认识这个人），只会诱导"生成某个具体真人"的解读；
+    #   - 未成年人的性别化形象刻画没有必要，README 里"性别精准"那条卖点已删；
+    #   - 配图统一按**风格化插画**出图（15 种风格里 8-bit 像素/水墨/童话精灵本就与"写实人脸"冲突）。
+    # 人物身份只保留抽象角色，姓名/年级等事实仍保留在寄语（文字）里。
     prompt_parts = [
-        f"Masterpiece portrait of {identity_with_gender}, photorealistic style, highly detailed face and skin texture.",
-        f"Name: {name}, {role_name}",
+        f"Stylized illustrator's portrait of {identity}, expressive character design, "
+        f"hand-drawn illustration look, symbolic and decorative, not a real person.",
     ]
     if grade or cls:
-        prompt_parts.append(f"Department: {grade} {cls}.")
+        prompt_parts.append(f"Representing a {grade} {cls} class atmosphere.")
     prompt_parts.append(f"Title: '{main_title}', achievement points: {points}.")
     teach_stats = profile.get("teach_stats", "")
     admin_stats = profile.get("admin_stats", "")
@@ -224,11 +220,13 @@ def build_portrait_image_prompt(
         "curious and playful, slight smirk",
         "warm and friendly, approachable look",
     ])
+    # 合规（P-4）：质量词也换成插画口径 —— 原来这四条是"专业人像摄影 / 8K / 极致皮肤质感"，
+    # 会把整张图重新拉回写实人脸，与"风格化插画 + 非真人"的定位互相打架。
     _quality = random.choice([
-        "professional portrait photography, 8K, highly detailed skin texture",
-        "award-winning portrait shot, razor sharp focus, 4K",
-        "editorial photography style, crisp details, perfect exposure",
-        "high-end magazine cover portrait, flawless lighting",
+        "high-quality digital illustration, clean line art, rich colors",
+        "concept-art quality, detailed painterly rendering, vivid palette",
+        "polished illustration, crisp shapes, harmonious colors",
+        "premium poster illustration, balanced composition, refined details",
     ])
 
     prompt_parts.append(
@@ -256,7 +254,6 @@ def build_portrait_comment_prompt(
     grade = profile.get("grade", "")
     cls = profile.get("class", "")
     role = profile.get("role", 2)
-    role_name = profile.get("role_name", "用户")
     main_title = profile.get("titles", {}).get("main", "初窥门径")
     points = profile.get("total_points", 0)
     streak = profile.get("streak_days", 0)
@@ -266,6 +263,22 @@ def build_portrait_comment_prompt(
     exam_str = ""
     if exams.get("count", 0) > 0:
         exam_str = f"近期{exams['count']}场考试平均{exams['avg']}分，趋势{exams.get('trend', '稳定')}"
+
+    # P-6：本期（周 / 月，随系统配置）数据 —— 画像讲"这个周期"，而不是含糊的"最近"
+    period_stats = profile.get("period_stats") or {}
+    period_label = profile.get("period_label") or "本周"
+    if period_stats:
+        bits = []
+        if period_stats.get("points"):
+            bits.append(f"新增{period_stats['points']}积分")
+        if period_stats.get("activities"):
+            bits.append(f"参与{period_stats['activities']}次活动")
+        if period_stats.get("exams"):
+            bits.append(f"{period_stats['exams']}场考试")
+        if period_stats.get("wrong"):
+            bits.append(f"新增错题{period_stats['wrong']}道")
+        if bits:
+            exam_str = (exam_str + "；" if exam_str else "") + f"{period_label}：{'、'.join(bits)}"
 
     # 薄弱点
     weakness = profile.get("weakness", [])
@@ -316,42 +329,61 @@ def build_portrait_comment_prompt(
         # 聚焦闪光点——把数据变成积极、有温度的描述
         extra_stats = ""
         if student_stats:
+            # P-6：优先讲本期（period_stats），本期为空才退回累计（新加入的学生也能生成）
+            ps = period_stats or {}
+
+            def _pv(key: str, fallback_key: str = "") -> int:
+                val = ps.get(key)
+                if val:
+                    return int(val)
+                return int(student_stats.get(fallback_key or key, 0) or 0)
+
+            def _plabel(key: str) -> str:
+                """有本期数据就说"本期"，否则说"累计" —— 避免把累计数说成本周"""
+                return period_label if (ps.get(key) or 0) > 0 else "累计"
+
             sparkles = []
             s = student_stats
             # 闪光点1：坚持不懈
-            if s.get("total_exams", 0) >= 3:
-                sparkles.append(f"经历了{s['total_exams']}场考试的打磨，越战越勇")
-            elif s.get("total_exams", 0) > 0:
-                sparkles.append(f"勇敢地接受了{s['total_exams']}场考试的挑战")
-            # 闪光点2：本周积极性
-            if s.get("week_points", 0) >= 10:
-                sparkles.append(f"本周火力全开，拿下{s['week_points']}积分")
-            elif s.get("week_points", 0) > 0:
-                sparkles.append(f"本周有{s['week_points']}积分入账，稳步前进")
+            _ex = _pv("exams", "total_exams")
+            if _ex >= 3:
+                sparkles.append(f"{_plabel('exams')}经历了{_ex}场考试的打磨，越战越勇")
+            elif _ex > 0:
+                sparkles.append(f"勇敢地接受了{_ex}场考试的挑战")
+            # 闪光点2：本期积极性
+            _pt = _pv("points", "week_points")
+            if _pt >= 10:
+                sparkles.append(f"{period_label}火力全开，拿下{_pt}积分")
+            elif _pt > 0:
+                sparkles.append(f"{period_label}有{_pt}积分入账，稳步前进")
             # 闪光点3：求知欲
-            if s.get("total_chats", 0) >= 10:
-                sparkles.append(f"求知欲爆棚，和AI聊了{s['total_chats']}个回合")
-            elif s.get("total_chats", 0) > 0:
-                sparkles.append(f"善于提问，主动与AI对话{s['total_chats']}次")
+            _ch = _pv("chats", "total_chats")
+            if _ch >= 10:
+                sparkles.append(f"求知欲爆棚，和AI聊了{_ch}个回合")
+            elif _ch > 0:
+                sparkles.append(f"善于提问，主动与AI对话{_ch}次")
             # 闪光点4：团队协作
-            if s.get("total_discussions", 0) >= 5:
-                sparkles.append(f"乐于分享，在{s['total_discussions']}次讨论中发光发热")
-            elif s.get("total_discussions", 0) > 0:
-                sparkles.append(f"积极参与讨论，碰撞思维火花")
+            _dc = _pv("discussions", "total_discussions")
+            if _dc >= 5:
+                sparkles.append(f"乐于分享，在{_dc}次讨论中发光发热")
+            elif _dc > 0:
+                sparkles.append("积极参与讨论，碰撞思维火花")
             # 闪光点5：迎难而上（改错题的积极面）
-            if s.get("wrong_count", 0) >= 5:
-                sparkles.append(f"面对{s['wrong_count']}道错题毫不退缩，正在逐个击破")
-            elif s.get("wrong_count", 0) > 0:
-                sparkles.append(f"认真对待每一道错题，从中汲取养分")
+            _wr = _pv("wrong", "wrong_count")
+            if _wr >= 5:
+                sparkles.append(f"面对{_wr}道错题毫不退缩，正在逐个击破")
+            elif _wr > 0:
+                sparkles.append("认真对待每一道错题，从中汲取养分")
             # 闪光点6：资源探索
-            if s.get("week_resource_views", 0) >= 10:
-                sparkles.append(f"本周探索了{s['week_resource_views']}个学习资源，知识面不断拓展")
+            _rv = _pv("resource_views", "week_resource_views")
+            if ps.get("resource_views", 0) >= 10:
+                sparkles.append(f"{period_label}探索了{_rv}个学习资源，知识面不断拓展")
             elif s.get("total_resource_views", 0) >= 10:
                 sparkles.append(f"已浏览{s['total_resource_views']}个学习资源，主动获取知识")
-            elif s.get("total_resource_views", 0) > 0:
-                sparkles.append(f"积极浏览学习资源，开阔视野")
+            elif _rv > 0:
+                sparkles.append("积极浏览学习资源，开阔视野")
             # 闪光点7：最热爱的活动
-            act_detail = s.get("activity_detail", {})
+            act_detail = ps.get("activity_detail") or s.get("activity_detail", {})
             if act_detail:
                 top_act = sorted(act_detail.items(), key=lambda x: -x[1])[0]
                 name_cn = _ACTIVITY_NAMES.get(top_act[0], top_act[0])
@@ -364,7 +396,7 @@ def build_portrait_comment_prompt(
             profile_section = f"【学生数据】\n🌟 {name} · {grade} {cls} · 称号「{main_title}」"
         role_instruction = "语气亲切有活力，像好朋友在聊天"
 
-    prompt = f"""你是一位创意作家。根据以下用户数据，为ta创作一段"本周画像寄语"。
+    prompt = f"""你是一位创意作家。根据以下用户数据，为ta创作一段"{period_label}画像寄语"。
 
 【关于ta】
 {profile_section}
@@ -380,6 +412,7 @@ def build_portrait_comment_prompt(
 【创作方向】
 - 你可以用任何形式来写——一段故事、一首小诗、一段内心独白、幻想场景、对话片段……都可以
 - 重点是从ta的数据中找到**最特别的发光点**，围绕它展开
+- 若数据里标了「{period_label}」就按周期讲，标了「累计」的只能当背景，不要把累计数说成{period_label}
 - 让ta的独特之处成为作品的灵魂，而不是简单罗列数字
 - 温暖真诚，让人读完觉得被看见、被肯定
 - {role_instruction}
