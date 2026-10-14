@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   Modal, Form, Input, Button, Space, Select, Radio, Checkbox,
-  Typography, Divider, Tag, message, Empty, Popconfirm,
+  Typography, Divider, Tag, message, Empty, Popconfirm, InputNumber, Switch,
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons'
 import FormulaRenderer from './FormulaRenderer'
 import ActivityScopeSelector from './ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import type { ActivityScopeValue } from './ActivityScopeSelector'
+import { distributeScores } from '../utils/score'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -48,6 +49,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   const [description, setDescription] = useState(initialDescription)
   const [questions, setQuestions] = useState<Question[]>(initialQuestions || [])
   const [saving, setSaving] = useState(false)
+  // R2(Step B): 默认由系统把总分均摊成 100(与同步练习/考试同一口径); 教师改过任一题分值即转手动
+  const [autoScore, setAutoScore] = useState(true)
   const [scope, setScope] = useState<ActivityScopeValue>({
     target_scope: 'teacher_classes',
     target_grade: '',
@@ -60,9 +63,14 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
       setTitle(initialTitle)
       setDescription(initialDescription)
       setQuestions(initialQuestions || [])
+      setAutoScore(true)
       setScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
     }
   }, [open, initialTitle, initialDescription, initialQuestions])
+
+  /** 自动模式下的每题分值(合计恒为 100); 手动模式用题目自身的 score */
+  const autoScores = useMemo(() => distributeScores(questions.length, 100), [questions.length])
+  const effectiveScore = (q: Question, i: number) => (autoScore ? (autoScores[i] ?? 1) : q.score)
 
   const addQuestion = (type: 'single' | 'multiple' | 'true_false') => {
     const newQ: Question = {
@@ -169,7 +177,9 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
     setSaving(true)
     try {
-      await onSave(title, description, questions, scope)
+      // 自动模式: 把均摊后的分值显式写进题目(后端据此判定"已配过分值"不再覆盖)
+      const payload = questions.map((q, i) => ({ ...q, score: effectiveScore(q, i) }))
+      await onSave(title, description, payload, scope)
     } finally {
       setSaving(false)
     }
@@ -204,7 +214,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
           {t('createQuizCount', { count: questions.length })}
         </Button>,
       ]}
-      width={800}
+      width="min(800px, 94vw)"
       style={{ top: 20 }}
     >
       {/* 基本信息 */}
@@ -237,6 +247,18 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
       {/* 添加题目按钮 */}
       <div style={{ marginBottom: 16 }}>
         <Text strong style={{ fontSize: 15 }}>{t('questionList')}</Text>
+        {/* R2(Step B): 满分口径与同步练习/考试对齐 —— 默认均摊 100, 教师可逐题改分 */}
+        <div style={{ marginTop: 6 }}>
+          <Space size={8} wrap>
+            <Switch size="small" checked={autoScore} onChange={setAutoScore} />
+            <Text style={{ fontSize: 12 }}>{t('qeAutoScore')}</Text>
+            {autoScore && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('qeScoreTotal', { total: 100, n: questions.length })}
+              </Text>
+            )}
+          </Space>
+        </div>
         <div style={{ marginTop: 8 }}>
           <Space>
             <Button icon={<PlusOutlined />} type="primary" onClick={() => addQuestion('single')}>
@@ -282,6 +304,13 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                   <Select.Option value="multiple">{t('quizMultipleChoice')}</Select.Option>
                   <Select.Option value="true_false">{t('trueFalse')}</Select.Option>
                 </Select>
+                {/* R2: 每题分值(默认自动均摊成合计 100, 改过即转手动) */}
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('qeScore')}</Text>
+                <InputNumber size="small" min={1} max={100} style={{ width: 64 }}
+                  value={effectiveScore(q, index)}
+                  disabled={autoScore}
+                  onChange={(v) => { setAutoScore(false); updateQuestion(q.id, 'score', Number(v) || 1) }}
+                />
               </Space>
               <Space>
                 <Button size="small" icon={<ArrowUpOutlined />}

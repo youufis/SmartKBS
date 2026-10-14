@@ -29,6 +29,10 @@ from backend.permission_service import (
     _resolve_class_id_flexible,
 )
 from backend.summary_service import SUMMARY_TYPES, build_summary
+# P0-2/R2-b: 测验对错与满分口径与结果页/AI 分析共用一份实现
+from backend.quiz_stats import (
+    quiz_graded, answer_index_map, is_question_correct, pending_keys, quiz_total,
+)
 
 router = APIRouter()
 
@@ -690,6 +694,15 @@ def _safe_sheet_name(name: str) -> str:
 
 # ── CSV 响应辅助 ──
 
+def _fmt_num(v):
+    """数值列去掉多余小数尾巴(100.0 → 100), 让 Excel 直接当数字用"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return v
+    return int(f) if abs(f - int(f)) < 1e-9 else round(f, 1)
+
+
 def _csv_response(rows: list[list[str]], headers: list[str], filename: str) -> StreamingResponse:
     """将数据转为 CSV 响应（带 UTF-8 BOM，Excel 可直接打开）"""
     buf = io.StringIO()
@@ -731,45 +744,125 @@ def export_quiz_result(quiz_id: int, request: Request):
     )
     _assert_can_view_interaction(user, qcreator[0][0] if qcreator else "", "随堂测验")
     questions = json.loads(quiz[4]) if isinstance(quiz[4], str) else quiz[4]
+    questions = questions if isinstance(questions, list) else []
+    # R2: 满分 = 各题分值之和(老测验=题数, 新测验=100), 不再把原始分当百分制
+    total = quiz_total(questions) or float(len(questions) or 0)
 
-    # 获取答题记录
+    # 获取答题记录(带 graded 留痕: 简答题的对错以 AI/教师判分为准)
     answers = execute_query(
-        """SELECT student_username, answers, score, submitted_at
+        """SELECT student_username, answers, score, submitted_at, graded
            FROM interaction_quiz_answers WHERE quiz_id = ? ORDER BY score DESC""",
         (quiz_id,),
     )
 
-    csv_headers = ["学生", "得分"]
-    for i, q in enumerate(questions):
+    csv_headers = ["学生", "百分制得分", "原始分", "满分", "得分率(%)", "批改状态"]
+    for i, _q in enumerate(questions):
         csv_headers.append(f"第{i + 1}题答案")
         csv_headers.append(f"第{i + 1}题是否正确")
+        csv_headers.append(f"第{i + 1}题判分来源")
+
+    graded_by_label = {
+        "ai": "AI批改", "keyword": "要点批改", "exact": "系统判分",
+        "teacher": "教师批改", "queued": "待批改", "none": "未自动判分",
+    }
 
     csv_rows = []
     for a in answers:
-        student = a[0]
-        ans_data = json.loads(a[1]) if isinstance(a[1], str) else a[1]
-        score = a[2]
-        row = [student, str(score)]
+        score = float(a[2] or 0)
+        graded_map = quiz_graded(a[4])
+        idx_map = answer_index_map(a[1])
+        pend = pending_keys(graded_map)
+        row = [
+            a[0],
+            _fmt_num(round(score / max(total, 1) * 100, 1)),
+            _fmt_num(round(score, 1)),
+            _fmt_num(total),
+            _fmt_num(round(score / max(total, 1) * 100, 1)),
+            f"待批改 {len(pend)} 题" if pend else "已完成",
+        ]
         for i, q in enumerate(questions):
-            user_ans = ""
-            correct = ""
-            for item in ans_data:
-                if item.get("question_index") == i:
-                    user_ans = item.get("answer", "")
-                    correct_ans = q.get("answer", "")
-                    if isinstance(q.get("options"), dict):
-                        correct_ans = q.get("answer", "")
-                    is_correct = "是" if str(user_ans).upper() == str(correct_ans).upper() else "否"
-                    row.append(user_ans)
-                    row.append(is_correct)
-                    break
+            g = graded_map.get(str(i)) if isinstance(graded_map.get(str(i)), dict) else {}
+            user_ans = idx_map.get(i, "")
+            row.append(user_ans)
+            if str(i) in pend:
+                row.append("待批改")
             else:
-                row.append("")
-                row.append("")
+                row.append("是" if is_question_correct(
+                    g, user_ans, str(q.get("answer", "")).strip(),
+                    q.get("type", "single"), q.get("options")) else "否")
+            row.append(graded_by_label.get(str(g.get("graded_by") or ""), ""))
         csv_rows.append(row)
 
     filename = f"随堂测验_{quiz[2]}.csv"
     return _csv_response(csv_rows, csv_headers, filename)
+
+
+@router.get("/practice/{session_id}", summary="导出同步练习结果 (CSV)")
+async def export_practice_result(session_id: int, request: Request):
+    """导出同步练习的逐人成绩(含未交名单)。
+
+    P1-5: 同步练习此前完全没有导出入口, 教师只能一屏一屏看。这里直接复用
+    practice_router.get_session_detail 的权限与名单口径(含目标范围外的过滤),
+    不另写一份, 避免两处口径不一致。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    from backend.api.practice_router import get_session_detail
+    data = await get_session_detail(session_id, request)   # 内部已做创建者/范围校验
+    sess = data.get("session") or {}
+    questions = data.get("questions") or []
+    total = float(sess.get("total_score") or 0) or sum(
+        float(q.get("score") or 0) for q in questions)
+    attempts = {a.get("student_username"): a for a in (data.get("attempts") or [])}
+
+    headers = ["学号", "姓名", "年级", "班级", "状态", "百分制得分", "原始分", "满分",
+               "得分率(%)", "对题数", "批改状态", "提交时间"]
+
+    rows = []
+    for stu in (data.get("students") or []):
+        uname = stu.get("username")
+        a = attempts.get(uname)
+        score = float((a or {}).get("score") or 0)
+        graded = (a or {}).get("graded") or {}
+        # 逐题对错按题目 question_id 对齐(与答卷改分的键一致)
+        correct = 0
+        for q in questions:
+            g = graded.get(str(q.get("question_id")))
+            if isinstance(g, dict) and g.get("is_correct"):
+                correct += 1
+        pending_ai = int((a or {}).get("pending_ai") or 0)
+        pending_review = int((a or {}).get("pending_review") or 0)
+        if not a:
+            state = "未提交"
+        elif (a or {}).get("teacher_reviewed"):
+            state = "教师已批改"
+        elif pending_ai:
+            state = f"批改中 {pending_ai} 题"
+        elif pending_review:
+            state = f"待人工批改 {pending_review} 题"
+        else:
+            state = "已批改"
+        rows.append([
+            uname,
+            stu.get("name") or uname,
+            stu.get("grade") or "",
+            stu.get("class") or "",
+            "已提交" if a else "未提交",
+            _fmt_num(round(score / max(total, 1) * 100, 1)) if a else "",
+            _fmt_num(round(score, 1)) if a else "",
+            _fmt_num(total),
+            _fmt_num(round(score / max(total, 1) * 100, 1)) if a else "",
+            correct if a else "",
+            state,
+            (a or {}).get("submitted_at") or "",
+        ])
+
+    rows.sort(key=lambda r: (r[4] != "已提交", str(r[3]), str(r[1])))
+    filename = f"同步练习_{sess.get('title') or session_id}.csv"
+    return _csv_response(rows, headers, filename)
 
 
 # ── 7. 导出投票结果 ──

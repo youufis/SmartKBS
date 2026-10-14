@@ -23,6 +23,17 @@ from backend.database import (
 # S-GRADING(P3): 主观题后台批量批改引擎 + 共用判分规则
 from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
 from backend.grading_rules import keyword_fallback
+# P0-2: 测验判分/统计口径收敛到 backend.quiz_stats (唯一实现), 本模块只保留别名
+from backend.quiz_stats import (
+    quiz_graded as _quiz_graded,
+    quiz_questions as _quiz_questions,
+    quiz_total as _quiz_total,
+    normalize_quiz_scores,
+    answer_index_map as _answer_index_map,
+    is_question_correct as _is_question_correct,
+    split_answers as _split_answers,
+    build_question_stats as _build_question_stats,
+)
 from backend.logger import logger
 from backend.prompts import apply_skills, build_ai_role
 from backend.api.chat_router import get_api_keys
@@ -45,6 +56,8 @@ class QuizCreate(BaseModel):
     target_grade: str = ""
     target_class: str = ""
     target_users: str = ""
+    # R2(Step B): True=由后端把各题分值折算成合计 100(教师没手工配分值时)
+    auto_scores: bool = True
 
 
 class QuizAnswerSubmit(BaseModel):
@@ -451,6 +464,7 @@ class QuizUpdate(BaseModel):
     description: str | None = None
     questions: str | None = None
     status: str | None = None
+    auto_scores: bool = True
 
 
 class PollUpdate(BaseModel):
@@ -469,28 +483,6 @@ def _get_quiz_row(quiz_id: int) -> dict[str, Any] | None:
     """S10: 统一按字典取测验字段, 淘汰 quiz[0][4] 这类位置索引"""
     rows = execute_query_dict("SELECT * FROM interaction_quizzes WHERE id = ?", (quiz_id,))
     return rows[0] if rows else None
-
-
-def _quiz_questions(quiz_row: dict[str, Any]) -> list[Any]:
-    raw = quiz_row.get("questions")
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            return []
-    return raw if isinstance(raw, list) else []
-
-
-def _quiz_graded(row: Any) -> dict[str, Any]:
-    """interaction_quiz_answers.graded → 逐题批改结果字典(老数据为空则返回 {})
-
-    老数据只存了总分没有逐题留痕, 调用方据此退回"按精确匹配重算"的旧口径。
-    """
-    try:
-        data = json.loads(row) if isinstance(row, str) else (row or {})
-    except (json.JSONDecodeError, TypeError):
-        data = {}
-    return data if isinstance(data, dict) else {}
 
 
 def _answer_matches(user_ans: str, correct_ans: str, q_type: str, options: Any = None) -> bool:
@@ -547,6 +539,10 @@ async def create_quiz(req: QuizCreate, request: Request):
     except (json.JSONDecodeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"试题格式错误: {e}")
 
+    # R2(Step B): 题面分值折算成合计 100 —— 与同步练习/考试同一套百分制口径。
+    # 老实现每题固定 1 分(满分=题数), 5 题答对 3 题显示"3/5", 与"60 分"对不上。
+    questions = normalize_quiz_scores(questions, req.auto_scores)
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     quiz_id = execute_insert_update(
         """INSERT INTO interaction_quizzes
@@ -580,7 +576,7 @@ async def create_quiz(req: QuizCreate, request: Request):
             logger.warning(f"发送随堂测验通知失败: {e}")
     asyncio.create_task(_notify_quiz())
 
-    return {"message": "测验创建成功", "quiz_id": quiz_id}
+    return {"message": "测验创建成功", "quiz_id": quiz_id, "total_score": _quiz_total(questions)}
 
 
 def _can_manage_quiz(username: str, role: int, quiz_id: int) -> bool:
@@ -614,11 +610,16 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
             params.append(val)
     if req.questions is not None:
         try:
-            json.loads(req.questions)
+            edited = json.loads(req.questions)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="试题格式错误")
+        # 已有答卷时不动分值: 老答卷的分数是按旧满分(题数)记的, 改了分母就对不上了
+        has_answers = bool(execute_query(
+            "SELECT 1 FROM interaction_quiz_answers WHERE quiz_id = ? LIMIT 1", (quiz_id,)))
+        if isinstance(edited, list) and not has_answers:
+            edited = normalize_quiz_scores(edited, req.auto_scores)
         updates.append("questions = ?")
-        params.append(req.questions)
+        params.append(json.dumps(edited, ensure_ascii=False) if isinstance(edited, list) else req.questions)
 
     params.append(quiz_id)
     execute_insert_update(
@@ -1172,6 +1173,8 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
 
     pending_ai = sum(1 for d in details if d.get("grading") == "pending")
     return {
+        # P2-14: 显式声明视角 —— 前端原来靠 "有无 quiz_title 字段" 区分师生, 语义脆弱
+        "view": "student",
         "quiz_title": quiz_row0.get("title"),
         "score": total_score,
         "total_score": q_score,
@@ -1181,34 +1184,6 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
         "pending_ai": pending_ai,
         "pending_review": sum(1 for d in details if d.get("needs_review")),
     }
-
-
-def _answer_index_map(raw: Any) -> dict[int, str]:
-    """答卷 JSON → {题号: 答案}"""
-    try:
-        user_answers = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except (json.JSONDecodeError, TypeError):
-        user_answers = []
-    out: dict[int, str] = {}
-    if isinstance(user_answers, list):
-        for ua in user_answers:
-            if isinstance(ua, dict) and ua.get("question_index") is not None:
-                try:
-                    out[int(ua["question_index"])] = str(ua.get("answer", "")).strip()
-                except (TypeError, ValueError):
-                    continue
-    return out
-
-
-def _is_question_correct(g: Any, user_ans: str, correct_ans: str, q_type: str) -> bool:
-    """该题是否判对: 有留痕以留痕为准, 没留痕(老数据)才按精确匹配重算。
-
-    S-GRADING(P3): 简答题由 AI 判分, 用「字符串相等」重算必然得到"答错",
-    学生卷面得分与逐题对错因此长期互相矛盾。
-    """
-    if isinstance(g, dict) and g:
-        return bool(g.get("is_correct"))
-    return _answer_matches(user_ans, correct_ans, q_type)
 
 
 def _calc_student_correct_count(answer_row: tuple[Any, ...], questions: list[Any],
@@ -1254,25 +1229,8 @@ async def get_quiz_results(quiz_id: int, request: Request):
     for a in answers:
         parsed.append((a, _answer_index_map(a[1]), _quiz_graded(a[4])))
 
-    question_stats = []
-    for i, q in enumerate(questions):
-        q_type = q.get("type", "single")
-        correct_ans = str(q.get("answer", "")).strip()
-        correct_count = sum(1 for _a, m, gm in parsed
-                            if _is_question_correct(gm.get(str(i)), m.get(i, ""), correct_ans, q_type))
-        question_stats.append({
-            "index": i,
-            "question": q.get("question", q.get("question_text", "")),
-            "options": q.get("options", []),
-            "correct_answer": correct_ans,
-            "type": q_type,
-            "svg_content": q.get("svg_content") or q.get("svg_code", ""),
-            "has_svg": q.get("has_svg", 1 if q.get("svg_code") or q.get("svg_content") else 0),
-            "media_placeholders": q.get("media_placeholders", []),
-            "correct_count": correct_count,
-            "total_count": len(answers),
-            "correct_rate": round(correct_count / max(len(answers), 1) * 100, 1),
-        })
+    quiz_total = _quiz_total(questions)
+    question_stats = _build_question_stats(questions, parsed)
 
     # 建立学生用户名→姓名/年级/班级映射（批量查询，班级优先用 classes.display_name）
     usernames = [a[0] for a in answers]
@@ -1297,39 +1255,65 @@ async def get_quiz_results(quiz_id: int, request: Request):
                     cls_disp = raw_cls if ("班" in raw_cls or not raw_cls.isdigit()) else f"{raw_cls}班"
             stu_map[r[0]] = {"name": r[1] or r[0], "grade": str(r[2] or "").strip(), "class_name": (cls_disp or "").strip()}
 
+    # R2/P0: 逐人成绩统一口径 —— 百分制折算 + 批改中的题不计入"答对题数"
+    student_answers = []
+    for a, m, gm in parsed:
+        pending_set = pending_keys(gm)
+        correct_count = sum(
+            1 for i2, q2 in enumerate(questions)
+            if str(i2) not in pending_set and
+            _is_question_correct(gm.get(str(i2)), m.get(i2, ""),
+                                 str(q2.get("answer", "")).strip(), q2.get("type", "single"))
+        )
+        student_answers.append({
+            "student": a[0],
+            "student_name": stu_map.get(a[0], {}).get("name", a[0]),
+            "grade": stu_map.get(a[0], {}).get("grade", ""),
+            "class_name": stu_map.get(a[0], {}).get("class_name", ""),
+            "score": a[2],
+            "total_score": quiz_total,
+            # R2(Step A): 前端只读这个字段, 不再各自 Math.round(score/total*100)
+            "percentage": round(float(a[2] or 0) / max(quiz_total, 1) * 100, 1),
+            "submitted_at": a[3],
+            "correct_count": correct_count,
+            "total_questions": len(questions),
+            "graded_questions": max(len(questions) - len(pending_set), 0),
+            "pending_ai": len(pending_set),
+            "pending_review": sum(1 for v in gm.values()
+                                  if isinstance(v, dict) and v.get("needs_review")),
+        })
+    rates = [s["percentage"] for s in student_answers
+             if not s["pending_ai"] and s["percentage"] is not None]
+
     return {
+        # P2-14: 显式声明视角(前端不必再靠 quiz_title 是否存在来判断)
+        "view": "teacher",
         "quiz": {
             "id": quiz_row.get("id"),
             "title": quiz_row.get("title"),
             "question_count": len(questions),
+            # R2: 满分 —— 新测验恒为 100, 老测验等于题数, 前端据此折算百分制
+            "total_score": quiz_total,
+            "pass_score": round(quiz_total * 0.6, 1),
         },
         "total_answers": len(answers),
+        # 班级整体统计(与同步练习详情同口径)
+        "stats": {
+            "submitted_count": len(answers),
+            "graded_count": sum(1 for s in student_answers if not s["pending_ai"]),
+            "avg_score": round(sum(s["score"] or 0 for s in student_answers) / max(len(student_answers), 1), 1),
+            "avg_rate": round(sum(rates) / len(rates), 1) if rates else None,
+            "high_rate": max(rates) if rates else None,
+            "low_rate": min(rates) if rates else None,
+            "pass_rate": round(sum(1 for r in rates if r >= 60) / len(rates) * 100, 1) if rates else None,
+        },
         # S-GRADING(P3): 整场测验还有多少题在后台批改(教师可催批)
         "pending_ai_total": sum(len(pending_keys(gm)) for _a, _m, gm in parsed),
         "pending_review_total": sum(
             1 for _a, _m, gm in parsed for v in gm.values()
             if isinstance(v, dict) and v.get("needs_review")),
         "question_stats": question_stats,
-        "student_answers": [
-            {
-                "student": a[0],
-                "student_name": stu_map.get(a[0], {}).get("name", a[0]),
-                "grade": stu_map.get(a[0], {}).get("grade", ""),
-                "class_name": stu_map.get(a[0], {}).get("class_name", ""),
-                "score": a[2],
-                "submitted_at": a[3],
-                "correct_count": sum(
-                    1 for i2, q2 in enumerate(questions)
-                    if _is_question_correct(gm.get(str(i2)), m.get(i2, ""),
-                                            str(q2.get("answer", "")).strip(), q2.get("type", "single"))
-                ),
-                "total_questions": len(questions),
-                "pending_ai": len(pending_keys(gm)),
-                "pending_review": sum(1 for v in gm.values()
-                                      if isinstance(v, dict) and v.get("needs_review")),
-            }
-            for a, m, gm in parsed
-        ],
+        "student_answers": student_answers,
     }
 
 
@@ -2390,10 +2374,10 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
     questions = _quiz_questions(quiz_row0)
 
     answers = execute_query(
-        "SELECT student_username, answers, score FROM interaction_quiz_answers WHERE quiz_id = ?",
+        "SELECT student_username, answers, score, graded FROM interaction_quiz_answers WHERE quiz_id = ?",
         (quiz_id,),
     )
-    # S9: 每份答卷只解析一次
+    # S9: 每份答卷只解析一次; R2-c: 带批改留痕, 与 /results 共用同一份统计口径
     parsed_list = []
     for a in answers:
         try:
@@ -2408,50 +2392,25 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
                         idx_map[int(ua["question_index"])] = str(ua.get("answer", "")).strip()
                     except (TypeError, ValueError):
                         continue
-        parsed_list.append((a, idx_map))
+        parsed_list.append((a, idx_map, _quiz_graded(a[3])))
 
     participant_count = len(answers)
-    total_possible = sum(q.get("score", 1) for q in questions)
+    total_possible = _quiz_total(questions)
 
-    # 每题正确率统计
+    # 每题正确率统计 —— 唯一口径(与 /results 完全一致)
+    shared_stats = _build_question_stats(questions, parsed_list)
     question_stats = []
-    for i, q in enumerate(questions):
-        correct_count = 0
-        q_type = q.get("type", "single")
-        correct_ans = str(q.get("answer", "")).strip()
-        wrong_options = {}  # 统计错误选项分布
-
-        for _a, _m in parsed_list:
-            user_ans = _m.get(i, "")
-
-            if q_type == "multiple":
-                user_set = sorted([x.strip().upper() for x in user_ans.split(",") if x.strip()])
-                correct_set = sorted([x.strip().upper() for x in correct_ans.split(",") if x.strip()])
-                if user_set == correct_set:
-                    correct_count += 1
-                else:
-                    # 记录错误选项
-                    for ans_part in user_set:
-                        wrong_options[ans_part] = wrong_options.get(ans_part, 0) + 1
-            else:
-                if user_ans.upper() == correct_ans.upper():
-                    correct_count += 1
-                elif user_ans:
-                    wrong_options[user_ans.upper()] = wrong_options.get(user_ans.upper(), 0) + 1
-
-        rate = round(correct_count / max(participant_count, 1) * 100, 1)
+    for st in shared_stats:
         wrong_text = ""
-        if wrong_options:
-            sorted_wrong = sorted(wrong_options.items(), key=lambda x: -x[1])
-            wrong_text = "，错误选项分布：" + "、".join(f"{k}({v}人)" for k, v in sorted_wrong[:3])
-
+        if st["wrong_options"]:
+            wrong_text = "，错误选项分布：" + "、".join(f"{k}({v}人)" for k, v in st["wrong_options"])
         question_stats.append({
-            "index": i + 1,
-            "text": q.get("question", "")[:60],
-            "type": q_type,
-            "correct_rate": rate,
-            "correct_count": correct_count,
-            "total": participant_count,
+            "index": st["index"] + 1,
+            "text": str(st["question"] or "")[:60],
+            "type": st["type"],
+            "correct_rate": st["correct_rate"],
+            "correct_count": st["correct_count"],
+            "total": st["total_count"],
             "wrong_distribution": wrong_text,
         })
 
@@ -2486,11 +2445,14 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
         prompt = apply_skills(prompt, "quiz")
 
         analysis = await call_ai_async(prompt, api_key, use_kb=False)
+        # R2: 平均分也按百分制给, 避免"平均 3.5 分"这种没有满分参照的数
+        avg_raw = sum(float(a[2] or 0) for a in answers) / max(participant_count, 1)
         return {
             "analysis": analysis,
             "stats": question_stats,
             "participant_count": participant_count,
-            "avg_score": round(sum(a[2] for a in answers) / max(participant_count, 1), 1),
+            "avg_score": round(avg_raw / max(total_possible, 1) * 100, 1),
+            "avg_raw_score": round(avg_raw, 1),
             "total_score": total_possible,
         }
 

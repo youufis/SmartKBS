@@ -20,10 +20,11 @@ import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import { toPercentInt, percentColor } from '../utils/score'
 
 const { Title, Text } = Typography
 
-const RANK_COLORS = ['#ff4d4f', '#fa8c16', '#faad14']
+const RANK_COLORS = ['var(--color-error, #ff4d4f)', '#fa8c16', '#faad14']
 
 const QuickQuizResult: React.FC = () => {
   const { t } = useTranslation('interaction')
@@ -135,9 +136,8 @@ const QuickQuizResult: React.FC = () => {
               <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('accuracy')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: '#1677ff' }}>
                 {my_info.correct_count + my_info.wrong_count > 0
-                  ? `${Math.round(my_info.correct_count / (my_info.correct_count + my_info.wrong_count) * 100)}%`
-                  : '-'
-                }
+                  ? `${toPercentInt(my_info.correct_count, my_info.correct_count + my_info.wrong_count)}%`
+                  : '-'}
               </div>
             </Col>
             <Col xs={12} sm={8} md={5}>
@@ -190,13 +190,13 @@ const QuickQuizResult: React.FC = () => {
               render: (_: any, r: any) => {
                 const total = (r.correct_count || 0) + (r.wrong_count || 0)
                 if (!total) return '-'
-                const pct = Math.round(r.correct_count / total * 100)
+                const pct = toPercentInt(r.correct_count, total)
                 return (
                   <Progress
                     type="circle"
                     percent={pct}
                     size={30}
-                    strokeColor={pct >= 80 ? '#52c41a' : pct >= 50 ? '#faad14' : '#ff4d4f'}
+                    strokeColor={percentColor(pct)}
                     format={(p) => `${p}%`}
                   />
                 )
@@ -225,7 +225,7 @@ const QuickQuizResult: React.FC = () => {
                 <Space className="wrap-space">
                     <Text strong>{t('questionN', { n: q.sort_order })}</Text>
                   <Tag color={q.correct_count > q.total_answers / 2 ? '#52c41a' : '#faad14'}>
-                    {t('accuracy')}: {q.total_answers > 0 ? Math.round(q.correct_count / q.total_answers * 100) : 0}%
+                    {t('accuracy')}: {toPercentInt(q.correct_count, q.total_answers)}%
                   </Tag>
                   <Text style={{ flex: 1, maxWidth: 300 }} ellipsis>
                     <FormulaRenderer content={q.question_text} />
@@ -292,10 +292,10 @@ const QuickQuizResult: React.FC = () => {
       <div style={{ textAlign: 'center', marginTop: 16, padding: 16 }}>
         <Space>
           <Button type="primary" icon={<ReloadOutlined />} onClick={loadResult}>
-            刷新结果
+            {t('refreshResult')}
           </Button>
           <Button icon={<HomeOutlined />} onClick={() => navigate('/quick-quiz')}>
-            返回抢答主页
+            {t('qqBackHome')}
           </Button>
         </Space>
       </div>

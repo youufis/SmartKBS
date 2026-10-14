@@ -24,6 +24,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Optional
 
@@ -93,6 +94,28 @@ def _rate(score: Any, total: Any) -> Optional[float]:
     if t <= 0:
         return None
     return _round1(max(0.0, min(100.0, s / t * 100.0)))
+
+
+def _quiz_total(questions: Any) -> float:
+    """随堂测验满分 = 各题分值之和。
+
+    R2-a: 老测验每题固定 1 分(满分=题数), 新测验由 interaction_router.create_quiz
+    折算成合计 100。旧实现把满分写死 100, 于是一份 5 题答对 3 题的答卷被算成
+    "3/100 = 3%", 班级均分与及格率整体失真。
+    """
+    try:
+        items = json.loads(questions) if isinstance(questions, str) else (questions or [])
+    except (json.JSONDecodeError, TypeError):
+        items = []
+    if not isinstance(items, list):
+        return 0.0
+    total = 0.0
+    for q in items:
+        try:
+            total += float((q or {}).get("score", 1) or 0)
+        except (TypeError, ValueError):
+            total += 1.0
+    return total
 
 
 class SummaryContext:
@@ -284,12 +307,16 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
         cw, cp = _creator_where(ctx)
         where = f"WHERE {cw}" if cw else ""
         acts["quiz"] = execute_query_dict(
-            f"""SELECT id, title, creator_username, status, 100 AS total_score, 60 AS pass_score,
+            f"""SELECT id, title, creator_username, status, questions,
                        IFNULL(target_scope,'') AS target_scope, IFNULL(target_grade,'') AS target_grade,
                        IFNULL(target_class,'') AS target_class, IFNULL(target_users,'') AS target_users
                 FROM interaction_quizzes {where}""",
             tuple(cp),
         )
+        # R2-a: 满分按题目分值求和(老数据=题数, 新数据=100), 不再写死 100
+        for a in acts["quiz"]:
+            a["total_score"] = _quiz_total(a.pop("questions", None))
+            a["pass_score"] = round(float(a["total_score"] or 0) * 0.6, 1)
 
     if "poll" in t:
         cw, cp = _creator_where(ctx)
@@ -501,7 +528,8 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
                 continue
             records.append(_make_record(
                 ctx, type_key="quiz", act=amap[r["quiz_id"]], student=stu,
-                score=r["score"], total=100,
+                # R2-a: 分母用该测验真实满分(老测验=题数, 新测验=100)
+                score=r["score"], total=amap[r["quiz_id"]].get("total_score") or None,
                 status="待批改" if r["ai_pending"] else "已完成",
                 ts=r["submitted_at"],
             ))

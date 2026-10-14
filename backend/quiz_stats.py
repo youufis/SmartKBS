@@ -1,0 +1,160 @@
+# -*- coding: utf-8 -*-
+"""随堂测验判分 / 统计的公共口径（全站唯一实现）。
+
+P0-2: 判对错的实现原本散在四处（interaction_router 的结果页、AI 分析的自己一套、
+export_router CSV 的字符串相等、summary_service 写死的满分），同一场测验在不同页面
+算出不同正确率。这里收敛成一份，被下列调用方共用：
+  - backend/api/interaction_router.py  → /results、/my-result、/ai-analysis
+  - backend/api/export_router.py       → 测验 CSV 导出
+  - backend/summary_service.py         → 汇总导出（满分）
+  - backend/api/dashboard_router.py    → 首页动态（百分制）
+
+三条口径（改动前请先读）：
+  1. 对错以 interaction_quiz_answers.graded 留痕为准 —— 简答题是 AI 判的 8 分，
+     用字符串相等重算必然得到"答错"（老数据没留痕才退回精确匹配）；
+  2. 满分 = 各题分值之和 —— 老测验每题固定 1 分（满分=题数），新测验由
+     create_quiz 折算成合计 100（与同步练习/考试同一套百分制口径）；
+  3. 正确率分母用「已判分人数」—— 批改中的主观题计入分母会把正确率凭空压低。
+"""
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+
+def quiz_graded(row: Any) -> dict[str, Any]:
+    """interaction_quiz_answers.graded → 逐题批改结果字典(老数据为空则返回 {})"""
+    try:
+        data = json.loads(row) if isinstance(row, str) else (row or {})
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def quiz_questions(row: Any) -> list[Any]:
+    """测验行的 questions 字段(JSON 字符串/列表) → 题目数组"""
+    raw = (row or {}).get("questions") if isinstance(row, dict) else row
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    return raw if isinstance(raw, list) else []
+
+
+def quiz_total(questions: Any) -> float:
+    """全卷满分 = 各题分值之和（老数据每题 1 分 → 等于题数）"""
+    if not isinstance(questions, list):
+        questions = quiz_questions(questions)
+    total = 0.0
+    for q in questions:
+        try:
+            total += float((q or {}).get("score", 1) or 0)
+        except (TypeError, ValueError):
+            total += 1.0
+    return total
+
+
+def normalize_quiz_scores(questions: list[Any], auto: bool = True) -> list[Any]:
+    """R2(Step B): 把题面分值折算成合计 100（与同步练习/考试对齐）。
+
+    仅当调用方没有显式配过分值(auto=True, 即每题都是默认的 1 分)时才折算；
+    教师手工配过分值就照用 —— 与 practice_router.create_session 的规则一致。
+    """
+    if not questions:
+        return questions
+    explicit = [float((q or {}).get("score") or 0) for q in questions]
+    if not auto or any(abs(s - 1.0) > 1e-9 for s in explicit):
+        return questions
+    from backend.utils import distribute_scores
+    scores = distribute_scores(len(questions), 100)
+    return [{**(q or {}), "score": scores[i]} for i, q in enumerate(questions)]
+
+
+def answer_index_map(raw: Any) -> dict[int, str]:
+    """答卷 JSON → {题号: 答案}"""
+    try:
+        user_answers = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except (json.JSONDecodeError, TypeError):
+        user_answers = []
+    out: dict[int, str] = {}
+    if isinstance(user_answers, list):
+        for ua in user_answers:
+            if isinstance(ua, dict) and ua.get("question_index") is not None:
+                try:
+                    out[int(ua["question_index"])] = str(ua.get("answer", "")).strip()
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def is_question_correct(g: Any, user_ans: str, correct_ans: str, q_type: str,
+                        options: Any = None) -> bool:
+    """该题是否判对: 有留痕以留痕为准, 没留痕(老数据)才按统一归一化重算。"""
+    if isinstance(g, dict) and g:
+        return bool(g.get("is_correct"))
+    from backend.answer_norm import answers_equal
+    return answers_equal(user_ans, correct_ans, options, q_type)
+
+
+def is_pending(g: Any) -> bool:
+    """该题是否还在后台批改(分数未定)"""
+    return isinstance(g, dict) and g.get("grading") == "pending"
+
+
+def pending_keys(graded: dict[str, Any]) -> list[str]:
+    """仍待后台批改的题号"""
+    return [k for k, v in (graded or {}).items() if is_pending(v)]
+
+
+def split_answers(raw: str) -> list[str]:
+    """多选答案 'AC' / 'A,C' / 'A、C' 都切成 ['A','C']"""
+    return [x.strip().upper() for x in re.split(r"[,，、\s]+", str(raw or "")) if x.strip()]
+
+
+def build_question_stats(
+    questions: list[Any],
+    parsed: list[tuple[Any, dict[int, str], dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """每题正确率统计 —— /results 与 /ai-analysis 共用的唯一口径。
+
+    parsed = [(答卷行, {题号: 答案}, graded 留痕), ...]
+    """
+    stats: list[dict[str, Any]] = []
+    for i, q in enumerate(questions):
+        q_type = q.get("type", "single")
+        correct_ans = str(q.get("answer", "")).strip()
+        options = q.get("options", [])
+        correct_count = 0
+        graded_count = 0
+        pending_count = 0
+        wrong_options: dict[str, int] = {}
+        for _row, m, gm in parsed:
+            user_ans = str(m.get(i, "") or "").strip()
+            if is_pending(gm.get(str(i))):
+                pending_count += 1
+                continue
+            graded_count += 1
+            if is_question_correct(gm.get(str(i)), user_ans, correct_ans, q_type, options):
+                correct_count += 1
+            elif user_ans:
+                for part in split_answers(user_ans):
+                    wrong_options[part] = wrong_options.get(part, 0) + 1
+        stats.append({
+            "index": i,
+            "question": q.get("question", q.get("question_text", "")),
+            "options": options,
+            "correct_answer": correct_ans,
+            "type": q_type,
+            "svg_content": q.get("svg_content") or q.get("svg_code", ""),
+            "has_svg": q.get("has_svg", 1 if q.get("svg_code") or q.get("svg_content") else 0),
+            "media_placeholders": q.get("media_placeholders", []),
+            "correct_count": correct_count,
+            "total_count": graded_count,        # 已判分人数(正确率分母)
+            "submitted_count": len(parsed),     # 提交人数(含批改中)
+            "pending_count": pending_count,     # 本题批改中人数
+            "correct_rate": round(correct_count / max(graded_count, 1) * 100, 1),
+            "wrong_options": sorted(wrong_options.items(), key=lambda x: -x[1])[:3],
+        })
+    return stats

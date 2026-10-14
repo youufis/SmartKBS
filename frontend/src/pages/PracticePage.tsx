@@ -3,13 +3,13 @@ import { useTranslation } from 'react-i18next'
 import AnswerLine from '../components/AnswerLine'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
-  Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination, Checkbox,
-  Switch, Tooltip,
+  Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Pagination, Checkbox,
+  Switch, Tooltip, Tabs, Dropdown, Statistic, Row, Col, Skeleton,
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, StopOutlined, DeleteOutlined,
-  ThunderboltOutlined,
+  ThunderboltOutlined, DownloadOutlined, MoreOutlined, BellOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -26,6 +26,8 @@ import ResetActivityButton from '../components/ResetActivityButton'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { reportLoadError } from '../utils/loadError'
+import { toPercent, percentStatus, percentColor, percentLevelKey } from '../utils/score'
+import { useNavigate } from 'react-router-dom'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -115,31 +117,42 @@ const SessionRoster: React.FC<{
       </Space>
       <Table size="small" rowKey="username" dataSource={rows}
         locale={{ emptyText: t('noStudentSubmissions') }}
-        scroll={{ x: 850 }}
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }) }}
         columns={[
-          { title: t('studentName'), key: 'student', width: 140,
+          // 列合并(去横向滚动): 姓名+学号同格双行, 得分改百分制(原始分作次要说明)
+          { title: t('studentName'), key: 'student', width: 132,
             render: (_: any, r: any) => (
               <div>
                 <div>{r.name || '-'}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{r.username}</div>
               </div>
             ) },
-          { title: t('gradeClass'), key: 'grade_class', width: 120,
+          { title: t('gradeClass'), key: 'grade_class', width: 116,
             render: (_: any, r: any) => (
               <ScopeTag variant="text" grade={r.grade} classes={String(r.class ?? '')} />
             ) },
           {
-            title: t('status'), dataIndex: 'submitted', width: 90,
+            title: t('status'), dataIndex: 'submitted', width: 84,
             render: (v: boolean) => (v ? <Tag color="success">{t('submitted')}</Tag> : <Tag>{t('notStarted')}</Tag>),
           },
           {
-            title: t('score'), key: 'score', width: 96,
-            render: (_: any, r: any) => (r.submitted ? `${r.score ?? 0}/${r.total_score ?? 0}` : '-'),
+            title: t('questionScore'), key: 'score', width: 104,
+            render: (_: any, r: any) => {
+              if (!r.submitted) return '-'
+              const pct = toPercent(r.score, r.total_score)
+              return (
+                <div>
+                  <Text strong color={percentStatus(pct)}>{pct}</Text>
+                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                    {t('rawScoreHint', { score: r.score ?? 0, total: r.total_score ?? 0 })}
+                  </div>
+                </div>
+              )
+            },
           },
           {
             // S-GRADE: 谁判的分、还剩几题待批改, 教师一眼可见
-            title: t('gradingState'), key: 'grading', width: 130,
+            title: t('gradingState'), key: 'grading', width: 124,
             render: (_: any, r: any) => {
               const a = attMap.get(r.username)
               if (!a) return '-'
@@ -151,9 +164,9 @@ const SessionRoster: React.FC<{
               return <Tag color="green">{t('gradedDone')}</Tag>
             },
           },
-          { title: t('submitTime'), dataIndex: 'submitted_at', width: 150, ellipsis: true, render: (v: string) => v || '-' },
+          { title: t('submitTime'), dataIndex: 'submitted_at', width: 138, ellipsis: true, render: (v: string) => v || '-' },
           {
-            title: t('actions'), key: 'op', width: 100, fixed: 'right' as const,
+            title: t('actions'), key: 'op', width: 88,
             render: (_: any, r: any) => {
               const a = attMap.get(r.username)
               return a && onShowSheet
@@ -172,6 +185,7 @@ const SessionRoster: React.FC<{
 // ════════════════════════════════════════
 const StudentView: React.FC = () => {
   const { t } = useTranslation('practice')
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [sessions, setSessions] = useState<any[]>([])
   const [activeSession, setActiveSession] = useState<any>(null)
@@ -255,13 +269,32 @@ const StudentView: React.FC = () => {
       <div>
         <Title level={4}><CheckCircleOutlined /> {submittedView.session?.title} — {t('practiceComplete')}</Title>
         <Card style={{ textAlign: 'center', marginBottom: 16 }}>
-          <Progress type="circle" percent={submittedView.attempt?.accuracy || 0}
-            format={p => `${p}%`}
-            strokeColor={submittedView.attempt?.accuracy >= 80 ? '#52c41a' : submittedView.attempt?.accuracy >= 60 ? '#faad14' : '#ff4d4f'}
-          />
-          <div style={{ marginTop: 8 }}>
-            <Text>{t('scoreLabel', { score: submittedView.attempt?.score, total: submittedView.attempt?.total_score })}</Text>
-          </div>
+          {/* R2: 与随堂测验同一套百分制口径; 等级与原始分并列展示 */}
+          {(() => {
+            const pct = toPercent(submittedView.attempt?.score, submittedView.attempt?.total_score)
+            return (
+              <>
+                <Progress type="circle" percent={Math.round(pct)} format={p => `${p}%`} />
+                <div style={{ marginTop: 8 }}>
+                  <Space size={8} wrap>
+                    <Text strong>{t('scoreLabel', {
+                      score: toPercent(submittedView.attempt?.score, submittedView.attempt?.total_score),
+                      total: 100,
+                    })}</Text>
+                    <Tag color={percentStatus(pct)}>{t(percentLevelKey(pct))}</Tag>
+                  </Space>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('rawScoreHint', {
+                        score: submittedView.attempt?.score ?? 0,
+                        total: submittedView.attempt?.total_score ?? 0,
+                      })}
+                    </Text>
+                  </div>
+                </div>
+              </>
+            )
+          })()}
           {Number(submittedView.attempt?.pending_ai || 0) > 0 && (
             <div style={{ marginTop: 8 }}>
               <Space size={6} wrap>
@@ -304,7 +337,7 @@ const StudentView: React.FC = () => {
               )}
               {!!r.teacher_comment && (
                 <div style={{ marginTop: 4 }}>
-                  <Text style={{ color: '#389e0d' }}>{t('teacherComment')}：{r.teacher_comment}</Text>
+                  <Text type="success">{t('teacherComment')}：{r.teacher_comment}</Text>
                 </div>
               )}
               {!!r.needs_review && (
@@ -318,8 +351,17 @@ const StudentView: React.FC = () => {
             )}
           </Card>
         ))}
-        <Button icon={<FormOutlined />} onClick={() => { setSubmittedView(null); loadSessions() }}
-          style={{ marginTop: 16 }}>{t('practiceHistory')}</Button>
+        <Space style={{ marginTop: 16 }} wrap>
+          {/* P1-7: 错题已随本次提交进入错题本, 这里给一个闭环入口 */}
+          {(submittedView.results || []).some((r: any) => r && r.is_correct === false && !isGradingPending(r)) && (
+            <Button icon={<FileTextOutlined />} onClick={() => navigate('/wrong-book')}>
+              {t('goWrongBook')}
+            </Button>
+          )}
+          <Button icon={<FormOutlined />} onClick={() => { setSubmittedView(null); loadSessions() }}>
+            {t('practiceHistory')}
+          </Button>
+        </Space>
       </div>
     )
   }
@@ -383,10 +425,11 @@ const StudentView: React.FC = () => {
         {result && (
           <Card style={{ marginTop: 16, textAlign: 'center' }}>
             <Title level={4}>{t('submit')}</Title>
-            <Progress type="circle" percent={result.accuracy}
-              format={p => `${p}%`}
-              strokeColor={result.accuracy >= 80 ? '#52c41a' : result.accuracy >= 60 ? '#faad14' : '#ff4d4f'} />
-            <div style={{ marginTop: 8 }}><Text>{t('score')}：{result.score}/{result.total_score}</Text></div>
+            <Progress type="circle" percent={Math.round(toPercent(result.score, result.total_score))}
+              format={p => `${p}%`} />
+            <div style={{ marginTop: 8 }}>
+              <Text>{t('score')}：{toPercent(result.score, result.total_score)}/100</Text>
+            </div>
             {Number(result.pending_ai || 0) > 0 && (
               <div style={{ marginTop: 8 }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('pendingAiHint', { count: result.pending_ai })}</Text>
@@ -416,7 +459,17 @@ const StudentView: React.FC = () => {
             {sessions.slice((stuPage - 1) * stuPageSize, stuPage * stuPageSize).map(s => (
               <Card key={s.id} size="small" style={{ marginBottom: 8 }}
                 hoverable onClick={() => startPractice(s.id)}
-                extra={s.attempted ? <Tag color="processing">{t('submitted')}</Tag> : <Tag color="default">{t('notStarted')}</Tag>}>
+                extra={s.attempted
+                  ? <Space size={6}>
+                      {/* 已提交的直接显示百分制得分, 不用再点进去看 */}
+                      {s.score != null && (
+                        <Text strong color={percentStatus(toPercent(s.score, s.total_score))}>
+                          {toPercent(s.score, s.total_score)}/100
+                        </Text>
+                      )}
+                      <Tag color="processing">{t('submitted')}</Tag>
+                    </Space>
+                  : <Tag color="default">{t('notStarted')}</Tag>}>
                 <Text strong>{s.title}</Text>
                 <div><Text type="secondary">{s.knowledge_points}</Text></div>
                 <div><Text type="secondary">{t('publisher')}：{s.creator_username || s.creator_name} · {s.question_count} {t('questionCount')}
@@ -478,6 +531,11 @@ const TeacherView: React.FC = () => {
   // 抽屉是否还开着：批改是异步的，闭包里的 detailOpen 会过期，只能靠 ref 判断
   const detailOpenRef = useRef(false)
   detailOpenRef.current = detailOpen
+  // R1: 详情页的 AI 学情分析(缓存到 sessionStorage, 避免每次打开都烧一次 token)
+  const [detailAiAnalysis, setDetailAiAnalysis] = useState<string | null>(null)
+  const [detailAiLoading, setDetailAiLoading] = useState(false)
+  const [detailAiCached, setDetailAiCached] = useState(false)
+  const [notifying, setNotifying] = useState(false)
 
   useEffect(() => {
     // 加载学科列表
@@ -551,11 +609,73 @@ const TeacherView: React.FC = () => {
     setDetailSid(id)
     setDetailOpen(true)
     setDetailLoading(true)
+    // 换了一场练习, AI 分析结果不能沿用上一场的
+    setDetailAiAnalysis(null)
+    setDetailAiCached(false)
     try {
       const { data } = await apiClient.get(`/api/practice/sessions/${id}`)
       setDetail(data)
     } catch { message.error(t('loadDetailFailed')) }
     finally { setDetailLoading(false) }
+  }
+
+  /** R1: 详情页 AI 学情分析(异步任务 → 轮询), 结果按练习 id 缓存 24h */
+  const runDetailAiAnalysis = async (force = false) => {
+    if (!detailSid) return
+    const cacheKey = `practice-ai:${detailSid}`
+    if (!force) {
+      try {
+        const raw = sessionStorage.getItem(cacheKey)
+        if (raw) {
+          const cached = JSON.parse(raw)
+          if (cached?.text && Date.now() - Number(cached.ts || 0) < 24 * 3600 * 1000) {
+            setDetailAiAnalysis(cached.text)
+            setDetailAiCached(true)
+            return
+          }
+        }
+      } catch { /* 缓存坏了就当没有 */ }
+    }
+    setDetailAiLoading(true)
+    setDetailAiAnalysis(null)
+    setDetailAiCached(false)
+    try {
+      const { data } = await apiClient.get(
+        `/api/practice/sessions/${detailSid}/ai-analysis`, { timeout: 180000 })
+      let text: string | null = null
+      if (data.task_id) {
+        const out: any = await pollAiTask(data.task_id, 180000)
+        if (out?.analysis) text = out.analysis
+        else if (out) text = out.analysis
+        else message.error(t('aiAnalyzeTimeout'))
+      } else {
+        text = data.analysis
+      }
+      if (text) {
+        setDetailAiAnalysis(text)
+        try { sessionStorage.setItem(cacheKey, JSON.stringify({ text, ts: Date.now() })) } catch { /* 存不下就算了 */ }
+      }
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('aiAnalyzeFailed'))
+    } finally {
+      setDetailAiLoading(false)
+    }
+  }
+
+  /** P1-6: 一键提醒未提交学生 */
+  const notifyUnsubmitted = async () => {
+    if (!detailSid) return
+    setNotifying(true)
+    try {
+      const { data } = await apiClient.post(
+        `/api/practice/sessions/${detailSid}/notify-unsubmitted`)
+      if (data?.notified > 0) message.success(t('notifySent', { count: data.notified }))
+      else message.info(t('notifyNone'))
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('notifyFailed'))
+    } finally {
+      setNotifying(false)
+    }
   }
 
   /** S-GRADING: 立刻批改该练习待判的主观题，进度走 AI 任务轮询 */
@@ -724,22 +844,22 @@ const TeacherView: React.FC = () => {
       {tab === 'sessions' && (
         loadingSessions ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : sessions.length === 0 ? <Result icon={<FileTextOutlined />} title={t('publishedRecords')} />
+        // 去横向滚动: 题数+满分、状态+提交数 合并为双行单元格, 低频操作收进「更多」
         : <Table dataSource={sessions} rowKey="id"
-            scroll={{ x: 980 }}
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }), pageSizeOptions: ['5', '10', '20', '50'] }}
             columns={[
               { title: t('title_'), dataIndex: 'title', ellipsis: true },
-              { title: t('publisher'), dataIndex: 'creator_username', width: 90 },
+              { title: t('publisher'), dataIndex: 'creator_username', width: 88, ellipsis: true },
               {
                 // 与其它活动列表同口径: 目标范围(年级/班级 / 指定N人), 定向名单优先
-                title: t('gradeClass'), key: 'scope', width: 160,
+                title: t('gradeClass'), key: 'scope', width: 150,
                 render: (_: any, r: any) => {
                   const students: string[] = r.target_students || []
                   const scope = students.length
                     ? 'individual'
                     : (r.target_scope || (String(r.target_grade || '').trim() ? 'grade' : 'teacher_classes'))
                   return (
-                    <Space size={4}>
+                    <Space size={4} wrap>
                       <ScopeTag scope={scope} grade={r.target_grade} classes={r.target_class}
                         users={students.join(',')} />
                       {r.source === 'wrong_book' && <Tag color="purple">{t('sourceWrongBook')}</Tag>}
@@ -747,21 +867,64 @@ const TeacherView: React.FC = () => {
                   )
                 },
               },
-              { title: t('questionCount'), dataIndex: 'question_count', width: 56 },
-              { title: t('status'), render: (_, r) => r.status === 'active' ? <Tag color="processing">{t('inProgress')}</Tag> : <Tag>{t('endedSuccess')}</Tag>, width: 76 },
-              { title: t('submitted'), render: (_, r) => `${r.submitted_count}/${r.student_count}`, width: 76 },
-              { title: t('actions'), key: 'actions', width: 336, render: (_, r) => <Space size={4} wrap={false} style={{ whiteSpace: 'nowrap' }}>
-                <Button size="small" onClick={() => viewSessionDetail(r.id)}>{t('detail')}</Button>
-                {r.status === 'active' && (
-                  <Popconfirm title={t('endConfirm')} onConfirm={() => endSession(r.id)}>
-                    <Button size="small" icon={<StopOutlined />}>{t('endedSuccess')}</Button>
-                  </Popconfirm>
-                )}
-                <ResetActivityButton activityType="practice" activityId={r.id} onSuccess={loadSessions} />
-                <Popconfirm title={t('deleteConfirm')} onConfirm={() => deleteSession(r.id)}>
-                  <Button size="small" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
-                </Popconfirm>
-              </Space> },
+              { title: t('questionCountTitle'), key: 'meta', width: 90,
+                render: (_: any, r: any) => (
+                  <div>
+                    <div>{t('questionCountTitle')} {r.question_count}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      {t('totalScoreTitle')} {r.total_score}
+                    </div>
+                  </div>
+                ) },
+              { title: t('status'), key: 'state', width: 108,
+                render: (_: any, r: any) => (
+                  <div>
+                    <div>{r.status === 'active' ? <Tag color="processing">{t('inProgress')}</Tag> : <Tag>{t('endedSuccess')}</Tag>}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      {t('submitted')} {r.submitted_count}/{r.student_count}
+                    </div>
+                  </div>
+                ) },
+              { title: t('actions'), key: 'actions', width: 186,
+                render: (_: any, r: any) => (
+                  <Space size={4} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+                    <Button size="small" onClick={() => viewSessionDetail(r.id)}>{t('detail')}</Button>
+                    <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
+                    <Dropdown
+                      trigger={['click']}
+                      menu={{
+                        items: [
+                          ...(r.status === 'active' ? [{ key: 'end', icon: <StopOutlined />, label: t('endedSuccess') }] : []),
+                          { key: 'export', icon: <DownloadOutlined />, label: t('exportResult') },
+                          { key: 'delete', icon: <DeleteOutlined />, label: t('delete'), danger: true },
+                        ],
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation()
+                          if (key === 'end') {
+                            Modal.confirm({
+                              title: t('endConfirm'),
+                              okText: t('endedSuccess'),
+                              cancelText: t('cancel'),
+                              onOk: () => endSession(r.id),
+                            })
+                          } else if (key === 'export') {
+                            window.open(`/api/export/practice/${r.id}`, '_blank')
+                          } else if (key === 'delete') {
+                            Modal.confirm({
+                              title: t('deleteConfirm'),
+                              okText: t('delete'),
+                              okButtonProps: { danger: true },
+                              cancelText: t('cancel'),
+                              onOk: () => deleteSession(r.id),
+                            })
+                          }
+                        },
+                      }}
+                    >
+                      <Button size="small" icon={<MoreOutlined />} />
+                    </Dropdown>
+                  </Space>
+                ) },
             ]}
           />
       )}
@@ -770,7 +933,7 @@ const TeacherView: React.FC = () => {
         title={detail?.session?.title || t('detail')}
         open={detailOpen}
         onCancel={() => { setDetailOpen(false); setSheetAttempt(null) }}
-        width={900}
+        width="min(920px, 94vw)"
         styles={{ body: { maxHeight: '68vh', overflowY: 'auto', paddingRight: 6 } }}
         footer={
           <Space wrap>
@@ -780,39 +943,148 @@ const TeacherView: React.FC = () => {
                 {t('gradeNow')}
               </Button>
             )}
+            {/* R1: AI 学情分析(结果缓存, 再点即重新分析) */}
+            {!detailLoading && !!detail?.question_stats?.length && (
+              <Button icon={<RobotOutlined />} loading={detailAiLoading}
+                onClick={() => runDetailAiAnalysis(!!(detailAiAnalysis || detailAiCached))}>
+                {detailAiAnalysis ? t('aiReAnalyze') : t('aiAnalyze')}
+              </Button>
+            )}
+            {/* P1-6: 一键提醒未交 */}
+            {!detailLoading && (detail?.students || []).some((s: any) => !s.submitted) && (
+              <Button icon={<BellOutlined />} loading={notifying} onClick={notifyUnsubmitted}>
+                {t('notifyUnsubmitted')}
+              </Button>
+            )}
+            <Button icon={<DownloadOutlined />}
+              onClick={() => window.open(`/api/export/practice/${detailSid}`, '_blank')}>
+              {t('exportResult')}
+            </Button>
             <Button onClick={() => { setDetailOpen(false); setSheetAttempt(null) }}>{t('close')}</Button>
           </Space>
         }
       >
-        {detailLoading && <Spin style={{ display: 'block', margin: '60px auto' }} />}
+        {detailLoading && <Skeleton active paragraph={{ rows: 8 }} />}
         {!detailLoading && detail && (
           <>
             <p>{t('knowledgePoints')}：{detail.session?.knowledge_points}</p>
             <p>{t('questionCountTitle')}：{detail.session?.question_count} · {t('totalScoreTitle')}：{detail.session?.total_score}</p>
             <Divider />
-            <Text strong>{t('questionListTitle')}</Text>
-            {detail.questions?.map((q: any, i: number) => (
-              <Card key={q.question_id || i} size="small" style={{ marginBottom: 8, marginTop: 8 }}
-                title={t('questionN', { n: i + 1 })}
-                extra={<Space size={4}><Tag>{TYPE_LABELS_LOCAL[q.type] || q.type}</Tag><Tag color="blue">{t('fullScore')} {q.score}</Tag></Space>}
-              >
-                <FormulaRenderer content={q.question_text} />
-                <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="normal" />
-                {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
-                  <div key={k} style={{ margin: '2px 0' }}>
-                    <Text>{k}. <FormulaRenderer content={v as string} inline /></Text>
-                  </div>
-                ))}
-                <div style={{ marginTop: 4 }}>
-                  <AnswerLine color="blue" label={t('answerColon')} value={q.correct_answer} />
-                </div>
-              </Card>
-            ))}
-            <Divider />
-            <Text strong>{t('submissionStatus', { count: detail.attempts?.length || 0 })}</Text>
-            <div style={{ marginTop: 8 }}>
-              <SessionRoster attempts={detail.attempts || []} students={detail.students || []} onShowSheet={openSheet} />
-            </div>
+            {/* R1/UI: 竖向长条拆成三段页签 —— 概览(统计+AI) / 题目 / 名册 */}
+            <Tabs
+              items={[
+                {
+                  key: 'overview',
+                  label: t('tabOverview'),
+                  children: (
+                    <>
+                      <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
+                        <Col xs={12} sm={8} md={6}>
+                          <Statistic title={t('statParticipation')}
+                            value={detail.stats?.participation_rate ?? 0} suffix="%" />
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {detail.stats?.submitted_count ?? 0}/{detail.stats?.student_count ?? 0}
+                          </Text>
+                        </Col>
+                        <Col xs={12} sm={8} md={6}>
+                          <Statistic title={t('statAvgScore')} value={detail.stats?.avg_score ?? 0}
+                            suffix={`/ ${detail.stats?.total_score ?? detail.session?.total_score ?? 0}`} />
+                        </Col>
+                        <Col xs={12} sm={8} md={6}>
+                          <Statistic title={t('statAvgRate')} value={detail.stats?.avg_rate ?? 0} suffix="%" />
+                        </Col>
+                        <Col xs={12} sm={8} md={6}>
+                          <Statistic title={t('statPassRate')} value={detail.stats?.pass_rate ?? 0} suffix="%" />
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {t('statHighRate')} {detail.stats?.high_rate ?? '-'}% · {t('statLowRate')} {detail.stats?.low_rate ?? '-'}%
+                          </Text>
+                        </Col>
+                      </Row>
+                      <Text strong>{t('questionStatsTitle')}</Text>
+                      <Table size="small" rowKey="question_id" style={{ marginTop: 8 }}
+                        dataSource={detail.question_stats || []}
+                        pagination={false}
+                        locale={{ emptyText: t('statsNoData') }}
+                        columns={[
+                          { title: '#', key: 'idx', width: 56,
+                            render: (_: any, __: any, i: number) => i + 1 },
+                          { title: t('questionListTitle'), key: 'q',
+                            render: (_: any, r: any) => {
+                              const q = (detail.questions || [])[r.index] || {}
+                              return (
+                                <Tooltip title={<div style={{ maxWidth: 420 }}><FormulaRenderer content={q.question_text} /></div>}>
+                                  <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                    <FormulaRenderer content={q.question_text} />
+                                  </div>
+                                </Tooltip>
+                              )
+                            } },
+                          { title: t('colCorrectRate'), dataIndex: 'correct_rate', width: 150,
+                            render: (v: number, r: any) => (
+                              <Space size={6}>
+                                <Progress type="circle" percent={Math.round(Number(v) || 0)} size={30}
+                                  strokeColor={percentColor(Number(v) || 0)} format={(p) => `${p}%`} />
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  {r.correct_count}/{r.total_count}
+                                  {r.pending_count > 0 ? ` (+${r.pending_count} ${t('gradingPending')})` : ''}
+                                </Text>
+                              </Space>
+                            ) },
+                        ] as any} />
+                      {detailAiAnalysis && (
+                        <Card size="small" style={{ marginTop: 12 }} title={<Space><RobotOutlined />{t('aiAnalyze')}</Space>}>
+                          {detailAiCached && (
+                            <div style={{ marginBottom: 6 }}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>{t('aiAnalyzeCached')}</Text>
+                            </div>
+                          )}
+                          <div className="markdown-content">
+                            <FormulaRenderer content={detailAiAnalysis} />
+                          </div>
+                        </Card>
+                      )}
+                    </>
+                  ),
+                },
+                {
+                  key: 'questions',
+                  label: t('tabQuestions'),
+                  children: (
+                    <>
+                      {detail.questions?.map((q: any, i: number) => (
+                        <Card key={q.question_id || i} size="small" style={{ marginBottom: 8 }}
+                          title={t('questionN', { n: i + 1 })}
+                          extra={<Space size={4}><Tag>{TYPE_LABELS_LOCAL[q.type] || q.type}</Tag><Tag color="blue">{t('fullScore')} {q.score}</Tag></Space>}
+                        >
+                          <FormulaRenderer content={q.question_text} />
+                          <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="normal" />
+                          {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
+                            <div key={k} style={{ margin: '2px 0' }}>
+                              <Text>{k}. <FormulaRenderer content={v as string} inline /></Text>
+                            </div>
+                          ))}
+                          <div style={{ marginTop: 4 }}>
+                            <AnswerLine color="blue" label={t('answerColon')} value={q.correct_answer} />
+                          </div>
+                        </Card>
+                      ))}
+                    </>
+                  ),
+                },
+                {
+                  key: 'roster',
+                  label: t('tabRoster'),
+                  children: (
+                    <>
+                      <Text strong>{t('submissionStatus', { count: detail.attempts?.length || 0 })}</Text>
+                      <div style={{ marginTop: 8 }}>
+                        <SessionRoster attempts={detail.attempts || []} students={detail.students || []} onShowSheet={openSheet} />
+                      </div>
+                    </>
+                  ),
+                },
+              ]}
+            />
           </>
         )}
       </Modal>
@@ -828,7 +1100,7 @@ const TeacherView: React.FC = () => {
         okText={t('saveReview')}
         cancelText={t('cancel')}
         okButtonProps={{ loading: savingReview }}
-        width={880}
+        width="min(900px, 94vw)"
       >
         {sheetAttempt && (
           <div>

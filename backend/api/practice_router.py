@@ -731,6 +731,53 @@ async def get_session_detail(session_id: int, request: Request):
     } for r in urows]
     students.sort(key=lambda x: (bool(x["submitted"]), _num_class(x["class"]), x["name"]))
 
+    # ── R1: 每题正确率 + 班级统计(与随堂测验同一口径) ──
+    paper_total = float(sess.get("total_score") or 0) or sum(
+        float(q.get("score") or 0) for q in questions)
+    question_stats = []
+    for i, q in enumerate(questions):
+        qid = str(q.get("question_id") or q.get("id"))
+        graded_vals = [a["graded"].get(qid) for a in attempts
+                       if isinstance(a.get("graded"), dict)]
+        graded_vals = [g for g in graded_vals if isinstance(g, dict)]
+        # 对错以批改留痕为准; 分母只算已判分人数(批改中的主观题不拉低正确率)
+        judged = [g for g in graded_vals if g.get("grading") != "pending"]
+        correct = sum(1 for g in judged if g.get("is_correct"))
+        question_stats.append({
+            "question_id": q.get("question_id"),
+            "index": i,
+            "type": q.get("type"),
+            "score": q.get("score"),
+            "correct_answer": q.get("correct_answer"),
+            "correct_count": correct,
+            "total_count": len(judged),
+            "submitted_count": len(graded_vals),
+            "pending_count": len(graded_vals) - len(judged),
+            "correct_rate": round(correct / max(len(judged), 1) * 100, 1),
+        })
+
+    rates = []
+    for a in attempts:
+        if a.get("pending_ai"):
+            continue
+        try:
+            rates.append(round(float(a.get("score") or 0) / max(paper_total, 1) * 100, 1))
+        except (TypeError, ValueError):
+            continue
+    class_stats = {
+        "student_count": len(urows),
+        "submitted_count": len(attempts),
+        "graded_count": sum(1 for a in attempts if not a.get("pending_ai")),
+        "participation_rate": round(len(attempts) / max(len(urows), 1) * 100, 1),
+        "total_score": paper_total,
+        "avg_score": round(sum(float(a.get("score") or 0) for a in attempts)
+                           / max(len(attempts), 1), 1),
+        "avg_rate": round(sum(rates) / len(rates), 1) if rates else None,
+        "high_rate": max(rates) if rates else None,
+        "low_rate": min(rates) if rates else None,
+        "pass_rate": round(sum(1 for r in rates if r >= 60) / len(rates) * 100, 1) if rates else None,
+    }
+
     sess_dict = dict(sess)
     sess_dict["target_students"] = target_students
 
@@ -739,10 +786,106 @@ async def get_session_detail(session_id: int, request: Request):
         "questions": questions,
         "attempts": attempts,
         "students": students,
+        "question_stats": question_stats,      # R1: 每题正确率
+        "stats": class_stats,                  # R1: 班级总体统计
         # S-GRADING: 整场练习还有多少题在后台批改 / 待人工批改
         "pending_ai_total": sum(a.get("pending_ai") or 0 for a in attempts),
         "pending_review_total": sum(a.get("pending_review") or 0 for a in attempts),
     }
+
+
+@router.get("/sessions/{session_id}/ai-analysis", summary="AI 分析同步练习答题数据")
+async def practice_ai_analysis(session_id: int, request: Request):
+    """R1: 同步练习的 AI 学情分析(与随堂测验 /quizzes/{id}/ai-analysis 同构)。
+
+    统计口径直接复用 get_session_detail 里算好的 question_stats / stats —— 那里已经是
+    "以批改留痕为准、分母只算已判分人数"的唯一口径, 不再另写一套匹配逻辑。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
+
+    detail = await get_session_detail(session_id, request)   # 内部已校验创建者/管理员
+    sess = detail.get("session") or {}
+    questions = detail.get("questions") or []
+    stats_by_q = {q["question_id"]: q for q in (detail.get("question_stats") or [])}
+    lines = []
+    for i, q in enumerate(questions):
+        qs = stats_by_q.get(q.get("question_id")) or {}
+        lines.append(
+            f"第{i + 1}题 ({q.get('type')}): 正确率{qs.get('correct_rate', 0)}% "
+            f"({qs.get('correct_count', 0)}/{qs.get('total_count', 0)}人) 满分{q.get('score')}分\n"
+            f"  题目：{str(q.get('question_text') or '')[:100]}\n"
+        )
+    stats_text = "\n".join(lines) or "（暂无作答数据）"
+
+    from backend.ai_task_manager import task_manager
+
+    async def _do_analysis() -> dict[str, Any]:
+        from backend.prompts.practice import PRACTICE_ANALYSIS_PROMPT
+        from backend.prompts import apply_skills
+
+        keys = get_api_keys(user["username"])
+        api_key = keys[0] if keys and keys[0] else ""
+        if not api_key:
+            raise HTTPException(status_code=400, detail="未配置 API Key")
+
+        def _safe(s):
+            return str(s).replace('{', '{{').replace('}', '}}')
+
+        cs = detail.get("stats") or {}
+        prompt = f"{build_ai_role()}" + PRACTICE_ANALYSIS_PROMPT.format(
+            practice_title=_safe(sess.get("title") or ""),
+            subject=_safe(sess.get("subject") or ""),
+            knowledge_points=_safe(sess.get("knowledge_points") or ""),
+            expected_count=cs.get("student_count", 0),
+            submitted_count=cs.get("submitted_count", 0),
+            participation_rate=cs.get("participation_rate", 0),
+            avg_rate=cs.get("avg_rate") if cs.get("avg_rate") is not None else "-",
+            question_stats=_safe(stats_text),
+        )
+        prompt = apply_skills(prompt, "practice")
+        analysis = await call_ai_async(prompt, api_key, use_kb=False)
+        return {
+            "analysis": analysis,
+            "question_stats": detail.get("question_stats") or [],
+            "class_stats": cs,
+        }
+
+    task_id = await task_manager.create_task(
+        description=f"练习 #{session_id} AI 学情分析",
+        coro_factory=_do_analysis,
+        dedupe_key=f"practice-ai:{session_id}", max_concurrent=4,
+    )
+    return {"task_id": task_id, "message": "AI 分析已提交，请稍后查询结果"}
+
+
+@router.post("/sessions/{session_id}/notify-unsubmitted", summary="一键提醒未提交学生")
+async def notify_unsubmitted(session_id: int, request: Request):
+    """P1-6: 教师一键提醒该练习尚未提交的学生(通知中心)"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    detail = await get_session_detail(session_id, request)   # 权限与名单口径共用
+    sess = detail.get("session") or {}
+    todo = [s["username"] for s in (detail.get("students") or []) if not s.get("submitted")]
+    if not todo:
+        return {"message": "所有学生都已提交，无需提醒", "notified": 0}
+
+    from backend.api.notification_router import notify_users
+    from backend.text_utils import clip
+    notify_users(
+        todo, "info",
+        f"请完成同步练习「{clip(sess.get('title') or '', 30)}」",
+        f"知识点：{sess.get('knowledge_points') or '-'}，共 {sess.get('question_count') or 0} 题。",
+        "/practice",
+        source_type="practice", source_id=str(session_id),
+    )
+    logger.info(f"教师 {user['username']} 提醒练习 {session_id} 未提交学生 {len(todo)} 人")
+    return {"message": f"已提醒 {len(todo)} 名学生", "notified": len(todo)}
 
 
 @router.delete("/sessions/{session_id}")
@@ -972,6 +1115,8 @@ async def list_my_practices(request: Request):
         """SELECT ps.*,
                   (SELECT COUNT(*) FROM practice_attempts pa
                     WHERE pa.session_id = ps.id AND pa.student_username = ?) AS attempted
+                  ,(SELECT pa.score FROM practice_attempts pa
+                     WHERE pa.session_id = ps.id AND pa.student_username = ?) AS my_score
            FROM practice_sessions ps
            WHERE ps.status = 'active'
              AND (
@@ -986,7 +1131,7 @@ async def list_my_practices(request: Request):
                  ))
              )
            ORDER BY ps.created_at DESC""",
-        (username, f'%"{username}"%', grade, f"%{grade}%"),
+        (username, username, f'%"{username}"%', grade, f"%{grade}%"),
     )
     # 精确判定(班级归一化 + 定向名单成员), SQL 只做粗筛
     visible = [r for r in rows if _session_visible_to_student(r, username, grade, cls)]
@@ -1002,6 +1147,7 @@ async def list_my_practices(request: Request):
             "creator_name": creator_map.get(s_.get("creator_username", ""), {}).get("name") or s_.get("creator_username", ""),
             "source": s_.get("source") or "teacher",
             "attempted": bool(s_["attempted"]),
+            "score": s_.get("my_score"),
             "created_at": s_["created_at"],
         })
 

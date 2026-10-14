@@ -88,6 +88,22 @@ def _act_q_db(sql: str, params=()):
         return []
 
 
+def _quiz_totals(quiz_ids: list[Any]) -> dict[Any, float]:
+    """R2-d: quiz_id → 满分(各题分值之和; 老测验=题数, 新测验=100)。
+
+    首页动态原来直接写「得分 3 分」, 没有满分参照, 学生会误以为满分 100。
+    """
+    ids = [i for i in dict.fromkeys(quiz_ids) if i is not None]
+    if not ids:
+        return {}
+    from backend.quiz_stats import quiz_total, quiz_questions
+    ph = ",".join("?" * len(ids))
+    out: dict[Any, float] = {}
+    for row in _act_q(f"SELECT id, questions FROM interaction_quizzes WHERE id IN ({ph})", tuple(ids)):
+        out[row[0]] = quiz_total(quiz_questions({"questions": row[1]})) or 0.0
+    return out
+
+
 def _student_labels(usernames: list[Any]) -> dict[str, dict[str, str]]:
     """批量解析学生标识(实现已上移到 permission_service, 与全站共用一份)"""
     from backend.permission_service import get_student_identity
@@ -1211,19 +1227,24 @@ async def recent_activity(request: Request):
 
         # 最近的随堂测验结果
         quiz_activities = _act_q(
-            """SELECT a.submitted_at, q.title, a.score
+            """SELECT a.submitted_at, q.title, a.score, a.quiz_id
                FROM interaction_quiz_answers a
                JOIN interaction_quizzes q ON a.quiz_id = q.id
                WHERE a.student_username = ?
                ORDER BY a.submitted_at DESC LIMIT 5""",
             (username,),
         )
+        # R2-d: 「得分 3 分」→「得分 60/100」, 否则学生以为满分 100 只拿 3 分
+        _qtot = _quiz_totals([act[3] for act in quiz_activities])
         for act in quiz_activities:
+            _t = float(_qtot.get(act[3]) or 0)
+            _detail = (f"得分 {round(float(act[2] or 0) / _t * 100, 1)}/100"
+                       if _t > 0 else f"得分 {act[2]} 分")
             activities.append({
                 "time": act[0],
                 "type": "quiz",
                 "title": f"完成了随堂测验「{act[1]}」",
-                "detail": f"得分 {act[2]} 分",
+                "detail": _detail,
             })
 
         # 最近的投票参与
@@ -1843,15 +1864,21 @@ def _recent_done(username: str, days: int = 30, limit: int = 30) -> list[dict[st
                    "time": r.get("created_at"), "url": "/code-practice"})
 
     # 5) 随堂测验（smartkb.db，tuple 行）
-    _push(_act_q(
-        """SELECT iqa.id, iqa.submitted_at, iqa.score, q.title
+    _quiz_rows = _act_q(
+        """SELECT iqa.id, iqa.submitted_at, iqa.score, q.title, iqa.quiz_id
            FROM interaction_quiz_answers iqa JOIN interaction_quizzes q ON iqa.quiz_id = q.id
            WHERE iqa.student_username=? AND COALESCE(iqa.submitted_at,'') >= ?
            ORDER BY iqa.submitted_at DESC LIMIT 10""",
-        (username, since)),
-        lambda r: {"id": f"done-quiz-{r[0]}", "type": "quiz", "title": str(r[3] or ""),
-                   "detail": "", "score": r[2], "total": None,
-                   "time": r[1], "url": "/interaction"})
+        (username, since))
+    # R2-d: 带上满分与百分制得分, 不再直接甩原始分(看着像满分 100 只拿 3 分)
+    _quiz_tot = _quiz_totals([r[4] for r in _quiz_rows])
+    _push(_quiz_rows,
+          lambda r: {"id": f"done-quiz-{r[0]}", "type": "quiz", "title": str(r[3] or ""),
+                     "detail": "",
+                     "score": round(float(r[2] or 0) / _quiz_tot[r[4]] * 100, 1)
+                     if _quiz_tot.get(r[4]) else r[2],
+                     "total": _quiz_tot.get(r[4]) or None,
+                     "time": r[1], "url": "/interaction"})
 
     # 6) 投票（smartkb.db）
     _push(_act_q(

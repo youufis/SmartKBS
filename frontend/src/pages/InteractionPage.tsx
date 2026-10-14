@@ -4,7 +4,7 @@ import MediaDisplay from '../components/MediaDisplay'
 import {
   Card, Tabs, Button, Space, Typography, Tag, Modal,
   Form, Input, InputNumber, Select, message, Empty, Spin, Radio, Result,
-  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination,
+  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination, Tooltip,
 } from 'antd'
 import {
   ThunderboltOutlined, BarChartOutlined,
@@ -26,6 +26,7 @@ import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import { RowList } from '../components/RowList'
+import { toPercent, toPercentInt, percentStatus, percentColor, percentLevelKey } from '../utils/score'
 const { Title, Text } = Typography
 
 /** S-GRADING(P3): 这道题的分是谁给的 */
@@ -63,6 +64,10 @@ const InteractionPage: React.FC = () => {
   const [quizStuSearch, setQuizStuSearch] = useState('')
   const [quizAiAnalysis, setQuizAiAnalysis] = useState<string | null>(null)
   const [quizAiAnalysisLoading, setQuizAiAnalysisLoading] = useState(false)
+  // P1: AI 分析结果是否来自缓存(命中缓存时给个提示, 避免教师以为"没重新算")
+  const [quizAiCached, setQuizAiCached] = useState(false)
+  // 结果弹窗内层页签(AI 分析出结果后自动切到「逐题分析」)
+  const [quizResultTab, setQuizResultTab] = useState('overview')
   const [aiQuizModal, setAiQuizModal] = useState(false)
   const [aiQuizLoading, setAiQuizLoading] = useState(false)
   const [aiQuizResult, setAiQuizResult] = useState<any>(null)
@@ -223,6 +228,8 @@ const InteractionPage: React.FC = () => {
       setQuizResultsId(quizId)
       setQuizResultsPending(Number(data?.pending_ai ?? data?.pending_ai_total ?? 0))
       setQuizAiAnalysis(null)
+      setQuizAiCached(false)
+      setQuizResultTab('overview')
     } catch { message.error(t('loadResultFailed')) }
   }
 
@@ -288,20 +295,50 @@ const InteractionPage: React.FC = () => {
     } finally { setQuizGradingNow(false) }
   }
 
-  const handleQuizAiAnalysis = async (quizId: number) => {
+  /** 关闭结果弹窗: 同时停掉后台批改轮询(否则关掉后又被回调"复活") */
+  const closeQuizResults = () => {
+    setQuizResultsView(null)
+    setQuizResultsId(null)
+    setQuizResultsPending(0)
+  }
+
+  /** P1: AI 分析结果缓存到 sessionStorage —— 关弹窗再打开不该再烧一次 token */
+  const handleQuizAiAnalysis = async (quizId: number, force = false) => {
     if (!quizId) return
+    const cacheKey = `quiz-ai:${quizId}`
+    if (!force) {
+      try {
+        const raw = sessionStorage.getItem(cacheKey)
+        if (raw) {
+          const cached = JSON.parse(raw)
+          if (cached?.text && Date.now() - Number(cached.ts || 0) < 24 * 3600 * 1000) {
+            setQuizAiAnalysis(cached.text)
+            setQuizAiCached(true)
+            setQuizResultTab('questions')     // 直接把教师带到分析结果所在的页签
+            return
+          }
+        }
+      } catch { /* 缓存坏了就当没有 */ }
+    }
     setQuizAiAnalysisLoading(true)
     setQuizAiAnalysis(null)
+    setQuizAiCached(false)
     try {
       const { data } = await apiClient.get(`/api/interaction/quizzes/${quizId}/ai-analysis`, { timeout: 180000 })
+      let text: string | null = null
       if (data.task_id) {
         // 异步任务，轮询结果
         const result = await pollAiTask(data.task_id)
-        if (result) setQuizAiAnalysis(result.analysis)
+        if (result) text = result.analysis
         else message.error(t('aiAnalyzeTimeout'))
       } else {
         // 兼容旧版同步返回
-        setQuizAiAnalysis(data.analysis)
+        text = data.analysis
+      }
+      if (text) {
+        setQuizAiAnalysis(text)
+        setQuizResultTab('questions')
+        try { sessionStorage.setItem(cacheKey, JSON.stringify({ text, ts: Date.now() })) } catch { /* 存不下就算了 */ }
       }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('aiAnalyzeFailed'))
@@ -425,7 +462,27 @@ const InteractionPage: React.FC = () => {
         footer={[
           <Button key="submit" type="primary" loading={quizSubmitting} onClick={() => { void handleSubmitQuiz() }}>{t('submit')}</Button>,
         ]}
-        width={640}>
+        width="min(680px, 94vw)">
+        {/* P1: 答题进度 —— 以前只有提交时弹一次「还有几题没答」, 做到一半完全没参照 */}
+        {takingQuiz?.questions?.length > 0 && (() => {
+          const total = takingQuiz.questions.length
+          const done = takingQuiz.questions.filter((_q: any, i: number) => (quizAnswers[i] || '').trim()).length
+          return (
+            <div style={{ marginBottom: 12 }}>
+              <Space size={8} style={{ marginBottom: 4 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('answerProgress', { current: Math.min(done + 1, total), total, done })}
+                </Text>
+                {done < total && (
+                  <Tag color="warning" style={{ marginInlineEnd: 0 }}>
+                    {t('unansweredN', { count: total - done })}
+                  </Tag>
+                )}
+              </Space>
+              <Progress percent={Math.round(done / total * 100)} size="small" showInfo={false} />
+            </div>
+          )
+        })()}
         {takingQuiz?.questions?.map((q: any, i: number) => (
           <div key={i} style={{ marginBottom: 12, padding: 12, background: 'var(--bg-layout)', borderRadius: 4, border: '1px solid var(--border-color)' }}>
             <div style={{ marginBottom: 8 }}>
@@ -476,11 +533,14 @@ const InteractionPage: React.FC = () => {
         {quizResult && (
           <Result
             status={Number(quizResult.pending_ai || 0) > 0 ? 'info'
-              : (quizResult.percentage >= 60 ? 'success' : 'warning')}
-            title={t('ipScoreOf', { score: quizResult.score, total: quizResult.total_score })}
+              : (toPercent(quizResult.score, quizResult.total_score) >= 60 ? 'success' : 'warning')}
+            /* R2(Step A): 得分统一按百分制显示 —— 老数据显示"3/5"会被当成 3 分 */
+            title={t('quizPercentScore', {
+              percent: toPercent(quizResult.score, quizResult.total_score),
+            })}
             subTitle={Number(quizResult.pending_ai || 0) > 0
               ? t('ipGradingPendingHint', { count: quizResult.pending_ai })
-              : t('accuracyRate', { percent: quizResult.percentage })}
+              : `${t('accuracyRate', { percent: quizResult.percentage })} · ${t('quizRawScoreHint', { score: quizResult.score, total: quizResult.total_score })}`}
           />
         )}
       </Modal>
@@ -488,23 +548,69 @@ const InteractionPage: React.FC = () => {
       {/* ── 测验结果统计弹窗 ── */}
       <Modal title={quizResultsView?.quiz_title ? t('ipMyScore', { title: quizResultsView.quiz_title }) : t('ipQuizResult')}
         open={!!quizResultsView}
-        onCancel={() => {
-          setQuizResultsView(null)
-          setQuizResultsId(null)          // 关掉就停轮询
-          setQuizResultsPending(0)
-        }}
-        footer={null} width={900}>
+        onCancel={closeQuizResults}
+        width="min(980px, 94vw)"
+        footer={isStudent
+          ? <Button type="primary" onClick={closeQuizResults}>{t('close')}</Button>
+          : (
+            <Space wrap>
+              {/* S-GRADING(P3): 后台还没判完 / 有题判不准时, 教师可以立刻催批 */}
+              {(Number(quizResultsView?.pending_ai_total || 0) > 0
+                || Number(quizResultsView?.pending_review_total || 0) > 0) && (
+                <>
+                  {quizResultsView?.pending_ai_total > 0 && (
+                    <Tag color="blue">{t('ipGradingPendingN', { count: quizResultsView.pending_ai_total })}</Tag>
+                  )}
+                  {quizResultsView?.pending_review_total > 0 && (
+                    <Tag color="orange">{t('ipNeedsReviewN', { count: quizResultsView.pending_review_total })}</Tag>
+                  )}
+                  <Popconfirm title={t('ipGradeNowConfirm')} onConfirm={() => handleQuizGradeNow(false)}>
+                    <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />}
+                      loading={quizGradingNow} disabled={!(Number(quizResultsView?.pending_ai_total || 0) > 0)}>
+                      {t('ipGradeNow')}
+                    </Button>
+                  </Popconfirm>
+                  {Number(quizResultsView?.pending_review_total || 0) > 0 && (
+                    <Popconfirm title={t('ipRetryReviewConfirm')} onConfirm={() => handleQuizGradeNow(true)}>
+                      <Button size="small" loading={quizGradingNow}>{t('ipRetryReview')}</Button>
+                    </Popconfirm>
+                  )}
+                </>
+              )}
+              <Button icon={<RobotOutlined />} size="small"
+                loading={quizAiAnalysisLoading}
+                disabled={!quizResultsView?.question_stats?.length}
+                onClick={() => handleQuizAiAnalysis(quizResultsView?.quiz?.id, !!(quizAiAnalysis || quizAiCached))}>
+                {quizAiAnalysis ? t('aiReAnalyze') : t('ipAiAnalyze')}
+              </Button>
+              <Button type="primary" onClick={closeQuizResults}>{t('close')}</Button>
+            </Space>
+          )}>
         {quizResultsView && (
           <>
             {/* 学生端：个人答题结果 */}
-            {quizResultsView.quiz_title && (
+            {/* P2-14: 视角以后端 view 字段为准(老后端没这个字段时回退按 quiz_title 判断) */}
+            {(quizResultsView.view ? quizResultsView.view === 'student' : !!quizResultsView.quiz_title) && (
               <div>
                 <Card style={{ textAlign: 'center', marginBottom: 16 }}>
-                  <Progress type="circle" percent={quizResultsView.percentage}
-                    format={p => `${p}%`}
-                    strokeColor={quizResultsView.percentage >= 80 ? '#52c41a' : quizResultsView.percentage >= 60 ? '#faad14' : '#ff4d4f'} />
+                  {/* R2(Step A): 圆环与分数都走百分制; 原始分只作次要说明 */}
+                  <Progress type="circle"
+                    percent={toPercentInt(quizResultsView.score, quizResultsView.total_score)}
+                    format={p => `${p}%`} />
                   <div style={{ marginTop: 8 }}>
-                    <Text>{t('ipScore', { score: quizResultsView.score, total: quizResultsView.total_score })}</Text>
+                    <Space size={8} wrap>
+                      <Text strong>{t('quizPercentScore', {
+                        percent: toPercent(quizResultsView.score, quizResultsView.total_score),
+                      })}</Text>
+                      <Tag color={percentStatus(toPercent(quizResultsView.score, quizResultsView.total_score))}>
+                        {t(percentLevelKey(toPercent(quizResultsView.score, quizResultsView.total_score)))}
+                      </Tag>
+                    </Space>
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('quizRawScoreHint', { score: quizResultsView.score, total: quizResultsView.total_score })}
+                      </Text>
+                    </div>
                   </div>
                 </Card>
                 {quizResultsView.details?.map((r: any, i: number) => (
@@ -520,7 +626,7 @@ const InteractionPage: React.FC = () => {
                     {r.options && typeof r.options === 'object' && !Array.isArray(r.options) && (
                       <div style={{ marginTop: 4, paddingLeft: 8 }}>
                         {Object.entries(r.options).map(([k, v]) => (
-                          <div key={k} style={{ fontSize: 12, color: '#555', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          <div key={k} style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                             {k}. <FormulaRenderer content={v as string} inline />
                           </div>
                         ))}
@@ -529,7 +635,7 @@ const InteractionPage: React.FC = () => {
                     {r.options && Array.isArray(r.options) && (
                       <div style={{ marginTop: 4, paddingLeft: 8 }}>
                         {r.options.map((opt: string, j: number) => (
-                          <div key={j} style={{ fontSize: 12, color: '#555', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          <div key={j} style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                             <FormulaRenderer content={opt} inline />
                           </div>
                         ))}
@@ -567,12 +673,52 @@ const InteractionPage: React.FC = () => {
               </div>
             )}
             {/* 教师端：全班统计 */}
-            {!quizResultsView.quiz_title && (
+            {!(quizResultsView.view ? quizResultsView.view === 'student' : !!quizResultsView.quiz_title) && (
               <>
-                <Row gutter={16} style={{ marginBottom: 16 }}>
-                  <Col span={8}><Statistic title={t('ipQCount')} value={quizResultsView.quiz?.question_count} /></Col>
-                  <Col span={8}><Statistic title={t('ipParticipants')} value={quizResultsView.total_answers} /></Col>
+                {/* P1-4: 教师结果页原来只有"题目数/参与人数", 看不出整体水平 —— 补班级统计 */}
+                {/* P1-3: 三段内容拆成页签 —— 概览 / 学生成绩 / 逐题分析(催批与 AI 按钮移到弹窗底部) */}
+                <Tabs
+                  activeKey={quizResultTab}
+                  onChange={setQuizResultTab}
+                  items={[
+                    {
+                      key: 'overview',
+                      label: t('tabOverview'),
+                      children: (
+                        <>
+                <Row gutter={[16, 12]} style={{ marginBottom: 16 }}>
+                  <Col xs={12} sm={8} md={4}><Statistic title={t('ipQCount')} value={quizResultsView.quiz?.question_count} /></Col>
+                  <Col xs={12} sm={8} md={4}><Statistic title={t('ipParticipants')} value={quizResultsView.total_answers} /></Col>
+                  <Col xs={12} sm={8} md={4}>
+                    <Statistic title={t('statAvgScore')} value={quizResultsView.stats?.avg_score ?? 0}
+                      suffix={`/ ${quizResultsView.quiz?.total_score ?? 0}`} />
+                  </Col>
+                  <Col xs={12} sm={8} md={4}>
+                    <Statistic title={t('statAvgRate')} value={quizResultsView.stats?.avg_rate ?? 0} suffix="%" />
+                  </Col>
+                  <Col xs={12} sm={8} md={4}>
+                    <Statistic title={t('statPassRate')} value={quizResultsView.stats?.pass_rate ?? 0} suffix="%" />
+                  </Col>
+                  <Col xs={12} sm={8} md={4}>
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      {t('statHighRate')}: {quizResultsView.stats?.high_rate ?? '-'}%
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      {t('statLowRate')}: {quizResultsView.stats?.low_rate ?? '-'}%
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      {t('statGraded')}: {quizResultsView.stats?.graded_count ?? 0}
+                    </div>
+                  </Col>
                 </Row>
+                        </>
+                      ),
+                    },
+                    {
+                      key: 'students',
+                      label: t('tabStudents'),
+                      children: (
+                        <>
                 {/* 学生答题汇总 */}
                 {quizResultsView.student_answers?.length > 0 && (
                   <Card title={t('ipStudentTable')} size="small" style={{ marginBottom: 16 }}
@@ -588,96 +734,131 @@ const InteractionPage: React.FC = () => {
                       rowKey="student" size="small"
                       pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (num: number) => t('ipNTotal', { count: num }) }}
                       columns={[
-                        { title: t('ipIdx'), key: 'idx', width: 48, render: (_: any, __: any, i: number) => i + 1 },
-                        { title: t('ipName'), dataIndex: 'student_name', width: 90, ellipsis: true },
-                        { title: t('ipUsername'), dataIndex: 'student', width: 100, ellipsis: true },
-                        { title: t('ipGrade'), dataIndex: 'grade', width: 64 },
-                        { title: t('ipClass'), dataIndex: 'class_name', width: 88 },
-                        { title: t('ipCorrectCol'), dataIndex: 'correct_count', width: 72,
+                        // 列合并(去横向滚动): 姓名+学号、年级+班级、答对/总题 双行; 得分改百分制并带得分率
+                        { title: t('ipIdx'), key: 'idx', width: 44, render: (_: any, __: any, i: number) => i + 1 },
+                        { title: t('ipName'), key: 'student', width: 124, ellipsis: true,
+                          render: (_: any, r: any) => (
+                            <div>
+                              <div>{r.student_name || r.student}</div>
+                              <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{r.student}</div>
+                            </div>
+                          ) },
+                        { title: t('ipGrade'), key: 'grade_class', width: 108,
+                          render: (_: any, r: any) => (
+                            <ScopeTag variant="text" grade={r.grade} classes={String(r.class_name ?? '')} />
+                          ) },
+                        { title: t('ipCorrectCol'), dataIndex: 'correct_count', width: 92,
                           render: (v: number, r: any) => (
-                            <Text strong style={{ color: v === r.total_questions ? '#52c41a' : v > 0 ? '#faad14' : '#ff4d4f' }}>
-                              {v}/{r.total_questions}
-                            </Text>
+                            r.pending_ai
+                              ? <Tooltip title={t('ipGradingPendingN', { count: r.pending_ai })}>
+                                  <Text type="secondary">—</Text>
+                                </Tooltip>
+                              : <Text strong color={percentStatus(toPercentInt(v, r.total_questions))}>
+                                  {v}/{r.total_questions}
+                                </Text>
                           ),
                         },
-                        { title: t('ipScoreCol'), dataIndex: 'score', width: 64 },
+                        // R2: 得分列统一百分制, 副行给得分率(两者一致, 便于教师对照)
+                        { title: t('ipScoreCol'), key: 'score', width: 96,
+                          render: (_: any, r: any) => {
+                            const pct = r.percentage ?? toPercent(r.score, r.total_score)
+                            if (r.pending_ai) {
+                              return <Tooltip title={t('ipGradingPendingN', { count: r.pending_ai })}>
+                                <Text type="secondary">—</Text>
+                              </Tooltip>
+                            }
+                            return (
+                              <div>
+                                <Text strong color={percentStatus(pct)}>{pct}</Text>
+                                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                                  {' '}({t('colScoreRate')} {pct}%)
+                                </span>
+                              </div>
+                            )
+                          },
+                        },
                         // S-GRADING(P3): 谁的卷子还没判完
-                        { title: t('ipGradingState'), key: 'gs', width: 104,
+                        { title: t('ipGradingState'), key: 'gs', width: 96,
                           render: (_: any, r: any) => (
                             r.pending_ai ? <Tag color="blue">{t('ipGradingPendingN', { count: r.pending_ai })}</Tag>
                               : r.pending_review ? <Tag color="orange">{t('ipNeedsReviewN', { count: r.pending_review })}</Tag>
                               : <Tag color="green">{t('ipGraded')}</Tag>
                           ),
                         },
-                        { title: t('ipSubmitted'), dataIndex: 'submitted_at', width: 150 },
+                        { title: t('ipSubmitted'), dataIndex: 'submitted_at', width: 130, ellipsis: true },
                       ]} />
                   </Card>
                 )}
-                <div style={{ textAlign: 'right', marginBottom: 8 }}>
-                  {/* S-GRADING(P3): 后台还没判完 / 有题判不准时, 教师可以立刻催批 */}
-                  {(Number(quizResultsView.pending_ai_total || 0) > 0
-                    || Number(quizResultsView.pending_review_total || 0) > 0) && (
-                    <Space size={6} wrap style={{ marginRight: 8 }}>
-                      {quizResultsView.pending_ai_total > 0 && (
-                        <Tag color="blue">{t('ipGradingPendingN', { count: quizResultsView.pending_ai_total })}</Tag>
-                      )}
-                      {quizResultsView.pending_review_total > 0 && (
-                        <Tag color="orange">{t('ipNeedsReviewN', { count: quizResultsView.pending_review_total })}</Tag>
-                      )}
-                      <Popconfirm title={t('ipGradeNowConfirm')} onConfirm={() => handleQuizGradeNow(false)}>
-                        <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />}
-                          loading={quizGradingNow} disabled={!(quizResultsView.pending_ai_total > 0)}>
-                          {t('ipGradeNow')}
-                        </Button>
-                      </Popconfirm>
-                      {quizResultsView.pending_review_total > 0 && (
-                        <Popconfirm title={t('ipRetryReviewConfirm')} onConfirm={() => handleQuizGradeNow(true)}>
-                          <Button size="small" loading={quizGradingNow}>{t('ipRetryReview')}</Button>
-                        </Popconfirm>
-                      )}
-                    </Space>
-                  )}
-                  <Button icon={<RobotOutlined />} size="small"
-                    loading={quizAiAnalysisLoading}
-                    onClick={() => handleQuizAiAnalysis(quizResultsView.quiz?.id)}>
-                    {t('ipAiAnalyze')}
-                  </Button>
-                </div>
-                <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small"
-                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (num: number) => t('ipNTotal', { count: num }), pageSizeOptions: ['5', '10', '20'] }}
-                  columns={[
-                    { title: t('ipQNoCol'), dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
-                    { title: t('ipQuestionCol'), key: 'question', width: 400,
-                      render: (_: any, r: any) => (
-                        <div>
-                          <FormulaRenderer content={r.question} />
-                          <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={(r as any).media_files} size="normal" />
-                          {r.options?.length > 0 && (
-                            <div style={{ marginTop: 4, paddingLeft: 8 }}>
-                              {r.options.map((opt: string, j: number) => (
-                                <div key={j} style={{ fontSize: 12, color: '#555', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                                  <FormulaRenderer content={opt} inline />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <AnswerLine color="blue" style={{ marginTop: 4 }} label={t('ipAnswerLabel')} value={r.correct_answer} />
-                        </div>
+                        </>
                       ),
                     },
-                    { title: t('correctRate'), dataIndex: 'correct_rate', width: 100,
-                      render: (r: number) => (
-                        <Text strong style={{ color: r >= 60 ? '#52c41a' : '#ff4d4f' }}>{r}%</Text>
+                    {
+                      key: 'questions',
+                      label: t('tabQuestions'),
+                      children: (
+                        <>
+                {/* 宽表收敛: 题面单行截断, 选项/配图/答案收进展开行 —— 不再靠 400px 列宽铺满 */}
+                <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small"
+                  locale={{ emptyText: t('aiNeedData') }}
+                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (num: number) => t('ipNTotal', { count: num }), pageSizeOptions: ['5', '10', '20'] }}
+                  expandable={{
+                    expandedRowRender: (r: any) => (
+                      <div>
+                        <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={(r as any).media_files} size="normal" />
+                        {r.options?.length > 0 && (
+                          <div style={{ marginTop: 4, paddingLeft: 8 }}>
+                            {r.options.map((opt: string, j: number) => (
+                              <div key={j} style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                <FormulaRenderer content={opt} inline />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <AnswerLine color="blue" style={{ marginTop: 4 }} label={t('ipAnswerLabel')} value={r.correct_answer} />
+                      </div>
+                    ),
+                  }}
+                  columns={[
+                    { title: t('ipQNoCol'), dataIndex: 'index', render: (i: number) => i + 1, width: 56 },
+                    { title: t('ipQuestionCol'), key: 'question',
+                      render: (_: any, r: any) => (
+                        <Tooltip title={<div style={{ maxWidth: 420 }}><FormulaRenderer content={r.question} /></div>}>
+                          <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            <FormulaRenderer content={r.question} />
+                          </div>
+                        </Tooltip>
+                      ),
+                    },
+                    { title: t('correctRate'), dataIndex: 'correct_rate', width: 132,
+                      render: (v: number, r: any) => (
+                        <Space size={6}>
+                          <Progress type="circle" percent={Math.round(v)} size={30}
+                            strokeColor={percentColor(Number(v))} format={(p) => `${p}%`} />
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {r.correct_count}/{r.total_count}
+                            {r.pending_count > 0 ? ` (+${r.pending_count} ${t('gradingInProgress')})` : ''}
+                          </Text>
+                        </Space>
                       ),
                     },
                   ]} />
                 {quizAiAnalysis && (
-                  <Card size="small" style={{ marginTop: 12, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                  <Card size="small" style={{ marginTop: 12 }} title={<Space><RobotOutlined />{t('ipAiAnalyze')}</Space>}>
+                    {quizAiCached && (
+                      <div style={{ marginBottom: 6 }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>{t('aiAnalyzeCached')}</Text>
+                      </div>
+                    )}
                     <div className="markdown-content">
                       <FormulaRenderer content={quizAiAnalysis} />
                     </div>
                   </Card>
                 )}
+                        </>
+                      ),
+                    },
+                  ]}
+                />
               </>
             )}
           </>
@@ -739,7 +920,7 @@ const InteractionPage: React.FC = () => {
                 {q.options && (
                   <div style={{ marginTop: 4, paddingLeft: 16 }}>
                     {q.options.map((opt: string, j: number) => (
-                      <div key={j} style={{ fontSize: 13, color: '#555' }}>{opt}</div>
+                      <div key={j} style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{opt}</div>
                     ))}
                   </div>
                 )}
