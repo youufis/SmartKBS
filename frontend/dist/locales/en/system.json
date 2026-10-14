@@ -93,6 +93,7 @@
   "register": "Register",
   "registerFailed": "Registration failed",
   "updateFailed": "Update failed",
+  "loadUserDetailFailed": "Could not read this user's current info; the update was cancelled to avoid overwriting existing data.",
   "deleteFailed": "Delete failed, please retry",
   "changePasswordFailed": "Change password failed",
   "searchKeywordRequired": "Please enter a keyword",

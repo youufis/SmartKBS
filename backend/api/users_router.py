@@ -516,14 +516,28 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
     if _caller_role(current_user) == 1 and username == current_user["username"]:
         old_grade = existing[0][2] or ""
         old_class = str(existing[0][3] or "")
-        if (req.grade or "") != old_grade or _normalize_class(req.class_val or "") != _normalize_class(old_class):
+        # 只有请求里显式带了这两个字段才谈"改任教范围"; 没带=保持原值, 不该误判
+        wants_grade = "grade" in req.model_fields_set
+        wants_class = "class_val" in req.model_fields_set
+        if ((wants_grade and (req.grade or "") != old_grade)
+                or (wants_class and _normalize_class(req.class_val or "") != _normalize_class(old_class))):
             raise HTTPException(status_code=403, detail="任教范围只能由管理员调整")
     else:
         _assert_can_manage_target(current_user, username, "更新", any_student=True)
 
-    gender_num = _standardize_gender(req.gender)
-    class_val = _normalize_class(req.class_val or "")
-    grade_val = req.grade or ""
+    # PATCH 语义(重要): 只更新请求里**显式给出**的字段, 其余保持库中原值。
+    # 旧实现把缺失字段按 Pydantic 默认值(""/0)写入 —— 实测"只改姓名"会把学生的
+    # 年级/班级清空、grade_id/class_id 置 NULL、性别从男变女, 该生随即从教师的
+    # 所有活动范围(积分/点名/展示卡/可见性)中消失。
+    provided = req.model_fields_set
+    _cur_row = execute_query("SELECT name, gender FROM users WHERE username=?", (username,))
+    cur_name = (_cur_row[0][0] or "") if _cur_row else ""
+    cur_gender = _cur_row[0][1] if _cur_row else 0
+
+    gender_num = _standardize_gender(req.gender) if "gender" in provided else (cur_gender or 0)
+    class_val = _normalize_class(req.class_val or "") if "class_val" in provided else _normalize_class(str(existing[0][3] or ""))
+    grade_val = (req.grade or "") if "grade" in provided else (existing[0][2] or "")
+    name_val = (req.name or "") if "name" in provided else cur_name
     role_rows = execute_query("SELECT role FROM users WHERE username=?", (username,))
     role_num = role_rows[0][0] if role_rows else 2
 
@@ -541,7 +555,7 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
 
         execute_insert_update(
             "UPDATE users SET class=?, name=?, gender=?, grade=?, grade_id=?, class_id=? WHERE username=?",
-            (class_val, req.name, gender_num, grade_val, grade_id, class_id, username),
+            (class_val, name_val, gender_num, grade_val, grade_id, class_id, username),
         )
 
         # 教师：重建 teacher_assignments

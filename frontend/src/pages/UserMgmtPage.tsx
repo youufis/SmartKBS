@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 // 用户管理
 import {
@@ -149,6 +149,12 @@ const UserMgmtPage: React.FC = () => {
 
   // ── 更新信息 ──
   const [updForm] = Form.useForm()
+  // 表单当前承载的是哪个用户的信息(失焦加载成功后才算), 以及用户是否手动动过性别。
+  // 作用: 若用户没触发失焦就直接提交, 表单里除他填的字段外全是空 —— 直接提交会把
+  // 学生的年级/班级/性别清空(实测会把 grade_id/class_id 置 NULL, 该生随即从教师
+  // 的所有活动范围里消失)。此时先取回原值合并, 只让用户真正填写的字段生效。
+  const loadedUserRef = useRef('')
+  const genderTouchedRef = useRef(false)
   const handleUpdateUsernameBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
     const username = e.target.value?.trim()
     if (!username) return
@@ -166,15 +172,39 @@ const UserMgmtPage: React.FC = () => {
       if (data.role_name === '管理员') {
         updForm.setFieldsValue({ subjects })
       }
-    } catch (err) { reportLoadError(err, { key: 'userMgmt.detail' }) }
+      loadedUserRef.current = username
+      genderTouchedRef.current = false
+    } catch (err) {
+      loadedUserRef.current = ''
+      reportLoadError(err, { key: 'userMgmt.detail' })
+    }
   }
   const handleUpdate = async (values: Record<string, unknown>) => {
     const v = values as Record<string, string> & { subjects?: string[] }
+    let classVal = v.class_val || ''
+    let nameVal = v.name || ''
+    let gradeVal = v.grade || ''
+    let genderNum = v.gender === '男' ? 1 : 0
+    let subjectList = v.subjects || []
+
+    if (loadedUserRef.current !== v.username) {
+      // 表单没装载过该用户的现有信息: 先取回来, 用户填了的字段优先、空字段沿用原值
+      try {
+        const cur = await usersApi.getUserInfo(v.username)
+        classVal = classVal.trim() || (cur.class || '')
+        nameVal = nameVal.trim() || (cur.name || '')
+        gradeVal = gradeVal.trim() || (cur.grade || '')
+        if (!genderTouchedRef.current) genderNum = cur.gender === '男' ? 1 : 0
+        if (!subjectList.length) subjectList = cur.subjects || []
+      } catch (err: unknown) {
+        message.error((err as ApiError)?.response?.data?.detail || t('loadUserDetailFailed'))
+        return
+      }
+    }
+
     try {
       const msg = await usersApi.updateUserInfo(
-        v.username, v.class_val || '',
-        v.name || '', v.gender === '男' ? 1 : 0,
-        v.grade || '', v.subjects || [],
+        v.username, classVal, nameVal, genderNum, gradeVal, subjectList,
       )
       message.success(msg)
     } catch (err: unknown) {
@@ -263,7 +293,11 @@ const UserMgmtPage: React.FC = () => {
       setUsersLoading(false)
     }
   }
-  useEffect(() => { handleListUsers() }, [userStatusFilter])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // 学生没有用户列表权限(后端 /api/users 对 role=2 返回 403): 不主动拉取。
+    // 否则学生从菜单进「修改密码」时会先弹一句"获取用户列表失败", 像系统坏了
+    if (isAdmin || isTeacher) void handleListUsers()
+  }, [userStatusFilter, isAdmin, isTeacher])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRestoreGraduate = async (username: string) => {
     try {
@@ -740,7 +774,9 @@ const UserMgmtPage: React.FC = () => {
             <Input placeholder={t('classPlaceholder')} />
           </Form.Item>
           <Form.Item name="name" label={t('nameLabel')}><Input /></Form.Item>
-          <Form.Item name="gender" label={t('genderLabel')} initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
+          <Form.Item name="gender" label={t('genderLabel')} initialValue="男">
+            <Radio.Group options={genderRadios} onChange={() => { genderTouchedRef.current = true }} />
+          </Form.Item>
           <Button type="primary" htmlType="submit">{t('edit')}</Button>
         </Form>
       ),
@@ -1153,10 +1189,14 @@ const UserMgmtPage: React.FC = () => {
 
   // 按权限过滤可见的标签页
   const visibleTabs = tabItems.filter(t => tabPermissions[t.key])
+  // 学生只有「修改密码」一个页签: 标题就该叫修改密码, 而不是"用户管理"
+  const showUserTitle = visibleTabs.some(tb => tb.key !== 'password')
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
-      <Typography.Title level={4} style={{ marginTop: 0 }}>👥 {t('title')}</Typography.Title>
+      <Typography.Title level={4} style={{ marginTop: 0 }}>
+        {showUserTitle ? `👥 ${t('title')}` : `🔑 ${t('changePassword')}`}
+      </Typography.Title>
       <Tabs items={visibleTabs} />
     </Layout>
   )

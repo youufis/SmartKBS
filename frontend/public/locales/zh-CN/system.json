@@ -94,6 +94,7 @@
   "register": "注册",
   "registerFailed": "注册失败",
   "updateFailed": "更新失败",
+  "loadUserDetailFailed": "无法读取该用户的现有信息，已取消本次修改（以免覆盖掉原有资料）",
   "deleteFailed": "删除失败，请重试",
   "changePasswordFailed": "修改密码失败",
   "searchKeywordRequired": "请输入关键词",
