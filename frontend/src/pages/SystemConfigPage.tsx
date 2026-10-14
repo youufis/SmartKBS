@@ -233,6 +233,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // AI 播客双主播音色：留空 = 按当前合成模型自动各挑一条（A 主讲默认男声、B 互动默认女声）
   { key: 'PODCAST_VOICE_A', labelKey: 'field_PODCAST_VOICE_A', descKey: 'field_PODCAST_VOICE_A_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
   { key: 'PODCAST_VOICE_B', labelKey: 'field_PODCAST_VOICE_B', descKey: 'field_PODCAST_VOICE_B_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
+  // 播客时长：档位与硬上限（原先只存在于后端与配置文件中，页面上看不到 → 被「未收录配置键」面板点名）
+  { key: 'PODCAST_DURATION_OPTIONS', labelKey: 'field_PODCAST_DURATION_OPTIONS', descKey: 'field_PODCAST_DURATION_OPTIONS_desc', type: 'text', group: 'tts', required: false, placeholderKey: 'placeholder_PODCAST_DURATION_OPTIONS' },
+  { key: 'PODCAST_MAX_SECONDS', labelKey: 'field_PODCAST_MAX_SECONDS', descKey: 'field_PODCAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
   // 课堂抽问（backend/api/class_drill_router.py）：总闸关掉后该页只从题库取题，零 AI 计费
   { key: 'CLASS_DRILL_AI_ENABLED', labelKey: 'field_CLASS_DRILL_AI_ENABLED', descKey: 'field_CLASS_DRILL_AI_ENABLED_desc', type: 'boolean', group: 'classdrill', required: false },
 

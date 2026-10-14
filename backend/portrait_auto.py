@@ -68,7 +68,6 @@ def _candidates(prev_start: str, prev_end: str) -> list[str]:
 async def _generate_for(username: str, period: str, prev_start: str, prev_end: str) -> bool:
     """为一名学生自动生成；返回是否成功出图"""
     from backend.api.portrait_router import _get_api_key, _run_generation
-    from backend.api.config_router import get_config_value
     api_key = ""
     try:
         api_key = _get_api_key()
@@ -78,7 +77,7 @@ async def _generate_for(username: str, period: str, prev_start: str, prev_end: s
         logger.info("[portrait-auto] 未配置 AI Key，跳过本轮")
         return False
 
-    style = str(get_config_value("PORTRAIT_AUTO_STYLE", "random") or "random")
+    style = "random"      # 每个学生随机一种风格（不设隐藏配置键，避免"改不到只能翻配置文件"）
     try:
         out = await _run_generation(
             username=username, role=2, style=style, period=period,
