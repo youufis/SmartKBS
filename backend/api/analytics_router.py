@@ -17,6 +17,12 @@ from backend.prompts import apply_skills
 from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 from backend.prompts import build_ai_role
+# E1: 考试判分/统计的唯一实现（成绩弹窗 / 本页 / Excel 导出共用）
+from backend.exam_stats import (
+    exam_graded,
+    question_stats as exam_question_stats,
+    score_stats as exam_score_stats,
+)
 
 # ── 辅助：将 TEXT 年级/班级名解析为 ID ──
 def _resolve_grade_id(grade_name: str) -> int | None:
@@ -420,14 +426,16 @@ async def exam_analytics(exam_id: int, request: Request):
     from backend.api.export_router import _assert_can_view_exam
     _assert_can_view_exam(user, dict(exam))
 
+    # E1: 与成绩弹窗、Excel 导出统一口径 —— 不再自己筛 auto_graded=1（那会把"还没判完"的答卷整份排除，
+    #     于是同一场考试在学情分析与成绩页的人数/平均分对不上）。
     attempts = q_execute_query(
-        "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded') AND auto_graded = 1 AND answers IS NOT NULL AND answers != '' ORDER BY score DESC",
+        "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded') ORDER BY score DESC",
         (exam_id,),
     )
 
     questions = q_execute_query(
-        """SELECT qb.id, qb.type, qb.question_text, qb.correct_answer, qb.difficulty, qb.knowledge_points,
-                  eq.score as question_score
+        """SELECT qb.id as qid, qb.type, qb.question_text, qb.correct_answer, qb.difficulty,
+                  qb.knowledge_points, qb.options, eq.score as question_score
            FROM exam_questions eq
            JOIN question_bank qb ON eq.question_id = qb.id
            WHERE eq.exam_id = ?
@@ -435,43 +443,35 @@ async def exam_analytics(exam_id: int, request: Request):
         (exam_id,),
     )
 
-    scores = [a['score'] for a in attempts]
-    total_count = len(scores)
-    avg_score = round(sum(scores) / max(total_count, 1), 1)
-    pass_count = sum(1 for s in scores if s >= exam['pass_score'])
-    max_score = max(scores) if scores else 0
-    min_score = min(scores) if scores else 0
+    # 每题正确率 + 班级统计：走 backend.exam_stats（分母只算已判分人数，批改中的卷子不进平均分）
+    parsed = []
+    for a in attempts:
+        graded = exam_graded(a.get('answers'))
+        ans_map = {str(k): v.get('student_answer', '') for k, v in graded.items() if isinstance(v, dict)}
+        parsed.append((a.get('student_username', ''), ans_map, graded))
 
-    # 每题正确率
-    q_accuracy = []
-    for q in questions:
-        correct = 0
-        for a in attempts:
-            if a.get('answers'):
-                try:
-                    answers = json.loads(a['answers']) if isinstance(a['answers'], str) else a['answers']
-                except (json.JSONDecodeError, TypeError):
-                    answers = {}
-            else:
-                answers = {}
-            q_key = str(q['id'])
-            # 注意: answers 存储的是批改结果对象，如 {student_answer, correct_answer, is_correct}
-            ans_entry = answers.get(q_key, {})
-            if isinstance(ans_entry, dict):
-                if ans_entry.get('is_correct'):
-                    correct += 1
-            elif ans_entry == q['correct_answer']:
-                # 兼容旧格式：直接存答案文本
-                correct += 1
-        rate = round(correct / max(total_count, 1) * 100, 1)
-        q_accuracy.append({
-            "id": q['id'],
-            "type": q['type'],
-            "text": q['question_text'][:80],
-            "correct_rate": rate,
-            "difficulty": q.get('difficulty', 'medium'),
-            "knowledge_points": q.get('knowledge_points', ''),
-        })
+    q_stats = exam_question_stats(questions, parsed)
+    stats = exam_score_stats(attempts, exam['total_score'], exam['pass_score'])
+    stats['total_students'] = stats['submitted_count']      # 兼容前端既有字段名
+    total_count = stats['graded_count']
+    avg_score = stats['avg_score']
+    max_score = stats['max_score']
+    min_score = stats['min_score']
+    pass_count = stats['pass_count']
+
+    # 前端（学情分析页）沿用旧字段名：id / text / correct_rate / difficulty / knowledge_points
+    q_accuracy = [{
+        "id": int(q['qid']) if str(q['qid']).isdigit() else q['qid'],
+        "type": q['type'],
+        "text": str(q['question_text'] or '')[:80],
+        "correct_rate": q['correct_rate'],
+        "difficulty": q.get('difficulty', 'medium') or 'medium',
+        "knowledge_points": q.get('knowledge_points', '') or '',
+        # 新增：让页面能显示「已判 x/y」与本题批改中人数
+        "correct_count": q['correct_count'],
+        "total_count": q['total_count'],
+        "pending_count": q['pending_count'],
+    } for q in q_stats]
 
     # 找出最薄弱的知识点
     weak_points = [q for q in q_accuracy if q['correct_rate'] < 60]
@@ -481,8 +481,8 @@ async def exam_analytics(exam_id: int, request: Request):
 
 考试名称：{exam['title']}
 科目：{exam['subject']}
-参考人数：{total_count}
-平均分：{avg_score}/{exam['total_score']}
+参考人数：{stats['submitted_count']}（其中 {stats['pending_count']} 份仍在批改中，下列统计均不含）
+平均分：{avg_score}/{exam['total_score']}（平均得分率 {stats['avg_rate']}%）
 最高分：{max_score}
 最低分：{min_score}
 及格人数：{pass_count}/{total_count}（及格线{exam['pass_score']}分）
@@ -506,15 +506,8 @@ async def exam_analytics(exam_id: int, request: Request):
         "task_id": task_id,
         "message": "AI 分析已提交，请稍后查询结果",
         "exam": {"id": exam['id'], "title": exam['title'], "subject": exam['subject']},
-        "statistics": {
-            "total_students": total_count,
-            "avg_score": avg_score,
-            "max_score": max_score,
-            "min_score": min_score,
-            "pass_count": pass_count,
-            "pass_rate": round(pass_count / max(total_count, 1) * 100, 1),
-            "total_score": exam['total_score'],
-        },
+        # E1: 与成绩弹窗同一份口径（批改中的答卷不进平均分/及格率，另给已判份数）
+        "statistics": {**stats, "total_score": exam['total_score']},
         "question_accuracy": q_accuracy,
     }
 

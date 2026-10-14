@@ -32,6 +32,13 @@ from backend.permission_service import check_activity_visibility
 # S-GRADING(P2): 主观题后台批量批改引擎(与同步练习/随堂测验共用)
 from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
 from backend.question_db import get_connection
+# E1: 考试成绩口径的唯一实现（结果页 / 学情分析 / Excel 导出三处共用）
+from backend.exam_stats import (
+    pending_keys as exam_pending_keys,
+    question_stats as exam_question_stats,
+    score_stats as exam_score_stats,
+    attempt_percentage as exam_attempt_percentage,
+)
 # 2026-10 走查: 分值分配 / 卷面守卫 / 原子写入统一收敛到 backend/exam_scoring.py
 from backend import exam_scoring
 # 2026-10 走查第二批: 选题能力统一收敛到 backend/paper_compose.py（与智能组卷页同一引擎）
@@ -2638,30 +2645,88 @@ async def get_exam_results(exam_id: int, request: Request):
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权查看此考试的结果")
 
-    # 获取所有提交记录（不包含 answers 详情，展开时再按学生加载）
+    # 获取所有提交记录（不包含 answers 明细，展开时再按学生加载）
+    # E1: 筛选条件与导出/学情分析统一（原先只有本端点用 status='submitted'，另两处是 IN (…,'graded')）
     attempts = execute_query(
         """SELECT id, exam_id, student_username, student_name, score, total_score,
                   submitted_at, status, auto_graded, ai_pending, teacher_reviewed, answers
            FROM exam_attempts
-           WHERE exam_id = ? AND status = 'submitted'
+           WHERE exam_id = ? AND status IN ('submitted', 'graded')
            ORDER BY score DESC""",
         (exam_id,),
     )
-    # S-GRADING(P2): 名册要能看出「谁还在批改中/谁需要人工批改」, 但 answers 明细不下发
+    # E1: 逐份答卷挂上「还在批改中 / 待人工」与百分制得分率；answers 明细不下发（体积）
+    parsed: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    stat_attempts: list[dict[str, Any]] = []
     for a in attempts:
         _g = _exam_json_dict(a.get("answers"))
-        a["pending_ai"] = len(pending_keys(_g))
+        a["pending_ai"] = len(exam_pending_keys(_g))
         a["pending_review"] = sum(1 for v in _g.values() if isinstance(v, dict) and v.get("needs_review"))
+        # 单份答卷是否还有题没判完（决定这一行显示分数还是"批改中"）
+        a["grading_pending"] = bool(a["pending_ai"] or a["pending_review"])
+        a["percentage"] = exam_attempt_percentage(a.get("score"), a.get("total_score") or exam["total_score"])
+        # 逐题统计要用题号→学生答案，先在这里取出来（下面 pop 掉 answers）
+        ans_map = {}
+        for k, v in _g.items():
+            if isinstance(v, dict):
+                ans_map[str(k)] = v.get("student_answer", "")
+        parsed.append((a.get("student_username", ""), ans_map, _g))
+        # 统计要用判分明细判断"这份还在批改吗"；下面会 pop 掉 answers（响应不下发明细）
+        stat_attempts.append({"score": a.get("score"), "graded": _g})
         a.pop("answers", None)
     pending_ai_total = sum(a.get("pending_ai") or 0 for a in attempts)
     pending_review_total = sum(a.get("pending_review") or 0 for a in attempts)
 
-    # 统计数据
-    total_students = len(attempts)
-    avg_score = round(sum(a["score"] for a in attempts) / max(total_students, 1), 1)
-    pass_count = sum(1 for a in attempts if a["score"] >= exam["pass_score"])
-    max_score = max((a["score"] for a in attempts), default=0)
-    min_score = min((a["score"] for a in attempts), default=0)
+    # E1: 统计数据走公共口径 —— 批改中的答卷不计入平均分/及格率/最高最低，并单独下发份数
+    stats = exam_score_stats(stat_attempts, exam["total_score"], exam["pass_score"])
+    stats["pending_ai_total"] = pending_ai_total
+    stats["pending_review_total"] = pending_review_total
+    # 兼容旧字段名（前端与其它调用方仍在读 total_students / max_score）
+    stats["total_students"] = stats["submitted_count"]
+
+    # E2: 每题正确率（与学情分析、Excel 导出共用同一份实现）
+    questions = execute_query(
+        """SELECT eq.score as question_score, qb.id as qid, qb.type, qb.question_text,
+                  qb.options, qb.correct_answer, qb.knowledge_points, qb.difficulty
+           FROM exam_questions eq
+           JOIN question_bank qb ON eq.question_id = qb.id
+           WHERE eq.exam_id = ?
+           ORDER BY eq.sort_order""",
+        (exam_id,),
+    )
+    for q in questions:
+        raw = q.get("options")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                q["options"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                q["options"] = {}
+    q_stats = exam_question_stats(questions, parsed)
+
+    # E2: 缺考名单（按考试的目标范围算应交，未交的单独一组）
+    absent: list[dict[str, Any]] = []
+    expected_count = 0
+    try:
+        from backend.permission_service import get_students_by_scope
+        expected = get_students_by_scope(
+            exam.get("creator_username", ""),
+            target_scope=exam.get("target_scope", "") or "teacher_classes",
+            target_grade=exam.get("target_grade", "") or "",
+            target_class=exam.get("target_class", "") or "",
+            target_users=exam.get("target_users", "") or "",
+        ) or []
+        expected_count = len(expected)
+        submitted = {a.get("student_username") for a in attempts}
+        for s in expected:
+            if s.get("username") not in submitted:
+                absent.append({
+                    "student_username": s.get("username", ""),
+                    "student_name": s.get("name") or s.get("username", ""),
+                    "grade": s.get("grade", ""),
+                    "class_name": s.get("class_name") or s.get("class") or "",
+                })
+    except Exception as e:
+        logger.warning(f"计算缺考名单失败(exam={exam_id}): {e}")
 
     # 补充学生年级/班级（users/classes 在主库，批量查询；班级优先 classes.display_name）
     try:
@@ -2696,17 +2761,12 @@ async def get_exam_results(exam_id: int, request: Request):
     return {
         "exam": exam,
         "attempts": attempts,
-        "statistics": {
-            "total_students": total_students,
-            "avg_score": avg_score,
-            "pass_count": pass_count,
-            "pass_rate": round(pass_count / max(total_students, 1) * 100, 1),
-            "max_score": max_score,
-            "min_score": min_score,
-            # S-GRADING(P2): 整场考试还有多少题在后台批改 / 待人工批改
-            "pending_ai_total": pending_ai_total,
-            "pending_review_total": pending_review_total,
-        },
+        # E1: 统一口径（批改中的答卷不计入平均分/及格率/最高最低，另给已判份数）
+        "statistics": stats,
+        # E2: 每题正确率 + 缺考名单（应交人数按考试的目标范围算）
+        "question_stats": q_stats,
+        "absent": absent,
+        "expected_count": expected_count,
     }
 
 

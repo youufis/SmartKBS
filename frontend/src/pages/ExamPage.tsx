@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col,
   Divider, Empty, Tabs, Spin, Statistic, Checkbox, Alert,
+  Progress, Radio,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined, SafetyCertificateOutlined,
@@ -12,6 +13,7 @@ import {
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
   DownloadOutlined, BulbOutlined, FileOutlined, RobotOutlined,
   FileTextOutlined, ThunderboltOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -34,6 +36,7 @@ import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import { reportLoadError } from '../utils/loadError'
 import MobileCardTable from '../components/MobileCardTable'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { toPercent, percentColor, percentStatus } from '../utils/score'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -154,6 +157,13 @@ const ExamPage: React.FC = () => {
 
   // ── 成绩查看弹窗 ──
   const [resultModal, setResultModal] = useState(false)
+  // E2: 成绩弹窗内层状态（页签 / 名册筛选 / AI 报告）
+  const [resultTab, setResultTab] = useState('overview')
+  const [resultFilter, setResultFilter] = useState<'all' | 'pending' | 'failed' | 'absent'>('all')
+  const [examAiReport, setExamAiReport] = useState<string | null>(null)
+  const [examAiLoading, setExamAiLoading] = useState(false)
+  const [examAiCached, setExamAiCached] = useState(false)
+  const resultPollTries = useRef(0)
   const [resultExam, setResultExam] = useState<ExamInfo | null>(null)
   const [resultData, setResultData] = useState<any>(null)
   const [resultSearch, setResultSearch] = useState('')
@@ -726,6 +736,13 @@ const ExamPage: React.FC = () => {
     setResultExam(exam)
     setResultModal(true)
     setResultLoading(true)
+    // E2: 换一场考试时重置内层页签/筛选与 AI 报告，避免沿用上一场的状态
+    setResultTab('overview')
+    setResultFilter('all')
+    setResultSearch('')
+    setExamAiReport(null)
+    setExamAiCached(false)
+    resultPollTries.current = 0
     try {
       const res = await examsApi.getExamResults(exam.id)
       setResultData(res)
@@ -733,6 +750,66 @@ const ExamPage: React.FC = () => {
       message.error(err?.response?.data?.detail || t('loadScoreFailed'))
     } finally {
       setResultLoading(false)
+    }
+  }
+
+  /** E2: 静默刷新（不动页签/筛选；批改完成后自动更新用） */
+  const refreshResults = useCallback(async () => {
+    if (!resultExam?.id) return
+    setResultLoading(true)
+    try {
+      const res = await examsApi.getExamResults(resultExam.id)
+      setResultData(res)
+    } catch { /* 静默：不打断教师正在看的表格 */ }
+    finally { setResultLoading(false) }
+  }, [resultExam?.id])
+
+  // E2: 还有卷子在批改时，弹窗打开期间每 8 秒自动刷新一次（最多 12 次），批完即停
+  useEffect(() => {
+    const pending = Number(resultData?.statistics?.pending_count || 0)
+    if (!resultModal || pending <= 0) { resultPollTries.current = 0; return }
+    const id = window.setInterval(() => {
+      if (++resultPollTries.current > 12) { window.clearInterval(id); return }
+      void refreshResults()
+    }, 8000)
+    return () => window.clearInterval(id)
+  }, [resultModal, resultData?.statistics?.pending_count, refreshResults])
+
+  /** E2: 单次考试的 AI 分析（复用学情分析页那个端点），结果缓存 24h */
+  const handleExamAiAnalysis = async (force = false) => {
+    const examId = resultExam?.id
+    if (!examId) return
+    const cacheKey = `exam-ai:${examId}`
+    if (!force) {
+      try {
+        const raw = sessionStorage.getItem(cacheKey)
+        if (raw) {
+          const cached = JSON.parse(raw)
+          if (cached?.text && Date.now() - Number(cached.ts || 0) < 24 * 3600 * 1000) {
+            setExamAiReport(cached.text)
+            setExamAiCached(true)
+            return
+          }
+        }
+      } catch { /* 缓存坏了就当没有 */ }
+    }
+    setExamAiLoading(true)
+    setExamAiReport(null)
+    setExamAiCached(false)
+    try {
+      const { data } = await apiClient.get(`/api/analytics/exam/${examId}/report`, { timeout: 60000 })
+      const out: any = data?.task_id ? await pollAiTask(data.task_id, 300000) : null
+      const text = out?.result || out?.analysis || data?.report
+      if (text) {
+        setExamAiReport(text)
+        try { sessionStorage.setItem(cacheKey, JSON.stringify({ text, ts: Date.now() })) } catch { /* 存不下就算了 */ }
+      } else {
+        message.error(out?.error || t('aiAnalyzeTimeout'))
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('aiAnalyzeFailed'))
+    } finally {
+      setExamAiLoading(false)
     }
   }
 
@@ -1845,104 +1922,279 @@ const ExamPage: React.FC = () => {
         </Spin>
       </Modal>
 
-      {/* ── 成绩查看弹窗 ── */}
+      {/* ── 成绩查看弹窗（E2：概览 / 每题 / 名册 三段；E3：宽度自适应 + 语义色） ── */}
       <Modal title={`${t('result')} - ${resultExam?.title || ''}`}
         open={resultModal}
         onCancel={() => setResultModal(false)}
-        width={900}
+        width="min(1040px, 96vw)"
         footer={[
+          <Button key="explain" icon={<BulbOutlined />} onClick={() => resultExam && handleExplainWrong(resultExam.id)}>
+            {t('aiExplainTitle')}
+          </Button>,
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!resultExam?.id}
             onClick={() => window.open(`/api/export/exam/${resultExam?.id}`, '_blank')}>{t('exportReport')}</Button>,
+          <Button key="refresh" icon={<ReloadOutlined />} loading={resultLoading}
+            onClick={() => { void refreshResults() }}>{t('refresh')}</Button>,
           <Button key="close" onClick={() => setResultModal(false)}>{t('close')}</Button>,
         ]}>
+        {!resultData && !resultLoading ? (
+          <Empty description={t('exLoadResultsFailed')}>
+            <Button type="primary" onClick={() => resultExam && handleViewResults(resultExam)}>{t('retry')}</Button>
+          </Empty>
+        ) : (
         <Spin spinning={resultLoading}>
-          {resultData && (
-            <>
-              <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic title={t('totalStudents')} value={resultData.statistics.total_students} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic title={t('average')} value={resultData.statistics.avg_score} precision={1} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic title={t('passCount')} value={resultData.statistics.pass_count}
-                      suffix={`/ ${resultData.statistics.total_students}`} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic title={t('passRate')} value={resultData.statistics.pass_rate}
-                      suffix="%" precision={1} />
-                  </Card>
-                </Col>
-              </Row>
-              <Space style={{ marginBottom: 8 }} wrap>
-                <Input allowClear size="small" style={{ width: 260 }}
-                  placeholder={t('exSearchStudent')} value={resultSearch} onChange={(e) => setResultSearch(e.target.value)} />
-                {/* S-GRADING(P2): 还有主观题没判完时, 教师可以立刻催批, 不必等后台节拍 */}
-                {Number(resultData.statistics?.pending_ai_total || 0) > 0 && (
-                  <>
-                    <Tag color="blue">{t('exGradingPendingN', { count: resultData.statistics.pending_ai_total })}</Tag>
-                    {Number(resultData.statistics?.pending_review_total || 0) > 0 && (
-                      <Tag color="orange">{t('exPendingReviewN', { count: resultData.statistics.pending_review_total })}</Tag>
-                    )}
-                    <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />}
-                      loading={gradingNow} onClick={handleGradeNow}>{t('exGradeNow')}</Button>
-                  </>
-                )}
-              </Space>
-              <Table
-                dataSource={(resultData.attempts || []).filter((r: any) => {
-                  const kw = resultSearch.trim().toLowerCase()
-                  if (!kw) return true
-                  return [r.student_username, r.student_name, r.grade, r.class_name]
-                    .some((x: any) => String(x || '').toLowerCase().includes(kw))
-                })}
-                rowKey="id" size="small"
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (n: number) => t('exTotalStudents', { count: n }) }}
-                columns={[
-                  { title: t('exName'), dataIndex: 'student_name', key: 'student_name', width: 90, ellipsis: true },
-                  { title: t('exStudentId'), dataIndex: 'student_username', key: 'student_username', width: 100, ellipsis: true },
-                  { title: t('exGrade'), dataIndex: 'grade', key: 'grade', width: 64 },
-                  { title: t('exClass'), dataIndex: 'class_name', key: 'class_name', width: 88 },
-                  { title: t('score'), key: 'score', width: 100,
-                    render: (_: any, r: ExamAttempt) => {
-                      const passed = r.score >= (resultExam?.pass_score || 60)
-                      return <span style={{ color: passed ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>{r.score} / {r.total_score}</span>
-                    },
+          {resultData && (() => {
+            const st: any = resultData.statistics || {}
+            const attempts: any[] = resultData.attempts || []
+            const absent: any[] = resultData.absent || []
+            const pendingCount = Number(st.pending_count || 0)
+            const passScore = Number(st.pass_score || 60)
+            // 排名：后端已按分数降序返回，这里给一个稳定的名次映射（批改中的名次是临时的）
+            const rankMap = new Map<string, number>()
+            attempts.forEach((r: any, i: number) => rankMap.set(r.student_username, i + 1))
+            const kw = resultSearch.trim().toLowerCase()
+            const rows = attempts.filter((r: any) => {
+              if (kw && ![r.student_username, r.student_name, r.grade, r.class_name]
+                .some((x: any) => String(x || '').toLowerCase().includes(kw))) return false
+              if (resultFilter === 'pending') return !!r.grading_pending
+              if (resultFilter === 'failed') return !r.grading_pending && Number(r.score || 0) < passScore
+              if (resultFilter === 'absent') return false
+              return true
+            })
+            return (
+              <>
+                <Tabs activeKey={resultTab} onChange={setResultTab} items={[
+                  {
+                    key: 'overview', label: t('exTabOverview'),
+                    children: (
+                      <>
+                        <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
+                          <Col xs={12} sm={8} md={4}>
+                            <Statistic title={t('exSubmitted')} value={st.submitted_count ?? 0} />
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <Statistic title={t('exGradedCount')} value={st.graded_count ?? 0}
+                              suffix={pendingCount > 0 ? `/ ${st.submitted_count}` : undefined} />
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <Statistic title={t('average')} value={st.avg_score ?? 0} precision={1}
+                              suffix={`/ ${st.total_score ?? 0}`} />
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <Statistic title={t('exAvgRate')} value={st.avg_rate ?? '-'} suffix="%" precision={1} />
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <Statistic title={t('passRate')} value={st.pass_rate ?? '-'} suffix="%" precision={1} />
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                              {t('exMaxScore')}: {st.max_score ?? '-'} · {t('exMinScore')}: {st.min_score ?? '-'}
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                              {t('exPassCount')}: {st.pass_count ?? 0}/{st.graded_count ?? 0}
+                            </div>
+                          </Col>
+                        </Row>
+                        <Space size={6} wrap style={{ marginBottom: 12 }}>
+                          {pendingCount > 0 && (
+                            <Tag color="blue">{t('exPendingNotCounted', { count: pendingCount })}</Tag>
+                          )}
+                          {Number(st.pending_review_total || 0) > 0 && (
+                            <Tag color="orange">{t('exPendingReviewN', { count: st.pending_review_total })}</Tag>
+                          )}
+                          {Number(st.pending_ai_total || 0) > 0 && (
+                            <Popconfirm title={t('exGradeNowConfirm')} onConfirm={() => handleGradeNow()}>
+                              <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />}
+                                loading={gradingNow}>{t('exGradeNow')}</Button>
+                            </Popconfirm>
+                          )}
+                          <Button size="small" icon={<RobotOutlined />} loading={examAiLoading}
+                            onClick={() => handleExamAiAnalysis(!!(examAiReport || examAiCached))}>
+                            {examAiReport ? t('aiReAnalyze') : t('exAiAnalyze')}
+                          </Button>
+                          <Button size="small" icon={<DownloadOutlined />}
+                            onClick={() => window.open(`/api/analytics/exam/${resultExam?.id}/report/export`, '_blank')}>
+                            {t('exAiReportWord')}
+                          </Button>
+                        </Space>
+                        {examAiReport ? (
+                          <Card size="small" title={<Space><RobotOutlined />{t('exAiAnalyze')}</Space>}>
+                            {examAiCached && (
+                              <div style={{ marginBottom: 6 }}>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('aiAnalyzeCached')}</Typography.Text>
+                              </div>
+                            )}
+                            <div className="markdown-content">
+                              <FormulaRenderer content={examAiReport} />
+                            </div>
+                          </Card>
+                        ) : (
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('exAiHint')}</Typography.Text>
+                        )}
+                      </>
+                    ),
                   },
-                  // S-GRADING(P2): 一眼看出谁的卷子还在批改中 / 谁需要人工批改
-                  { title: t('exGradingState'), key: 'grading_state', width: 110,
-                    render: (_: any, r: any) => {
-                      if (r.teacher_reviewed) return <Tag color="green">{t('exGradedByTeacher')}</Tag>
-                      if (r.pending_ai) return <Tag color="blue">{t('exGradingPendingN', { count: r.pending_ai })}</Tag>
-                      if (r.pending_review) return <Tag color="orange">{t('exPendingReviewN', { count: r.pending_review })}</Tag>
-                      return <Tag color="green">{t('exGradedDone')}</Tag>
-                    },
+                  {
+                    key: 'questions', label: t('exTabQuestions'),
+                    children: (
+                      <Table
+                        dataSource={resultData.question_stats || []}
+                        rowKey="qid"
+                        size="small"
+                        pagination={false}
+                        locale={{ emptyText: t('noQuestionData') }}
+                        expandable={{
+                          expandedRowRender: (r: any) => (
+                            <div>
+                              {r.options && Object.keys(r.options).length > 0 && (
+                                <div style={{ marginBottom: 4 }}>
+                                  {Object.entries(r.options).map(([k, v]: any) => (
+                                    <div key={k} style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                      {k}. <FormulaRenderer content={v} inline />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <Space size={8} wrap>
+                                <Tag color="blue">{t('correctAnsLabel')}: {r.correct_answer}</Tag>
+                                {r.knowledge_points && <Tag>{r.knowledge_points}</Tag>}
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  {t('exQuestionScoreCol')}: {r.question_score}
+                                </Typography.Text>
+                              </Space>
+                            </div>
+                          ),
+                        }}
+                        columns={[
+                          { title: '#', key: 'idx', width: 56, render: (_: any, __: any, i: number) => i + 1 },
+                          {
+                            title: t('exQuestionCol'), key: 'q',
+                            render: (_: any, r: any) => (
+                              <Tooltip title={<div style={{ maxWidth: 460 }}><FormulaRenderer content={r.question_text} /></div>}>
+                                <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                  <FormulaRenderer content={r.question_text} />
+                                </div>
+                              </Tooltip>
+                            ),
+                          },
+                          {
+                            title: t('accuracy'), dataIndex: 'correct_rate', width: 168,
+                            render: (v: number, r: any) => (
+                              <Space size={6}>
+                                <Progress type="circle" percent={Math.round(Number(v) || 0)} size={30}
+                                  strokeColor={percentColor(Number(v) || 0)} format={(p) => `${p}%`} />
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  {r.correct_count}/{r.total_count}
+                                  {r.pending_count > 0 ? ` (+${r.pending_count} ${t('exGradingPending')})` : ''}
+                                </Typography.Text>
+                              </Space>
+                            ),
+                          },
+                        ] as any}
+                      />
+                    ),
                   },
-                  { title: t('submittedAt'), dataIndex: 'submitted_at', key: 'submitted_at', width: 150,
-                    render: (v: string) => v ? v.slice(0, 16) : '-' },
-                ]}
-                expandable={{
-                  expandedRowRender: (record: any) => <StudentExamDetail
-                    examId={resultExam?.id ?? 0}
-                    attemptId={record.id}
-                    studentName={record.student_name}
-                    showReview={true}
-                  />,
-                  rowExpandable: () => true,
-                }}
-              />
-            </>
-          )}
+                  {
+                    key: 'roster', label: `${t('exTabRoster')} (${attempts.length})`,
+                    children: (
+                      <>
+                        <Space style={{ marginBottom: 8 }} wrap>
+                          <Input allowClear size="small" style={{ width: 220 }}
+                            placeholder={t('exSearchStudent')} value={resultSearch}
+                            onChange={(e) => setResultSearch(e.target.value)} />
+                          <Radio.Group size="small" value={resultFilter} onChange={(e) => setResultFilter(e.target.value)}>
+                            <Radio.Button value="all">{t('exFilterAll')}</Radio.Button>
+                            <Radio.Button value="pending">{t('exFilterPending')}</Radio.Button>
+                            <Radio.Button value="failed">{t('exFilterFailed')}</Radio.Button>
+                            <Radio.Button value="absent">{t('exFilterAbsent', { count: absent.length })}</Radio.Button>
+                          </Radio.Group>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {t('exTotalStudents', { count: rows.length })}
+                          </Typography.Text>
+                        </Space>
+                        <Table
+                          dataSource={rows}
+                          rowKey="id" size="small"
+                          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (n: number) => t('exTotalStudents', { count: n }) }}
+                          columns={[
+                            { title: t('exRank'), key: 'rank', width: 56,
+                              render: (_: any, r: any) => rankMap.get(r.student_username) ?? '-' },
+                            { title: t('exName'), key: 'student', width: 128, ellipsis: true,
+                              render: (_: any, r: any) => (
+                                <div>
+                                  <div>{r.student_name || '-'}</div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{r.student_username}</div>
+                                </div>
+                              ) },
+                            { title: t('exGradeClass'), key: 'grade_class', width: 116,
+                              render: (_: any, r: any) => (
+                                <ScopeTag variant="text" grade={r.grade} classes={String(r.class_name ?? '')} />
+                              ) },
+                            { title: t('score'), key: 'score', width: 132,
+                              sorter: (a: any, b: any) => Number(a.score || 0) - Number(b.score || 0),
+                              render: (_: any, r: any) => {
+                                if (r.grading_pending) {
+                                  return <Tooltip title={t('exPendingNotCounted', { count: 1 })}>
+                                    <Tag color="blue">{t('exGradingPending')}</Tag>
+                                  </Tooltip>
+                                }
+                                const pct = Number(r.percentage ?? toPercent(r.score, r.total_score))
+                                return (
+                                  <div>
+                                    <Typography.Text strong color={percentStatus(pct)}>{pct}</Typography.Text>
+                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                                      {t('exRawScoreHint', { score: r.score ?? 0, total: r.total_score ?? 0 })}
+                                    </div>
+                                  </div>
+                                )
+                              } },
+                            { title: t('exGradingState'), key: 'grading_state', width: 104,
+                              render: (_: any, r: any) => {
+                                if (r.teacher_reviewed) return <Tag color="green">{t('exGradedByTeacher')}</Tag>
+                                if (r.pending_ai) return <Tag color="blue">{t('exGradingPendingN', { count: r.pending_ai })}</Tag>
+                                if (r.pending_review) return <Tag color="orange">{t('exPendingReviewN', { count: r.pending_review })}</Tag>
+                                return <Tag color="green">{t('exGradedDone')}</Tag>
+                              } },
+                            { title: t('submittedAt'), dataIndex: 'submitted_at', key: 'submitted_at', width: 138,
+                              ellipsis: true, render: (v: string) => v ? v.slice(0, 16) : '-' },
+                          ] as any}
+                          expandable={{
+                            expandedRowRender: (record: any) => <StudentExamDetail
+                              examId={resultExam?.id ?? 0}
+                              attemptId={record.id}
+                              studentName={record.student_name}
+                              showReview={true}
+                            />,
+                            rowExpandable: () => true,
+                          }}
+                        />
+                        {absent.length > 0 && (
+                          <Card size="small" style={{ marginTop: 12 }}
+                            title={<Space><WarningOutlined />{t('exAbsentList', { count: absent.length })}</Space>}>
+                            <Table
+                              dataSource={absent} rowKey="student_username" size="small"
+                              pagination={absent.length > 20 ? { pageSize: 20, showSizeChanger: true } : false}
+                              columns={[
+                                { title: t('exName'), dataIndex: 'student_name', width: 140, ellipsis: true },
+                                { title: t('exStudentId'), dataIndex: 'student_username', width: 140, ellipsis: true },
+                                { title: t('exGradeClass'), key: 'gc', width: 140,
+                                  render: (_: any, r: any) => (
+                                    <ScopeTag variant="text" grade={r.grade} classes={String(r.class_name ?? '')} />
+                                  ) },
+                              ] as any}
+                            />
+                          </Card>
+                        )}
+                      </>
+                    ),
+                  },
+                ]} />
+              </>
+            )
+          })()}
         </Spin>
+        )}
       </Modal>
 
       {/* ── AI 错题讲解弹窗 ── */}
@@ -2141,6 +2393,8 @@ const StudentExamDetail: React.FC<{
   const [reviewScore, setReviewScore] = useState<number | null>(null)
   const [reviewComment, setReviewComment] = useState('')
   const [reviewing, setReviewing] = useState(false)
+  // E2: 主观题多时逐题卡很长，给教师一个「只看错题」开关
+  const [onlyWrong, setOnlyWrong] = useState(false)
 
   const loadDetail = useCallback(async () => {
     setLoading(true)
@@ -2200,16 +2454,26 @@ const StudentExamDetail: React.FC<{
             <Tag color="blue">{t('exGradingPendingN', { count: detail.attempt.pending_ai })}</Tag>
           )}
         </Space>
-        {isTeacherOrAdmin && showReview && (
-          <Button size="small" icon={<EditOutlined />} onClick={() => setReviewModal(true)}>
-            {isReviewed ? t('modifyRecheck') : t('recheck')}
-          </Button>
-        )}
+        <Space size={8}>
+          <Checkbox checked={onlyWrong} onChange={(e) => setOnlyWrong(e.target.checked)}>
+            {t('exOnlyWrong')}
+          </Checkbox>
+          {isTeacherOrAdmin && showReview && (
+            <Button size="small" icon={<EditOutlined />} onClick={() => setReviewModal(true)}>
+              {isReviewed ? t('modifyRecheck') : t('recheck')}
+            </Button>
+          )}
+        </Space>
       </div>
 
       {questions.length === 0 ? (
         <Typography.Text type="secondary">{t('noQData')}</Typography.Text>
-      ) : questions.map((q: any, idx: number) => {
+      ) : questions.filter((q: any) => {
+        if (!onlyWrong) return true
+        const a = answers[String(q.id)] || {}
+        const pend = a.grading === 'pending' || a.graded_by === 'queued'
+        return !pend && !a.is_correct
+      }).map((q: any, idx: number) => {
         const ans = answers[String(q.id)] || {}
         // S-GRADING(P2): 后台还没判完的题不显示对错
         const pendingItem = ans.grading === 'pending' || ans.graded_by === 'queued'

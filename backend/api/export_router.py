@@ -33,6 +33,14 @@ from backend.summary_service import SUMMARY_TYPES, build_summary
 from backend.quiz_stats import (
     quiz_graded, answer_index_map, is_question_correct, pending_keys, quiz_total,
 )
+# E1: 考试成绩口径的唯一实现（成绩弹窗 / 学情分析 / 本导出共用）
+from backend.exam_stats import (
+    exam_graded,
+    pending_keys as exam_pending_keys,
+    question_stats as exam_question_stats,
+    score_stats as exam_score_stats,
+    attempt_percentage as exam_attempt_percentage,
+)
 
 router = APIRouter()
 
@@ -331,28 +339,28 @@ def export_exam_result(exam_id: int, request: Request):
         ws1.cell(3, i * 2 + 1, k).font = Font(bold=True)
         ws1.cell(3, i * 2 + 2, v)
 
-    # 统计数据
-    scores_list = [a["score"] for a in attempts]
-    total = len(scores_list)
-    avg_score = round(sum(scores_list) / max(total, 1), 1) if scores_list else 0
-    pass_count = sum(1 for s in scores_list if s >= exam["pass_score"])
-    max_score = max(scores_list) if scores_list else 0
-    min_score = min(scores_list) if scores_list else 0
-
+    # E1: 统计口径与成绩弹窗/学情分析一致 —— 批改中的卷子不计入平均分与及格率
+    for a in attempts:
+        a["_graded"] = exam_graded(a.get("answers"))
+        a["_pending"] = bool(exam_pending_keys(a["_graded"]))
+        a["_rate"] = exam_attempt_percentage(a.get("score"), a.get("total_score") or exam["total_score"])
+    st = exam_score_stats(attempts, exam["total_score"], exam["pass_score"])
     stats = [
-        ("参考人数", total),
-        ("平均分", avg_score),
-        ("最高分", max_score),
-        ("最低分", min_score),
-        ("及格人数", pass_count),
-        ("及格率", f"{round(pass_count / max(total, 1) * 100, 1)}%"),
+        ("参考人数", st["submitted_count"]),
+        ("已判份数", st["graded_count"]),
+        ("平均分", st["avg_score"]),
+        ("平均得分率", f"{st['avg_rate'] if st['avg_rate'] is not None else '-'}%"),
+        ("最高分", st["max_score"] if st["max_score"] is not None else '-'),
+        ("最低分", st["min_score"] if st["min_score"] is not None else '-'),
+        ("及格人数", st["pass_count"]),
+        ("及格率", f"{st['pass_rate'] if st['pass_rate'] is not None else '-'}%"),
     ]
     for i, (k, v) in enumerate(stats):
         ws1.cell(4, i * 2 + 1, k).font = Font(bold=True)
         ws1.cell(4, i * 2 + 2, v)
 
     # 表头
-    headers1 = ["排名", "学生姓名", "用户名", "得分", "总分", "是否及格", "提交时间"]
+    headers1 = ["排名", "学生姓名", "用户名", "得分", "总分", "得分率(%)", "批改状态", "是否及格", "提交时间"]
     row_start = 6
     for i, h in enumerate(headers1, 1):
         ws1.cell(row_start, i, h)
@@ -365,9 +373,11 @@ def export_exam_result(exam_id: int, request: Request):
         ws1.cell(row, 3, a["student_username"])
         ws1.cell(row, 4, a["score"])
         ws1.cell(row, 5, exam["total_score"])
+        ws1.cell(row, 6, a["_rate"])
+        ws1.cell(row, 7, "批改中" if a["_pending"] else "已批改")
         passed = "✅ 及格" if a["score"] >= exam["pass_score"] else "❌ 未及格"
-        ws1.cell(row, 6, passed)
-        ws1.cell(row, 7, a.get("submitted_at") or "")
+        ws1.cell(row, 8, "—" if a["_pending"] else passed)
+        ws1.cell(row, 9, a.get("submitted_at") or "")
 
     _style_cells(ws1, row_start + 1, row_start + len(attempts), len(headers1))
     _auto_width(ws1, len(headers1))
@@ -378,7 +388,7 @@ def export_exam_result(exam_id: int, request: Request):
         ws2.merge_cells("A1:F1")
         ws2.cell(1, 1, f"逐题分析 - {exam['title']}").font = TITLE_FONT
 
-        headers2 = ["题号", "题型", "题目内容", "正确答案", "分值", "正确率"]
+        headers2 = ["题号", "题型", "题目内容", "正确答案", "分值", "正确率", "已判/提交"]
         for i, h in enumerate(headers2, 1):
             ws2.cell(3, i, h)
         _style_header(ws2, 3, len(headers2))
@@ -386,8 +396,17 @@ def export_exam_result(exam_id: int, request: Request):
         type_map = {"single": "单选", "multiple": "多选", "true_false": "判断", "short": "简答",
                      "fill": "填空", "essay": "作文", "subjective": "主观题"}
 
+        # E1: 正确率改由 backend.exam_stats 统一计算 —— 旧实现拿 answers.get(qid) 与正确答案
+        #     做字符串比较，而 answers 里存的是判分对象（dict），比较恒为 False，正确率永远是 0%。
+        parsed = [(a["student_username"],
+                   {str(k): v.get("student_answer", "") for k, v in a["_graded"].items() if isinstance(v, dict)},
+                   a["_graded"]) for a in attempts]
+        q_stat_list = exam_question_stats(
+            [dict(q, qid=q["qid"]) for q in questions], parsed)
+
         for idx, q in enumerate(questions):
             row = 4 + idx
+            qs = q_stat_list[idx]
             ws2.cell(row, 1, idx + 1)
             ws2.cell(row, 2, type_map.get(q["type"], q["type"]))
             # 截取题目内容
@@ -397,25 +416,8 @@ def export_exam_result(exam_id: int, request: Request):
             ws2.cell(row, 3, q_text)
             ws2.cell(row, 4, q["correct_answer"])
             ws2.cell(row, 5, q["question_score"])
-
-            # 计算正确率
-            correct_count = 0
-            for a in attempts:
-                if a.get("answers"):
-                    try:
-                        answers = json.loads(a["answers"]) if isinstance(a["answers"], str) else a["answers"]
-                    except (json.JSONDecodeError, TypeError):
-                        answers = {}
-                else:
-                    answers = {}
-                # 题目答案的 key 在 answers 字典中
-                q_key = str(q["qid"])
-                student_ans = answers.get(q_key) or answers.get(str(q["eq_id"])) or ""
-                if student_ans and student_ans == q["correct_answer"]:
-                    correct_count += 1
-
-            rate = round(correct_count / max(len(attempts), 1) * 100, 1)
-            ws2.cell(row, 6, f"{rate}%")
+            ws2.cell(row, 6, f"{qs['correct_rate']}%")
+            ws2.cell(row, 7, f"{qs['correct_count']}/{qs['total_count']}")
 
         _style_cells(ws2, 4, 4 + len(questions) - 1, len(headers2))
         _auto_width(ws2, len(headers2), max_width=50)
