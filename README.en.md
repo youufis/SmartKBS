@@ -35,7 +35,7 @@
 
 ---
 
-> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-11)
+> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-14)
 >
 > - 🔊 **Speech synthesis and roll-call voice** — only voices verified to produce audio are offered, polyphonic surnames are corrected automatically, and nothing is billed while the feature is off
 > - 🧭 **Settings stop guessing** — one model catalogue behind dropdowns, self-test buttons for image and speech generation, size options filtered by measured limits, wrong values rejected on save
@@ -46,6 +46,8 @@
 > - 🎧 **New: AI Podcast** — one click turns a knowledge point into a **two-host dialogue** audio page (male / female voices) at 3 / 4 / 5 minutes; the model only writes the script while the backend renders the player page, and anything past the limit is truncated; the page carries the transcript and four themes, and once bound to the knowledge point students can listen right away
 > - 🎨 **Whiteboard usability and a rebuilt realtime path** — refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, dropped links reconnect on their own
 > - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports how long it waited and which endpoint it tried
+> - 📊 **Exercise detail gains AI analysis and per-question accuracy** — the teacher detail dialog is now three tabs (Overview / Questions / Roster); the overview carries participation, average score, average score rate, pass rate and per-question accuracy (questions still being graded stay out of the denominator), plus one-click AI analysis, result export and a reminder for students who have not submitted
+> - 💯 **Scores are on a 100-point scale everywhere** — quizzes no longer read "3 / 5": results, exports and the dashboard feed all show 60 / 100 with a grade tag and the raw score, and newly created quizzes spread their points across 100, matching exercises and exams; four score-reporting bugs went with it — the summary export treated the raw score as out of 100 (5 questions, 3 right: 3% → 60%), the CSV export marked every short answer wrong, AI analysis and the results page each computed their own accuracy, and the dashboard feed had no full-score reference
 > - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
 
 ---
@@ -1094,9 +1096,9 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.6.0** (2026-10-05 ~ 10-11). Each release lists the changes a user can notice; per-commit detail lives in the git history.
+Current version **8.6.0** (2026-10-05 ~ 10-14). Each release lists the changes a user can notice; per-commit detail lives in the git history.
 
-### v8.6.0 (2026-10-05 ~ 10-11)
+### v8.6.0 (2026-10-05 ~ 10-14)
 
 - 🔊 Speech synthesis and roll-call voice landed; polyphonic surnames corrected; zero billing while off
 - 🧭 One model catalogue behind dropdowns, self-test buttons for image and speech, sizes filtered by measured limits, wrong settings rejected on save; the entry page is no longer cached; login-page visit statistics added
@@ -1108,7 +1110,10 @@ Current version **8.6.0** (2026-10-05 ~ 10-11). Each release lists the changes a
 - 🎨 Whiteboard usability and realtime path rebuilt: refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
 - ⏱ Question generation scales its output ceiling to the question count and splits the timeout budget across endpoints; a timeout now reports the wait and the endpoint tried
 - 📱 Phone support landed, figure pipeline governed, points anti-farming, dashboard reworked, activity feed denoised, and system "reduce motion" respected
-- 🧪 134 regression tests added; full suite 802 passed, 1 skipped
+- 📊 Exercise detail gained AI analysis, per-question accuracy and class statistics, plus a CSV result export (including students who have not submitted) and a "remind pending" action; the detail dialog became three tabs and no longer scrolls sideways, with low-frequency actions moved into a "More" menu
+- 💯 Quiz scores are on a 100-point scale: results, the teacher score table, per-question stats, exports and the dashboard feed show 60 / 100 with a grade tag and the raw score, and newly created quizzes spread their points across 100; questions still being graded no longer count as wrong
+- 🧮 Grading and full-score rules collapsed into one implementation (backend/quiz_stats.py) shared by the results page, AI analysis, the CSV export and the summary export — fixing the summary export treating the raw score as out of 100, the CSV export marking every short answer wrong, AI analysis and the results page disagreeing on accuracy, and the dashboard feed having no full-score reference
+- 🧪 145 regression tests added in total; full suite 972 passed, 1 skipped
 - ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error instead of being silently rewritten; the whiteboard and generation batches need a backend restart; retrying across endpoints may bill the same prompt twice
 
 ### v8.5.0 (2026-10-03 ~ 10-04)
