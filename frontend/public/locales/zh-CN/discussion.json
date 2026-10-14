@@ -31,6 +31,7 @@
   "whiteboard": "教学白板",
   "createWhiteboard": "创建白板",
   "whiteboardTitle": "白板标题",
+  "wbRoomCreated": "白板已创建，房间码 {{code}}",
   "noWhiteboards": "暂无白板",
   "tools": "工具",
   "pen": "画笔",

@@ -81,7 +81,8 @@ const WhiteboardPage: React.FC = () => {
         room_type: roomType,
         ...roomScope,
       })
-      message.success(t('roomCreated', { code: res.room_code }))
+      // 白板用自己的文案键：discussion 命名空间的 roomCreated 是"讨论室已创建"（同键串味）
+      message.success(t('wbRoomCreated', { code: res.room_code }))
       setCreateOpen(false)
       setTitle('')
       setRoomScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
@@ -210,7 +211,8 @@ const WhiteboardPage: React.FC = () => {
         </Space>
       ),
     },
-    { title: t('title'), dataIndex: 'title', key: 'title' },
+    // 列头用「白板标题」，不能用 discussion 命名空间的 title（那是"分组讨论"）
+    { title: t('whiteboardTitle'), dataIndex: 'title', key: 'title' },
     { title: t('creator'), dataIndex: 'creator_username', key: 'creator_username', width: 100,
       render: (n: string) => n || '-',
     },
