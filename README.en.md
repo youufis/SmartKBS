@@ -42,12 +42,12 @@
 > - 🧱 **One door into the question bank** — nine hand-written insert paths merged into a single exit: validate → de-duplicate → one transaction → link knowledge points
 > - 🔁 **One filling policy** — bank first → AI covers the shortfall → AI questions are stored before being returned; buzzer rounds no longer pad with repeats; composing can opt into shortfall filling (off by default)
 > - 📏 **Question counts mean what the teacher typed** — real parameters everywhere, out-of-range requests fail loudly instead of being silently rewritten
-> - 🎯 **New: Class Drill** — choose a grade/class and a knowledge point, draw from the question bank first (AI generation behind a switch, questions stored for reuse), pick a student fairly, and the student taps an answer that is judged and scored on submit (correct +5 / wrong +2 / skipped 0) — warm-ups and in-class questioning, loop as long as you like
-> - 🎧 **New: AI Podcast** — one click turns a knowledge point into a **two-host dialogue** audio page (male / female voices) at 3 / 4 / 5 minutes; the model only writes the script while the backend renders the player page, and anything past the limit is truncated; the page carries the transcript and four themes, and once bound to the knowledge point students can listen right away
-> - 🎨 **Whiteboard usability and a rebuilt realtime path** — refused connections explain themselves, an ended room can be reopened, one slow student no longer stalls the class, dropped links reconnect on their own
-> - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports how long it waited and which endpoint it tried
-> - 📊 **Exercise detail gains AI analysis and per-question accuracy** — the teacher detail dialog is now three tabs (Overview / Questions / Roster); the overview carries participation, average score, average score rate, pass rate and per-question accuracy (questions still being graded stay out of the denominator), plus one-click AI analysis, result export and a reminder for students who have not submitted
-> - 💯 **Scores are on a 100-point scale everywhere** — quizzes no longer read "3 / 5": results, exports and the dashboard feed all show 60 / 100 with a grade tag and the raw score, and newly created quizzes spread their points across 100, matching exercises and exams; four score-reporting bugs went with it — the summary export treated the raw score as out of 100 (5 questions, 3 right: 3% → 60%), the CSV export marked every short answer wrong, AI analysis and the results page each computed their own accuracy, and the dashboard feed had no full-score reference
+> - 🎯 **New: Class Drill** — draw by knowledge point (optional AI top-up stored for reuse), pick a student fairly, the student taps an answer and it is judged and scored on submit; loop as long as you like
+> - 🎧 **New: AI Podcast** — one click turns a knowledge point into a **two-host dialogue** audio page (male / female voices, 3 / 4 / 5 minutes, four themes); the model only writes the script while the backend renders the player, truncated at the limit, and students can listen once it is bound
+> - 🎨 **Whiteboard usability and a rebuilt realtime path** — refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
+> - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports the wait and the endpoint tried
+> - 📊 **Exercise detail gains AI analysis and per-question accuracy** — the detail dialog became three tabs (Overview / Questions / Roster); the overview carries participation, average score, score rate, pass rate and per-question accuracy (graded-away questions stay out of the denominator), with AI analysis, export and a reminder for non-submitters
+> - 💯 **Scores are on a 100-point scale everywhere** — quizzes no longer read "3 / 5": results, exports and the dashboard feed show 60 / 100 with a grade tag and the raw score, new quizzes spread their points across 100, matching exercises and exams; four score bugs fixed (summary export treating the raw score as out of 100 — 5 questions, 3 right: 3% → 60%; the CSV export marking short answers wrong; two different accuracies between AI analysis and the results page; no full-score reference in the dashboard feed)
 > - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
 
 ---
@@ -1104,38 +1104,30 @@ Current version **8.6.0** (2026-10-05 ~ 10-14). Each release lists the changes a
 - 🧭 One model catalogue behind dropdowns, self-test buttons for image and speech, sizes filtered by measured limits, wrong settings rejected on save; the entry page is no longer cached; login-page visit statistics added
 - 🧱 Question storage merged into one exit: invalid questions refused, duplicates de-duplicated with ids backfilled, AI questions reach the selection engine the same day, figures cleaned on the way in
 - 🔁 One filling policy: bank first → AI covers the shortfall → AI questions stored before returning; buzzer rounds stop padding; composing can opt into shortfall filling (off by default)
-- 🎯 New "Class Drill": draw questions from the bank by course knowledge point (or a typed topic), optional AI generation covering the shortfall (stored for reuse); after a fair student pick the student taps an answer, and submitting judges and scores it instantly (correct 5 / wrong 2 / skipped 0), with points going into the existing points system
-- 🎧 New "AI Podcast": one click turns a knowledge point into a two-host dialogue audio page (male / female voices, 3 / 4 / 5 minutes, four themes); the model only writes the script and the backend renders the player page; speech is synthesised per segment and the duration is computed from the audio size and truncated at the limit; the generated page can be bound to the knowledge point for students to listen to; it shares the speech-synthesis master switch with roll-call announcements
+- 📏 Question counts are real parameters: out-of-range requests fail loudly instead of being silently rewritten, and the async path behaves like the sync one
+- 🎯 New "Class Drill": draw from the bank by knowledge point (or a typed topic) with optional AI top-up stored for reuse; after a fair student pick the student taps an answer, and submitting judges and scores it instantly (correct 5 / wrong 2 / skipped 0)
+- 🎧 New "AI Podcast": one click turns a knowledge point into a two-host dialogue audio page (male / female voices, 3 / 4 / 5 minutes, four themes); the model only writes the script and the backend renders the player, truncated at the limit; students can listen once it is bound; it shares the speech-synthesis master switch with roll-call announcements
 - 🧮 Paper score totals, the three selection engines, export rendering, drag-to-reorder and per-student shuffling all brought in line; AI generation moved to background jobs
 - 🎨 Whiteboard usability and realtime path rebuilt: refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
 - ⏱ Question generation scales its output ceiling to the question count and splits the timeout budget across endpoints; a timeout now reports the wait and the endpoint tried
 - 📱 Phone support landed, figure pipeline governed, points anti-farming, dashboard reworked, activity feed denoised, and system "reduce motion" respected
-- 📊 Exercise detail gained AI analysis, per-question accuracy and class statistics, plus a CSV result export (including students who have not submitted) and a "remind pending" action; the detail dialog became three tabs and no longer scrolls sideways, with low-frequency actions moved into a "More" menu
-- 💯 Quiz scores are on a 100-point scale: results, the teacher score table, per-question stats, exports and the dashboard feed show 60 / 100 with a grade tag and the raw score, and newly created quizzes spread their points across 100; questions still being graded no longer count as wrong
-- 🧮 Grading and full-score rules collapsed into one implementation (backend/quiz_stats.py) shared by the results page, AI analysis, the CSV export and the summary export — fixing the summary export treating the raw score as out of 100, the CSV export marking every short answer wrong, AI analysis and the results page disagreeing on accuracy, and the dashboard feed having no full-score reference
-- 🧪 145 regression tests added in total; full suite 972 passed, 1 skipped
+- 📊 Exercise detail gained AI analysis, per-question accuracy and class statistics, plus a CSV result export (including non-submitters) and a "remind pending" action; the dialog became three tabs
+- 💯 Quiz scores are on a 100-point scale (results / exports / dashboard feed show 60 / 100 with a grade tag and the raw score, new quizzes spread their points across 100, questions still being graded no longer count as wrong); grading and full-score rules collapsed into one implementation, and four score-reporting bugs were fixed
+- 🧪 145 regression tests added; full suite 972 passed, 1 skipped
 - ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error instead of being silently rewritten; the whiteboard and generation batches need a backend restart; retrying across endpoints may bill the same prompt twice
 
-### v8.5.0 (2026-10-03 ~ 10-04)
+### v8.0 – v8.5 (2026-09-05 ~ 10-04)
 
-- 🧮 Paper score totals became a hard invariant; the paper health check only simulates until you confirm
-- 🔒 In-flight answers lock the paper: edits are refused while anyone is still answering, naming the student
-- 🎯 Three selection engines became one; drag-to-reorder and deterministic per-student shuffling finally apply
-- 🔢 Export rendering fixed (Chinese figures, formulas, blanks); paper header stored per exam
-- 📱 Phone support landed; 🖼 figure pipeline governed; 🏆 points anti-farming and honour cleanup
-- 🔐 Admin login history and three login kill switches; 🧠 skill injection restricted by scene; 🧪 130+ regression tests added
-- ⚠️ **Breaking changes**: none (when old papers already contain duplicates, the unique index degrades to a normal index with a log line — no data deleted)
-
-### v8.0 – v8.4 (2026-09-05 ~ 2026-09-29)
-
-- 🔒 **Auth and privilege lockdown**: 16 review rounds closed anonymous reads and cross-teacher writes; activities limited to one's own classes, secrets masked
-- ⏱️ **AI calls fully async**: grading left the request thread, submissions became idempotent, long endpoints got their own timeouts
+- 🔒 **Auth and privilege lockdown**: 16 review rounds closed anonymous reads and cross-teacher writes; activities limited to one's own classes, secrets masked, roll-call writes require login and teaching scope
+- ⏱️ **AI calls fully async**: grading left the request thread, submissions became idempotent, long endpoints got their own timeouts, streaming output fixed with a startup self-check
+- 🧮 **Paper and score semantics**: paper totals became a hard invariant (rebalancing only simulates until confirmed), in-flight answers lock the paper and name the student, three selection engines became one, drag-to-reorder and per-student shuffling finally apply, export rendering fixed, paper header stored per exam
 - 🎯 **Class activity stability**: buzzer advances when everyone answered and restarts safely, quests start instantly with the rest filled in the background, code questions moved to Code Practice
-- 🧮 **Points and data semantics**: nine activity types support "clear participation, keep content" resets (dry run, confirm, rollback, audited) and totals recompute immediately
+- 🧮 **Points and data semantics**: nine activity types support "clear participation, keep content" resets (dry run, confirm, rollback, audited) and totals recompute immediately; points anti-farming and honour cleanup
 - 📝 **Teaching main flow**: Tasks became Conversational Homework with per-requirement evidence, formula rendering unified in 23 places, history grouped per session, four-table export
-- 📚 **Knowledge base drives the AI chain**: generation, lesson plans, grading, analytics and whiteboard all retrieve first and degrade gracefully with visible citations
-- 📰 **News and dashboard rebuilt**: per-feed validation with circuit breaker and backup pool, brief cold start 57.2s → 6.6s, teacher home is task-driven
-- ⚠️ **Breaking changes**: roll-call writes require login and teaching scope; quizzes / polls target only one's own classes; Tasks renamed to Conversational Homework
+- 📚 **Knowledge base and analytics**: generation, lesson plans, grading, analytics and whiteboard all retrieve first and degrade gracefully with visible citations; skill injection restricted by scene
+- 📰 **News, dashboard and mobile**: per-feed validation with circuit breaker and backup pool, brief cold start 57.2s → 6.6s, teacher home is task-driven, phone support landed, figure pipeline governed
+- 🔐 **Login and security**: admin login history and three login kill switches; 🧪 130+ regression tests added
+- ⚠️ **Breaking changes**: roll-call writes require login and teaching scope; quizzes / polls target only one's own classes; Tasks renamed to Conversational Homework (when old papers already contain duplicates, the unique index degrades to a normal index with a log line — no data deleted)
 
 ### v7.x and earlier (H1 2026)
 
