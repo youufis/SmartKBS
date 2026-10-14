@@ -851,7 +851,8 @@ const UserMgmtPage: React.FC = () => {
     },
     {
       key: 'list',
-      label: t('userManagement'),
+      // 页面标题已经叫「用户管理」了，这个 tab 是名单视图，改叫「用户列表」免得同名
+      label: t('userList'),
       children: (
         <Space orientation="vertical" style={{ width: '100%' }}>
           <Space>
@@ -1190,12 +1191,14 @@ const UserMgmtPage: React.FC = () => {
   // 按权限过滤可见的标签页
   const visibleTabs = tabItems.filter(t => tabPermissions[t.key])
   // 学生只有「修改密码」一个页签: 标题就该叫修改密码, 而不是"用户管理"
+  // 管理员/教师: 标题取侧边栏同名项 userManagement(用户管理) ——
+  // 旧实现用 system.title, 那是侧边栏"系统管理"分组名, 页面标题挂错了层级
   const showUserTitle = visibleTabs.some(tb => tb.key !== 'password')
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Typography.Title level={4} style={{ marginTop: 0 }}>
-        {showUserTitle ? `👥 ${t('title')}` : `🔑 ${t('changePassword')}`}
+        {showUserTitle ? `👥 ${t('userManagement')}` : `🔑 ${t('changePassword')}`}
       </Typography.Title>
       <Tabs items={visibleTabs} />
     </Layout>

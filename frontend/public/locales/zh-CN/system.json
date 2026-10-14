@@ -20,6 +20,7 @@
   "promoteAdminOnly": "升年级操作仅限管理员使用",
   "title": "系统管理",
   "userManagement": "用户管理",
+  "userList": "用户列表",
   "gradeClass": "年级/班级",
   "addUser": "添加用户",
   "editUser": "编辑用户",
