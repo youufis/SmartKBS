@@ -90,6 +90,15 @@ def _normalize_class(cls_val: str) -> str:
     return cls_val.replace("班", "")
 
 
+def _class_display_name(class_id, fallback: str = "") -> str:
+    """class_id -> 班级显示名（如「高一1班」）；取不到就用传入的原始值兜底"""
+    if class_id:
+        rows = execute_query("SELECT display_name FROM classes WHERE id=?", (class_id,))
+        if rows and rows[0][0]:
+            return rows[0][0]
+    return (fallback or "").strip()
+
+
 def _standardize_gender(gender_value) -> int:
     """标准化性别值"""
     if gender_value is None:
@@ -507,7 +516,8 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
         raise HTTPException(status_code=400, detail="用户名不能为空")
 
     existing = execute_query(
-        "SELECT username, role, grade, class FROM users WHERE username=?", (username,)
+        "SELECT username, role, grade, class, grade_id, class_id FROM users WHERE username=?",
+        (username,)
     )
     if not existing:
         raise HTTPException(status_code=404, detail=f"用户 '{username}' 不存在")
@@ -557,6 +567,39 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
             "UPDATE users SET class=?, name=?, gender=?, grade=?, grade_id=?, class_id=? WHERE username=?",
             (class_val, name_val, gender_num, grade_val, grade_id, class_id, username),
         )
+
+        # S-SYNC: 学生改名/转班时，把以"姓名"为键的积分与点名数据一并搬走。
+        # scores / rollcall_history / rollcall_weights 的键是 (teacher, grade, class_name, student_name)，
+        # 名字或班级一变，旧行就成了孤儿：名单按 users 渲染 → 查不到旧键 → 该生积分显示 0
+        # （实测过），点名权重也留给了"查无此人"。这里按旧的三元组精确匹配再写新值，
+        # 同年级同名的另一个班学生不会被误伤。
+        old_gid, old_cid = existing[0][4], existing[0][5]
+        if role_num == 2:
+            old_grade_d = existing[0][2] or ""
+            old_class_d = _class_display_name(old_cid, str(existing[0][3] or ""))
+            new_grade_d = grade_val
+            new_class_d = _class_display_name(class_id, class_val)
+            if cur_name != name_val or old_grade_d != new_grade_d or old_class_d != new_class_d:
+                try:
+                    for table in ("scores", "rollcall_history", "rollcall_weights"):
+                        execute_insert_update(
+                            f"UPDATE {table} SET student_name=?, grade=?, grade_id=?, class_name=?, class_id=? "
+                            "WHERE student_name=? AND grade=? AND class_name=?",
+                            (name_val, new_grade_d, grade_id, new_class_d, class_id,
+                             cur_name, old_grade_d, old_class_d),
+                        )
+                        if old_gid is not None or old_cid is not None:
+                            # 兜底：班级显示名对不上的历史行，按 FK 再匹配一次
+                            execute_insert_update(
+                                f"UPDATE {table} SET student_name=?, grade=?, grade_id=?, class_name=?, class_id=? "
+                                "WHERE student_name=? AND grade_id IS ? AND class_id IS ?",
+                                (name_val, new_grade_d, grade_id, new_class_d, class_id,
+                                 cur_name, old_gid, old_cid),
+                            )
+                    logger.info(f"学生改名/转班已同步积分与点名数据: {username} -> {name_val}/{new_class_d}")
+                except Exception as exc:
+                    # 用户资料已经写成功，同步失败不该把这次更新判成失败，但必须留痕
+                    logger.warning(f"同步积分/点名数据失败（用户信息已更新）: {exc}")
 
         # 教师：重建 teacher_assignments
         # U5: 旧实现"先清空, 再仅按请求里的 subjects 重建", 于是任何不带 subjects 字段的

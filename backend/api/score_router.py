@@ -1,14 +1,22 @@
 """
 课堂积分系统 API 路由
 """
-import jwt as pyjwt
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
-from backend.database import get_connection, execute_query, execute_query_dict
+from backend.api.dependencies import get_current_user
+from backend.auth import ROLE_ADMIN, ROLE_STUDENT
+from backend.database import execute_query, execute_query_dict
 from backend.logger import logger
-from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
+from backend.score_utils import (
+    teacher_score_key,
+    load_teacher_scores,
+    load_students,
+    apply_score_delta,
+    load_score_logs,
+    new_op_id,
+)
 from backend.permission_service import (
     get_teacher_grades,
     get_teacher_classes,
@@ -22,19 +30,48 @@ router = APIRouter()
 
 # ── 教师身份识别工具 ──
 
-def _get_teacher(request: Request) -> str:
-    """从请求中提取教师用户名"""
-    teacher = request.query_params.get("teacher", "")
-    if teacher:
-        return teacher
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        try:
-            payload = pyjwt.decode(auth[7:], options={"verify_signature": False})
-            return payload.get("username", "root")
-        except Exception:
-            pass
-    return "root"
+def _get_teacher(request: Request, body: dict | None = None) -> str:
+    """S-AUTH: 积分的归属一律以"登录身份"为准（与点名 R2 同一口径）
+
+    - 管理员可用 ?teacher= 或 body.teacher 指名查看/操作某位教师的数据；
+    - 教师/学生忽略客户端传来的 teacher，强制使用本人用户名；
+    - 未登录由 get_current_user 直接抛 auth_missing（401），不再回退 "root"。
+    旧实现信任 query 里的 teacher 且未登录回退 root，叠加 middleware 把 /api/scores/
+    当成公开路径 —— 匿名请求带上 ?teacher=root 即可读写全校积分（实测可读名单、可加 100 分）。
+    """
+    user = get_current_user(request)
+    if user.get("role") == ROLE_ADMIN:
+        requested = (request.query_params.get("teacher")
+                     or (body or {}).get("teacher") or "").strip()
+        if requested:
+            return requested
+    return user.get("username") or "root"
+
+
+def _require_staff(request: Request, body: dict | None = None) -> str:
+    """加减分/批量/重置/撤销只允许教师与管理员（学生只读）。
+
+    前端本来就不给学生入口，但接口层不能只靠界面：旧实现里任何登录用户都能给任意学生加分。
+    """
+    user = get_current_user(request)
+    if user.get("role") == ROLE_STUDENT:
+        raise HTTPException(status_code=403, detail="权限不足：学生不能修改积分")
+    return _get_teacher(request, body)
+
+
+def _current_place(username: str):
+    """按学号取学生当前的 (年级, 班级显示名, 姓名)：撤销时对齐用，改名转班后仍撤得对"""
+    rows = execute_query(
+        """SELECT COALESCE(g.name, u.grade), COALESCE(c.display_name, u.class), u.name
+           FROM users u
+           LEFT JOIN grades  g ON g.id = u.grade_id
+           LEFT JOIN classes c ON c.id = u.class_id
+           WHERE u.username=?""",
+        (username,),
+    )
+    if not rows or not rows[0][2]:
+        return None
+    return (rows[0][0] or "", rows[0][1] or "", rows[0][2])
 
 
 # ── API 处理器 ──
@@ -209,70 +246,123 @@ async def api_stats(request: Request):
 
 async def api_score_post(request: Request):
     body = await request.json()
-    teacher = body.get("teacher") or _get_teacher(request)
-    scores = load_teacher_scores(teacher)
-    key = teacher_score_key(teacher, body["grade"], body["class"], body["name"])
-    scores[key] = scores.get(key, 0) + body["points"]
-    save_teacher_scores(scores, teacher)
-    return {"success": True, "total": scores[key], "added": body["points"]}
+    teacher = _require_staff(request, body)
+    grade = (body.get("grade") or "").strip()
+    cls = (body.get("class") or "").strip()
+    name = (body.get("name") or "").strip()
+    points = int(body.get("points") or 0)
+    reason = (body.get("reason") or "").strip()
+    if not grade or not cls or not name:
+        return {"success": False, "error": "参数错误"}
+    if not points:
+        return {"success": False, "error": "分值不能为 0"}
+    op_id = new_op_id()
+    total = apply_score_delta(teacher, grade, cls, name, points, reason=reason, op_id=op_id)
+    return {"success": True, "total": total, "added": points, "op_id": op_id}
 
 
 async def api_reset_post(request: Request):
+    """重置积分 = 写 0 并记流水（可撤销）。
+
+    旧实现是直接把 scores 行删掉：既留不下痕迹，也没法撤销；而且和"删除"按钮撞成同一个效果。
+    """
     body = await request.json()
-    teacher = body.get("teacher") or _get_teacher(request)
+    teacher = _require_staff(request, body)
     scores = load_teacher_scores(teacher)
     g, c, n = body.get("grade"), body.get("class"), body.get("name")
     if n:
-        scores.pop(teacher_score_key(teacher, g, c, n), None)
+        keys = [teacher_score_key(teacher, g, c, n)]
     elif c and g:
         prefix = f"{teacher}|{g}|{c}|"
-        for k in list(scores):
-            if k.startswith(prefix):
-                scores.pop(k, None)
-    save_teacher_scores(scores, teacher)
-    return {"success": True}
-
-
-async def api_student_save(request: Request):
-    body = await request.json()
-    teacher = body.get("teacher") or _get_teacher(request)
-    grade = body.get("grade")
-    from backend.subject_config import get_grade_list
-    if grade not in get_grade_list():
-        return {"success": False, "error": "无效年级"}
-
-    name = (body.get("name") or "").strip()
-    cls = (body.get("class") or "").strip()
-    original_name = (body.get("originalName") or "").strip()
-    original_class = (body.get("originalClass") or "").strip()
-
-    if not name or not cls:
-        return {"success": False, "error": "姓名和班级为必填项"}
-
-    if original_name and original_class and (original_name != name or original_class != cls):
-        scores = load_teacher_scores(teacher)
-        old_key = teacher_score_key(teacher, grade, original_class, original_name)
-        new_key = teacher_score_key(teacher, grade, cls, name)
-        if old_key in scores:
-            scores[new_key] = scores.pop(old_key)
-            save_teacher_scores(scores, teacher)
-
-    return {"success": True, "student": {"name": name, "class": cls}}
-
-
-async def api_student_delete(request: Request):
-    body = await request.json()
-    teacher = body.get("teacher") or _get_teacher(request)
-    grade = body.get("grade")
-    name = (body.get("name") or "").strip()
-    cls = (body.get("class") or "").strip()
-    from backend.subject_config import get_grade_list
-    if grade not in get_grade_list() or not name or not cls:
+        keys = [k for k in scores if k.startswith(prefix)]
+    else:
         return {"success": False, "error": "参数错误"}
-    scores = load_teacher_scores(teacher)
-    scores.pop(teacher_score_key(teacher, grade, cls, name), None)
-    save_teacher_scores(scores, teacher)
-    return {"success": True}
+
+    op_id = new_op_id()
+    touched = 0
+    for key in keys:
+        old = int(scores.get(key) or 0)
+        if not old:
+            continue
+        parts = key.split("|")
+        if len(parts) != 4:
+            continue
+        _, k_grade, k_cls, k_name = parts
+        apply_score_delta(teacher, k_grade, k_cls, k_name, -old, reason="reset", op_id=op_id)
+        touched += 1
+    return {"success": True, "reset": touched, "op_id": op_id}
+
+
+async def api_score_batch(request: Request):
+    """批量加分/扣分：一次操作共用一个 op_id，整组可撤销"""
+    body = await request.json()
+    teacher = _require_staff(request, body)
+    grade = (body.get("grade") or "").strip()
+    cls = (body.get("class") or "").strip()
+    names = [str(x).strip() for x in (body.get("names") or []) if str(x).strip()]
+    points = int(body.get("points") or 0)
+    reason = (body.get("reason") or "").strip()
+    if not grade or not cls or not names:
+        return {"success": False, "error": "参数错误"}
+    if not points:
+        return {"success": False, "error": "分值不能为 0"}
+    op_id = new_op_id()
+    for nm in names:
+        apply_score_delta(teacher, grade, cls, nm, points, reason=reason, op_id=op_id)
+    return {"success": True, "updated": len(names), "added": points, "op_id": op_id}
+
+
+async def api_score_logs(request: Request):
+    """积分流水（默认当前教师的当前年级/班级；管理员可加 ?teacher= 看别人）"""
+    teacher = _get_teacher(request)
+    try:
+        limit = int(request.query_params.get("limit") or 200)
+    except ValueError:
+        limit = 200
+    return {"logs": load_score_logs(
+        teacher,
+        grade=(request.query_params.get("grade") or "").strip(),
+        cls_display=(request.query_params.get("class") or "").strip(),
+        name=(request.query_params.get("name") or "").strip(),
+        limit=limit,
+    )}
+
+
+async def api_score_undo(request: Request):
+    """撤销最近一次积分操作（默认限当前班级）：把那一组流水按相反数再应用一遍"""
+    body = await request.json()
+    teacher = _require_staff(request, body)
+    grade = (body.get("grade") or "").strip()
+    cls = (body.get("class") or "").strip()
+
+    sql = "SELECT op_id FROM score_logs WHERE teacher_username=? AND undone=0"
+    params: list = [teacher]
+    if grade and cls:
+        sql += " AND grade=? AND class_name=?"
+        params += [grade, cls]
+    sql += " ORDER BY id DESC LIMIT 1"
+    rows = execute_query(sql, tuple(params))
+    if not rows:
+        return {"success": False, "error": "没有可撤销的操作"}
+
+    op_id = rows[0][0]
+    logs = execute_query(
+        "SELECT id, student_username, grade, class_name, student_name, points "
+        "FROM score_logs WHERE op_id=? AND undone=0 ORDER BY id",
+        (op_id,),
+    )
+    reversed_students = 0
+    reversed_points = 0
+    for lid, sun, g, cls_n, nm, pts in logs:
+        pts = int(pts or 0)
+        cur = _current_place(sun) if sun else None      # 学生可能已改名/转班
+        gg, cc, nn = cur if cur else (g, cls_n, nm)
+        apply_score_delta(teacher, gg, cc, nn, -pts, reason="undo", op_id=op_id,
+                          student_username=sun or "", log_undone=True, mark_undone_id=lid)
+        reversed_students += 1
+        reversed_points += pts
+    return {"success": True, "reversed_students": reversed_students,
+            "reversed_points": reversed_points, "op_id": op_id}
 
 
 # ── 路由注册 ──
@@ -284,9 +374,10 @@ router.get("/students", summary="获取学生列表（含积分）")(api_student
 router.get("/ranking", summary="获取积分排名")(api_ranking)
 router.get("/stats", summary="获取积分统计")(api_stats)
 router.post("/score", summary="添加积分")(api_score_post)
-router.post("/reset", summary="重置积分")(api_reset_post)
-router.post("/student", summary="保存/迁移学生积分")(api_student_save)
-router.delete("/student", summary="删除学生积分")(api_student_delete)
+router.post("/batch", summary="批量加减分")(api_score_batch)
+router.post("/reset", summary="重置积分（写 0 + 记流水，可撤销）")(api_reset_post)
+router.post("/undo", summary="撤销最近一次积分操作")(api_score_undo)
+router.get("/logs", summary="积分流水")(api_score_logs)
 
 
 # ── 原 mount_score_api 内联定义的路由 ──
@@ -343,8 +434,15 @@ async def api_my_score(request: Request):
 
 
 @router.get("/teachers", summary="获取教师/管理员列表")
-async def api_teachers():
-    """获取所有教师/管理员列表"""
+async def api_teachers(request: Request):
+    """获取所有教师/管理员列表（S-AUTH：仅教师与管理员可读）
+
+    前端只在管理员打开积分管理时才拉它做"切换教师"下拉；学生不需要同事目录，
+    顺手把越权面收掉（旧实现登录即可枚举全部教师用户名）。
+    """
+    user = get_current_user(request)
+    if user.get("role") == ROLE_STUDENT:
+        raise HTTPException(status_code=403, detail="权限不足：无法查看教师列表")
     teachers = ["root"]
     try:
         rows = execute_query(

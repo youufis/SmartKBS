@@ -1,28 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card, Select, Table, Button, message, Statistic, Row, Col,
-  Space, Typography, Divider, Modal, Input, Radio, Tooltip,
+  Space, Typography, Divider, Tooltip, Alert, Drawer, Input, InputNumber, Modal,
   Spin, Empty, Popconfirm, Tag,
 } from 'antd'
 import {
   PlusOutlined, MinusOutlined, TrophyOutlined,
   ReloadOutlined, BarChartOutlined, TeamOutlined,
-  UserAddOutlined, DeleteOutlined, EditOutlined,
   DownloadOutlined, UserOutlined, StarOutlined,
-  HistoryOutlined, RiseOutlined,
+  HistoryOutlined, RiseOutlined, UndoOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
-import { registerUser, extractApiErrorDetail } from '../api/users'
 import { reportLoadError } from '../utils/loadError'
 
 const { Text } = Typography
-
-/** 新建学生账号的初始密码，与用户管理批量导入模板保持一致 */
-const DEFAULT_STUDENT_PASSWORD = '123456'
 
 interface Student {
   /** 学号 = 登录用户名（全站统一以 username 作为学号展示） */
@@ -87,15 +82,8 @@ const ScorePage: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'scores' | 'ranking' | 'manage'>('scores')
+  const [activeTab, setActiveTab] = useState<'scores' | 'ranking'>('scores')
 
-  // 学生管理
-  const [editModal, setEditModal] = useState(false)
-  const [editStudent, setEditStudent] = useState<Student | null>(null)
-  const [editUsername, setEditUsername] = useState('')
-  const [editName, setEditName] = useState('')
-  const [editClass, setEditClass] = useState('')
-  const [editGender, setEditGender] = useState('')
 
   // 加载当前教师的任教信息
   const [teacherInfo, setTeacherInfo] = useState<string>('')
@@ -259,93 +247,109 @@ const ScorePage: React.FC = () => {
     }
   }
 
-  // ── 添加/编辑学生 ──
-  const openAddStudent = () => {
-    setEditStudent(null)
-    setEditUsername('')
-    setEditName('')
-    setEditClass(cls)
-    setEditGender('男')
-    setEditModal(true)
-  }
+  // ── 批量选择 / 自定义分值 / 积分流水 / 撤销（S-UI）──
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([])
+  const [customOpen, setCustomOpen] = useState(false)
+  const [customTarget, setCustomTarget] = useState<Student | null>(null)
+  const [customValue, setCustomValue] = useState<number | null>(null)
+  const [customReason, setCustomReason] = useState('')
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logs, setLogs] = useState<any[]>([])
+  const [logsFor, setLogsFor] = useState('')          // '' = 全班
+  const [undoing, setUndoing] = useState(false)
 
-  const openEditStudent = (s: Student) => {
-    setEditStudent(s)
-    setEditUsername(s.username || '')
-    setEditName(s.name)
-    setEditClass(s.class)
-    setEditGender(s.gender || '男')
-    setEditModal(true)
-  }
+  const selectedStudents = students.filter((s) => selectedKeys.includes(s.username || s.name))
 
-  // 班级显示名「高一1班」→ 建号接口要的班级序号「1」(与用户管理/导入模板同一约定)
-  const toClassNo = (v: string) => {
-    const t2 = v.trim().replace(/班/g, '').replace(grade, '').trim()
-    return t2 || v.trim()
-  }
+  const refreshAll = () => { loadStudents(); loadStats(); loadRanking() }
 
-  const handleSaveStudent = async () => {
-    const newName = editName.trim()
-    const newClass = editClass.trim()
-    const studentNo = editUsername.trim()
-    if (!newName || !newClass) {
-      message.warning(t('requiredFields'))
-      return
-    }
-    // 新增：学号必填，因为要拿它当登录账号建号（名单来自 users 表，不建号就不会出现该学生）
-    if (!editStudent && !studentNo) {
-      message.warning(t('studentIdRequired'))
-      return
-    }
+  /** 批量加减分：一次操作共用一个 op_id，可整组撤销 */
+  const applyBatch = async (points: number, reason = '') => {
+    const names = selectedStudents.map((s) => s.name)
+    if (!names.length) return
     try {
-      if (!editStudent) {
-        try {
-          await registerUser({
-            username: studentNo,
-            password: DEFAULT_STUDENT_PASSWORD,
-            name: newName,
-            gender: editGender === '男' ? 1 : 0,
-            role: 2,
-            grade,
-            class_val: toClassNo(newClass),
-          })
-        } catch (err: any) {
-          // 学号重复/超出任教范围等，直接把后端原因抛给老师
-          message.error(extractApiErrorDetail(err?.response?.data) || t('createAccountFailed'))
-          return
-        }
-      }
-      const body: Record<string, string> = {
-        grade, name: newName, class: newClass, gender: editGender,
-      }
-      if (editStudent) {
-        body.originalName = editStudent.name
-        body.originalClass = editStudent.class
-      }
-      await apiClient.post('/api/scores/student', { ...body, teacher: currentTeacher })
-      message.success(editStudent ? t('saveSuccess') : t('addStudentSuccess', { no: studentNo }))
-      setEditModal(false)
-      loadStudents()
-      loadStats()
-      loadRanking()
-    } catch {
-      message.error(t('saveFail'))
-    }
-  }
-
-  // ── 删除学生 ──
-  const handleDeleteStudent = async (s: Student) => {
-    try {
-      await apiClient.delete('/api/scores/student', {
-        data: { grade, name: s.name, class: s.class, teacher: currentTeacher },
+      const { data } = await apiClient.post('/api/scores/batch', {
+        grade, class: cls, names, points, reason, teacher: currentTeacher,
       })
-      message.success(t('deleteSuccess', { name: s.name }))
-      loadStudents()
-      loadRanking()
+      message.success(t('batchDone', { count: data.updated, points: points > 0 ? '+' + points : points }))
+      setSelectedKeys([])
+      refreshAll()
     } catch {
       message.error(t('saveFail'))
     }
   }
+
+  const openCustomPoints = (student: Student | null) => {
+    setCustomTarget(student)
+    setCustomValue(null)
+    setCustomReason('')
+    setCustomOpen(true)
+  }
+
+  /** 自定义分值：单人（customTarget）或批量（当前勾选） */
+  const submitCustomPoints = async () => {
+    const pts = Number(customValue || 0)
+    if (!pts) { message.warning(t('pointsNotZero')); return }
+    if (!customTarget && !selectedStudents.length) { message.warning(t('batchPickFirst')); return }
+    if (!customTarget) {
+      setCustomOpen(false)
+      await applyBatch(pts, customReason.trim())
+      return
+    }
+    try {
+      const { data } = await apiClient.post('/api/scores/score', {
+        grade, class: cls, name: customTarget.name, points: pts,
+        reason: customReason.trim(), teacher: currentTeacher,
+      })
+      message.success(t('pointsChanged', { name: customTarget.name, points: pts > 0 ? '+' + pts : pts, total: data.total }))
+      setCustomOpen(false)
+      refreshAll()
+    } catch {
+      message.error(t('saveFail'))
+    }
+  }
+
+  /** 撤销最近一次操作：后端按流水反向应用（学生改名转班也能撤对） */
+  const handleUndo = async () => {
+    setUndoing(true)
+    try {
+      const { data } = await apiClient.post('/api/scores/undo', {
+        grade, class: cls, teacher: currentTeacher,
+      })
+      if (data.success) message.success(t('undoDone', { count: data.reversed_students, points: data.reversed_points }))
+      else message.info(t('undoNothing'))
+      refreshAll()
+      if (logsOpen) loadLogs(logsFor)
+    } catch {
+      message.error(t('undoFail'))
+    } finally {
+      setUndoing(false)
+    }
+  }
+
+  const loadLogs = async (studentName = '') => {
+    setLogsLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/scores/logs', {
+        params: scoreParams({ grade, class: cls, name: studentName, limit: 200 }),
+      })
+      setLogs(Array.isArray(data.logs) ? data.logs : [])
+    } catch {
+      setLogs([])
+    } finally {
+      setLogsLoading(false)
+    }
+  }
+
+  const openLogs = (studentName = '') => {
+    setLogsFor(studentName)
+    setLogsOpen(true)
+    loadLogs(studentName)
+  }
+
+  /** 流水里的原因：内置操作存的是机器码，显示时翻译；其余是老师手填的原文 */
+  const reasonLabel = (r: string) =>
+    r === 'reset' ? t('reasonReset') : r === 'undo' ? t('reasonUndo') : (r || t('reasonManual'))
 
   // ── 积分操作按钮 ──
   const ScoreActions = ({ student }: { student: Student }) => (
@@ -385,26 +389,16 @@ const ScorePage: React.FC = () => {
         </Tooltip>
       </Popconfirm>
       {isAdminOrTeacher && (
-        <Tooltip title={t('edit')}>
-          <Button size="small" type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditStudent(student)}
-          />
+        <Tooltip title={t('logs')}>
+          <Button size="small" type="text" icon={<HistoryOutlined />}
+            onClick={() => openLogs(student.name)} />
         </Tooltip>
       )}
       {isAdminOrTeacher && (
-        <Popconfirm
-          title={t('deleteStudentConfirm', { name: student.name })}
-          onConfirm={() => handleDeleteStudent(student)}
-          okText={t('confirm')}
-          cancelText={t('cancel')}
-        >
-          <Tooltip title={t('delete')}>
-            <Button size="small" type="text" danger
-              icon={<DeleteOutlined />}
-            />
-          </Tooltip>
-        </Popconfirm>
+        <Tooltip title={t('customPoints')}>
+          <Button size="small" type="text" icon={<RiseOutlined />}
+            onClick={() => openCustomPoints(student)} />
+        </Tooltip>
       )}
       {isAdminOrTeacher && (
         <Tooltip title={t('viewPortfolio')}>
@@ -431,6 +425,7 @@ const ScorePage: React.FC = () => {
     { title: t('studentId'), dataIndex: 'username', key: 'username', width: 100,
       render: (v: string) => v || '-' },
     { title: t('name'), dataIndex: 'name', key: 'name', width: 80 },
+    { title: t('gender'), dataIndex: 'gender', key: 'gender', width: 60 },
     {
       title: t('manualScore'), dataIndex: 'score', key: 'score', width: 80,
       sorter: (a: any, b: any) => (b.score || 0) - (a.score || 0),
@@ -456,7 +451,7 @@ const ScorePage: React.FC = () => {
       ),
     },
     {
-      title: t('actions'), key: 'action', width: 340,
+      title: t('actions'), key: 'action', width: 400,
       render: (_: any, record: Student) =>
         isAdminOrTeacher ? <ScoreActions student={record} /> : null,
     },
@@ -466,8 +461,23 @@ const ScorePage: React.FC = () => {
   const rankingColumns = [
     { title: t('rank'), key: 'rank', width: 60,
       render: (_: any, __: any, idx: number) => {
+        // S-RANK: 同分并列 —— 名次与前一名相同则沿用前一名次，奖牌只给并列的第一人，
+        // 其余显示 #名次（旧实现直接拿数组下标发牌，并列时奖牌会错位）
+        const cur = ranking[idx]?.total_points ?? 0
+        const prev = idx > 0 ? (ranking[idx - 1]?.total_points ?? 0) : null
+        let rank = idx + 1
+        if (prev !== null && cur === prev) {
+          let k = idx - 1
+          while (k > 0 && (ranking[k]?.total_points ?? 0) === (ranking[k - 1]?.total_points ?? 0)) k--
+          rank = k + 1
+        }
+        const tiedAndNotFirst = prev !== null && cur === prev
         const medals = ['🥇', '🥈', '🥉']
-        return <span style={{ fontSize: 16 }}>{medals[idx] || `#${idx + 1}`}</span>
+        return (
+          <span style={{ fontSize: 16 }}>
+            {rank <= 3 && !tiedAndNotFirst ? medals[rank - 1] : `#${rank}`}
+          </span>
+        )
       },
     },
     { title: t('studentId'), dataIndex: 'username', key: 'username', width: 100,
@@ -512,9 +522,12 @@ const ScorePage: React.FC = () => {
           <Col>
             <Space>
               {isAdmin && teacherList.length > 0 && (
+                // S-ROLE: 只有管理员能切换"以哪位教师的身份看积分"；教师页面上这个下拉不渲染，
+                // 后端也强制用登录身份（参数 teacher 仅管理员生效），所以教师切不了别人。
                 <Select value={currentTeacher} onChange={(v) => setCurrentTeacher(v)}
-                  style={{ width: 120 }} options={teacherList.map((t) => ({ label: t, value: t }))}
+                  style={{ width: 150 }} options={teacherList.map((t) => ({ label: t, value: t }))}
                   placeholder={t('selectTeacher')}
+                  showSearch optionFilterProp="label"
                 />
               )}
               {teacherInfo && (
@@ -679,20 +692,23 @@ const ScorePage: React.FC = () => {
                 onClick={() => setActiveTab('ranking')}
               >{t('ranking')}</Button>
 
-              {isAdminOrTeacher && (
-                <Button
-                  type={activeTab === 'manage' ? 'primary' : 'default'}
-                  icon={<TeamOutlined />}
-                  onClick={() => setActiveTab('manage')}
-                >{t('studentManage')}</Button>
-              )}
             </Space>
           </Col>
           <Col>
             {activeTab === 'scores' && cls && (
               <Space>
                 {isAdminOrTeacher && (
-                  <Button icon={<UserAddOutlined />} onClick={openAddStudent}>{t('addStudent')}</Button>
+                  <>
+                    <Button icon={<HistoryOutlined />} onClick={() => openLogs('')}>{t('logs')}</Button>
+                    <Popconfirm
+                      title={t('undoConfirm')}
+                      onConfirm={handleUndo}
+                      okText={t('confirm')}
+                      cancelText={t('cancel')}
+                    >
+                      <Button icon={<UndoOutlined />} loading={undoing}>{t('undo')}</Button>
+                    </Popconfirm>
+                  </>
                 )}
                 <Popconfirm
                   title={t('resetAllConfirm', { cls })}
@@ -703,9 +719,6 @@ const ScorePage: React.FC = () => {
                   <Button danger icon={<ReloadOutlined />}>{t('resetAll')}</Button>
                 </Popconfirm>
               </Space>
-            )}
-            {activeTab === 'manage' && cls && isAdminOrTeacher && (
-              <Button icon={<UserAddOutlined />} onClick={openAddStudent}>{t('addStudent')}</Button>
             )}
           </Col>
         </Row>
@@ -723,10 +736,31 @@ const ScorePage: React.FC = () => {
             <Empty description={t('selectGradeClass')} />
           ) : (
             <Spin spinning={loading}>
+              {isAdminOrTeacher && selectedStudents.length > 0 && (
+                <Alert
+                  type="info" showIcon style={{ marginBottom: 8 }}
+                  message={
+                    <Space wrap>
+                      <Text>{t('batchSelected', { count: selectedStudents.length })}</Text>
+                      {[1, 2, 5, -1].map((p) => (
+                        <Button key={p} size="small" onClick={() => applyBatch(p)}>
+                          {p > 0 ? `+${p}` : p}
+                        </Button>
+                      ))}
+                      <Button size="small" onClick={() => openCustomPoints(null)}>{t('customPoints')}</Button>
+                      <Button size="small" type="link" onClick={() => setSelectedKeys([])}>{t('clearSelection')}</Button>
+                    </Space>
+                  }
+                />
+              )}
               <Table
                 dataSource={students}
                 columns={scoreColumns}
                 rowKey={(r) => r.username || r.name}
+                rowSelection={isAdminOrTeacher ? {
+                  selectedRowKeys: selectedKeys,
+                  onChange: (keys) => setSelectedKeys(keys),
+                } : undefined}
                 pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudents', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
                 size="small"
                 locale={{ emptyText: <Empty description={t('noStudentData')} /> }}
@@ -759,85 +793,75 @@ const ScorePage: React.FC = () => {
           </Spin>
         )}
 
-        {/* ── 学生管理 Tab ── */}
-        {activeTab === 'manage' && (
-          !cls ? (
-            <Empty description={t('selectGradeClass')} />
-          ) : (
-            <Table
-              dataSource={students}
-              columns={[
-                { title: t('studentId'), dataIndex: 'username', key: 'username', width: 110,
-                  render: (v: string) => v || '-' },
-                { title: t('name'), dataIndex: 'name', key: 'name', width: 100 },
-                { title: t('gender'), dataIndex: 'gender', key: 'gender', width: 60 },
-                { title: t('className'), dataIndex: 'class', key: 'class', width: 120 },
-                {
-                  title: t('actions'), key: 'action', width: 140,
-                  render: (_: any, record: Student) => (
-                    <Space>
-                      <Button size="small" icon={<EditOutlined />}
-                        onClick={() => openEditStudent(record)}>{t('edit')}</Button>
-                      <Popconfirm
-                        title={t('deleteStudentConfirm', { name: record.name })}
-                        onConfirm={() => handleDeleteStudent(record)}
-                        okText={t('confirm')}
-                        cancelText={t('cancel')}
-                      >
-                        <Button size="small" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
-                      </Popconfirm>
-                    </Space>
-                  ),
-                },
-              ]}
-              rowKey={(r) => r.username || r.name}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudents', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
-              size="small"
-            />
-          )
-        )}
       </Card>
       )}
 
-      {/* ── 添加/编辑学生弹窗 ── */}
+      {/* ── 积分明细（流水）：谁、何时、加/扣多少、为什么，可撤销 ── */}
+      <Drawer
+        title={logsFor ? t('logsFor', { name: logsFor }) : t('logs')}
+        placement="right"
+        width={540}
+        open={logsOpen}
+        onClose={() => setLogsOpen(false)}
+        extra={isAdminOrTeacher ? (
+          <Popconfirm
+            title={t('undoConfirm')}
+            onConfirm={handleUndo}
+            okText={t('confirm')}
+            cancelText={t('cancel')}
+          >
+            <Button size="small" icon={<UndoOutlined />} loading={undoing}>{t('undo')}</Button>
+          </Popconfirm>
+        ) : null}
+      >
+        <Table
+          dataSource={logs}
+          rowKey="id"
+          size="small"
+          loading={logsLoading}
+          pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          locale={{ emptyText: <Empty description={t('logsEmpty')} /> }}
+          columns={[
+            { title: t('time'), dataIndex: 'created_at', key: 'created_at', width: 140,
+              render: (v: string) => v?.slice(5, 16) || '' },
+            { title: t('name'), dataIndex: 'name', key: 'name', width: 90, ellipsis: true },
+            { title: t('points'), dataIndex: 'points', key: 'points', width: 70,
+              render: (p: number) => (
+                <Text strong style={{ color: p > 0 ? '#52c41a' : '#ff4d4f' }}>{p > 0 ? `+${p}` : p}</Text>
+              ) },
+            { title: t('reason'), dataIndex: 'reason', key: 'reason', ellipsis: true,
+              render: (r: string) => reasonLabel(r) },
+            { title: t('actions'), key: 'undone', width: 80,
+              render: (_: any, rec: any) => (rec.undone ? <Tag>{t('logsUndone')}</Tag> : null) },
+          ]}
+        />
+      </Drawer>
+
+      {/* ── 自定义分值：单人加/扣任意分，或给勾选的多人批量加/扣 ── */}
       <Modal maskClosable={false}
-        title={editStudent ? t('editStudent') : t('addStudent')}
-        open={editModal}
-        onOk={handleSaveStudent}
-        onCancel={() => setEditModal(false)}
+        title={customTarget
+          ? t('customPointsFor', { name: customTarget.name })
+          : t('customPointsBatch', { count: selectedStudents.length })}
+        open={customOpen}
+        onOk={submitCustomPoints}
+        onCancel={() => setCustomOpen(false)}
         okText={t('save')}
         cancelText={t('cancel')}
       >
         <Space orientation="vertical" style={{ width: '100%' }}>
-          <div>
-            <Text>{t('studentId')} <Text type="danger">*</Text></Text>
-            <Input
-              value={editStudent ? (editStudent.username || '') : editUsername}
-              onChange={(e) => setEditUsername(e.target.value)}
-              placeholder={t('studentIdPlaceholder')}
-              disabled={!!editStudent}
-            />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {editStudent ? t('studentIdLockedHint') : t('studentIdCreateHint', { password: DEFAULT_STUDENT_PASSWORD })}
-            </Text>
-          </div>
-          <div>
-            <Text>{t('name')} <Text type="danger">*</Text></Text>
-            <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t('studentName')} />
-          </div>
-          <div>
-            <Text>{t('className')} <Text type="danger">*</Text></Text>
-            <Input value={editClass} onChange={(e) => setEditClass(e.target.value)} placeholder={t('className')} />
-          </div>
-          <div>
-            <Text>{t('gender')}</Text>
-            <Radio.Group value={editGender} onChange={(e) => setEditGender(e.target.value)}>
-              <Radio value="男">{t('male')}</Radio>
-              <Radio value="女">{t('female')}</Radio>
-            </Radio.Group>
-          </div>
+          <InputNumber
+            value={customValue}
+            onChange={(v) => setCustomValue(v as number | null)}
+            style={{ width: '100%' }}
+            placeholder={t('pointsPlaceholder')}
+            autoFocus
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('pointsHint')}</Text>
+          <Input value={customReason} onChange={(e) => setCustomReason(e.target.value)}
+            placeholder={t('reasonPlaceholder')} maxLength={60} />
         </Space>
       </Modal>
+
     </Card>
   )
 }

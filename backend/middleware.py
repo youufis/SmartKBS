@@ -62,8 +62,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/auth/verify-security",
             "/api/auth/reset-password-by-security",
             "/api/resources/nav",
-            "/api/scores/",
-            "/api/rollcall/",
             "/api/downloads/",
             "/static/",
             "/docs",

@@ -312,6 +312,30 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass
 
+            # ── 课堂积分流水表（S-LOG）──
+            # scores 只存"当前总分"，改一次就覆盖一次：老师无法回答"这分谁什么时候加的"，
+            # 也无法撤销。每次加减/重置都在这里落一行，op_id 把一次操作（单个/批量/整班重置）
+            # 归成一组，撤销 = 把最近一组按相反数再应用一遍（见 score_utils.apply_score_delta）。
+            c.execute("""CREATE TABLE IF NOT EXISTS score_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                op_id TEXT NOT NULL,
+                teacher_username TEXT NOT NULL,
+                student_username TEXT,
+                grade TEXT,
+                class_name TEXT,
+                student_name TEXT NOT NULL,
+                points INTEGER NOT NULL DEFAULT 0,
+                reason TEXT,
+                undone INTEGER DEFAULT 0,
+                created_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_score_logs_teacher ON score_logs(teacher_username, id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_score_logs_op ON score_logs(op_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_score_logs_student ON score_logs(student_username, id)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 点名权重表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS rollcall_weights (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
