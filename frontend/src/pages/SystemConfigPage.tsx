@@ -67,7 +67,7 @@ interface ConfigZone {
 }
 
 const CONFIG_ZONES: ConfigZone[] = [
-  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward'] },
+  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward', 'showcase'] },
   { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill', 'portrait'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
@@ -80,6 +80,7 @@ const SECTION_TITLES: Record<string, string> = {
   notify: 'group_notify',
   incentive: 'group_incentive',
   reward: 'group_reward',
+  showcase: 'group_showcase',
   credentials: 'group_credentials',
   models: 'group_models',
   knowledgebase: 'group_knowledgebase',
@@ -173,6 +174,11 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'ENABLE_BADGES', labelKey: 'field_ENABLE_BADGES', descKey: 'field_ENABLE_BADGES_desc', type: 'boolean', group: 'incentive', required: false },
   { key: 'ENABLE_SUBJECT_TITLES', labelKey: 'field_ENABLE_SUBJECT_TITLES', descKey: 'field_ENABLE_SUBJECT_TITLES_desc', type: 'boolean', group: 'incentive', required: false },
   { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'boolean', group: 'incentive' },
+  // 荣耀殿堂（backend/showcase_auto.py + api/showcase_router.py）：自动建卡与名次展示策略
+  { key: 'SHOWCASE_AUTO_ENABLED', labelKey: 'field_SHOWCASE_AUTO_ENABLED', descKey: 'field_SHOWCASE_AUTO_ENABLED_desc', type: 'boolean', group: 'showcase', required: false },
+  { key: 'SHOWCASE_MIN_POINTS', labelKey: 'field_SHOWCASE_MIN_POINTS', descKey: 'field_SHOWCASE_MIN_POINTS_desc', type: 'number', group: 'showcase', required: false, unitKey: 'unitPoint' },
+  { key: 'SHOWCASE_AUTO_INTERVAL_MIN', labelKey: 'field_SHOWCASE_AUTO_INTERVAL_MIN', descKey: 'field_SHOWCASE_AUTO_INTERVAL_MIN_desc', type: 'number', group: 'showcase', required: false, unitKey: 'unitMinute' },
+  { key: 'SHOWCASE_RANK_MODE', labelKey: 'field_SHOWCASE_RANK_MODE', descKey: 'field_SHOWCASE_RANK_MODE_desc', type: 'text', group: 'showcase', required: false },
 
   // ══ ② AI 与模型 ══
   // 服务接入

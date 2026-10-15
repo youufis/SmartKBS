@@ -137,6 +137,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] AI 画像自动生成巡检启动失败: {e}", file=sys.stderr)
     try:
+        # S1: 荣耀殿堂自动建卡巡检（受 SHOWCASE_AUTO_ENABLED 控制，默认开）
+        from backend.showcase_auto import start as start_showcase_auto
+        start_showcase_auto()
+    except Exception as e:
+        print(f"[main] 荣耀殿堂自动建卡巡检启动失败: {e}", file=sys.stderr)
+    try:
         from backend.config_sync import try_sync_remote_config
         import asyncio
         asyncio.ensure_future(try_sync_remote_config())

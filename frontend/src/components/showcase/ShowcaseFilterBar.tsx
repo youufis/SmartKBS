@@ -58,6 +58,7 @@ const ShowcaseFilterBar: React.FC<Props> = ({
         style={{ width: 140 }}
         options={[
           { label: t('sortByPoints'), value: 'points' },
+          { label: t('sortByProgress'), value: 'progress' },
           { label: t('sortByLikes'), value: 'likes' },
           { label: t('sortByNewest'), value: 'newest' },
         ]}

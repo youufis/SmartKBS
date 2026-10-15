@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { Card, Typography, Button, Spin, Empty, Pagination, message } from 'antd'
-import { CrownOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Card, Typography, Button, Spin, Empty, Pagination, message, Space } from 'antd'
+import { CrownOutlined, ReloadOutlined, FullscreenOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { getShowcaseList } from '../api/showcase'
@@ -50,6 +50,18 @@ const ShowcasePage: React.FC = () => {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstMount = useRef(true)
 
+  // S2: 自动同步 —— 页面可见时每 60 秒静默拉一次（与服务端 60 秒缓存对齐），
+  //     停留期间积分/称号/徽章/名次会自己更新，不用点「刷新」。
+  const AUTO_SYNC_SEC = 60
+  const [lastSync, setLastSync] = useState<Date | null>(null)
+  const pageRef = useRef(1)
+  const totalRef = useRef(0)
+  const filtersRef = useRef(filters)
+  filtersRef.current = filters
+
+  // S3: 大屏「荣誉墙」模式（全屏放大 + 自动翻页，投影/典礼用）
+  const [wallMode, setWallMode] = useState(false)
+
   // 刷新冷却与并发闸门（防止连点刷接口）
   const [cooldown, setCooldown] = useState(0)
   const cooldownSecRef = useRef(REFRESH_COOLDOWN_SEC)
@@ -74,10 +86,10 @@ const ShowcasePage: React.FC = () => {
   useEffect(() => () => { if (tickRef.current) clearInterval(tickRef.current) }, [])
 
   // ── 统一加载函数 ──
-  const fetchData = useCallback(async (p: number, f: typeof filters, manual = false) => {
+  const fetchData = useCallback(async (p: number, f: typeof filters, manual = false, silent = false) => {
     if (inflightRef.current) return          // 同一时刻只允许一个列表请求
     inflightRef.current = true
-    setLoading(true)
+    if (!silent) setLoading(true)            // 自动同步不闪整页 loading
     try {
       const res = await getShowcaseList({
         grade: f.selectedGrade || undefined,
@@ -91,6 +103,9 @@ const ShowcasePage: React.FC = () => {
       setCards(res.cards)
       setTotal(res.total)
       setPage(p)
+      pageRef.current = p
+      totalRef.current = res.total || 0
+      setLastSync(new Date())
       if (typeof res.refresh_interval === 'number' && res.refresh_interval > 0) {
         cooldownSecRef.current = res.refresh_interval
       }
@@ -104,10 +119,42 @@ const ShowcasePage: React.FC = () => {
         message.error(e?.response?.data?.detail || t('refreshFailed'))
       }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
       inflightRef.current = false
     }
   }, [startCooldown, t])
+
+  // ── S2: 停留期间自动同步（隐藏标签页不请求；切回来立刻补一次）──
+  useEffect(() => {
+    const sync = () => {
+      if (document.hidden || inflightRef.current) return
+      void fetchData(pageRef.current, filtersRef.current, false, true)
+    }
+    const id = setInterval(sync, AUTO_SYNC_SEC * 1000)
+    const onVisible = () => { if (!document.hidden) sync() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [fetchData])
+
+  // ── S3: 大屏模式 Esc 退出 + 自动翻页 ──
+  useEffect(() => {
+    if (!wallMode) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWallMode(false) }
+    document.addEventListener('keydown', onKey)
+    const id = setInterval(() => {
+      if (document.hidden) return
+      const pages = Math.max(1, Math.ceil(totalRef.current / PAGE_SIZE))
+      const next = (pageRef.current % pages) + 1
+      void fetchData(next, filtersRef.current, false, true)
+    }, 12000)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      clearInterval(id)
+    }
+  }, [wallMode, fetchData])
 
   // ── 筛选变化 → 防抖 → 第1页重新加载（跳过首次渲染）──
   useEffect(() => {
@@ -215,8 +262,19 @@ const ShowcasePage: React.FC = () => {
             {t('hallOfGlory')}
           </Title>
           <Text type="secondary">{t('showcaseSubtitle')}</Text>
+          {/* S2: 让学生看见"分数在动"：每 60 秒自动同步一次 */}
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {lastSync
+                ? t('scAutoSyncAt', { time: lastSync.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) })
+                : t('scAutoSyncHint')}
+            </Text>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <Button icon={<FullscreenOutlined />} onClick={() => setWallMode(true)} disabled={!cards.length}>
+            {t('scWallMode')}
+          </Button>
           <Button
             icon={<ReloadOutlined />}
             onClick={doRefresh}
@@ -305,6 +363,35 @@ const ShowcasePage: React.FC = () => {
         onClose={() => setPreviewOpen(false)}
         onLikeChange={handlePreviewLike}
       />
+
+      {/* S3: 大屏荣誉墙 —— 全屏放大 + 12 秒自动翻页（投影/典礼用），Esc 或点右上角退出 */}
+      {wallMode && (
+        <div className="showcase-wall">
+          <div className="showcase-wall-head">
+            <Space>
+              <CrownOutlined style={{ color: '#faad14' }} />
+              <Text strong style={{ color: '#fff', fontSize: 22 }}>{t('hallOfGlory')}</Text>
+              <Text style={{ color: 'rgba(255,255,255,0.65)' }}>
+                {t('scWallPage', { page, total: Math.max(1, Math.ceil(total / PAGE_SIZE)) })}
+              </Text>
+            </Space>
+            <Button ghost onClick={() => setWallMode(false)}>{t('scWallExit')}</Button>
+          </div>
+          <div className="showcase-grid showcase-wall-grid">
+            {cards.map((card) => (
+              <ShowcaseCard
+                key={card.id}
+                card={card}
+                onLikeChange={handleLikeChange}
+                onThemeChange={handleThemeChange}
+              />
+            ))}
+          </div>
+          <div className="showcase-wall-foot">
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>{t('scWallAutoNext')}</Text>
+          </div>
+        </div>
+      )}
     </Card>
   )
 }

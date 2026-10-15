@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Tag, Tooltip, Popover, message } from 'antd'
 import { EyeOutlined, BgColorsOutlined } from '@ant-design/icons'
 import { updateShowcaseTheme } from '../../api/showcase'
@@ -36,7 +36,8 @@ const THEME_DOTS = [
   { key: 'forest',  color: '#52c41a' },
   { key: 'cherry',  color: '#eb2f96' },
   { key: 'aurora',  color: '#722ed1' },
-  { key: 'gunset',  color: '#fa8c16' },
+  // S3: 旧键 gunset 是 sunset 的拼写错误（CSS 里只有 .theme-sunset，于是这套主题点了没反应）
+  { key: 'sunset',  color: '#fa8c16' },
   { key: 'cosmic',  color: '#1a1a2e' },
   { key: 'mint',    color: '#13c2c2' },
   { key: 'flame',   color: '#f5222d' },
@@ -63,14 +64,49 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
   const user = useAuthStore((s) => s.user)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [localTheme, setLocalTheme] = useState(card.theme_style || 'golden')
+  // S3: 积分数字滚动（尊重系统"减弱动态效果"）
+  const [shownPoints, setShownPoints] = useState(0)
+  const rafRef = useRef<number | null>(null)
+
+  // S3: 数字滚动动画（1 秒内滚到目标值；系统开启"减弱动态效果"时直接落定）
+  // 注意：钩子必须写在任何提前 return 之前，否则快照缺失时钩子顺序会变。
+  const targetPoints = Number(card.snapshot_data?.total_points) || 0
+  useEffect(() => {
+    const target = targetPoints
+    const reduce = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduce) { setShownPoints(target); return }
+    const from = 0
+    const start = performance.now()
+    const dur = 900
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / dur)
+      const eased = 1 - Math.pow(1 - p, 3)
+      setShownPoints(Math.round(from + (target - from) * eased))
+      if (p < 1) rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [targetPoints])
 
   const { snapshot_data } = card
   if (!snapshot_data) return null
 
-  const { main_title, progress, subject_titles, badges, total_points } = snapshot_data
+  const { main_title, progress, total_points } = snapshot_data
+  // S1: 自动建卡的"最小快照"里徽章/学科称号是空数组，装饰性数据由 live 覆盖补齐；
+  //     这里仍做兜底，避免任一缺失把整块卡片打崩。
+  const badges = snapshot_data.badges || []
+  const subject_titles = snapshot_data.subject_titles || []
   const themeClass = localTheme
   const stars = getStars(total_points)
   const unlockedBadges = badges.filter((b) => b.unlocked)
+
+  /** S2: 名次是否展示由服务端一处决定（低分保护）；这里只负责呈现 */
+  const showRank = card.rank_show && card.class_rank
+  const rankTier = card.class_rank === 1 ? 'gold'
+    : card.class_rank === 2 ? 'silver'
+    : card.class_rank === 3 ? 'bronze' : 'plain'
+  const nextBadge = badges.find((b) => !b.unlocked)
 
   const isOwnerOrTeacher = user?.username === card.student_username
     || user?.role === 'admin' || user?.role === 'teacher'
@@ -150,6 +186,17 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
         <span className="banner-emoji">{main_title.emoji}</span>
         Lv.{main_title.level} {main_title.name}
         <span className="banner-level"> · {main_title.desc}</span>
+        {/* S2: 名次徽章 —— 只给"值得炫耀"的名次（服务端按策略下发 rank_show） */}
+        {showRank ? (
+          <span className={`showcase-rank rank-${rankTier}`}>
+            {rankTier === 'gold' ? '🥇' : rankTier === 'silver' ? '🥈' : rankTier === 'bronze' ? '🥉' : '🏅'}
+            {t('scClassRank', { rank: card.class_rank })}
+          </span>
+        ) : (Number(card.week_gain || 0) > 0 && (
+          <span className="showcase-rank rank-plain">
+            {t('scWeekGain', { count: card.week_gain })}
+          </span>
+        ))}
       </div>
 
       {/* 学生信息 */}
@@ -165,8 +212,12 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
             {'⭐'.repeat(stars.filled)}
             {'☆'.repeat(stars.total - stars.filled)}
           </div>
-          <div className="points-number">{total_points.toLocaleString()}</div>
+          <div className="points-number">{shownPoints.toLocaleString()}</div>
           <div className="points-label">{t('scTotalPoints')}</div>
+          {/* S2: 全校名次（同样受名次策略约束） */}
+          {showRank && card.school_rank ? (
+            <div className="points-sub">{t('scSchoolRank', { rank: card.school_rank })}</div>
+          ) : null}
         </div>
 
         {/* 下一级进度条 */}
@@ -198,6 +249,14 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
                 <span className="showcase-badge" style={{ fontSize: 12, fontWeight: 600 }}>+{unlockedBadges.length - 8}</span>
               </Tooltip>
             )}
+          </div>
+        )}
+
+        {/* S3: 徽章激励闭环 —— 展示"下一枚即将解锁的徽章"，把静态展示变成想看下一步 */}
+        {nextBadge && (
+          <div className="showcase-next-badge">
+            <span className="next-badge-icon">{nextBadge.icon || '🎖️'}</span>
+            {t('scNextBadge', { name: nextBadge.name })}
           </div>
         )}
 

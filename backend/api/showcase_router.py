@@ -220,6 +220,11 @@ def _overlay_live_points(card: dict[str, Any], live_points: int) -> None:
         if k == "theme_style":
             continue
         snap[k] = v
+    # 兜底：前端直接用 badges.filter(...)，缺字段会整块崩；补齐空数组与计数
+    snap.setdefault("badges", [])
+    snap.setdefault("subject_titles", [])
+    snap.setdefault("unlocked_badge_count", len([b for b in snap.get("badges") or [] if b.get("unlocked")]))
+    snap.setdefault("total_badge_count", 0)
 
 
 def _assemble_cards(rows: list[Any], current_username: str, points_mode: str) -> list[dict[str, Any]]:
@@ -233,14 +238,157 @@ def _assemble_cards(rows: list[Any], current_username: str, points_mode: str) ->
             tuple([current_username] + card_ids),
         )}
 
+    # S1/S2: 一页卡片的基础信息/名次/本周进步都批量取（避免每卡再打 3~4 次查询）
+    usernames = [r[1] for r in rows]
+    metas = _batch_card_meta(usernames) if usernames else {}
+
     cards = []
     for row in rows:
         card = _format_showcase_row(row)
         card["liked"] = card["id"] in liked_ids
         if points_mode != "snapshot":
             _overlay_live_points(card, row[12])
+        meta = metas.get(row[1]) or {}
+        # S1: 姓名/年级/班级以 users 实时为准（建卡快照可能是转班/升年级之前的）
+        if meta.get("name") or meta.get("grade") or meta.get("class"):
+            card["student_name"] = meta.get("name") or card.get("student_name")
+            card["grade"] = meta.get("grade", card.get("grade") or "")
+            card["class_name"] = meta.get("class", card.get("class_name") or "")
+            snap = card.get("snapshot_data")
+            if isinstance(snap, dict):
+                snap["student_info"] = {"name": card["student_name"],
+                                        "grade": card["grade"], "class": card["class_name"]}
+        # S2: 名次（本班/全校）+ 本周进步 + 是否展示名次（低分保护由服务端一处决定）
+        card["week_gain"] = int(meta.get("week_gain") or 0)
+        card["class_rank"] = meta.get("class_rank")
+        card["class_total"] = meta.get("class_total")
+        card["school_rank"] = meta.get("school_rank")
+        card["school_total"] = meta.get("school_total")
+        card["rank_show"] = bool(meta.get("rank_show"))
         cards.append(card)
     return cards
+
+
+def _rank_mode() -> str:
+    """名次展示策略：all=都显示 / top30=本班前 10 或全校前 30 / top10=本班前 3 或全校前 10 / none=都不显示。
+
+    默认 top30 —— "有积分都能上墙"（这是产品口径），但名次只给值得炫耀的那批看，
+    其余同学改为"距离下一级还差 X 分 / 本周进步 +Y"，避免把靠后的名次公开示众。
+    """
+    raw = str(_cfg_value("SHOWCASE_RANK_MODE", "top30") or "top30").strip().lower()
+    return raw if raw in ("all", "top30", "top10", "none") else "top30"
+
+
+def _batch_card_meta(usernames: list[str]) -> dict[str, dict[str, Any]]:
+    """批量算：姓名/年级班级、本周新增积分、本班与全校名次、名次是否展示。"""
+    if not usernames:
+        return {}
+    uniq = list(dict.fromkeys(usernames))
+    ph = ",".join("?" * len(uniq))
+    out: dict[str, dict[str, Any]] = {}
+
+    # 基本信息 + 名次（"超过我的人数" = COUNT(比我分高)，同分同名次）
+    rows = execute_query(
+        f"""SELECT u.username, COALESCE(u.name, u.username), COALESCE(u.grade, ''), COALESCE(u.class, ''),
+                   (SELECT COUNT(*) FROM student_total_points t2 JOIN users u2 ON u2.username = t2.student_username
+                     WHERE u2.role = 2 AND u2.grade = u.grade AND u2.class = u.class
+                       AND COALESCE(t2.total_points,0) > COALESCE(t.total_points,0)) + 1 AS class_rank,
+                   (SELECT COUNT(*) FROM student_total_points t2 JOIN users u2 ON u2.username = t2.student_username
+                     WHERE u2.role = 2
+                       AND COALESCE(t2.total_points,0) > COALESCE(t.total_points,0)) + 1 AS school_rank
+            FROM users u
+            LEFT JOIN student_total_points t ON t.student_username = u.username
+            WHERE u.username IN ({ph})""",
+        tuple(uniq),
+    ) or []
+    pairs: set[str] = set()
+    for r in rows:
+        key = f"{r[2]}|{r[3]}"
+        pairs.add(key)
+        out[r[0]] = {"name": r[1], "grade": r[2], "class": r[3],
+                     "class_rank": int(r[4] or 0), "school_rank": int(r[5] or 0)}
+
+    # 各范围总人数（"第 3 / 42 名"里的 42）
+    threshold = _showcase_min_points()
+    try:
+        school_total = execute_query(
+            """SELECT COUNT(*) FROM users u JOIN student_total_points t ON t.student_username = u.username
+               WHERE u.role = 2 AND COALESCE(t.total_points,0) >= ?""",
+            (threshold,),
+        )
+        school_total = int(school_total[0][0]) if school_total else 0
+    except Exception:
+        school_total = 0
+    class_totals: dict[str, int] = {}
+    if pairs:
+        tph = ",".join("?" * len(pairs))
+        try:
+            trows = execute_query(
+                f"""SELECT u.grade || '|' || u.class, COUNT(*)
+                    FROM users u JOIN student_total_points t ON t.student_username = u.username
+                    WHERE u.role = 2 AND COALESCE(t.total_points,0) >= ?
+                      AND (u.grade || '|' || u.class) IN ({tph})
+                    GROUP BY u.grade || '|' || u.class""",
+                tuple([threshold] + list(pairs)),
+            ) or []
+            class_totals = {r[0]: int(r[1]) for r in trows}
+        except Exception as e:
+            logger.warning(f"名次总人数统计失败: {e}")
+
+    # 本周进步（近 7 天新增积分）
+    try:
+        wrows = execute_query(
+            f"""SELECT student_username, COALESCE(SUM(points),0) FROM activity_rewards
+                WHERE created_at >= datetime('now', '-7 days', 'localtime')
+                  AND student_username IN ({ph})
+                GROUP BY student_username""",
+            tuple(uniq),
+        ) or []
+        for r in wrows:
+            if r[0] in out:
+                out[r[0]]["week_gain"] = int(r[1] or 0)
+    except Exception as e:
+        logger.warning(f"本周进步统计失败: {e}")
+
+    mode = _rank_mode()
+    for meta in out.values():
+        cr, sr = meta.get("class_rank") or 0, meta.get("school_rank") or 0
+        meta["class_total"] = class_totals.get(f"{meta.get('grade')}|{meta.get('class')}")
+        meta["school_total"] = school_total
+        if mode == "all":
+            meta["rank_show"] = True
+        elif mode == "none":
+            meta["rank_show"] = False
+        elif mode == "top10":
+            meta["rank_show"] = bool((cr and cr <= 3) or (sr and sr <= 10))
+        else:  # top30（默认）
+            meta["rank_show"] = bool((cr and cr <= 10) or (sr and sr <= 30))
+    return out
+
+
+def _cfg_value(key: str, default: Any = None) -> Any:
+    try:
+        from backend.api.config_router import get_config_value
+        return get_config_value(key, default)
+    except Exception:
+        return default
+
+
+def _showcase_min_points() -> int:
+    """上墙门槛（0 分不上墙：默认 1）"""
+    try:
+        return max(0, int(_cfg_value("SHOWCASE_MIN_POINTS", 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _showcase_auto_enabled() -> bool:
+    """自动建卡总闸（默认开）"""
+    return bool(_cfg_value("SHOWCASE_AUTO_ENABLED", True))
+
+
+_last_lazy_sweep = 0.0
+_LAZY_SWEEP_MIN_INTERVAL = 60        # 秒：页面惰性补齐的最小间隔（防写放大）
 
 
 def _format_showcase_row(row: tuple) -> dict[str, Any]:
@@ -477,7 +625,7 @@ async def list_showcase(
     grade: str = Query("", description="年级筛选"),
     class_name: str = Query("", description="班级筛选"),
     student_name: str = Query("", description="学生姓名模糊搜索"),
-    sort_by: str = Query("points", description="排序: points/likes/newest"),
+    sort_by: str = Query("points", description="排序: points/likes/newest/progress"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     points_mode: str = Query("live", description="live=积分按实时汇总显示与排序(默认); snapshot=按建卡时的定格快照"),
@@ -495,8 +643,20 @@ async def list_showcase(
     if manual:
         _throttle_manual_refresh(current_username)
 
-    conditions = ["sc.is_active=1"]
-    params: list[Any] = []
+    # S1: 惰性自动建卡 —— 无需教师操作；只补"达到积分门槛且还没有卡"的学生，
+    #     不碰 is_active（被下架的卡片不会被自动复活）。同一进程 60 秒最多扫一次。
+    global _last_lazy_sweep
+    if _showcase_auto_enabled() and (time.time() - _last_lazy_sweep) > _LAZY_SWEEP_MIN_INTERVAL:
+        _last_lazy_sweep = time.time()
+        try:
+            from backend.showcase_auto import ensure_cards
+            await run_in_threadpool(ensure_cards, None, grade=grade, class_name=class_name)
+        except Exception as e:
+            logger.warning(f"惰性自动建卡失败(不影响列表): {e}")
+
+    # S2: 0 分不上墙（门槛可配，默认 1 分）
+    conditions = ["sc.is_active=1", "COALESCE(stp.total_points, 0) >= ?"]
+    params: list[Any] = [_showcase_min_points()]
 
     if grade:
         conditions.append("u.grade=?")
@@ -518,15 +678,21 @@ async def list_showcase(
     )
     order_map = {
         "points": points_order,
+        # S2: 本周进步榜 —— 总分榜天然是学霸榜，进步榜让后进学生也有机会上榜
+        "progress": "COALESCE((SELECT SUM(points) FROM activity_rewards ar "
+                    "WHERE ar.student_username = sc.student_username "
+                    "AND ar.created_at >= datetime('now', '-7 days', 'localtime')), 0) DESC",
         "likes": "sc.like_count DESC",
         "newest": "sc.generated_at DESC",
     }
     order_by = order_map.get(sort_by, order_map["points"])
 
     # 统计总数
+    # 注意：S2 的"上墙门槛"条件用到 stp，这里必须与 data_sql 一样带上这张表的 JOIN
     count_sql = f"""
         SELECT COUNT(*) FROM student_showcase sc
         JOIN users u ON sc.student_username = u.username
+        LEFT JOIN student_total_points stp ON stp.student_username = sc.student_username
         WHERE {where_clause}
     """
     count_row = execute_query(count_sql, tuple(params))

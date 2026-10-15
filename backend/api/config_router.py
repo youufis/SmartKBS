@@ -147,6 +147,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ENABLE_SUBJECT_TITLES": True,
     # 闯关挑战出题模式：false=AI 出题（默认）, true=从题库出题
     "QUEST_USE_BANK": True,  # 闯关优先从题库取题(used_count 轮换)，题库取不到才调 AI 生成 —— 成本随题量而非人数增长；可在系统配置-激励与闯关改回
+    # ── 荣耀殿堂（backend/showcase_auto.py + api/showcase_router.py）──
+    # 自动建卡总闸：打开后无需教师操作，达到积分门槛的学生自动上墙。
+    "SHOWCASE_AUTO_ENABLED": True,
+    # 上墙门槛：默认 1 分（= 有积分才上墙，0 分完全不上墙）
+    "SHOWCASE_MIN_POINTS": 1,
+    # 自动巡检间隔（分钟）：兜住"学生积分从 0 变正"
+    "SHOWCASE_AUTO_INTERVAL_MIN": 30,
+    # 名次展示策略：all=都显示 / top30=本班前10或全校前30(默认) / top10=本班前3或全校前10 / none=都不显示
+    "SHOWCASE_RANK_MODE": "top30",
     # ── AI 画像（backend/api/portrait_router.py）──
     # 总闸：关掉后画像页只读，任何人都不能再生成（零 AI 计费）。
     "PORTRAIT_ENABLED": True,
@@ -349,6 +358,9 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "PORTRAIT_EXTRA_POINTS": (0, 1000),
     "PORTRAIT_EXTRA_MAX": (0, 20),
     "PORTRAIT_STAFF_MAX": (0, 20),
+    # ── 荣耀殿堂 ──
+    "SHOWCASE_MIN_POINTS": (0, 100000),
+    "SHOWCASE_AUTO_INTERVAL_MIN": (5, 1440),
     "PODCAST_MAX_SECONDS": (60, 1800),
     "REWARD_DAILY_QUIZ_SESSIONS": (0, 20),
     "REWARD_DAILY_TOTAL_POINTS": (0, 500),
@@ -389,6 +401,7 @@ _BOOL_KEYS = {
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
     "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED",
     "PORTRAIT_ENABLED", "PORTRAIT_PERIOD_MONTHLY", "PORTRAIT_AUTO_PUSH",
+    "SHOWCASE_AUTO_ENABLED",
     "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
 }
@@ -396,6 +409,7 @@ _STR_LIMITS: dict[str, int] = {
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
     "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80,
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
+    "SHOWCASE_RANK_MODE": 16,
     "dashscope_api_key": 200, "APPID": 128,
     "KB_API_BASE": 300, "KB_AGENT_ID": 128,
     "CHAT_SKILL_SEGMENT_MODE": 16,

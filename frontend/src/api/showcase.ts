@@ -71,6 +71,15 @@ export interface ShowcaseCard {
   snapshot_points?: number;
   /** student_total_points 里的实时总积分, 默认口径下卡片显示的就是它 */
   live_points?: number;
+  /** S2: 近 7 天新增积分（本周进步榜用） */
+  week_gain?: number;
+  /** S2: 名次（本班/全校；同分同名次）与对应范围总人数 */
+  class_rank?: number | null;
+  class_total?: number | null;
+  school_rank?: number | null;
+  school_total?: number | null;
+  /** S2: 服务端按"名次展示策略"算好的开关 —— 低分保护只在这一处决定 */
+  rank_show?: boolean;
 }
 
 export interface ShowcaseListResponse {
@@ -107,6 +116,7 @@ export async function getShowcaseList(params: {
   grade?: string;
   class_name?: string;
   student_name?: string;
+  /** points=按积分 / progress=按本周进步 / likes=点赞 / newest=最新 */
   sort_by?: string;
   page?: number;
   page_size?: number;

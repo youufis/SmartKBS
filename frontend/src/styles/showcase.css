@@ -305,8 +305,17 @@
   border: 1px solid #ffd591;
   box-shadow: 0 4px 16px rgba(250, 140, 22, 0.15);
 }
-.theme-sunset .showcase-card-banner { background: linear-gradient(135deg, #fa8c16 0%, #ffd591 100%); color: #7a4200; }
-.theme-sunset .progress-bar { background: #fa8c16; }
+/* 历史数据里存的是拼写错的 gunset —— 别名让老卡片也能吃到这套主题 */
+.theme-sunset .showcase-card,
+.theme-gunset .showcase-card {
+  background: linear-gradient(145deg, #fff7e6 0%, #ffffff 100%);
+  border: 1px solid #ffd591;
+  box-shadow: 0 4px 16px rgba(250, 140, 22, 0.15);
+}
+.theme-sunset .showcase-card-banner,
+.theme-gunset .showcase-card-banner { background: linear-gradient(135deg, #fa8c16 0%, #ffd591 100%); color: #7a4200; }
+.theme-sunset .progress-bar,
+.theme-gunset .progress-bar { background: #fa8c16; }
 
 /* 7. 星空黑 */
 .theme-cosmic .showcase-card {
@@ -370,3 +379,83 @@
   color: #666;
 }
 .showcase-card.default-theme .progress-bar { background: #faad14; }
+
+/* ── S1/S2/S3 新增 ─────────────────────────────────────────── */
+
+/* 名次徽章（前三金银铜 + 光晕） */
+.showcase-rank {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.82);
+  color: #7a4200;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.showcase-rank.rank-gold   { background: linear-gradient(135deg, #fff1b8, #ffd666); color: #7a4b00; box-shadow: 0 0 10px rgba(250, 173, 20, 0.55); }
+.showcase-rank.rank-silver { background: linear-gradient(135deg, #f5f5f5, #d9d9d9); color: #434343; box-shadow: 0 0 8px rgba(140, 140, 140, 0.35); }
+.showcase-rank.rank-bronze { background: linear-gradient(135deg, #fff2e8, #ffbb96); color: #873800; box-shadow: 0 0 8px rgba(250, 84, 28, 0.3); }
+.showcase-rank.rank-plain  { background: rgba(22, 119, 255, 0.12); color: #1677ff; font-weight: 600; }
+
+.showcase-points .points-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-tertiary, #8c8c8c);
+}
+
+/* 「下一枚徽章」激励条 */
+.showcase-next-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-secondary, #595959);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  border: 1px dashed var(--border-color-secondary, #e8e8e8);
+}
+.showcase-next-badge .next-badge-icon { font-size: 15px; filter: grayscale(0.4); }
+
+/* 卡片入场错峰（尊重系统「减弱动态效果」） */
+@keyframes showcase-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.showcase-grid > * { animation: showcase-enter 0.4s ease both; }
+.showcase-grid > *:nth-child(2n) { animation-delay: 0.05s; }
+.showcase-grid > *:nth-child(3n) { animation-delay: 0.1s; }
+.showcase-grid > *:nth-child(4n) { animation-delay: 0.15s; }
+@media (prefers-reduced-motion: reduce) {
+  .showcase-grid > *,
+  .showcase-card,
+  .showcase-badge.glowing::after { animation: none !important; transition: none !important; }
+}
+
+/* 大屏「荣誉墙」模式 */
+.showcase-wall {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  padding: 24px 32px;
+  overflow: auto;
+  background: radial-gradient(1200px 600px at 50% -10%, #1f2440 0%, #0b0d18 70%);
+}
+.showcase-wall-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.showcase-wall-foot { margin-top: 18px; text-align: center; }
+.showcase-wall-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+.showcase-wall .showcase-card { transform: scale(1.02); }
+.showcase-wall .showcase-card:hover { transform: scale(1.04); }
