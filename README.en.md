@@ -35,7 +35,7 @@
 
 ---
 
-> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-14)
+> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-15)
 >
 > - 🔊 **Speech synthesis and roll-call voice** — only voices verified to produce audio are offered, polyphonic surnames are corrected automatically, and nothing is billed while the feature is off
 > - 🧭 **Settings stop guessing** — one model catalogue behind dropdowns, self-test buttons for image and speech generation, size options filtered by measured limits, wrong values rejected on save
@@ -1102,9 +1102,9 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.6.0** (2026-10-05 ~ 10-14). Each release lists the changes a user can notice; per-commit detail lives in the git history.
+Current version **8.6.0** (2026-10-05 ~ 10-15). Each release lists the changes a user can notice; per-commit detail lives in the git history.
 
-### v8.6.0 (2026-10-05 ~ 10-14)
+### v8.6.0 (2026-10-05 ~ 10-15)
 
 - 🔊 Speech synthesis and roll-call voice landed; polyphonic surnames corrected; zero billing while off
 - 🧭 One model catalogue behind dropdowns, self-test buttons for image and speech, sizes filtered by measured limits, wrong settings rejected on save; the entry page is no longer cached; login-page visit statistics added
@@ -1117,15 +1117,10 @@ Current version **8.6.0** (2026-10-05 ~ 10-14). Each release lists the changes a
 - 🎨 Whiteboard usability and realtime path rebuilt: refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
 - ⏱ Question generation scales its output ceiling to the question count and splits the timeout budget across endpoints; a timeout now reports the wait and the endpoint tried
 - 📱 Phone support landed, figure pipeline governed, points anti-farming, dashboard reworked, activity feed denoised, and system "reduce motion" respected
-- 📊 Exercise detail gained AI analysis, per-question accuracy and class statistics, plus a CSV result export (including non-submitters) and a "remind pending" action; the dialog became three tabs
-- 💯 Quiz scores are on a 100-point scale (results / exports / dashboard feed show 60 / 100 with a grade tag and the raw score, new quizzes spread their points across 100, questions still being graded no longer count as wrong); grading and full-score rules collapsed into one implementation, and four score-reporting bugs were fixed
-- 🎨 "Weekly Portrait" renamed to **My Portrait**: the period is switchable to monthly in system configuration and the portrait separates lifetime identity from this period's performance; three copy blocks that contradicted the code were fixed (no scheduler, yet the UI claimed a Sunday auto-generation; lifetime data described as "this week's data")
-- 🩺 Portrait pipeline tightened: generation is a background task with polling (no more 300-second request); a failed image can be retried alone without spending allowance or points; teachers/admins got a per-period cap; the image prompt drops the real name and gender for stylised illustration; an opt-in per-period auto-generation switch (off by default) and an admin-visible generation-health line were added
-- 📊 Exam results page completed: the dialog became three tabs (Overview / Questions / Roster) with per-question accuracy, AI analysis (plus a Word export), an absent list, filters and sortable columns, a refresh button that keeps polling while grading runs, and a "wrong only" toggle in the per-student sheet; scoring rules now match exercises and quizzes (papers still being graded are excluded from the average and pass rate, scores read on a 100-point scale and show "grading")
-- 🧮 Exam grading and statistics collapsed into one implementation (backend/exam_stats.py) shared by the results dialog, learning analytics and the Excel export — fixing the spreadsheet's per-question accuracy that was always 0% (the old code compared a grading object with the answer text) and unifying the three different attempt filters
-- 🏆 Hall of Glory (wrap-up): the teacher’s manual Generate dialog is gone — automatic card creation replaced it, and teachers now get an explicit Take down / Put back pair plus a Show taken-down switch (without which a taken-down card could never be found again); the portrait feature was renamed from AI Portrait to My Portrait for consistency with its dashboard entry, and the page no longer shows a Synced at HH:MM line (the 60-second auto-sync still runs)
-- 🏆 Hall of Glory: cards are now created automatically in the background (any points appear on the wall, a score of 0 never does, and cards a teacher took down are never revived; `SHOWCASE_AUTO_ENABLED` / `SHOWCASE_MIN_POINTS` are configurable), so the teacher's Generate button went from required to optional; grade/class on a card now come from live data instead of the creation snapshot (a student who changed class used to show the old one); class and school ranks were added along with a "progress this week" sort, and ranks are shown only to the part of the list worth celebrating (class top 10 or school top 30 by default, everyone else sees their weekly gain and next badge); the page re-syncs every 60 seconds while visible; cards gained rank medals, a count-up animation, a "next badge" hint, staggered entrance animation (respecting reduced-motion) and a full-screen wall mode — plus two fixes: the Sunset theme never applied because of the `gunset` typo, and the filter bar was missing its `useTranslation` import (it crashed on render)
-- 🧪 145 regression tests added; full suite 972 passed, 1 skipped
+- 📊 **One results page for all three** (exercises / quizzes / exams): three tabs (Overview / Questions / Roster) with per-question accuracy, AI analysis, absent list, export, filters and sorting; scores normalised to 100 points, papers still being graded excluded from the average and pass rate, and grading/full-score rules collapsed into one implementation (`quiz_stats.py` + `exam_stats.py`) — fixing the summary export treating raw scores as out of 100, the CSV marking short answers wrong, and the spreadsheet's per-question accuracy that was always 0%
+- 🖼 **Portrait renamed "My Portrait"**: configurable period (weekly / monthly) with lifetime identity kept apart from this period's performance; generation is a background task with polling, a failed image can be retried alone, teachers/admins got a per-period cap, the image prompt drops name and gender, and an opt-in per-period auto-generation switch and a generation-health line were added; three copy blocks that contradicted the code were fixed
+- 🏆 **Hall of Glory without teacher work**: background auto-creation (any points appear on the wall, a score of 0 never does, taken-down cards are not revived; threshold and master switch configurable) replaced the teacher's manual Generate dialog, and teachers now get an explicit Take down / Put back pair plus a Show-taken-down switch; grade/class come from live data; class and school ranks plus a "progress this week" sort were added, with ranks shown only to the part worth celebrating; the page re-syncs every 60 seconds; cards gained rank medals, count-up, a next-badge hint and a full-screen wall mode — plus fixes for the `gunset` theme key and a missing import in the filter bar
+- 🧪 170+ regression tests added in total; full suite 1004 passed, 1 skipped
 - ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error instead of being silently rewritten; the whiteboard and generation batches need a backend restart; retrying across endpoints may bill the same prompt twice
 
 ### v8.0 – v8.5 (2026-09-05 ~ 10-04)
