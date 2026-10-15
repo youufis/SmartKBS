@@ -1082,10 +1082,13 @@ const ExamPage: React.FC = () => {
     },
     {
       title: t('exDeadline'),
+      // 这个 dataIndex 不能省：没有它 antd 会把整个 record 当值传进来，
+      // 单元格就会渲染成 [object Object]（用户实测截图）
+      dataIndex: 'end_time',
       key: 'end_time',
       width: 130,
       render: (v: string | null) => {
-        if (!v) return <Typography.Text type="secondary">-</Typography.Text>
+        if (!v || typeof v !== 'string') return <Typography.Text type="secondary">-</Typography.Text>
         // 已过截止时间标红，便于一眼看出这场已经考不了
         const overdue = new Date(String(v).replace(' ', 'T')) < new Date()
         return <Tag color={overdue ? 'red' : 'default'}>{String(v).slice(0, 16)}</Tag>

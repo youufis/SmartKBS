@@ -464,7 +464,9 @@ async def list_exams(
         # （看 / 不看已交卷只依赖有没有有效答题记录，量级很小，一次查完）
         if my_status in ("todo", "done"):
             done_ids = {
-                int(r[0]) for r in execute_query(
+                # 注意: exam_router 里的 execute_query 是 question_db 那份，
+                # 返回的是字典行（sqlite3.Row → dict），按位置下标取会 KeyError → 500
+                int(row["exam_id"]) for row in execute_query(
                     """SELECT DISTINCT exam_id FROM exam_attempts
                        WHERE student_username = ? AND status <> 'expired'""",
                     (username,),
