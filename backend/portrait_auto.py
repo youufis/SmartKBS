@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""AI 画像：周期自动生成（P-7，默认关）。
+"""我的画像：周期自动生成（P-7，默认关）。
 
 每到新周期，为**上一周期有活动**的学生自动生成一张画像，并通知本人。
 由系统配置 `PORTRAIT_AUTO_PUSH` 控制，**默认关闭** —— 打开后会自动消耗 AI 额度
@@ -94,7 +94,7 @@ async def _generate_for(username: str, period: str, prev_start: str, prev_end: s
         from backend.api.notification_router import notify_users
         notify_users(
             [username], "info",
-            "你的 AI 画像已生成 🎨",
+            "你的 我的画像已生成 🎨",
             f"{'本月' if period == 'monthly' else '上周'}的专属画像已就绪，点开看看这一期的自己。",
             "/portrait",
             source_type="portrait", source_id=str(portrait.get("id")),

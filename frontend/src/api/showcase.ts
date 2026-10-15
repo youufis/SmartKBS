@@ -91,21 +91,6 @@ export interface ShowcaseListResponse {
   refresh_interval?: number;
 }
 
-export interface GenerateRequest {
-  count: number;
-  grade?: string;
-  class_name?: string;
-  student_name?: string;
-}
-
-export interface GenerateResponse {
-  message: string;
-  generated_count: number;
-  updated_count: number;
-  batch_id: string;
-  total: number;
-}
-
 export interface LikeResponse {
   action: 'liked' | 'unliked';
   count: number;
@@ -124,6 +109,8 @@ export async function getShowcaseList(params: {
   points_mode?: 'live' | 'snapshot';
   /** true=点「刷新」按钮触发的强制刷新，受后端每用户最小间隔限流 */
   manual?: boolean;
+  /** true=连已下架的卡片一起返回（仅教师/管理员，用于重新上架） */
+  include_inactive?: boolean;
 }): Promise<ShowcaseListResponse> {
   const { data } = await apiClient.get('/api/showcase/list', { params });
   return data;
@@ -132,12 +119,6 @@ export async function getShowcaseList(params: {
 /** 获取单张展示卡详情 */
 export async function getShowcaseDetail(id: number): Promise<ShowcaseCard> {
   const { data } = await apiClient.get(`/api/showcase/${id}`);
-  return data;
-}
-
-/** 生成展示卡（教师） */
-export async function generateShowcase(body: GenerateRequest): Promise<GenerateResponse> {
-  const { data } = await apiClient.post('/api/showcase/generate', body);
   return data;
 }
 
@@ -150,6 +131,11 @@ export async function toggleLike(id: number): Promise<LikeResponse> {
 /** 下架展示卡（教师） */
 export async function deactivateShowcase(id: number): Promise<void> {
   await apiClient.delete(`/api/showcase/${id}`);
+}
+
+/** 重新上架展示卡（教师） */
+export async function activateShowcase(id: number): Promise<void> {
+  await apiClient.post(`/api/showcase/${id}/activate`);
 }
 
 /** 批量调整排序（教师） */

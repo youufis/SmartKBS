@@ -131,11 +131,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] 主观题后台批改任务启动失败: {e}", file=sys.stderr)
     try:
-        # P-7: AI 画像周期自动生成巡检（受 PORTRAIT_AUTO_PUSH 控制，默认关）
+        # P-7: 我的画像周期自动生成巡检（受 PORTRAIT_AUTO_PUSH 控制，默认关）
         from backend.portrait_auto import start as start_portrait_auto
         start_portrait_auto()
     except Exception as e:
-        print(f"[main] AI 画像自动生成巡检启动失败: {e}", file=sys.stderr)
+        print(f"[main] 我的画像自动生成巡检启动失败: {e}", file=sys.stderr)
     try:
         # S1: 荣耀殿堂自动建卡巡检（受 SHOWCASE_AUTO_ENABLED 控制，默认开）
         from backend.showcase_auto import start as start_showcase_auto
@@ -313,7 +313,7 @@ app.include_router(code_router, prefix="/api", tags=["代码练习"])
 app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
 app.include_router(skill_router, prefix="/api/skills", tags=["技能管理"])
 app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
-app.include_router(portrait_router, prefix="/api/portrait", tags=["AI 画像"])
+app.include_router(portrait_router, prefix="/api/portrait", tags=["我的画像"])
 app.include_router(tracking_router, prefix="/api", tags=["资源追踪"])
 app.include_router(upgrade_router, prefix="/api/system/upgrade", tags=["系统升级"])
 app.include_router(daily_discovery_router, prefix="/api", tags=["每日精选"])

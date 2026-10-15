@@ -561,6 +561,11 @@
   "scSchoolRank": "School rank {{rank}}",
   "scWeekGain": "+{{count}} pts this week",
   "scNextBadge": "Next: {{name}}",
+  "scTookDownTag": "Taken down",
+  "scTakeDown": "Take down",
+  "scBringBack": "Put back",
+  "scTakeDownConfirm": "Take this card down? Students will no longer see it (you can put it back anytime).",
+  "scBringBackConfirm": "Put this card back on the wall?",
   "scPointsUnit": "pts",
   "scNextLevel": "Next level",
   "scNeedPoints": "({{count}} more pts)",
@@ -576,7 +581,7 @@
   "activityLoadFailed": "Failed to load activity, please retry",
   "retry": "Retry",
   "banner": {
-    "portraitHint": "View my AI portrait"
+    "portraitHint": "View my My Portrait"
   },
   "todoCard": {
     "title": "Today's Focus",

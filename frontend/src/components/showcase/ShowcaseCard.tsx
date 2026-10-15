@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { Tag, Tooltip, Popover, message } from 'antd'
-import { EyeOutlined, BgColorsOutlined } from '@ant-design/icons'
+import { Tag, Tooltip, Popover, Popconfirm, message } from 'antd'
+import { EyeOutlined, BgColorsOutlined, EyeInvisibleOutlined } from '@ant-design/icons'
 import { updateShowcaseTheme } from '../../api/showcase'
 import { useAuthStore } from '../../stores/authStore'
 import type { ShowcaseCard as ShowcaseCardType } from '../../api/showcase'
@@ -13,6 +13,8 @@ interface Props {
   onClick?: (card: ShowcaseCardType) => void;
   /** 主题变化回调（用于父组件同步更新 card.theme_style） */
   onThemeChange?: (id: number, newTheme: string) => void;
+  /** 教师上/下架回调（true=重新上架）；不传则不显示该按钮 */
+  onManage?: (card: ShowcaseCardType, activate: boolean) => void;
 }
 
 const COLOR_MAP: Record<string, string> = {
@@ -59,7 +61,7 @@ function getStars(points: number): { filled: number; total: number } {
   return { filled: 1, total: 5 }
 }
 
-const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeChange }) => {
+const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeChange, onManage }) => {
   const { t } = useTranslation('dashboard')
   const user = useAuthStore((s) => s.user)
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -155,6 +157,31 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
       onClick={() => onClick?.(card)}
       style={{ cursor: onClick ? 'pointer' : 'default', position: 'relative' }}
     >
+      {/* S2: 已下架的卡片（教师勾选「显示已下架」时可见）—— 压暗 + 角标，避免误以为还在墙上 */}
+      {card.is_active === false && (
+        <div className="showcase-inactive-mask">
+          <Tag color="default">{t('scTookDownTag')}</Tag>
+        </div>
+      )}
+
+      {/* 教师上/下架（明确的单一动作，取代原先的「生成展示卡」批量弹窗） */}
+      {onManage && user?.role !== 'student' && (
+        <Popconfirm
+          title={card.is_active === false ? t('scBringBackConfirm') : t('scTakeDownConfirm')}
+          okText={t('confirm')}
+          cancelText={t('cancel')}
+          onConfirm={() => onManage(card, card.is_active === false)}
+        >
+          <div
+            className="showcase-manage-btn"
+            onClick={(e) => e.stopPropagation()}
+            title={card.is_active === false ? t('scBringBack') : t('scTakeDown')}
+          >
+            <EyeInvisibleOutlined />
+          </div>
+        </Popconfirm>
+      )}
+
       {/* 主题切换按钮（仅主人/教师可见） */}
       {isOwnerOrTeacher && (
         <Popover

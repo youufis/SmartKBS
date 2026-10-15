@@ -156,7 +156,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "SHOWCASE_AUTO_INTERVAL_MIN": 30,
     # 名次展示策略：all=都显示 / top30=本班前10或全校前30(默认) / top10=本班前3或全校前10 / none=都不显示
     "SHOWCASE_RANK_MODE": "top30",
-    # ── AI 画像（backend/api/portrait_router.py）──
+    # ── 我的画像（backend/api/portrait_router.py）──
     # 总闸：关掉后画像页只读，任何人都不能再生成（零 AI 计费）。
     "PORTRAIT_ENABLED": True,
     # 周期：false=每周（默认）、true=每月。周期同时决定"免费额度"与"画像吃哪一段数据"。
@@ -354,7 +354,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "MAX_IMAGE_SIZE_MB": (1, 200),
     "IMAGE_GEN_MAX_PLACEHOLDERS": (0, 8),
     "REWARD_DAILY_CHAT_POINTS": (0, 200),
-    # ── AI 画像 ──
+    # ── 我的画像 ──
     "PORTRAIT_EXTRA_POINTS": (0, 1000),
     "PORTRAIT_EXTRA_MAX": (0, 20),
     "PORTRAIT_STAFF_MAX": (0, 20),

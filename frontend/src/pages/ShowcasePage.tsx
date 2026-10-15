@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { Card, Typography, Button, Spin, Empty, Pagination, message, Space } from 'antd'
+import { Card, Typography, Button, Spin, Empty, Pagination, message, Space, Switch } from 'antd'
 import { CrownOutlined, ReloadOutlined, FullscreenOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -8,7 +8,7 @@ import type { ShowcaseCard as ShowcaseCardType } from '../api/showcase'
 import ShowcaseCard from '../components/showcase/ShowcaseCard'
 import ShowcaseFilterBar from '../components/showcase/ShowcaseFilterBar'
 import ShowcasePreviewModal from '../components/showcase/ShowcasePreviewModal'
-import GenerateDialog from '../components/showcase/GenerateDialog'
+import { deactivateShowcase, activateShowcase } from '../api/showcase'
 import '../styles/showcase.css'
 import { reportLoadError } from '../utils/loadError'
 
@@ -42,7 +42,8 @@ const ShowcasePage: React.FC = () => {
   const [classes, setClasses] = useState<string[]>([])
 
   // 弹窗
-  const [genOpen, setGenOpen] = useState(false)
+  // S2 后「生成展示卡」已由自动建卡取代；教师这里保留的是明确的「上架 / 下架」
+  const [showInactive, setShowInactive] = useState(false)
   const [previewCard, setPreviewCard] = useState<ShowcaseCardType | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
 
@@ -53,7 +54,6 @@ const ShowcasePage: React.FC = () => {
   // S2: 自动同步 —— 页面可见时每 60 秒静默拉一次（与服务端 60 秒缓存对齐），
   //     停留期间积分/称号/徽章/名次会自己更新，不用点「刷新」。
   const AUTO_SYNC_SEC = 60
-  const [lastSync, setLastSync] = useState<Date | null>(null)
   const pageRef = useRef(1)
   const totalRef = useRef(0)
   const filtersRef = useRef(filters)
@@ -99,13 +99,14 @@ const ShowcasePage: React.FC = () => {
         page: p,
         page_size: PAGE_SIZE,
         manual: manual || undefined,
+        // 教师勾选「显示已下架」时才带（学生端后端会忽略）
+        include_inactive: showInactive || undefined,
       })
       setCards(res.cards)
       setTotal(res.total)
       setPage(p)
       pageRef.current = p
       totalRef.current = res.total || 0
-      setLastSync(new Date())
       if (typeof res.refresh_interval === 'number' && res.refresh_interval > 0) {
         cooldownSecRef.current = res.refresh_interval
       }
@@ -122,7 +123,14 @@ const ShowcasePage: React.FC = () => {
       if (!silent) setLoading(false)
       inflightRef.current = false
     }
-  }, [startCooldown, t])
+  }, [startCooldown, t, showInactive])
+
+  // ── 教师切换「显示已下架」→ 重新加载（跳过首次）──
+  const showInactiveInit = useRef(true)
+  useEffect(() => {
+    if (showInactiveInit.current) { showInactiveInit.current = false; return }
+    void fetchData(1, filtersRef.current, false, true)
+  }, [showInactive, fetchData])
 
   // ── S2: 停留期间自动同步（隐藏标签页不请求；切回来立刻补一次）──
   useEffect(() => {
@@ -221,9 +229,17 @@ const ShowcasePage: React.FC = () => {
   }, [])
 
   // ── 生成成功刷新 ──
-  const handleGenerateSuccess = useCallback(() => {
-    fetchData(1, filters)
-  }, [fetchData, filters])
+  /** 教师上架/下架单张卡片（下架后可勾选「显示已下架」把它找回来重新上架） */
+  const handleManageCard = useCallback(async (card: ShowcaseCardType, activate: boolean) => {
+    try {
+      if (activate) await activateShowcase(card.id)
+      else await deactivateShowcase(card.id)
+      message.success(activate ? t('scBringBackDone') : t('scTakeDownDone'))
+      await fetchData(pageRef.current, filtersRef.current, false, true)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('scManageFailed'))
+    }
+  }, [fetchData, t])
 
   // ── 点赞回调 ──
   const handleLikeChange = useCallback((id: number, liked: boolean, count: number) => {
@@ -262,14 +278,6 @@ const ShowcasePage: React.FC = () => {
             {t('hallOfGlory')}
           </Title>
           <Text type="secondary">{t('showcaseSubtitle')}</Text>
-          {/* S2: 让学生看见"分数在动"：每 60 秒自动同步一次 */}
-          <div>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {lastSync
-                ? t('scAutoSyncAt', { time: lastSync.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) })
-                : t('scAutoSyncHint')}
-            </Text>
-          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Button icon={<FullscreenOutlined />} onClick={() => setWallMode(true)} disabled={!cards.length}>
@@ -283,10 +291,12 @@ const ShowcasePage: React.FC = () => {
           >
             {cooldown > 0 ? t('refreshCountdown', { sec: cooldown }) : t('refresh')}
           </Button>
+          {/* 「生成展示卡」已被自动建卡取代（有积分即上墙）；教师保留的是明确的上/下架 */}
           {isTeacherOrAdmin && (
-            <Button type="primary" icon={<CrownOutlined />} onClick={() => setGenOpen(true)}>
-              {t('generateCard')}
-            </Button>
+            <Space size={6}>
+              <Switch size="small" checked={showInactive} onChange={setShowInactive} />
+              <Text style={{ fontSize: 12 }}>{t('scShowInactive')}</Text>
+            </Space>
           )}
         </div>
       </div>
@@ -329,6 +339,7 @@ const ShowcasePage: React.FC = () => {
                 onLikeChange={handleLikeChange}
                 onClick={handleCardClick}
                 onThemeChange={handleThemeChange}
+                onManage={isTeacherOrAdmin ? handleManageCard : undefined}
               />
             ))}
           </div>
@@ -347,14 +358,6 @@ const ShowcasePage: React.FC = () => {
           </div>
         </>
       )}
-
-      {/* 生成弹窗 */}
-      <GenerateDialog
-        open={genOpen}
-        onClose={() => setGenOpen(false)}
-        grades={grades}
-        onSuccess={handleGenerateSuccess}
-      />
 
       {/* 预览弹窗 */}
       <ShowcasePreviewModal

@@ -459,3 +459,37 @@
 }
 .showcase-wall .showcase-card { transform: scale(1.02); }
 .showcase-wall .showcase-card:hover { transform: scale(1.04); }
+
+/* 已下架卡片：压暗 + 角标（教师勾选「显示已下架」时可见） */
+.showcase-inactive-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
+  background: rgba(0, 0, 0, 0.42);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* 教师上/下架按钮（与右上角主题按钮并列） */
+.showcase-manage-btn {
+  position: absolute;
+  top: 8px;
+  right: 44px;
+  z-index: 4;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  color: var(--text-secondary, #595959);
+}
+.showcase-manage-btn:hover { color: var(--color-error, #ff4d4f); }

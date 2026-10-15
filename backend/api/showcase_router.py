@@ -30,13 +30,6 @@ router = APIRouter()
 
 # ── 数据模型 ──
 
-class GenerateRequest(BaseModel):
-    count: int = 10
-    grade: str = ""
-    class_name: str = ""
-    student_name: str = ""
-
-
 class ReorderRequest(BaseModel):
     ids: list[int]
 
@@ -49,7 +42,9 @@ PRESET_THEMES = {
     "forest":    {"name": "森林绿", "color": "#52c41a", "desc": "生机绿色，如森林般蓬勃"},
     "cherry":    {"name": "樱花粉", "color": "#eb2f96", "desc": "柔美粉色，如樱花般绚烂"},
     "aurora":    {"name": "极光紫", "color": "#722ed1", "desc": "梦幻紫色，如极光般神秘"},
-    "gunset":    {"name": "日落橙", "color": "#fa8c16", "desc": "温暖橙色，如夕阳般浪漫"},
+    # 原键 gunset 是 sunset 的拼写错误（CSS 里只有 .theme-sunset，于是这套主题点了没反应）。
+    # 这里以 sunset 为准；老前端/历史数据里的 gunset 由 LEGACY_THEME_ALIASES 兼容。
+    "sunset":    {"name": "日落橙", "color": "#fa8c16", "desc": "温暖橙色，如夕阳般浪漫"},
     "cosmic":    {"name": "星空黑", "color": "#1a1a2e", "desc": "深邃星空，神秘而高贵"},
     "mint":      {"name": "薄荷青", "color": "#13c2c2", "desc": "清新薄荷，如春风般怡人"},
     "flame":     {"name": "烈焰红", "color": "#f5222d", "desc": "热情红色，如火焰般奔放"},
@@ -67,55 +62,23 @@ LEVEL_THEME_MAP = [
     "aurora",   # Lv.6
     "cherry",   # Lv.7
     "golden",   # Lv.8
-    "gunset",   # Lv.9
+    "sunset",   # Lv.9
     "flame",    # Lv.10
     "flame",    # Lv.11
     "cosmic",   # Lv.12
 ]
+
+LEGACY_THEME_ALIASES = {"gunset": "sunset"}
+
 
 def _get_default_theme(level: int) -> str:
     """根据称号等级返回默认主题"""
     idx = max(0, min(level - 1, len(LEVEL_THEME_MAP) - 1))
     return LEVEL_THEME_MAP[idx]
 
+
 class ThemeUpdateRequest(BaseModel):
     theme: str  # theme key
-
-
-def _build_snapshot(student_username: str) -> dict[str, Any]:
-    """构建学生当前积分/称号/徽章的快照数据"""
-    total_points = get_student_total(student_username)
-    main_title = get_main_title(total_points)
-    subject_titles = get_student_subject_titles(student_username)
-    badges = get_student_badges(student_username)
-    badge_config = get_badge_config()
-    unlocked_count = sum(1 for b in badges if b.get("unlocked"))
-    total_badge_count = len(badge_config)
-
-    # 获取学生基本信息
-    rows = execute_query(
-        "SELECT name, grade, class FROM users WHERE username=?",
-        (student_username,),
-    )
-    student_info = {}
-    if rows:
-        student_info = {
-            "name": rows[0][0] or student_username,
-            "grade": rows[0][1] or "",
-            "class": rows[0][2] or "",
-        }
-
-    return {
-        "total_points": total_points,
-        "main_title": main_title,
-        "progress": get_main_title_progress(total_points),
-        "subject_titles": subject_titles,
-        "badges": badges,
-        "unlocked_badge_count": unlocked_count,
-        "total_badge_count": total_badge_count,
-        "student_info": student_info,
-        "theme_style": _get_default_theme(main_title["level"]),
-    }
 
 
 # ── 手动刷新频控（与新闻手动抓取同一套路，防止刷接口）──
@@ -477,148 +440,6 @@ def _check_liked(showcase_id: int, username: str) -> bool:
 # ═══════════════════════════════════════════════
 
 
-@router.post("/showcase/generate", summary="批量生成荣誉展示卡")
-async def generate_showcase(request: Request, body: GenerateRequest):
-    """教师按条件筛选学生并批量生成荣誉展示卡"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-
-    if role not in (0, 1):
-        raise HTTPException(status_code=403, detail="仅教师和管理员可生成展示卡")
-
-    # 参数校验
-    count = max(1, min(body.count, 200))
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    batch_id = f"showcase_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    # 构建查询
-    conditions = ["u.role=2"]
-    params: list[Any] = []
-
-    if body.student_name:
-        conditions.append("u.name LIKE ? ESCAPE '\\'")
-        params.append(f"%{like_escape(body.student_name)}%")
-
-    # 教师权限过滤（管理员跳过）
-    if role == 1 and not is_admin(username):
-        teacher_grades = get_teacher_grades(username)
-        teacher_grade_names = [g["name"] for g in teacher_grades]
-        if not teacher_grade_names:
-            raise HTTPException(status_code=403, detail="您暂无任教班级，无法生成展示卡")
-
-        if body.grade:
-            if body.grade not in teacher_grade_names:
-                raise HTTPException(status_code=403, detail=f"您未任教「{body.grade}」，无法生成该年级展示卡")
-            conditions.append("u.grade=?")
-            params.append(body.grade)
-            grade_info = get_grade_by_name(body.grade)
-            if grade_info:
-                allowed = get_teacher_classes(username, grade_info["id"])
-                allowed_nums = [c["name"] for c in allowed]
-                if allowed_nums:
-                    if body.class_name:
-                        cls_num = body.class_name.replace("班", "").strip()
-                        if cls_num not in allowed_nums:
-                            raise HTTPException(status_code=403, detail=f"您未任教「{body.grade}」的「{body.class_name}」")
-                        conditions.append("u.class=?")
-                        params.append(cls_num)
-                    else:
-                        placeholders = ",".join("?" for _ in allowed_nums)
-                        conditions.append(f"u.class IN ({placeholders})")
-                        params.extend(allowed_nums)
-        else:
-            grade_placeholders = ",".join("?" for _ in teacher_grade_names)
-            conditions.append(f"u.grade IN ({grade_placeholders})")
-            params.extend(teacher_grade_names)
-    else:
-        # 管理员/其他：按请求参数直接筛选
-        if body.grade:
-            conditions.append("u.grade=?")
-            params.append(body.grade)
-        if body.class_name:
-            cls_num = body.class_name.replace("班", "").strip()
-            conditions.append("u.class=?")
-            params.append(cls_num)
-
-    where_clause = " AND ".join(conditions)
-    sql = f"""
-        SELECT u.username
-        FROM users u
-        LEFT JOIN student_total_points stp ON u.username = stp.student_username
-        WHERE {where_clause}
-        ORDER BY COALESCE(stp.total_points, 0) DESC
-        LIMIT ?
-    """
-    params.append(count)
-
-    # SH3: 最多 200 张卡, 每张要重建快照(实测人均 27ms, 合计约 5s), 放线程池执行
-    rows = await run_in_threadpool(execute_query, sql, tuple(params))
-    if not rows:
-        raise HTTPException(status_code=404, detail="未找到符合条件的学生")
-
-    student_usernames = [r[0] for r in rows]
-
-    # 批量生成/更新卡片
-    generated_count = 0
-    updated_count = 0
-
-    with get_connection() as conn:
-        c = conn.cursor()
-        for idx, stu_username in enumerate(student_usernames):
-            snapshot = _build_snapshot(stu_username)
-            snapshot_json = json.dumps(snapshot, ensure_ascii=False)
-            theme = snapshot.get("theme_style", "auto")
-
-            # 检查是否已存在
-            existing = c.execute(
-                "SELECT id FROM student_showcase WHERE student_username=?",
-                (stu_username,),
-            ).fetchone()
-
-            if existing:
-                c.execute(
-                    """UPDATE student_showcase SET
-                       generated_by=?, snapshot_data=?, theme_style=?,
-                       sort_order=?, batch_id=?, updated_at=?
-                       WHERE student_username=?""",
-                    (username, snapshot_json, theme, idx, batch_id, now_str, stu_username),
-                )
-                updated_count += 1
-            else:
-                c.execute(
-                    """INSERT INTO student_showcase
-                       (student_username, generated_by, snapshot_data, theme_style,
-                        sort_order, batch_id, generated_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (stu_username, username, snapshot_json, theme,
-                     idx, batch_id, now_str, now_str),
-                )
-                generated_count += 1
-        conn.commit()
-
-    # 新批次全部设为活跃
-    if student_usernames:
-        placeholders = ",".join("?" for _ in student_usernames)
-        with get_connection() as conn2:
-            c2 = conn2.cursor()
-            c2.execute(
-                f"UPDATE student_showcase SET is_active=1 WHERE student_username IN ({placeholders})",
-                student_usernames,
-            )
-            conn2.commit()
-
-    logger.info(f"展示卡生成: teacher={username}, batch={batch_id}, new={generated_count}, updated={updated_count}")
-
-    return {
-        "message": f"生成成功 🎉 新增 {generated_count} 张，更新 {updated_count} 张",
-        "generated_count": generated_count,
-        "updated_count": updated_count,
-        "batch_id": batch_id,
-        "total": len(student_usernames),
-    }
-
-
 @router.get("/showcase/list", summary="获取荣誉展示卡列表")
 async def list_showcase(
     request: Request,
@@ -630,6 +451,7 @@ async def list_showcase(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     points_mode: str = Query("live", description="live=积分按实时汇总显示与排序(默认); snapshot=按建卡时的定格快照"),
     manual: bool = Query(False, description="true=页面「刷新」按钮触发的强制刷新, 受每用户最小间隔限流"),
+    include_inactive: bool = Query(False, description="true=连已下架的卡片一起返回（仅教师/管理员可见，用于重新上架）"),
 ):
     """获取荣誉展示卡列表，支持筛选、搜索、排序和分页
 
@@ -655,7 +477,10 @@ async def list_showcase(
             logger.warning(f"惰性自动建卡失败(不影响列表): {e}")
 
     # S2: 0 分不上墙（门槛可配，默认 1 分）
-    conditions = ["sc.is_active=1", "COALESCE(stp.total_points, 0) >= ?"]
+    # include_inactive 只有教师/管理员能用：否则"下架"之后卡片从列表消失，再也没有入口重新上架
+    can_manage = user.get("role", 2) in (0, 1)
+    conditions = [] if (include_inactive and can_manage) else ["sc.is_active=1"]
+    conditions.append("COALESCE(stp.total_points, 0) >= ?")
     params: list[Any] = [_showcase_min_points()]
 
     if grade:
@@ -853,6 +678,36 @@ async def deactivate_showcase(showcase_id: int, request: Request):
     return {"message": "已下架"}
 
 
+@router.post("/showcase/{showcase_id}/activate", summary="重新上架展示卡")
+async def activate_showcase(showcase_id: int, request: Request):
+    """教师把误下架（或需要恢复展示）的卡片重新上架。
+
+    为什么需要它：自动建卡只补缺失、绝不改 is_active（避免把违规卡悄悄复活），
+    所以"下架"必须有一个显式的反向动作，否则下架就成了不可逆操作。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    rows = execute_query(
+        "SELECT id, student_username FROM student_showcase WHERE id=?",
+        (showcase_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="展示卡不存在")
+    _assert_can_manage_card(user, _card_rows_with_scope([showcase_id]).get(showcase_id, {}))
+
+    execute_insert_update(
+        "UPDATE student_showcase SET is_active=1, updated_at=? WHERE id=?",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), showcase_id),
+    )
+    logger.info(f"展示卡已重新上架: id={showcase_id}, operator={username}")
+    return {"message": "已重新上架"}
+
+
 @router.put("/showcase/reorder", summary="批量调整排序")
 async def reorder_showcase(request: Request, body: ReorderRequest):
     """批量调整展示卡排序"""
@@ -905,7 +760,9 @@ async def update_theme(showcase_id: int, request: Request, body: ThemeUpdateRequ
     user = get_current_user(request)
     username = user["username"]
 
-    if body.theme not in PRESET_THEMES:
+    # 兼容老前端/历史数据里的拼写错误键（gunset → sunset）
+    theme = LEGACY_THEME_ALIASES.get(str(body.theme or "").strip(), str(body.theme or "").strip())
+    if theme not in PRESET_THEMES:
         raise HTTPException(status_code=400, detail=f"无效的主题: {body.theme}，可选: {', '.join(PRESET_THEMES.keys())}")
 
     rows = execute_query(
@@ -924,11 +781,11 @@ async def update_theme(showcase_id: int, request: Request, body: ThemeUpdateRequ
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_insert_update(
         "UPDATE student_showcase SET theme_style=?, updated_at=? WHERE id=?",
-        (body.theme, now_str, showcase_id),
+        (theme, now_str, showcase_id),
     )
     # SH1: 非卡片主人的教师同样需要任教范围校验
     if owner != username:
         _assert_can_manage_card(user, _card_rows_with_scope([showcase_id]).get(showcase_id, {}))
 
-    logger.info(f"展示卡主题更新: id={showcase_id}, theme={body.theme}, operator={username}")
-    return {"message": f"主题已更新为「{PRESET_THEMES[body.theme]['name']}」"}
+    logger.info(f"展示卡主题更新: id={showcase_id}, theme={theme}, operator={username}")
+    return {"message": f"主题已更新为「{PRESET_THEMES[theme]['name']}」"}

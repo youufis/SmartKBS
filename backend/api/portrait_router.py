@@ -1,6 +1,6 @@
 """
 学生自我画像 API 路由
-每日生成一张 AI 画像 + 创意寄语，支持画廊、分享与点赞
+每日生成一张 我的画像 + 创意寄语，支持画廊、分享与点赞
 """
 import os
 import time
@@ -784,7 +784,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     role = user.get("role", 2)
 
     if not _portrait_enabled():
-        raise HTTPException(status_code=403, detail="AI 画像功能已在系统配置中关闭")
+        raise HTTPException(status_code=403, detail="我的画像功能已在系统配置中关闭")
 
     # 先确认 AI 可用，避免"扣了分却什么都生成不出来"
     api_key = _get_api_key()
@@ -835,7 +835,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     from backend.ai_task_manager import task_manager
     try:
         task_id = await task_manager.create_task(
-            description=f"AI 画像生成（{username} · {label}）",
+            description=f"我的画像生成（{username} · {label}）",
             coro_factory=lambda: _run_generation(
                 username=username, role=role, style=style, period=period,
                 period_start=period_start, period_end=period_end,

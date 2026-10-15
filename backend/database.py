@@ -1784,7 +1784,7 @@ def init_db():
                 c.execute("ALTER TABLE student_portraits ADD COLUMN status TEXT DEFAULT 'active'")
             except sqlite3.OperationalError:
                 pass
-            # ── 周期化（AI 画像）──
+            # ── 周期化（我的画像）──
             # period_type/period_start/period_end：这张画像覆盖哪个周期（weekly/monthly）。
             # 旧数据留空，按 created_date 反推展示为"历史"。
             for col_def in [

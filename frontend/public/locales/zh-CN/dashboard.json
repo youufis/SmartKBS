@@ -561,6 +561,11 @@
   "scSchoolRank": "全校第 {{rank}} 名",
   "scWeekGain": "本周 +{{count}} 分",
   "scNextBadge": "下一枚：{{name}}",
+  "scTookDownTag": "已下架",
+  "scTakeDown": "下架",
+  "scBringBack": "重新上架",
+  "scTakeDownConfirm": "下架这张展示卡？学生端将看不到它（可随时重新上架）。",
+  "scBringBackConfirm": "重新上架这张展示卡？",
   "scPointsUnit": "分",
   "scNextLevel": "下一级",
   "scNeedPoints": "（还需 {{count}} 分）",
@@ -576,7 +581,7 @@
   "activityLoadFailed": "动态加载失败，请重试",
   "retry": "重试",
   "banner": {
-    "portraitHint": "查看我的 AI 画像"
+    "portraitHint": "查看我的 我的画像"
   },
   "todoCard": {
     "title": "今日要事",
