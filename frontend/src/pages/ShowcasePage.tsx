@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { Card, Typography, Button, Spin, Empty, Pagination, message, Space, Switch } from 'antd'
+import { Card, Typography, Button, Spin, Empty, Pagination, message, Space, Switch, Select } from 'antd'
 import { CrownOutlined, ReloadOutlined, FullscreenOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -61,6 +61,19 @@ const ShowcasePage: React.FC = () => {
 
   // S3: 大屏「荣誉墙」模式（全屏放大 + 自动翻页，投影/典礼用）
   const [wallMode, setWallMode] = useState(false)
+  // 墙面主题（投影房间明暗不同，给几套可选；记住上次选择）
+  // 默认「荣耀金」：明亮暖色在投影房里最耐看；深色（星空/极光）留作可选
+  const WALL_THEMES = ['gold', 'festive', 'mint', 'light', 'aurora', 'starfield']
+  const [wallTheme, setWallTheme] = useState<string>(
+    () => localStorage.getItem('showcase_wall_theme') || 'gold',
+  )
+  useEffect(() => { localStorage.setItem('showcase_wall_theme', wallTheme) }, [wallTheme])
+  // 翻屏间隔（秒；0 = 不自动翻）
+  const WALL_INTERVALS = [5, 8, 12, 20, 30, 0]
+  const [wallInterval, setWallInterval] = useState<number>(
+    () => Number(localStorage.getItem('showcase_wall_interval') ?? 12),
+  )
+  useEffect(() => { localStorage.setItem('showcase_wall_interval', String(wallInterval)) }, [wallInterval])
 
   // 刷新冷却与并发闸门（防止连点刷接口）
   const [cooldown, setCooldown] = useState(0)
@@ -149,7 +162,7 @@ const ShowcasePage: React.FC = () => {
 
   // ── S3: 大屏模式 Esc 退出 + 自动翻页 ──
   useEffect(() => {
-    if (!wallMode) return
+    if (!wallMode || !wallInterval) return     // 0 = 不自动翻屏
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWallMode(false) }
     document.addEventListener('keydown', onKey)
     const id = setInterval(() => {
@@ -157,12 +170,12 @@ const ShowcasePage: React.FC = () => {
       const pages = Math.max(1, Math.ceil(totalRef.current / PAGE_SIZE))
       const next = (pageRef.current % pages) + 1
       void fetchData(next, filtersRef.current, false, true)
-    }, 12000)
+    }, wallInterval * 1000)
     return () => {
       document.removeEventListener('keydown', onKey)
       clearInterval(id)
     }
-  }, [wallMode, fetchData])
+  }, [wallMode, wallInterval, fetchData])
 
   // ── 筛选变化 → 防抖 → 第1页重新加载（跳过首次渲染）──
   useEffect(() => {
@@ -369,16 +382,37 @@ const ShowcasePage: React.FC = () => {
 
       {/* S3: 大屏荣誉墙 —— 全屏放大 + 12 秒自动翻页（投影/典礼用），Esc 或点右上角退出 */}
       {wallMode && (
-        <div className="showcase-wall">
+        <div className={`showcase-wall wall-${wallTheme}`}>
           <div className="showcase-wall-head">
             <Space>
               <CrownOutlined style={{ color: '#faad14' }} />
-              <Text strong style={{ color: '#fff', fontSize: 22 }}>{t('hallOfGlory')}</Text>
-              <Text style={{ color: 'rgba(255,255,255,0.65)' }}>
+              <Text strong style={{ fontSize: 22 }}>{t('hallOfGlory')}</Text>
+              <Text type="secondary">
                 {t('scWallPage', { page, total: Math.max(1, Math.ceil(total / PAGE_SIZE)) })}
               </Text>
             </Space>
-            <Button ghost onClick={() => setWallMode(false)}>{t('scWallExit')}</Button>
+            <Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('scWallTheme')}</Text>
+              <Select
+                size="small"
+                value={wallTheme}
+                onChange={setWallTheme}
+                style={{ width: 132 }}
+                options={WALL_THEMES.map((k) => ({ value: k, label: t(`scWallTheme_${k}`) }))}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('scWallInterval')}</Text>
+              <Select
+                size="small"
+                value={wallInterval}
+                onChange={setWallInterval}
+                style={{ width: 104 }}
+                options={WALL_INTERVALS.map((n) => ({
+                  value: n,
+                  label: n ? t('scWallEveryN', { n }) : t('scWallManual'),
+                }))}
+              />
+              <Button ghost onClick={() => setWallMode(false)}>{t('scWallExit')}</Button>
+            </Space>
           </div>
           <div className="showcase-grid showcase-wall-grid">
             {cards.map((card) => (
@@ -391,7 +425,9 @@ const ShowcasePage: React.FC = () => {
             ))}
           </div>
           <div className="showcase-wall-foot">
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>{t('scWallAutoNext')}</Text>
+            <Text type="secondary" style={{ fontSize: 14 }}>
+              {wallInterval ? t('scWallAutoNextN', { n: wallInterval }) : t('scWallManualNext')}
+            </Text>
           </div>
         </div>
       )}

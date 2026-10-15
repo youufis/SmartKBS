@@ -212,6 +212,17 @@
   "scWallPage": "第 {{page}} / {{total}} 屏",
   "scWallExit": "退出",
   "scWallAutoNext": "每 12 秒自动翻屏 · 按 Esc 退出",
+  "scWallTheme": "墙面主题",
+  "scWallTheme_starfield": "🌌 星空",
+  "scWallTheme_gold": "🏆 荣耀金",
+  "scWallTheme_festive": "🎉 庆典红",
+  "scWallTheme_aurora": "🪩 极光",
+  "scWallTheme_light": "☀️ 明亮（浅色）",
+  "scWallInterval": "翻屏间隔",
+  "scWallEveryN": "每 {{n}} 秒",
+  "scWallManual": "不自动翻",
+  "scWallAutoNextN": "每 {{n}} 秒自动翻屏 · 按 Esc 退出",
+  "scWallManualNext": "手动翻屏（用下方分页）· 按 Esc 退出",
   "scShowInactive": "显示已下架",
   "scTakeDown": "下架",
   "scBringBack": "重新上架",
@@ -411,5 +422,6 @@
   "ptScopePrivate": "仅自己可见 — 不公开",
   "ptAutoTheme": "自动匹配",
   "ptThemeHint": "选择卡片和详情窗口的主题配色",
-  "ptAutoThemeTip": "自动匹配（跟随画像风格）"
+  "ptAutoThemeTip": "自动匹配（跟随画像风格）",
+  "scWallTheme_mint": "🌿 薄荷绿"
 }

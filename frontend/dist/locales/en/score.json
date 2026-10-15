@@ -212,6 +212,17 @@
   "scWallPage": "Screen {{page}} / {{total}}",
   "scWallExit": "Exit",
   "scWallAutoNext": "Auto-advances every 12s · press Esc to exit",
+  "scWallTheme": "Wall theme",
+  "scWallTheme_starfield": "🌌 Starfield",
+  "scWallTheme_gold": "🏆 Glory gold",
+  "scWallTheme_festive": "🎉 Festive red",
+  "scWallTheme_aurora": "🪩 Aurora",
+  "scWallTheme_light": "☀️ Bright (light)",
+  "scWallInterval": "Advance every",
+  "scWallEveryN": "{{n}}s",
+  "scWallManual": "Manual",
+  "scWallAutoNextN": "Auto-advances every {{n}}s · press Esc to exit",
+  "scWallManualNext": "Manual advance (use the pagination below) · press Esc to exit",
   "scShowInactive": "Show taken-down",
   "scTakeDown": "Take down",
   "scBringBack": "Put back",
@@ -411,5 +422,6 @@
   "ptScopePrivate": "Only me — not public",
   "ptAutoTheme": "Auto match",
   "ptThemeHint": "Theme colors for card and detail window",
-  "ptAutoThemeTip": "Auto (follow portrait style)"
+  "ptAutoThemeTip": "Auto (follow portrait style)",
+  "scWallTheme_mint": "🌿 Mint"
 }

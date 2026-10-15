@@ -446,6 +446,45 @@
   overflow: auto;
   background: radial-gradient(1200px 600px at 50% -10%, #1f2440 0%, #0b0d18 70%);
 }
+
+/* 荣誉墙的几套墙面主题。
+   默认走明亮暖色（投影房里纯黑背景会显得又闷又糊），深色只作为可选项保留。
+   每套定义 --wall-fg / --wall-fg-dim，页头页脚文字跟着主题走，避免浅底白字看不清。 */
+.showcase-wall { --wall-fg: #ffffff; --wall-fg-dim: rgba(255, 255, 255, 0.7); }
+.showcase-wall.wall-gold {
+  --wall-fg: #6b4708; --wall-fg-dim: rgba(107, 71, 8, 0.72);
+  background:
+    radial-gradient(1100px 520px at 50% -8%, rgba(255, 214, 102, 0.85) 0%, transparent 68%),
+    linear-gradient(160deg, #fffaf0 0%, #ffefd0 55%, #ffe3ae 100%);
+}
+.showcase-wall.wall-festive {
+  --wall-fg: #7a1020; --wall-fg-dim: rgba(122, 16, 32, 0.72);
+  background:
+    radial-gradient(1000px 480px at 50% -8%, rgba(255, 197, 186, 0.9) 0%, transparent 66%),
+    linear-gradient(160deg, #fff6f5 0%, #ffe4e0 55%, #ffd2cc 100%);
+}
+.showcase-wall.wall-mint {
+  --wall-fg: #0b5c58; --wall-fg-dim: rgba(11, 92, 88, 0.72);
+  background:
+    radial-gradient(1000px 480px at 50% -8%, rgba(178, 240, 235, 0.9) 0%, transparent 66%),
+    linear-gradient(160deg, #f3fffd 0%, #dcf7f4 55%, #c7efe9 100%);
+}
+.showcase-wall.wall-aurora {
+  --wall-fg: #ffffff; --wall-fg-dim: rgba(255, 255, 255, 0.75);
+  background:
+    radial-gradient(760px 400px at 18% -8%, rgba(114, 46, 209, 0.5) 0%, transparent 70%),
+    radial-gradient(760px 400px at 84% -4%, rgba(19, 194, 194, 0.42) 0%, transparent 70%),
+    linear-gradient(160deg, #2b2a5e 0%, #1b2050 55%, #141a3c 100%);
+}
+.showcase-wall.wall-starfield { background: radial-gradient(1200px 600px at 50% -10%, #1f2440 0%, #0b0d18 70%); }
+.showcase-wall.wall-light {
+  --wall-fg: #1f1f1f; --wall-fg-dim: rgba(31, 31, 31, 0.62);
+  background: linear-gradient(160deg, #ffffff 0%, #eef1f7 100%);
+}
+.showcase-wall .showcase-wall-head .ant-typography,
+.showcase-wall .showcase-wall-foot .ant-typography { color: var(--wall-fg) !important; }
+.showcase-wall .showcase-wall-head .ant-typography[style*='rgba(255'] { color: var(--wall-fg-dim) !important; }
+.showcase-wall .ant-btn-background-ghost { color: var(--wall-fg) !important; border-color: var(--wall-fg) !important; }
 .showcase-wall-head {
   display: flex;
   align-items: center;
