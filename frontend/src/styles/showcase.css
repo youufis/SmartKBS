@@ -441,7 +441,9 @@
 .showcase-wall {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  /* 必须低于 antd 弹层的 1050：否则墙面里的「墙面主题 / 翻屏间隔」下拉会被这层盖住，
+     菜单渲染在下面 → 看起来"点不开、选不了"。 */
+  z-index: 1000;
   padding: 24px 32px;
   overflow: auto;
   background: radial-gradient(1200px 600px at 50% -10%, #1f2440 0%, #0b0d18 70%);
