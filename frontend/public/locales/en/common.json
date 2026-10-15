@@ -322,5 +322,14 @@
     }
   },
   "desktopOnlyTitle": "Please use the desktop version for this feature",
-  "desktopOnlySub": "Mobile support is being rolled out page by page, and this page has no phone layout yet. Please open it on a classroom PC, an office computer or the desktop app for the full experience."
+  "desktopOnlySub": "Mobile support is being rolled out page by page, and this page has no phone layout yet. Please open it on a classroom PC, an office computer or the desktop app for the full experience.",
+  "draftFound": "Found unsent answers ({{done}}/{{total}} done)",
+  "draftResume": "Resume",
+  "draftRestart": "Start over",
+  "leaveTitle": "Leave the answer page?",
+  "leaveBody": "You have answered {{done}} question(s). They will be kept on this device so you can continue later.",
+  "answerProgressLine": "Question {{current}}/{{total}} · answered {{done}}",
+  "answerNavLabel": "Question no.",
+  "jumpToQuestion": "Question {{n}}",
+  "leaveConfirmOk": "Leave"
 }

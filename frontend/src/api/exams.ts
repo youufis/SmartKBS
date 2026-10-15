@@ -24,6 +24,8 @@ export async function listExams(params?: {
   keyword?: string;
   /** 1 = 仅看仍有待批改答卷的考试（与首页「待处理批阅」同口径） */
   pending_grading?: number;
+  /** 学生端：todo = 只看我还没参加的，done = 只看我已交卷的（服务端在分页前过滤） */
+  my_status?: 'todo' | 'done';
   scope?: string;
   page?: number;
   page_size?: number;

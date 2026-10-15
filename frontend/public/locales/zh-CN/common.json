@@ -322,5 +322,14 @@
     }
   },
   "desktopOnlyTitle": "此功能请在电脑端使用",
-  "desktopOnlySub": "手机端的适配正在逐步推进，该页面暂未开放手机视图。请在教室电脑、办公 PC 或桌面版中使用完整功能。"
+  "desktopOnlySub": "手机端的适配正在逐步推进，该页面暂未开放手机视图。请在教室电脑、办公 PC 或桌面版中使用完整功能。",
+  "draftFound": "发现上次未提交的作答（已答 {{done}}/{{total}} 题）",
+  "draftResume": "继续作答",
+  "draftRestart": "重新开始",
+  "leaveTitle": "确认离开答题页？",
+  "leaveBody": "已作答 {{done}} 题，离开后会自动保留在本机，下次进入可以继续。",
+  "answerProgressLine": "第 {{current}}/{{total}} 题 · 已答 {{done}}",
+  "answerNavLabel": "题号",
+  "jumpToQuestion": "第 {{n}} 题",
+  "leaveConfirmOk": "离开"
 }

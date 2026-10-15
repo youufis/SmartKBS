@@ -5,11 +5,13 @@ import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
   Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Pagination, Checkbox,
   Switch, Tooltip, Tabs, Dropdown, Statistic, Row, Col, Skeleton,
+  Alert, Segmented,
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, StopOutlined, DeleteOutlined,
   ThunderboltOutlined, DownloadOutlined, MoreOutlined, BellOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -26,6 +28,9 @@ import ResetActivityButton from '../components/ResetActivityButton'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { reportLoadError } from '../utils/loadError'
+import AnswerNav from '../components/AnswerNav'
+import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
+import { draftKey, loadDraft, clearDraft, useDebouncedDraft, countAnswered } from '../utils/answerDraft'
 import { toPercent, percentStatus, percentColor, percentLevelKey } from '../utils/score'
 import { useNavigate } from 'react-router-dom'
 
@@ -198,6 +203,16 @@ const StudentView: React.FC = () => {
   const refreshTries = useRef(0)
   const [stuPage, setStuPage] = useState(1)
   const [stuPageSize, setStuPageSize] = useState(10)
+  // 列表工具条：练习一多，靠翻页找就太累了（搜索/筛选/排序都在已加载的本页数据里做，不动接口）
+  const [stuKeyword, setStuKeyword] = useState('')
+  const [stuStatus, setStuStatus] = useState<'all' | 'todo' | 'draft' | 'done'>('all')
+  const [stuSort, setStuSort] = useState<'newest' | 'oldest' | 'title'>('newest')
+  // A1: 未提交的作答会存本机草稿；进入答题页时若发现草稿，先让学员选「继续 / 重新开始」
+  const currentUser = useAuthStore(s => s.user)
+  const [draftInfo, setDraftInfo] = useState<{ answers: Record<string, string>; ts: number } | null>(null)
+  // P2: 提交失败的可见重试（答案都还在，只差再点一次）
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const practiceDraftKey = activeSession?.id ? draftKey('practice', activeSession.id, currentUser?.username) : ''
 
   const loadSessions = useCallback(async () => {
     setLoading(true)
@@ -226,11 +241,41 @@ const StudentView: React.FC = () => {
         setQuestions(data.questions || [])
         setAnswers({})
         setResult(null)
+        // A1: 有草稿就提示恢复（题量对不上会自动丢弃）
+        const draft = loadDraft<Record<string, string>>(
+          draftKey('practice', sid, currentUser?.username), (data.questions || []).length)
+        setDraftInfo(draft && countAnswered(draft.answers) > 0 ? draft : null)
       }
     } catch { message.error(t('loadPracticeFailed')) }
   }
 
-  const submitAnswers = async () => {
+  // A1: 作答防抖落盘（草稿提示还挂着时先别写，否则会把旧草稿覆盖成空）
+  useDebouncedDraft(practiceDraftKey, answers,
+    !!activeSession && !submittedView && !draftInfo, questions.length)
+
+  // A1: 有未提交作答时，离开/关闭页面前拦一下（答案已在草稿里，提示只是让学员安心）
+  const answeredCount = countAnswered(answers)
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!activeSession || submittedView || answeredCount === 0) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [activeSession, submittedView, answeredCount])
+
+  // retry=true 表示「提交失败后的重新提交」：不再重复问一次未答确认
+  const submitAnswers = async (retry = false) => {
+    // A2: 未答完也能提交 —— 卡在一道不会的题上不该彻底交不了卷（原先按钮直接禁用）
+    if (!retry) {
+      const missing = unansweredIndexes(questions, (q) => !!(answers[String(q.id)] || '').trim())
+      if (missing.length) {
+        const ok = await confirmUnanswered({ missing, total: questions.length })
+        if (!ok) return
+      }
+    }
+    setSubmitError(null)
     setSubmitting(true)
     try {
       // S-GRADE: 含主观题时后端要逐题调 AI 批改, 默认 30s 超时会让「提交失败」误报
@@ -240,10 +285,15 @@ const StudentView: React.FC = () => {
         { timeout: 120000 },
       )
       setResult(data)
+      clearDraft(practiceDraftKey)          // A1: 提交成功即清草稿，重进不再提示恢复
+      setDraftInfo(null)
       // S-GRADING: 主观题不再卡在提交里, 明确告知成绩稍后自动更新
       if (Number(data?.pending_ai || 0) > 0) message.info(t('gradingQueuedToast', { count: data.pending_ai }))
     } catch (e: any) {
-      message.error(e.response?.data?.detail || t('submitFailed'))
+      // P2: 失败只弹一条 toast，学员刷新一下就白做了 —— 作答留在页面上，并给一个看得见的「重试」
+      const msg = e.response?.data?.detail || t('submitFailed')
+      message.error(msg)
+      setSubmitError(msg)
     } finally { setSubmitting(false) }
   }
 
@@ -262,7 +312,8 @@ const StudentView: React.FC = () => {
     return () => clearTimeout(timer)
   }, [submittedView])
 
-  const allAnswered = questions.length > 0 && questions.every(q => answers[String(q.id)]?.trim())
+  // A3: "下一道还没答的题" —— 进度文案与题号导航的当前高亮共用（全答完则为 -1）
+  const nextUnanswered = questions.findIndex(q => !(answers[String(q.id)] || '').trim())
 
   if (submittedView) {
     return (
@@ -371,9 +422,44 @@ const StudentView: React.FC = () => {
       <div>
         <Title level={4}><FormOutlined /> {activeSession.title}</Title>
         <Text type="secondary">{t('knowledgePoints')}：{activeSession.knowledge_points}</Text>
+        {/* A1: 发现未提交的本机草稿 → 让学员选"继续 / 重新开始"，而不是静默清空 */}
+        {draftInfo && (
+          <Alert
+            type="info" showIcon style={{ marginTop: 12 }}
+            title={t('common:draftFound', { done: countAnswered(draftInfo.answers), total: questions.length })}
+            action={
+              <Space>
+                <Button size="small" type="primary"
+                  onClick={() => { setAnswers(draftInfo.answers as Record<string, string>); setDraftInfo(null) }}>
+                  {t('common:draftResume')}
+                </Button>
+                <Button size="small"
+                  onClick={() => { clearDraft(practiceDraftKey); setDraftInfo(null) }}>
+                  {t('common:draftRestart')}
+                </Button>
+              </Space>
+            }
+          />
+        )}
+        {/* A3: 进度 + 题号导航（点击滚动到该题） */}
+        <div style={{ marginTop: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t('common:answerProgressLine', {
+              current: nextUnanswered >= 0 ? nextUnanswered + 1 : questions.length,
+              total: questions.length, done: answeredCount,
+            })}
+          </Text>
+          <Progress percent={questions.length ? Math.round(answeredCount / questions.length * 100) : 0}
+            size="small" showInfo={false} style={{ marginTop: 4 }} />
+          <AnswerNav
+            answered={questions.map(q => !!(answers[String(q.id)] || '').trim())}
+            current={nextUnanswered}
+            onJump={(i) => document.getElementById(`practice-q-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          />
+        </div>
         <Divider />
         {questions.map((q, i) => (
-          <Card key={q.id} size="small" title={t('questionNWithType', { n: i+1, type: typeLabel[q.type] || q.type })}
+          <Card key={q.id} id={`practice-q-${i}`} size="small" title={t('questionNWithType', { n: i+1, type: typeLabel[q.type] || q.type })}
             style={{ marginBottom: 12 }}>
             <FormulaRenderer content={q.question_text} />
             <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} />
@@ -411,11 +497,38 @@ const StudentView: React.FC = () => {
           </Card>
         ))}
         <div style={{ textAlign: 'center', marginTop: 16 }}>
-          <Button type="primary" size="large" loading={submitting} disabled={!allAnswered}
-            onClick={submitAnswers}>
-            {allAnswered ? `${t('submit')} (${Object.keys(answers).length}/${questions.length})` : t('answerAll')}
+          {/* P2: 提交失败 → 就地重试，不用刷新页面重做一遍 */}
+          {submitError && (
+            <Alert
+              type="error" showIcon closable style={{ marginBottom: 12, textAlign: 'left' }}
+              title={t('submitFailed')}
+              description={submitError}
+              onClose={() => setSubmitError(null)}
+              action={
+                <Button size="small" type="primary" danger loading={submitting}
+                  onClick={() => { void submitAnswers(true) }}>
+                  {t('common:retry')}
+                </Button>
+              }
+            />
+          )}
+          {/* A2: 未答完也能提交（点击后走 confirmUnanswered 二次确认） */}
+          <Button type="primary" size="large" loading={submitting}
+            onClick={() => { void submitAnswers() }}>
+            {`${t('submit')} (${answeredCount}/${questions.length})`}
           </Button>
-          <Button style={{ marginLeft: 12 }} onClick={() => { setActiveSession(null); loadSessions() }}>{t('practiceHistory')}</Button>
+          {/* A1: 有未提交作答时，离开前确认一次（草稿已存本机，不会真丢） */}
+          <Button style={{ marginLeft: 12 }} onClick={() => {
+            const leave = () => { setActiveSession(null); setDraftInfo(null); loadSessions() }
+            if (!answeredCount) { leave(); return }
+            Modal.confirm({
+              title: t('common:leaveTitle'),
+              content: t('common:leaveBody', { done: answeredCount }),
+              okText: t('common:leaveConfirmOk'),
+              cancelText: t('common:draftResume'),
+              onOk: leave,
+            })
+          }}>{t('practiceHistory')}</Button>
         </div>
         {questions.some(q => SUBJ_TYPES.includes(q.type)) && (
           <div style={{ textAlign: 'center', marginTop: 8 }}>
@@ -447,47 +560,121 @@ const StudentView: React.FC = () => {
     )
   }
 
+  // 学生列表三态：已提交 / 作答中（本机有草稿） / 未开始。
+  // 草稿直接在这里读 —— 交卷返回列表时不需要额外状态就能立刻反映成「已提交」。
+  const stuDraftOf = (s: any) => (s?.attempted ? null
+    : loadDraft<Record<string, string>>(draftKey('practice', s.id, currentUser?.username), s.question_count))
+  const stuStateOf = (s: any): 'todo' | 'draft' | 'done' =>
+    (s?.attempted ? 'done' : (stuDraftOf(s) ? 'draft' : 'todo'))
+  const doneCount = sessions.filter(s => s.attempted).length
+  const draftCount = sessions.filter(s => stuStateOf(s) === 'draft').length
+  const todoCount = Math.max(sessions.length - doneCount - draftCount, 0)
+  // 工具条三个控件都只在「已加载的这页数据」里筛/排，接口不用动；切筛选时页码回到第 1 页
+  const kw = stuKeyword.trim().toLowerCase()
+  const visibleSessions = [...sessions]
+    .filter(s => {
+      if (stuStatus !== 'all' && stuStateOf(s) !== stuStatus) return false
+      if (!kw) return true
+      return `${s.title || ''} ${s.knowledge_points || ''}`.toLowerCase().includes(kw)
+    })
+    .sort((a, b) => stuSort === 'title'
+      ? String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN')
+      : stuSort === 'oldest'
+      ? String(a.created_at || '').localeCompare(String(b.created_at || ''))
+      : String(b.created_at || '').localeCompare(String(a.created_at || '')))
+
   return (
     <div>
       <Title level={4}><FormOutlined /> {t('practiceHistory')}</Title>
-      <Text type="secondary">{t('practiceComplete')}</Text>
+      {/* 副标题原先写的是「练习完成」（从交卷完成页抄来的），列表页语义不对 —— 换成真实统计 */}
+      <Text type="secondary">{t('stuListSummary', { total: sessions.length, todo: todoCount, done: doneCount })}</Text>
       <Divider />
       {loading ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : sessions.length === 0
-        ? <Result icon={<FileTextOutlined />} title={t('noProblems')} subTitle={t('noHistory')} />
+        ? <Result icon={<FileTextOutlined />} title={t('noPracticeTitle')} subTitle={t('noPracticeHint')} />
         : <>
-            {sessions.slice((stuPage - 1) * stuPageSize, stuPage * stuPageSize).map(s => (
-              <Card key={s.id} size="small" style={{ marginBottom: 8 }}
-                hoverable onClick={() => startPractice(s.id)}
-                extra={s.attempted
-                  ? <Space size={6}>
-                      {/* 已提交的直接显示百分制得分, 不用再点进去看 */}
-                      {s.score != null && (
-                        <Text strong color={percentStatus(toPercent(s.score, s.total_score))}>
-                          {toPercent(s.score, s.total_score)}/100
-                        </Text>
-                      )}
-                      <Tag color="processing">{t('submitted')}</Tag>
-                    </Space>
-                  : <Tag color="default">{t('notStarted')}</Tag>}>
-                <Text strong>{s.title}</Text>
-                <div><Text type="secondary">{s.knowledge_points}</Text></div>
-                <div><Text type="secondary">{t('publisher')}：{s.creator_username || s.creator_name} · {s.question_count} {t('questionCount')}
-                  {s.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}
-                </Text></div>
-              </Card>
-            ))}
-            <div style={{ marginTop: 12, textAlign: 'center' }}>
-              <Pagination
-                current={stuPage} pageSize={stuPageSize} total={sessions.length}
-                showSizeChanger showTotal={(total) => t('totalItems', { count: total })}
-                pageSizeOptions={['5', '10', '20', '50']}
-                onChange={(p, ps) => { setStuPage(p); setStuPageSize(ps) }}
-                size="small"
-              />
+            {/* 工具条：练习一多，靠翻页找太累（长的行自动换行，不做横向滚动） */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+              <Input allowClear prefix={<SearchOutlined />} placeholder={t('stuSearchPh')}
+                value={stuKeyword} style={{ width: 240 }}
+                onChange={e => { setStuKeyword(e.target.value); setStuPage(1) }} />
+              <Segmented value={stuStatus}
+                onChange={(v) => { setStuStatus(v as 'all' | 'todo' | 'draft' | 'done'); setStuPage(1) }}
+                options={[
+                  { value: 'all', label: t('all') },
+                  { value: 'todo', label: t('notStarted') },
+                  { value: 'draft', label: t('answering') },
+                  { value: 'done', label: t('submitted') },
+                ]} />
+              <Select value={stuSort} style={{ width: 140 }}
+                onChange={(v) => { setStuSort(v); setStuPage(1) }}
+                options={[
+                  { value: 'newest', label: t('sortNewest') },
+                  { value: 'oldest', label: t('sortOldest') },
+                  { value: 'title', label: t('sortByTitle') },
+                ]} />
             </div>
-          </>
-      }
+            {visibleSessions.length === 0
+              ? <Result icon={<FileTextOutlined />} title={t('noMatch')}
+                  extra={<Button onClick={() => { setStuKeyword(''); setStuStatus('all'); setStuPage(1) }}>
+                    {t('clearFilter')}
+                  </Button>} />
+              : <>
+                  {visibleSessions.slice((stuPage - 1) * stuPageSize, stuPage * stuPageSize).map(s => {
+                    const state = stuStateOf(s)
+                    return (
+                      /* 标题放进 title、状态与得分放进 extra：原先 title 空着却带 extra，
+                         卡片顶部会留出一条没有内容的页眉（截图里的空带） */
+                      <Card key={s.id} size="small" style={{ marginBottom: 8, cursor: 'pointer' }}
+                        hoverable onClick={() => startPractice(s.id)}
+                        title={<Text strong>{s.title}</Text>}
+                        extra={state === 'done'
+                          ? <Space size={6} wrap>
+                              {/* 已提交的直接显示百分制得分, 不用再点进去看 */}
+                              {s.score != null && (
+                                <Text strong color={percentStatus(toPercent(s.score, s.total_score))}>
+                                  {toPercent(s.score, s.total_score)}/100
+                                </Text>
+                              )}
+                              <Tag color="processing">{t('submitted')}</Tag>
+                            </Space>
+                          : state === 'draft'
+                          ? <Space size={6} wrap>
+                              <Tag color="warning">{t('answering')}</Tag>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {t('draftProgress', {
+                                  done: countAnswered(stuDraftOf(s)?.answers ?? null),
+                                  total: s.question_count,
+                                })}
+                              </Text>
+                            </Space>
+                          : <Tag color="default">{t('notStarted')}</Tag>}>
+                        <div><Text type="secondary">{s.knowledge_points}</Text></div>
+                        <div><Text type="secondary">{t('publisher')}：{s.creator_username || s.creator_name} · {s.question_count} {t('questionCount')}
+                          {s.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}
+                        </Text></div>
+                        {/* 明确给一个入口：原先整卡可点，但没有任何按钮，学生看不出能点 */}
+                        <div style={{ marginTop: 8 }}>
+                          <Button size="small" type="primary" ghost
+                            icon={state === 'done' ? <FileTextOutlined /> : <FormOutlined />}
+                            onClick={(e) => { e.stopPropagation(); startPractice(s.id) }}>
+                            {state === 'done' ? t('viewResult') : state === 'draft' ? t('continuePractice') : t('startPractice')}
+                          </Button>
+                        </div>
+                      </Card>
+                    )
+                  })}
+                  <div style={{ marginTop: 12, textAlign: 'center' }}>
+                    <Pagination
+                      current={stuPage} pageSize={stuPageSize} total={visibleSessions.length}
+                      showSizeChanger showTotal={(total) => t('totalItems', { count: total })}
+                      pageSizeOptions={['5', '10', '20', '50']}
+                      onChange={(p, ps) => { setStuPage(p); setStuPageSize(ps) }}
+                      size="small"
+                    />
+                  </div>
+                </>}
+          </>}
     </div>
   )
 }

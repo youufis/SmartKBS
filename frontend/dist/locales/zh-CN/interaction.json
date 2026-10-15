@@ -631,5 +631,18 @@
   "levelExcellent": "优秀",
   "levelGood": "良好",
   "levelPass": "及格",
-  "levelWeak": "待加强"
+  "levelWeak": "待加强",
+  "ipListSub": "选一条测验开始作答，提交后立刻看到得分",
+  "ipMyProgress": "待作答 {{todo}} · 已完成 {{done}}",
+  "ipFilterAll": "全部",
+  "ipFilterTodo": "待作答",
+  "ipFilterDone": "已完成",
+  "ipSortNewest": "最新发布",
+  "ipSortOldest": "最早发布",
+  "ipSortTitle": "按标题",
+  "ipSearchPh": "搜索测验标题或说明",
+  "ipNoMatch": "没有符合筛选条件的测验",
+  "ipClearFilter": "清除筛选",
+  "ipNoListTitle": "还没有分配给你的测验",
+  "ipNoListHint": "老师发布并开始测验后，这里会出现，点一下就能作答"
 }

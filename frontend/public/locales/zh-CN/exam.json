@@ -566,5 +566,12 @@
   "aiFilledNotice": "其中 {{n}} 道由 AI 按缺口新出，已写入题库，下次可直接复用",
   "pcAiFillLbl": "题库不足时",
   "pcAiFillOn": "让 AI 出缺的题目（自动入题库）",
-  "pcAiFillOff": "只报缺口，不额外出题（默认）"
+  "pcAiFillOff": "只报缺口，不额外出题（默认）",
+  "exNotAttempted": "未参加",
+  "exSubmitted": "已交卷",
+  "exMyAll": "全部",
+  "exMyTodo": "待参加",
+  "exMyDone": "已参加",
+  "exSearchPh": "搜索考试名称",
+  "exDeadline": "截止时间"
 }

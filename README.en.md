@@ -35,22 +35,17 @@
 
 ---
 
-> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-15)
+> 📌 **Highlights of V8.6.0** (2026-10-05 ~ 10-16)
 >
-> - 🔊 **Speech synthesis and roll-call voice** — only voices verified to produce audio are offered, polyphonic surnames are corrected automatically, and nothing is billed while the feature is off
-> - 🧭 **Settings stop guessing** — one model catalogue behind dropdowns, self-test buttons for image and speech generation, size options filtered by measured limits, wrong values rejected on save
-> - 🧱 **One door into the question bank** — nine hand-written insert paths merged into a single exit: validate → de-duplicate → one transaction → link knowledge points
-> - 🔁 **One filling policy** — bank first → AI covers the shortfall → AI questions are stored before being returned; buzzer rounds no longer pad with repeats; composing can opt into shortfall filling (off by default)
-> - 📏 **Question counts mean what the teacher typed** — real parameters everywhere, out-of-range requests fail loudly instead of being silently rewritten
-> - 🎯 **New: Class Drill** — draw by knowledge point (optional AI top-up stored for reuse), pick a student fairly, the student taps an answer and it is judged and scored on submit; loop as long as you like
-> - 🎧 **New: AI Podcast** — one click turns a knowledge point into a **two-host dialogue** audio page (male / female voices, 3 / 4 / 5 minutes, four themes); the model only writes the script while the backend renders the player, truncated at the limit, and students can listen once it is bound
-> - 🎨 **Whiteboard usability and a rebuilt realtime path** — refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
-> - ⏱ **Generation stops gambling the whole timeout** — the output ceiling scales with the question count, the timeout budget is split across endpoints, and a timeout reports the wait and the endpoint tried
-> - 📊 **Exercise detail gains AI analysis and per-question accuracy** — the detail dialog became three tabs (Overview / Questions / Roster); the overview carries participation, average score, score rate, pass rate and per-question accuracy (graded-away questions stay out of the denominator), with AI analysis, export and a reminder for non-submitters
-> - 💯 **Scores are on a 100-point scale everywhere** — quizzes no longer read "3 / 5": results, exports and the dashboard feed show 60 / 100 with a grade tag and the raw score, new quizzes spread their points across 100, matching exercises and exams; four score bugs fixed (summary export treating the raw score as out of 100 — 5 questions, 3 right: 3% → 60%; the CSV export marking short answers wrong; two different accuracies between AI analysis and the results page; no full-score reference in the dashboard feed)
-> - 🎨 **"Weekly Portrait" becomes "My Portrait" and speaks in periods** — the period is configurable (weekly by default, switchable to monthly), and the portrait separates lifetime identity from **this period's** performance, so name and content finally agree; generation moved to a background task (no more 300-second request), a failed image can be retried alone without spending allowance or points, the image prompt drops the real name and gender for stylised illustration, and admins get a generation-health line
-> - 📊 **Exam results now carry real analysis** — the dialog became three tabs (Overview / Questions / Roster) with per-question accuracy, AI analysis and an absent list, plus filters, sorting and a refresh that keeps updating while grading runs; the statistics follow the same rules as exercises and quizzes — papers still being graded stay out of the average and pass rate, and scores read on a 100-point scale with a "grading" tag
-> - 🏆 **Hall of Glory without teacher work** — any student with points appears on the wall automatically (a score of 0 never does) and the page keeps points and ranks in sync every 60 seconds; cards gained rank medals, a "progress this week" board and a full-screen wall mode, while the tail of the ranking is no longer shown off — those students see "+N points this week" and their next badge instead
+> - 🔊 **Speech synthesis and roll-call voice** — only voices measured to produce audio, polyphonic surnames corrected, zero billing while off
+> - 🧭 **Settings stop guessing** — one model catalogue behind dropdowns plus self-test buttons for image and speech generation, wrong values rejected on save
+> - 🧱 **One door into the question bank** — nine hand-written insert paths merged into one exit (validate → de-duplicate → one transaction); bank first, AI covers the shortfall, AI questions stored before returning; question counts are real parameters that fail loudly when out of range
+> - 🎯 **New: Class Drill and AI Podcast** — the drill draws by knowledge point, picks a student fairly and scores the answer on submit; the podcast turns one click into a two-host dialogue audio page (male / female voices, 3 / 4 / 5 minutes, four themes)
+> - 🎨 **Whiteboard and generation timeouts brought in line** — a whiteboard that cannot connect says why, ended rooms reopen, one slow student no longer stalls the class; generation scales its output ceiling to the question count and splits its timeout budget across endpoints
+> - 📊 **One results view for exercises, quizzes and exams** — per-question accuracy, AI analysis, a 100-point scale, an absent list and three tabs; papers still being graded stay out of the average and the pass rate and simply read "grading"
+> - 🖼 **"Weekly Portrait" becomes "My Portrait"** — the period is configurable (weekly / monthly) and lifetime identity is separated from this period's performance; generation moved to a background task with a retry-image path, and the image prompt drops name and gender
+> - 🏆 **Hall of Glory without teacher work** — any student with points appears on the wall automatically (0 never does) and points plus ranks re-sync every 60 seconds; the tail of the ranking sees "+N this week" and its next badge instead of a rank
+> - 🧑‍🎓 **The whole answering flow is protected for students** — exercises and quizzes keep a per-user local draft (nothing lost to a refresh or an accidental close), confirm before leaving, and accept a partial submit; the exercise, quiz and exam entry pages gained search / filter / sort, cards that say "not started / in progress (n of N) / submitted", and an exam centre that finally reports your real status with a deadline column and a taken / not-taken filter
 > - 📊 **Dashboard redesign** + 📱 **phone support** + 🖼 **figure pipeline cleanup** + 🏆 **anti-farming points** + 🛡 **operations and settings polish**
 
 ---
@@ -1102,9 +1097,9 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.6.0** (2026-10-05 ~ 10-15). Each release lists the changes a user can notice; per-commit detail lives in the git history.
+Current version **8.6.0** (2026-10-05 ~ 10-16). Each release lists the changes a user can notice; per-commit detail lives in the git history.
 
-### v8.6.0 (2026-10-05 ~ 10-15)
+### v8.6.0 (2026-10-05 ~ 10-16)
 
 - 🔊 Speech synthesis and roll-call voice landed; polyphonic surnames corrected; zero billing while off
 - 🧭 One model catalogue behind dropdowns, self-test buttons for image and speech, sizes filtered by measured limits, wrong settings rejected on save; the entry page is no longer cached; login-page visit statistics added
@@ -1120,6 +1115,8 @@ Current version **8.6.0** (2026-10-05 ~ 10-15). Each release lists the changes a
 - 📊 **One results page for exercises, quizzes and exams**: three tabs, per-question accuracy, AI analysis and an absent list; scores normalised to 100 points with papers still being graded excluded, plus three score-reporting bugs fixed
 - 🖼 **Portrait renamed "My Portrait"**: configurable period (weekly / monthly), generation moved to a background task with a retry-image path, no name or gender in the image prompt, plus a per-period cap and an opt-out-by-default auto-generation switch
 - 🏆 **Hall of Glory without teacher work**: any points appear on the wall automatically (0 never does); teachers switch to Take down / Put back, and ranks plus a weekly-progress board were added (the tail of the ranking stays hidden), with a 60-second auto-sync
+- 🧑‍🎓 **Answering is no longer wiped by a refresh**: exercises and quizzes keep unsent answers in a per-user local draft (discarded when the question count changes), ask "resume / start over" on entry and clear it once submitted; leaving via the history button, the quiz dialog or the browser tab now confirms first; exercises accept a partial submit through the shared unanswered guard (being stuck on one question no longer blocks handing in); both pages gained a question-number strip (answered = green, next = blue) and a "question x of N · y answered" bar; a failed submit can be retried in place
+- 🧑‍🎓 **The three student entry pages were reworked (exercise history / quizzes / exam centre)**: the exercise list lost its wrong "practice complete" subtitle and its empty card header, gained search, status filter and sorting, and now distinguishes not started / in progress (n of N) / submitted (with the score) with an explicit button per card; the quiz page dropped the duplicated title and the single-tab row, gained search, a to-answer / answered filter and sorting, shows the description and publish date, and marks whether you answered; the exam centre fixed the "My Status" column that literally read "Status", reports submitted papers on a 100-point scale and distinguishes "grading" (no more "in progress" plus a continue button), and gained keyword search, a taken / not-taken filter applied before pagination, a deadline column, and hides the teacher-only pending-grading and draft filters
 - 🧪 170+ regression tests added in total; full suite 1004 passed, 1 skipped
 - ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error instead of being silently rewritten; the whiteboard and generation batches need a backend restart; retrying across endpoints may bill the same prompt twice
 

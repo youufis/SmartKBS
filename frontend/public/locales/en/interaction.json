@@ -631,5 +631,18 @@
   "levelExcellent": "Excellent",
   "levelGood": "Good",
   "levelPass": "Pass",
-  "levelWeak": "Needs work"
+  "levelWeak": "Needs work",
+  "ipListSub": "Pick a quiz and start answering — your score shows right after you submit",
+  "ipMyProgress": "{{todo}} to answer · {{done}} done",
+  "ipFilterAll": "All",
+  "ipFilterTodo": "To answer",
+  "ipFilterDone": "Done",
+  "ipSortNewest": "Newest first",
+  "ipSortOldest": "Oldest first",
+  "ipSortTitle": "By title",
+  "ipSearchPh": "Search title or description",
+  "ipNoMatch": "No quizzes match the current filter",
+  "ipClearFilter": "Clear filters",
+  "ipNoListTitle": "No quizzes assigned yet",
+  "ipNoListHint": "Once your teacher publishes and starts a quiz it shows up here — one click to answer."
 }

@@ -329,5 +329,17 @@
   "levelWeak": "待加强",
   "goWrongBook": "去错题本巩固",
   "statsNoData": "暂无作答数据",
-  "rawScoreHint": "原始得分 {{score}}/{{total}}"
+  "rawScoreHint": "原始得分 {{score}}/{{total}}",
+  "stuListSummary": "共 {{total}} 个练习 · 待完成 {{todo}} 个 · 已完成 {{done}} 个",
+  "stuSearchPh": "搜索练习标题或知识点",
+  "answering": "作答中",
+  "sortNewest": "最新发布",
+  "sortOldest": "最早发布",
+  "sortByTitle": "按标题",
+  "draftProgress": "已答 {{done}}/{{total}} 题",
+  "viewResult": "查看成绩",
+  "noPracticeTitle": "还没有分配给你的练习",
+  "noPracticeHint": "老师发布练习后这里会出现，点一下就能开始作答",
+  "noMatch": "没有符合筛选条件的练习",
+  "clearFilter": "清除筛选"
 }

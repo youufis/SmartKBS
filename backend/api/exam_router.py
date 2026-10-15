@@ -391,6 +391,7 @@ async def list_exams(
     keyword: str = Query(None, description="搜索标题"),
     pending_grading: int = Query(0, description="1=仅看仍有待批改答卷的考试"),
     scope: str = Query("all", description="all/my"),
+    my_status: str = Query("", description="学生专用: todo=只看我还没参加的, done=只看我已交卷的"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -458,6 +459,19 @@ async def list_exams(
                 target_users=exam.get("target_users", ""),
             ):
                 filtered.append(exam)
+
+        # 学生端「待参加 / 已参加」筛选：必须在分页之前过滤，否则筛出来的是空页
+        # （看 / 不看已交卷只依赖有没有有效答题记录，量级很小，一次查完）
+        if my_status in ("todo", "done"):
+            done_ids = {
+                int(r[0]) for r in execute_query(
+                    """SELECT DISTINCT exam_id FROM exam_attempts
+                       WHERE student_username = ? AND status <> 'expired'""",
+                    (username,),
+                )
+            }
+            want_done = my_status == "done"
+            filtered = [e for e in filtered if (int(e["id"]) in done_ids) == want_done]
 
         # 重新分页
         total = len(filtered)
@@ -1344,10 +1358,16 @@ def _remaining_seconds(exam: dict, attempt: dict | None) -> int | None:
 
 
 def _normalize_client_attempt(attempt):
-    """客户端只识别 in_progress/submitted: 过期记录不返回, 批改中短暂表现为进行中"""
+    """客户端只识别 in_progress/submitted: 过期记录不返回, 批改中短暂表现为进行中
+
+    2026-10 补 grading 标记: 'grading' 是"已交卷、后台正在判主观题"的过渡态,
+    归一成 in_progress 之后, 学生考试列表会把刚交的卷子显示成「进行中」并给出
+    「继续考试」按钮(点进去还能接着答)。加一个布尔位让前端能区分这两种"进行中"。
+    """
     if attempt and attempt.get("status") == "grading":
         attempt = dict(attempt)
         attempt["status"] = "in_progress"
+        attempt["grading"] = True
     return attempt
 
 

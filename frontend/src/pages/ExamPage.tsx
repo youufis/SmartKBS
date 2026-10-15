@@ -3,7 +3,7 @@ import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col,
   Divider, Empty, Tabs, Spin, Statistic, Checkbox, Alert,
-  Progress, Radio,
+  Progress, Radio, Segmented,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined, SafetyCertificateOutlined,
@@ -112,6 +112,9 @@ const ExamPage: React.FC = () => {
   // 否则会出现「卡片 13（份答卷）/ 列表 9（场考试）」这种看着像丢数据的错位
   const [searchParams, setSearchParams] = useSearchParams()
   const [pendingOnly, setPendingOnly] = useState(() => searchParams.get('grading') === 'pending')
+  // 关键字搜索（后端一直是支持的，页面此前没给入口）；学生另有「待参加 / 已参加」筛选
+  const [keyword, setKeyword] = useState('')
+  const [myStatus, setMyStatus] = useState<'all' | 'todo' | 'done'>('all')
 
   const togglePendingOnly = (v: boolean) => {
     setPendingOnly(v)
@@ -228,7 +231,11 @@ const ExamPage: React.FC = () => {
       const scope = isStudent ? 'all' : 'all'
       const res = await examsApi.listExams({
         status: statusFilter,
-        pending_grading: pendingOnly ? 1 : undefined,
+        keyword: keyword.trim() || undefined,
+        // 学生端按「我参没参加」筛（服务端在分页前过滤）；教师端不传
+        my_status: isStudent && myStatus !== 'all' ? myStatus : undefined,
+        // 「仅看待批改」是教师/管理员的批阅入口，学生列表不受它影响
+        pending_grading: !isStudent && pendingOnly ? 1 : undefined,
         scope,
         page,
         page_size: pageSize,
@@ -240,7 +247,7 @@ const ExamPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, page, pageSize, isStudent, t, pendingOnly])
+  }, [statusFilter, keyword, myStatus, page, pageSize, isStudent, t, pendingOnly])
 
   useEffect(() => { const fn = async () => { loadExams() }; fn() }, [loadExams])
 
@@ -1074,18 +1081,46 @@ const ExamPage: React.FC = () => {
       width: 70,
     },
     {
+      title: t('exDeadline'),
+      key: 'end_time',
+      width: 130,
+      render: (v: string | null) => {
+        if (!v) return <Typography.Text type="secondary">-</Typography.Text>
+        // 已过截止时间标红，便于一眼看出这场已经考不了
+        const overdue = new Date(String(v).replace(' ', 'T')) < new Date()
+        return <Tag color={overdue ? 'red' : 'default'}>{String(v).slice(0, 16)}</Tag>
+      },
+    },
+    {
       title: t('myStatus'),
       key: 'my_status',
       width: 120,
       render: (_: any, record: ExamInfo) => {
         const attempt = record.my_attempt
-        if (!attempt) return <Tag>{t('status')}</Tag>
-        if (attempt.status === 'in_progress') return <Tag color="processing">{t('inProgress')}</Tag>
-        if (attempt.status === 'submitted') {
-          const passed = attempt.score >= (record.pass_score || 60)
+        // 没答题的学生原先这里显示的是 t('status')，字面就是「状态」两个字，
+        // 列名却叫「我的状态」—— 学生根本看不出自己是"还没考"
+        if (!attempt) return <Tag>{t('exNotAttempted')}</Tag>
+        // 刚交卷、主观题还在后台判分：后端把 grading 归一成 in_progress，
+        // 这里靠 grading 位区分，否则刚交的卷子会显示成「进行中」
+        if ((attempt as any).grading) {
           return (
             <Space size={4}>
-              <Tag color={passed ? 'green' : 'red'}>{attempt.score}{t('scoreUnit')}</Tag>
+              <Tag color="processing">{t('exSubmitted')}</Tag>
+              <Tag color="blue">{t('exGradingPending')}</Tag>
+            </Space>
+          )
+        }
+        if (attempt.status === 'in_progress') return <Tag color="processing">{t('inProgress')}</Tag>
+        if (attempt.status === 'submitted') {
+          // 与练习/测验/成绩弹窗同口径：一律折算百分制（总分不一定是 100）
+          const pct = toPercent(attempt.score, attempt.total_score || record.total_score)
+          const passed = pct >= toPercent(record.pass_score || 60, record.total_score || 100)
+          return (
+            <Space size={4}>
+              <Typography.Text strong color={percentStatus(pct)}>{pct}/100</Typography.Text>
+              {passed
+                ? <Tag color="green">{t('pass')}</Tag>
+                : <Tag color="red">{t('fail')}</Tag>}
               {passed ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> : null}
             </Space>
           )
@@ -1111,6 +1146,12 @@ const ExamPage: React.FC = () => {
               )}
             </Space>
           )
+        }
+
+        // 判分中的答卷不该给任何答题按钮：后端把它归一成 in_progress，
+        // 原先会显示「继续考试」，点进去等于把交过的卷子再打开一次
+        if ((attempt as any)?.grading) {
+          return <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('exGradingPending')}</Typography.Text>
         }
 
         return (
@@ -1184,8 +1225,17 @@ const ExamPage: React.FC = () => {
           </Col>
         </Row>
 
-        {/* ── 状态筛选 ── */}
-        <Row gutter={12} align="middle">
+        {/* ── 搜索 + 筛选（长的行自动换行，不做横向滚动） ── */}
+        <Row gutter={[12, 8]} align="middle">
+          <Col xs={24} sm={12} md={6}>
+            <Input.Search allowClear placeholder={t('exSearchPh')} style={{ width: '100%' }}
+              defaultValue={keyword}
+              onSearch={(v) => { setKeyword(v); setPage(1); loadExams() }}
+              onChange={(e) => {
+                // 清空搜索框时也要把结果还原（onSearch 在点小叉时不触发）
+                if (!e.target.value && keyword) { setKeyword(''); setPage(1) }
+              }} />
+          </Col>
           <Col>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('status')}：</Typography.Text>
           </Col>
@@ -1193,19 +1243,35 @@ const ExamPage: React.FC = () => {
             <Select allowClear placeholder={t('all')} style={{ width: '100%' }}
               value={statusFilter}
               onChange={(val) => { setStatusFilter(val); setPage(1) }}>
-              <Option value="draft">{t('draft')}</Option>
+              {/* 学生只看得到已发布/已结束的考试，给「草稿」等于给一个永远空的筛选 */}
+              {!isStudent && <Option value="draft">{t('draft')}</Option>}
               <Option value="published">{t('published')}</Option>
               <Option value="ended">{t('ended')}</Option>
             </Select>
           </Col>
-          <Col>
-            <Checkbox checked={pendingOnly} onChange={(e) => togglePendingOnly(e.target.checked)}>
-              <span style={{ fontSize: 13 }}>{t('exPendingOnly')}</span>
-            </Checkbox>
-          </Col>
+          {isStudent && (
+            <Col>
+              {/* 学生真正关心的是"我考没考"，而不是考试本身的草稿/发布状态 */}
+              <Segmented value={myStatus}
+                onChange={(v) => { setMyStatus(v as 'all' | 'todo' | 'done'); setPage(1) }}
+                options={[
+                  { value: 'all', label: t('exMyAll') },
+                  { value: 'todo', label: t('exMyTodo') },
+                  { value: 'done', label: t('exMyDone') },
+                ]} />
+            </Col>
+          )}
+          {/* 「仅看待批改」是教师/管理员的批阅入口，学生页面不该出现 */}
+          {!isStudent && (
+            <Col>
+              <Checkbox checked={pendingOnly} onChange={(e) => togglePendingOnly(e.target.checked)}>
+                <span style={{ fontSize: 13 }}>{t('exPendingOnly')}</span>
+              </Checkbox>
+            </Col>
+          )}
           <Col>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {pendingOnly ? t('exPendingHint', { count: total }) : t('totalExams', { count: total })}
+              {!isStudent && pendingOnly ? t('exPendingHint', { count: total }) : t('totalExams', { count: total })}
             </Typography.Text>
           </Col>
         </Row>
@@ -1258,7 +1324,7 @@ const ExamPage: React.FC = () => {
                         return (
                           <Space>
                             <Typography.Text strong style={{ color: pend ? '#1677ff' : (passed ? '#52c41a' : '#ff4d4f') }}>
-                              {r.score} / {r.total_score}
+                              {toPercent(r.score, r.total_score)} / 100
                             </Typography.Text>
                             {pend
                               ? <Tag color="blue">{t('exGradingPending')}</Tag>

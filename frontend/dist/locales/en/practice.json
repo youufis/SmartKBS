@@ -329,5 +329,17 @@
   "levelWeak": "Needs work",
   "goWrongBook": "Review in Wrong Book",
   "statsNoData": "No submissions yet",
-  "rawScoreHint": "Raw score {{score}}/{{total}}"
+  "rawScoreHint": "Raw score {{score}}/{{total}}",
+  "stuListSummary": "{{total}} exercises · {{todo}} to do · {{done}} done",
+  "stuSearchPh": "Search title or knowledge point",
+  "answering": "In progress",
+  "sortNewest": "Newest first",
+  "sortOldest": "Oldest first",
+  "sortByTitle": "By title",
+  "draftProgress": "{{done}}/{{total}} answered",
+  "viewResult": "View score",
+  "noPracticeTitle": "No exercises assigned yet",
+  "noPracticeHint": "Once your teacher publishes an exercise it shows up here — one click to start.",
+  "noMatch": "No exercises match the current filter",
+  "clearFilter": "Clear filters"
 }
