@@ -895,10 +895,10 @@ const ExamPage: React.FC = () => {
       ),
     },
     {
-      title: t('duration'),
+      title: t('exDuration'),
       dataIndex: 'duration',
       key: 'duration',
-      width: 70,
+      width: 80,
       render: (v: number) => `${v}${t('minutes')}`,
     },
     {
@@ -1052,7 +1052,7 @@ const ExamPage: React.FC = () => {
       title: t('subject'),
       dataIndex: 'subject',
       key: 'subject',
-      width: 100,
+      width: 90,
     },
     {
       title: t('publisher'),
@@ -1062,10 +1062,10 @@ const ExamPage: React.FC = () => {
       render: (name: string, record: ExamInfo) => <Tag color="blue">{record.creator_username || name || '-'}</Tag>,
     },
     {
-      title: t('duration'),
+      title: t('exDuration'),
       dataIndex: 'duration',
       key: 'duration',
-      width: 70,
+      width: 80,
       render: (v: number) => `${v}${t('minutes')}`,
     },
     {
@@ -1080,24 +1080,26 @@ const ExamPage: React.FC = () => {
       key: 'question_count',
       width: 70,
     },
-    {
+    // 截止时间列只在真有考试设了截止时间时出现：空列白占 150px，
+    // 会把「考试名称」挤成「南京零…」（数据到位就没这个问题）
+    ...(exams.some(e => !!e.end_time) ? [{
       title: t('exDeadline'),
       // 这个 dataIndex 不能省：没有它 antd 会把整个 record 当值传进来，
       // 单元格就会渲染成 [object Object]（用户实测截图）
       dataIndex: 'end_time',
       key: 'end_time',
-      width: 130,
+      width: 150,
       render: (v: string | null) => {
         if (!v || typeof v !== 'string') return <Typography.Text type="secondary">-</Typography.Text>
         // 已过截止时间标红，便于一眼看出这场已经考不了
         const overdue = new Date(String(v).replace(' ', 'T')) < new Date()
         return <Tag color={overdue ? 'red' : 'default'}>{String(v).slice(0, 16)}</Tag>
       },
-    },
+    }] : []),
     {
       title: t('myStatus'),
       key: 'my_status',
-      width: 120,
+      width: 140,
       render: (_: any, record: ExamInfo) => {
         const attempt = record.my_attempt
         // 没答题的学生原先这里显示的是 t('status')，字面就是「状态」两个字，
@@ -1108,7 +1110,7 @@ const ExamPage: React.FC = () => {
         if ((attempt as any).grading) {
           return (
             <Space size={4}>
-              <Tag color="processing">{t('exSubmitted')}</Tag>
+              <Tag color="processing">{t('exMySubmitted')}</Tag>
               <Tag color="blue">{t('exGradingPending')}</Tag>
             </Space>
           )
@@ -1119,12 +1121,14 @@ const ExamPage: React.FC = () => {
           const pct = toPercent(attempt.score, attempt.total_score || record.total_score)
           const passed = pct >= toPercent(record.pass_score || 60, record.total_score || 100)
           return (
+            // nowrap：分数被从中间拆成「60/10 / 0」比列宽本身更难看（用户实测截图）
             <Space size={4}>
-              <Typography.Text strong color={percentStatus(pct)}>{pct}/100</Typography.Text>
+              <Typography.Text strong color={percentStatus(pct)} style={{ whiteSpace: 'nowrap' }}>
+                {pct}/100
+              </Typography.Text>
               {passed
-                ? <Tag color="green">{t('pass')}</Tag>
-                : <Tag color="red">{t('fail')}</Tag>}
-              {passed ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> : null}
+                ? <Tag color="green" style={{ marginInlineEnd: 0 }}>{t('pass')}</Tag>
+                : <Tag color="red" style={{ marginInlineEnd: 0 }}>{t('fail')}</Tag>}
             </Space>
           )
         }
@@ -1134,7 +1138,7 @@ const ExamPage: React.FC = () => {
     {
       title: t('actions'),
       key: 'action',
-      width: 200,
+      width: 130,
       render: (_: any, record: ExamInfo) => {
         const attempt = record.my_attempt
 
@@ -1319,19 +1323,22 @@ const ExamPage: React.FC = () => {
                     { title: t('publisher'), dataIndex: 'creator_username', key: 'creator_name', width: 90,
                       render: (name: string) => <Tag color="blue">{name || '-'}</Tag> },
                     {
-                      title: t('score'), key: 'score', width: 100,
+                      title: t('score'), key: 'score', width: 140,
                       render: (_: any, r: any) => {
                         // S-GRADING(P2): 主观题还在后台批改时, 分数是临时值, 不下通过/未通过结论
                         const pend = Number(r.ai_pending || 0)
                         const passed = r.score >= (r.pass_score || 60)
                         return (
                           <Space>
-                            <Typography.Text strong style={{ color: pend ? '#1677ff' : (passed ? '#52c41a' : '#ff4d4f') }}>
-                              {toPercent(r.score, r.total_score)} / 100
+                            <Typography.Text strong
+                              style={{ color: pend ? '#1677ff' : (passed ? '#52c41a' : '#ff4d4f'), whiteSpace: 'nowrap' }}>
+                              {toPercent(r.score, r.total_score)}/100
                             </Typography.Text>
                             {pend
-                              ? <Tag color="blue">{t('exGradingPending')}</Tag>
-                              : (passed ? <Tag color="green">{t('pass')}</Tag> : <Tag color="red">{t('fail')}</Tag>)}
+                              ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{t('exGradingPending')}</Tag>
+                              : (passed
+                                ? <Tag color="green" style={{ marginInlineEnd: 0 }}>{t('pass')}</Tag>
+                                : <Tag color="red" style={{ marginInlineEnd: 0 }}>{t('fail')}</Tag>)}
                           </Space>
                         )
                       },

@@ -568,10 +568,11 @@
   "pcAiFillOn": "let AI generate the missing questions (saved to the bank)",
   "pcAiFillOff": "only report the shortfall (default)",
   "exNotAttempted": "Not taken",
-  "exSubmitted": "Submitted",
   "exMyAll": "All",
   "exMyTodo": "To take",
   "exMyDone": "Taken",
   "exSearchPh": "Search exam title",
-  "exDeadline": "Deadline"
+  "exDeadline": "Deadline",
+  "exDuration": "Duration",
+  "exMySubmitted": "Submitted"
 }
