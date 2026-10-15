@@ -566,6 +566,8 @@
   "scBringBack": "Put back",
   "scTakeDownConfirm": "Take this card down? Students will no longer see it (you can put it back anytime).",
   "scBringBackConfirm": "Put this card back on the wall?",
+  "confirm": "OK",
+  "cancel": "Cancel",
   "scPointsUnit": "pts",
   "scNextLevel": "Next level",
   "scNeedPoints": "({{count}} more pts)",

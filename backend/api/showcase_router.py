@@ -3,6 +3,7 @@
 教师生成荣誉卡片，全校师生浏览、搜索、点赞
 """
 import json
+import re
 import threading
 import time
 from datetime import datetime
@@ -487,9 +488,15 @@ async def list_showcase(
         conditions.append("u.grade=?")
         params.append(grade)
     if class_name:
-        cls_num = class_name.replace("班", "").strip()
-        conditions.append("u.class=?")
-        params.append(cls_num)
+        # 班级写法兼容：前端下拉可能给「1」「1班」「高一1班」。
+        # users.class 存的是纯班级号（"1"），所以既比原样、也比抽出来的数字，避免筛不出东西。
+        raw_cls = str(class_name).strip()
+        cls_num = raw_cls.replace("班", "").strip()
+        digits = re.search(r"(\d+)", cls_num)
+        cls_alts = [cls_num] if not digits else [cls_num, digits.group(1)]
+        cls_alts = list(dict.fromkeys([c for c in cls_alts if c]))
+        conditions.append("(" + " OR ".join(["u.class=?"] * len(cls_alts)) + ")")
+        params.extend(cls_alts)
     if student_name:
         conditions.append("u.name LIKE ? ESCAPE '\\'")
         params.append(f"%{like_escape(student_name)}%")

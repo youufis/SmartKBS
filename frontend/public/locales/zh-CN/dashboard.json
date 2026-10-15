@@ -566,6 +566,8 @@
   "scBringBack": "重新上架",
   "scTakeDownConfirm": "下架这张展示卡？学生端将看不到它（可随时重新上架）。",
   "scBringBackConfirm": "重新上架这张展示卡？",
+  "confirm": "确定",
+  "cancel": "取消",
   "scPointsUnit": "分",
   "scNextLevel": "下一级",
   "scNeedPoints": "（还需 {{count}} 分）",
