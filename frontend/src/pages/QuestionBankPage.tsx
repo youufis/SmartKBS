@@ -784,7 +784,7 @@ const QuestionBankPage: React.FC = () => {
                         <Form.Item
                           label={t('knowledgePoints')}
                           name="knowledge_points"
-                          rules={[{ required: true, message: t('enterQuestionContent') }]}
+                          rules={[{ required: true, message: t('knowledgePointRequired') }]}
                         >
                           {/* 全站统一控件：下拉选课程知识点 + 手输（本控件的原型就是这一处） */}
                           <KnowledgePointSelect subject={genSubject || ''} />

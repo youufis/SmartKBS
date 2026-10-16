@@ -434,6 +434,13 @@ def select_questions(
     kp_norms = [x for x in ([kp_norm] + alias_norms) if x]
     terms = list(dict.fromkeys(terms + [t for a in alias_names for t in key_terms(a)]))
     sib_norms = {norm(s) for s in sibling_kp_names if norm(s)}
+    # 一条知识点约束都没给（教师没选、也没手输）＝"不限知识点"：这时整池都是合格候选，
+    # 不能留到 T5 —— T5 默认不参与（那条兜底是给"指定了知识点、库里确实没有"的组卷场景
+    # 留的），会让"选了学科但没填知识点"的抢答/抽问一道题都抽不到，再悄悄转去烧 AI
+    # 补题或塞内置常识题（2026-10-17 核实"不填知识点会怎样"时抓到的静默 0 道）。
+    no_kp_constraint = not (kp_name or kp_id or chapter_id or sibling_kp_names)
+    if no_kp_constraint:
+        audit["skipped"]["no_kp"] = "未指定知识点：按学科/题型整池召回（等同于不限）"
 
     def tier_of(r: dict[str, Any]) -> tuple[int, int]:
         tags = split_tags(r.get("knowledge_points"))
@@ -441,6 +448,8 @@ def select_questions(
         ntext = norm(r.get("question_text"))
         if r.get("id") in t0_ids:
             return 0, 120
+        if no_kp_constraint:
+            return 4, 40      # 不限知识点：整池同层，交给层内打乱 + 难度偏好决定顺序
         if kp_norms and any(t in kp_norms for t in ntags):
             return 1, 100
         if kp_norms and any(t and any((t in kn or kn in t) and len(t) >= 3 and t not in _STOP_WORDS

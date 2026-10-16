@@ -442,8 +442,12 @@ async def _ai_questions_for_room(need: int, avoid: list[str], room: dict[str, An
     general = (room.get("question_source") or "") == "bank_general"
     subject = str(room.get("subject") or "").strip() or ("综合常识" if general else "")
     knowledge_points = str(room.get("knowledge_points") or "").strip()
-    if general:
-        knowledge_points = knowledge_points or "、".join(GENERAL_CATEGORIES)
+    if not knowledge_points:
+        # 教师没填知识点也要给模型一句人话：百科场用通用门类兜底，学科场写"本学科主干
+        # 知识点"。旧写法只在百科场兜底，学科场会把 prompt 渲染成"知识点范围："这样的
+        # 空字段，模型只能自己猜方向（容易跑出与该学科无关的题）。
+        knowledge_points = ("、".join(GENERAL_CATEGORIES) if general
+                            else f"{subject or '本学科'}主干知识点")
     difficulty = str(room.get("difficulty") or "medium")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
 

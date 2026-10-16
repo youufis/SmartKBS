@@ -1,5 +1,6 @@
 {
   "title": "Question Bank",
+  "knowledgePointRequired": "Please select or type a knowledge point",
   "addQuestion": "Add Question",
   "editQuestion": "Edit",
   "deleteQuestion": "Delete",

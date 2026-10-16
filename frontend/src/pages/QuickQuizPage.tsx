@@ -522,6 +522,7 @@ const QuickQuizPage: React.FC = () => {
           </Row>
           {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输） */}
           <Form.Item name="knowledge_points" label={t('knowledgePoints')}
+            extra={t('kpOptionalHint')}
             getValueProps={(v) => ({ value: splitKps(v) })}
             normalize={(v) => joinKps(v)}>
             <KnowledgePointSelect subject={createKpSubject || ''} />
@@ -626,6 +627,7 @@ const QuickQuizPage: React.FC = () => {
           </Row>
           {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输） */}
           <Form.Item name="knowledge_points" label={t('knowledgePoints')}
+            extra={t('kpOptionalHint')}
             getValueProps={(v) => ({ value: splitKps(v) })}
             normalize={(v) => joinKps(v)}>
             <KnowledgePointSelect subject={editKpSubject || ''} />

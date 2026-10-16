@@ -1,5 +1,6 @@
 {
   "ipQuizOneShot": "提交后不能重复作答。",
+  "kpOptionalHint": "留空则不限知识点，按所选学科随机出题",
   "qqPeoplePercent": "{{v}} 人（{{pct}}%）",
   "qqAnswerStats": "本题作答：{{total}} 人，正确 {{correct}} 人",
   "title": "随堂测验",

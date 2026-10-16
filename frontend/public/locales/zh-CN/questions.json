@@ -1,5 +1,6 @@
 {
   "title": "试题管理",
+  "knowledgePointRequired": "请选择或输入知识点",
   "addQuestion": "添加试题",
   "editQuestion": "编辑",
   "deleteQuestion": "删除",
