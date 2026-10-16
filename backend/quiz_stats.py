@@ -77,6 +77,65 @@ def centesimal(score: Any, total: Any) -> float | None:
     return round(max(0.0, min(100.0, s / t * 100.0)), 1)
 
 
+def quiz_subjects(rows: Any) -> dict[Any, str]:
+    """一批测验行 → {测验id: 学科}。
+
+    interaction_quizzes **没有 subject 列**（2026-10-16 才补上，见 database.py 的字段迁移），
+    所以老测验的学科只能反查：题目 JSON 里存了题库 id，拿它去 question_bank 取 subject，
+    同一份测验跨学科抽题时取出现次数最多的那个。
+
+    调用方（活动监控 / 测验列表）应当**优先用行里已落库的 subject**，查不到才用这里的结果；
+    两边都取不到就留空由界面显示"-" —— 宁可空着，也不猜一个学科出来（猜错比空着更糟）。
+
+    rows: [{"id": ..., "questions": <JSON 字符串或列表>}, ...]
+    """
+    import json as _json
+
+    ids_of: dict[Any, list[int]] = {}
+    all_ids: set[int] = set()
+    for row in rows or []:
+        raw = (row or {}).get("questions")
+        try:
+            items = _json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except (ValueError, TypeError):
+            items = []
+        ids: list[int] = []
+        for it in items if isinstance(items, list) else []:
+            if not isinstance(it, dict):
+                continue
+            try:
+                ids.append(int(it.get("id")))
+            except (TypeError, ValueError):
+                continue            # 老卷题目没有题库 id（AI 直出/手写），跳过
+        if ids:
+            ids_of[(row or {}).get("id")] = ids
+            all_ids.update(ids)
+    if not all_ids:
+        return {}
+
+    from backend.question_db import execute_query as _q
+
+    subj_of: dict[int, str] = {}
+    ordered = sorted(all_ids)
+    for i in range(0, len(ordered), 500):      # 分批，避开 SQLite 的变量个数上限
+        chunk = ordered[i:i + 500]
+        ph = ",".join("?" * len(chunk))
+        for r in _q(f"SELECT id, subject FROM question_bank WHERE id IN ({ph})", tuple(chunk)):
+            s = str((r["subject"] if isinstance(r, dict) else r[1]) or "").strip()
+            qid = int(r["id"] if isinstance(r, dict) else r[0])
+            if s:
+                subj_of[qid] = s
+
+    from collections import Counter
+
+    out: dict[Any, str] = {}
+    for qid, ids in ids_of.items():
+        counter = Counter(subj_of[i] for i in ids if i in subj_of)
+        if counter:
+            out[qid] = counter.most_common(1)[0][0]
+    return out
+
+
 def normalize_quiz_scores(questions: list[Any], auto: bool = True) -> list[Any]:
     """R2(Step B): 把题面分值折算成合计 100（与同步练习/考试对齐）。
 

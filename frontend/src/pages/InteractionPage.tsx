@@ -151,6 +151,8 @@ const InteractionPage: React.FC = () => {
         await apiClient.post('/api/interaction/quizzes', {
           title: t('ipQuizSuffix', { topic: aiQuizForm.getFieldValue('topic') }),
           questions: JSON.stringify(aiQuizResult.questions),
+          // 学科：AI 弹窗里选过（图一那个下拉），必须一起落库 —— 否则活动监控/列表显示不出科目
+          subject: aiQuizForm.getFieldValue('subject') || '',
           target_scope: aiQuizScope.target_scope,
           target_grade: aiQuizScope.target_grade,
           target_class: aiQuizScope.target_class,
@@ -168,7 +170,8 @@ const InteractionPage: React.FC = () => {
   }
 
   // ── 创建测验（使用 QuizEditor） ──
-  const handleCreateQuiz = async (title: string, description: string, questions: Question[], scope?: any) => {
+  const handleCreateQuiz = async (title: string, description: string, questions: Question[],
+                                  scope?: any, subject?: string) => {
     try {
       const formatted = questions.map(q => ({
         type: q.type,
@@ -182,6 +185,7 @@ const InteractionPage: React.FC = () => {
         title,
         description: description || '',
         questions: JSON.stringify(formatted),
+        subject: subject || '',
         target_scope: scope?.target_scope || 'teacher_classes',
         target_grade: scope?.target_grade || '',
         target_class: scope?.target_class || '',
@@ -483,6 +487,7 @@ const InteractionPage: React.FC = () => {
                               : <Tag color="warning">{t('ipFilterTodo')}</Tag>
                           )}
                           <Tag color="blue">{quiz.creator_username || quiz.creator_name}</Tag>
+                          {quiz.subject && <Tag color="cyan">{quiz.subject}</Tag>}
                           {isTeacherOrAdmin && (
                             <ScopeTag scope={quiz.target_scope} grade={quiz.target_grade}
                               classes={quiz.target_class} users={quiz.target_users} />
@@ -1104,6 +1109,12 @@ const InteractionPage: React.FC = () => {
           </Form.Item>
           <Form.Item name="description" label={t('ipDesc')}>
             <Input />
+          </Form.Item>
+          {/* 学科：AI 建卷时选的会在这里显示，老测验也能在这里补上（列表与活动监控随即显示） */}
+          <Form.Item name="subject" label={t('subject')}>
+            <Select allowClear placeholder={t('subject')}>
+              {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
+            </Select>
           </Form.Item>
           <Form.Item name="status" label={t('ipStatus')}>
             <Select>

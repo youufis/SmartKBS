@@ -29,6 +29,7 @@ from backend.quiz_stats import (
     quiz_questions as _quiz_questions,
     quiz_total as _quiz_total,
     centesimal as _centesimal,
+    quiz_subjects as _quiz_subjects,
     normalize_quiz_scores,
     answer_index_map as _answer_index_map,
     is_question_correct as _is_question_correct,
@@ -53,6 +54,7 @@ class QuizCreate(BaseModel):
     title: str
     description: str = ""
     questions: str  # JSON 字符串 [{type, question, options, answer, score}]
+    subject: str = ""      # 学科（AI 建测验的弹窗里选的那个，落库后活动监控/列表才显示得出科目）
     target_scope: str = "teacher_classes"
     target_grade: str = ""
     target_class: str = ""
@@ -465,6 +467,7 @@ class QuizUpdate(BaseModel):
     description: str | None = None
     questions: str | None = None
     status: str | None = None
+    subject: str | None = None      # 学科（老测验可以补上，列表/活动监控随即显示）
     auto_scores: bool = True
 
 
@@ -547,10 +550,11 @@ async def create_quiz(req: QuizCreate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     quiz_id = execute_insert_update(
         """INSERT INTO interaction_quizzes
-           (creator_username, title, description, questions, status, created_at, updated_at,
+           (creator_username, title, description, questions, subject, status, created_at, updated_at,
             target_scope, target_grade, target_class, target_users)
-           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
-        (user["username"], req.title, req.description, json.dumps(questions, ensure_ascii=False), now, now,
+           VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+        (user["username"], req.title, req.description, json.dumps(questions, ensure_ascii=False),
+         (req.subject or "").strip(), now, now,
          req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
@@ -604,7 +608,7 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     updates = ["updated_at = ?"]
     params: list[Any] = [now]
-    for field in ("title", "description", "status"):
+    for field in ("title", "description", "status", "subject"):
         val = getattr(req, field, None)
         if val is not None:
             updates.append(f"{field} = ?")
@@ -852,7 +856,8 @@ async def list_quizzes(
             f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status,
                       q.created_at, q.updated_at,
                       q.target_scope, q.target_grade, q.target_class, q.target_users,
-                      COALESCE(u.name, u.username) AS creator_name
+                      COALESCE(u.name, u.username) AS creator_name,
+                      COALESCE(q.subject, '') AS subject
                 FROM interaction_quizzes q
                 JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
                 WHERE {where}
@@ -879,7 +884,8 @@ async def list_quizzes(
         rows = execute_query(
             f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at,
                         q.target_scope, q.target_grade, q.target_class, q.target_users,
-                        COALESCE(u.name, u.username) AS creator_name
+                        COALESCE(u.name, u.username) AS creator_name,
+                        COALESCE(q.subject, '') AS subject
                 FROM interaction_quizzes q
                 LEFT JOIN users u ON q.creator_username = u.username
                 WHERE {where}
@@ -905,6 +911,8 @@ async def list_quizzes(
             "target_grade": (r[9] if len(r) > 12 else "") or "",
             "target_class": (r[10] if len(r) > 12 else "") or "",
             "target_users": (r[11] if len(r) > 12 else "") or "",
+            # 学科：第 14 列（列序必须与上面两条 SELECT 一致；老查询没有这列时给空串）
+            "subject": (r[13] if len(r) > 13 else "") or "",
         }
         # 统一字段名：svg_code → svg_content
         questions = q.get("questions", [])
@@ -926,6 +934,14 @@ async def list_quizzes(
             )
             q["answered"] = (answered[0][0] if answered else 0) > 0
         quizzes.append(q)
+
+    # 学科：新卷用建卷时落库的 subject；老卷（那时还没这列）按题目里带的题库 id 反查，
+    # 与活动监控同一口径（都取不到就留空，界面显示"-"）
+    missing = [q for q in quizzes if not (q.get("subject") or "").strip()]
+    if missing:
+        fallback = _quiz_subjects(missing)
+        for q in missing:
+            q["subject"] = fallback.get(q["id"], "")
 
     return {"quizzes": quizzes}
 

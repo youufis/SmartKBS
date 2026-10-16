@@ -9,6 +9,7 @@ import ActivityScopeSelector from './ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import type { ActivityScopeValue } from './ActivityScopeSelector'
 import { distributeScores } from '../utils/score'
+import useSubjectOptions from '../hooks/useSubjectOptions'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -26,7 +27,8 @@ interface Question {
 interface QuizEditorProps {
   open: boolean
   onCancel: () => void
-  onSave: (title: string, description: string, questions: Question[], scope?: ActivityScopeValue) => Promise<void>
+  onSave: (title: string, description: string, questions: Question[],
+           scope?: ActivityScopeValue, subject?: string) => Promise<void>
   initialTitle?: string
   initialDescription?: string
   initialQuestions?: Question[]
@@ -45,8 +47,10 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   initialTitle = '', initialDescription = '', initialQuestions,
 }) => {
   const { t } = useTranslation('interaction')
+  const { subjects } = useSubjectOptions()      // 学科（与 AI 建测验同一份清单）
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState(initialDescription)
+  const [subject, setSubject] = useState('')
   const [questions, setQuestions] = useState<Question[]>(initialQuestions || [])
   const [saving, setSaving] = useState(false)
   // R2(Step B): 默认由系统把总分均摊成 100(与同步练习/考试同一口径); 教师改过任一题分值即转手动
@@ -62,6 +66,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     if (open) {
       setTitle(initialTitle)
       setDescription(initialDescription)
+      setSubject('')
       setQuestions(initialQuestions || [])
       setAutoScore(true)
       setScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
@@ -179,7 +184,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     try {
       // 自动模式: 把均摊后的分值显式写进题目(后端据此判定"已配过分值"不再覆盖)
       const payload = questions.map((q, i) => ({ ...q, score: effectiveScore(q, i) }))
-      await onSave(title, description, payload, scope)
+      await onSave(title, description, payload, scope, subject)
     } finally {
       setSaving(false)
     }
@@ -232,6 +237,16 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder={t('qeDescPh')}
+            />
+          </Form.Item>
+          {/* 学科：与 AI 建测验弹窗一致 —— 落库后测验列表与活动监控的"科目"列才显示得出来 */}
+          <Form.Item label={t('subject')}>
+            <Select
+              allowClear
+              value={subject || undefined}
+              onChange={(v) => setSubject(v || '')}
+              placeholder={t('subject')}
+              options={subjects.map(s => ({ value: s, label: s }))}
             />
           </Form.Item>
         </Form>

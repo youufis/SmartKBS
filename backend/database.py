@@ -641,6 +641,9 @@ def init_db():
                 ("target_grade", "TEXT DEFAULT ''"),
                 ("target_class", "TEXT DEFAULT ''"),
                 ("target_users", "TEXT DEFAULT ''"),
+                # 学科：AI 建测验的弹窗里一直有"学科"下拉，但以前没落库，
+                # 于是活动监控/测验列表都显示不出科目（只能显示"-"）。这里补列。
+                ("subject", "TEXT DEFAULT ''"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE interaction_quizzes ADD COLUMN {col_def[0]} {col_def[1]}")

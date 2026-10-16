@@ -133,7 +133,9 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     # ── 5. 随堂测验（smartkb.db）──
     quiz_rows = db_query_dict(
         """SELECT iq.id, iq.title, iq.status, iq.created_at, iq.updated_at,
-                  '' as subject, 0 as total_score, 0 as pass_score, 0 as duration,
+                  iq.questions,
+                  COALESCE(iq.subject, '') as subject,
+                  0 as total_score, 0 as pass_score, 0 as duration,
                   iq.target_scope, iq.target_grade, iq.target_class,
                   'quiz' as activity_type
            FROM interaction_quizzes iq
@@ -141,7 +143,12 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
            ORDER BY iq.created_at DESC""",
         (teacher_username,),
     )
+    # 科目优先用建测验时选的那个（2026-10-16 起随堂测验会落库）；
+    # 老测验（建卷时还没这列）才按题目里带的题库 id 反查；都查不到就留空，前端显示"-"
+    _quiz_subj = quiz_stats.quiz_subjects(quiz_rows)
     for qz in quiz_rows:
+        qz["subject"] = (qz.get("subject") or "").strip() or _quiz_subj.get(qz["id"], "")
+        qz.pop("questions", None)          # 题目正文只在服务端用来反查科目，不必回给列表接口
         sub = db_query_dict(
             "SELECT COUNT(DISTINCT student_username) as cnt FROM interaction_quiz_answers WHERE quiz_id=?",
             (qz["id"],),
@@ -740,6 +747,9 @@ async def get_activity_completion_status(
         activity_rec = {**activity_rec, "total_score": _cent_total,
                         "pass_score": round(_cent_total * 0.6, 1),
                         "raw_total_score": _q_total}
+        # 科目：优先用建卷时选的（已落库），老测验才按题目反查题库（与活动列表同一口径）
+        activity_rec["subject"] = ((activity_rec.get("subject") or "").strip()
+                                   or quiz_stats.quiz_subjects([activity_rec]).get(activity_rec.get("id"), ""))
 
     # 获取学生完成情况
     completed, incomplete = _get_students_with_completion(
