@@ -200,7 +200,7 @@ def _esc_like(v: str) -> str:
 
 
 def _question_refs(question_id: int) -> tuple[list, list]:
-    """Q2: 返回引用该题的(考试, 智能练习)。
+    """Q2: 返回引用该题的(考试, 同步练习)。
 
     practice_* 表与题库同在 questions.db。旧实现从 backend.database(主库 smartkb.db)
     查同名空表, 且外层 except: pass, 导致"正在使用中"保护恒判定为无引用。
@@ -225,7 +225,7 @@ def _format_refs(exam_refs: list, practice_refs: list) -> str:
     if exam_refs:
         parts.append("考试(%d个)：%s" % (len(exam_refs), "、".join("「%s」" % r["title"] for r in exam_refs)))
     if practice_refs:
-        parts.append("智能练习(%d个)：%s" % (len(practice_refs), "、".join("「%s」" % r["title"] for r in practice_refs)))
+        parts.append("同步练习(%d个)：%s" % (len(practice_refs), "、".join("「%s」" % r["title"] for r in practice_refs)))
     return "；".join(parts)
 
 

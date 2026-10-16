@@ -568,7 +568,7 @@ const CurriculumPage: React.FC = () => {
     }
   }
 
-  // ── 智能练习（增强混合模式，自动组合AI+题库，无需用户干预） ──
+  // ── 同步练习（增强混合模式，自动组合AI+题库，无需用户干预） ──
   const handleSmartPractice = async (kpId: number) => {
     setPracticeLoading(true)
     setPracticeHtmlUrl('')

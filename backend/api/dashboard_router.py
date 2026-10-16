@@ -385,7 +385,7 @@ async def dashboard_summary(request: Request):
             (username,),
         )
 
-        # ── 智能练习数据 ──
+        # ── 同步练习数据 ──
         pending_practice_count = _q_count(
             """SELECT COUNT(*) FROM practice_sessions ps
                WHERE ps.status='active'
@@ -474,7 +474,7 @@ async def dashboard_summary(request: Request):
             # 分组讨论
             "active_discussion_count": active_discussion_count,
             "my_discussion_count": my_discussion_count,
-            # 智能练习
+            # 同步练习
             "pending_practice_count": pending_practice_count,
             "completed_practice_count": completed_practice_count,
             # 错题本
@@ -690,7 +690,7 @@ async def dashboard_summary(request: Request):
                 (username,),
             )
 
-        # ── 智能练习统计（教师） ──
+        # ── 同步练习统计（教师） ──
         if role == 0:
             practice_published = _q_count(
                 "SELECT COUNT(*) FROM practice_sessions WHERE status='active'",
@@ -812,7 +812,7 @@ async def dashboard_summary(request: Request):
             "discussion_total": discussion_total,
             "discussion_active": discussion_active,
             "discussion_member_count": discussion_member_count,
-            # 智能练习
+            # 同步练习
             "practice_published": practice_published,
             "practice_submitted": practice_submitted,
             # 知识闯关
@@ -1336,7 +1336,7 @@ async def recent_activity(request: Request):
                 "detail": f"得分 {act[2]} 分 · 答对 {act[3]} 题",
             })
 
-        # 最近的智能练习记录
+        # 最近的同步练习记录
         practice_activities = _act_q_db(
             """SELECT pa.submitted_at, ps.title, pa.score, pa.total_score
                FROM practice_attempts pa
@@ -1349,7 +1349,7 @@ async def recent_activity(request: Request):
             activities.append({
                 "time": act['submitted_at'],
                 "type": "practice",
-                "title": f"完成了智能练习「{act['title']}」",
+                "title": f"完成了同步练习「{act['title']}」",
                 "detail": f"得分 {act['score']}/{act['total_score']}",
             })
 
@@ -1625,7 +1625,7 @@ async def recent_activity(request: Request):
                 "detail": "",
             })
 
-        # 最近的智能练习提交（学生提交到教师的练习）
+        # 最近的同步练习提交（学生提交到教师的练习）
         if role == 0:
             practice_acts = _act_q_db(
                 """SELECT pa.submitted_at, ps.title, pa.student_username, pa.score, pa.total_score
@@ -1650,7 +1650,7 @@ async def recent_activity(request: Request):
             activities.append({
                 "time": act['submitted_at'],
                 "type": "practice",
-                "title": f"学生 {su} {info.get('name') or su} 完成了智能练习",
+                "title": f"学生 {su} {info.get('name') or su} 完成了同步练习",
                 "detail": _with_tag(info.get("tag", ""), f"「{act['title']}」得分 {act['score']}/{act['total_score']}"),
             })
 
@@ -1819,7 +1819,7 @@ def _recent_done(username: str, days: int = 30, limit: int = 30) -> list[dict[st
                    "detail": r.get("subject") or "", "score": r.get("score"),
                    "total": r.get("total_score"), "time": r.get("submitted_at"), "url": "/exam"})
 
-    # 2) 智能练习（questions.db）
+    # 2) 同步练习（questions.db）
     _push(_act_q_db(
         """SELECT pa.id AS aid, pa.submitted_at, pa.score, pa.total_score, ps.title
            FROM practice_attempts pa JOIN practice_sessions ps ON pa.session_id = ps.id
@@ -2043,7 +2043,7 @@ async def get_task_todo(request: Request):
     except Exception as e:
         logger.warning(f"[task-todo] 查询任务失败: {e}")
 
-    # ── 3. 待完成智能练习 ──
+    # ── 3. 待完成同步练习 ──
     try:
         pending_practices = q_execute_query(
             """SELECT ps.id, ps.title, ps.subject, ps.question_count, ps.total_score,
@@ -2692,7 +2692,7 @@ async def get_task_todo(request: Request):
         stats["course_progress"] = round(done_kp / total_kp * 100) if total_kp > 0 else 0
 
         # 总体完成率：已完成的各类活动 / (已完成 + 待完成)
-        # 涵盖考试、智能练习、课程练习、代码练习
+        # 涵盖考试、同步练习、课程练习、代码练习
         completed = _q_count(
             "SELECT COUNT(*) FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
             (username,),

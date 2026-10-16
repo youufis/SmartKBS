@@ -4,12 +4,12 @@
 这是"活动重置"功能的前置修复。`activity_rewards` 用 (activity_type, activity_id)
 定位一个活动发出的积分流水，历史上存在两处口径缺陷，使"按活动清理流水"不可靠：
 
-- R-A 命名空间冲突：智能练习写 ('practice', practice_sessions.id)，课程练习也曾写
+- R-A 命名空间冲突：同步练习写 ('practice', practice_sessions.id)，课程练习也曾写
   ('practice', knowledge_points.id)。两个 id 域重叠后：
     1) 按活动清理会互相误伤（重置"练习 #5"会连带删掉"课程知识点 #5"的流水）；
     2) `award_participation/award_grade` 的幂等检查误判为"已发放"，
        学生第二次参加（另一类活动）时静默不加分。
-  写入侧已拆为 'practice'(智能练习) / 'course_practice'(课程练习)，本模块归位存量流水。
+  写入侧已拆为 'practice'(同步练习) / 'course_practice'(课程练习)，本模块归位存量流水。
 
 - R-B 抢答 activity_id 带前缀：写入侧曾用 f"quick_quiz_{room_id}"，而清理侧一律用
   str(room_id)，两边永不相交 -> 删除房间从不清理流水，`student_total_points` 虚高。
@@ -147,7 +147,7 @@ def _load_practice_evidence() -> dict[str, Any]:
 def _classify(activity_id: str, student: str, title: str, ev: dict[str, Any]) -> str:
     """判定单条 ('practice', id) 流水的真实归属
 
-    返回：'course'(归位课程练习) / 'session'(确属智能练习) /
+    返回：'course'(归位课程练习) / 'session'(确属同步练习) /
           'conflict'(两类答卷证据同时存在，无法回溯) / 'unknown'(无行级证据)
 
     判定顺序体现保守原则：该生该 id 的**行级提交证据**优先于标题匹配，
@@ -259,7 +259,7 @@ def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -
             _state_set(_STATE_KEY, f"ran:{report['course_practice_retyped']}")
         if report["conflict"] or report["unknown"]:
             logger.info(
-                f"[积分治理] practice 流水: 确属智能练习 {report['kept_as_practice']} 条,"
+                f"[积分治理] practice 流水: 确属同步练习 {report['kept_as_practice']} 条,"
                 f" 归位课程练习 {report['course_practice_retyped']} 条,"
                 f" 证据冲突 {report['conflict']} 条, 无行级证据 {report['unknown']} 条（后两类保留原样）"
             )

@@ -1033,7 +1033,7 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-            # ── 智能练习相关表（practice_sessions / practice_session_questions /
+            # ── 同步练习相关表（practice_sessions / practice_session_questions /
             #     practice_attempts）住在 questions.db，由 question_db.init_question_db()
             #     负责建表建索引；主库不再创建同名表，免得"查错库还静默返回空"。
 
@@ -2285,7 +2285,7 @@ def _prune_unlocatable_rows(c):
 
 
 # ── 历史遗留：主库中与试题库重名的空壳表 ──
-# 考试 / 题库 / 智能练习相关表早已迁到 questions.db（见 backend/question_db.py），
+# 考试 / 题库 / 同步练习相关表早已迁到 questions.db（见 backend/question_db.py），
 # 但早期版本在 smartkb.db 里建的同名表还留在库中，且恒为 0 行。
 # 它们的危害不是占地方，而是"静默骗人"：任何误用主库连接的查询都不报错，
 # 只是永远返回空/0（实测曾让每周画像显示"累计考试 0 场"、学科称号答题数偏低）。

@@ -278,7 +278,7 @@ def _delete_user_completely(username: str):
         ("DELETE FROM task_submissions WHERE student_username=?", (username,)),
         ("DELETE FROM task_grades WHERE student_username=?", (username,)),
         ("DELETE FROM practice_attempts WHERE student_username=?", (username,)),
-        # 智能练习：教师创建的练习任务
+        # 同步练习：教师创建的练习任务
         ("DELETE FROM practice_session_questions WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)),
         ("DELETE FROM practice_sessions WHERE creator_username=?", (username,)),
         ("DELETE FROM activity_rewards WHERE student_username=?", (username,)),
@@ -404,7 +404,7 @@ def _delete_user_completely(username: str):
             ("DELETE FROM exams WHERE creator_username=?", (username,)),
             # 教师创建的题库题目
             ("DELETE FROM question_bank WHERE creator_username=?", (username,)),
-            # 教师创建的智能练习（先删关联题目，再删练习记录）
+            # 教师创建的同步练习（先删关联题目，再删练习记录）
             ("DELETE FROM practice_session_questions WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)),
             ("DELETE FROM practice_attempts WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)),
             ("DELETE FROM practice_sessions WHERE creator_username=?", (username,)),

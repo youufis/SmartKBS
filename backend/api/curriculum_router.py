@@ -3075,7 +3075,7 @@ def _practice_overrides(body: dict) -> tuple[str, str, str]:
 async def _persist_curriculum_ai_questions(questions: list[dict[str, Any]], *, subject: str,
                                            kp_name: str, kp_id: int, username: str,
                                            now: str) -> tuple[list[int], list[int]]:
-    """课程练习 / 智能练习两条 AI 补题路径共用的入库（收敛到 question_factory）。
+    """课程练习 / 同步练习两条 AI 补题路径共用的入库（收敛到 question_factory）。
 
     返回 (new_ids, dup_ids)：
       new_ids  本次真正新入库的题 id（只有这些题去烧生图配额）
@@ -3084,7 +3084,7 @@ async def _persist_curriculum_ai_questions(questions: list[dict[str, Any]], *, s
     两条路径历史上行为不一致，这里一并对齐：
       · 判重从「全库精确文本」换成统一口径（学科族 + 题型 + 规范化题干）。实测现口径
         一条重复都没拦住（0 组），新口径拦住 2 组 4 条 —— 是严格超集，不会漏掉原来能拦的。
-      · 智能练习那条**从来不连教材知识点边**，于是它生成的题下次仍走不到 T0、还要再烧
+      · 同步练习那条**从来不连教材知识点边**，于是它生成的题下次仍走不到 T0、还要再烧
         一次 AI。现在两条都带 kp_id 连 ID 边（比按名字猜准，也不受"名字是否全库唯一"限制）。
       · 入库前做字段体检：答案越界、缺答案、题干过短的模型输出不再进题库。
     """
@@ -3756,7 +3756,7 @@ body {{
         <button class="btn-submit" style="margin-top: 20px; padding: 10px 32px; font-size: 15px;" onclick="location.reload()">🔄 重新答题</button>
     </div>
 
-    <div class="footer">AI 智能练习 · 系统自动批改</div>
+    <div class="footer">AI 同步练习 · 系统自动批改</div>
 </div>
 
 <script>
@@ -4103,7 +4103,7 @@ function showResults(accuracy, score, totalScore, results, prevResults) {{
     # 落盘前体检: 这个模板是 Python f-string 里嵌 JS, 一个裸 # 就能让整块 <script>
     # SyntaxError —— 页面空白, 而服务端只数题目数量, 日志照样报"生成成功"
     # (历史上 b5e7f90 引入、c7b00e5 修过模板)。产物不合格就拒绝落盘并留档,
-    # 宁可报错也不给学生一个空白页。AI练习/智能练习/章节练习三个调用点都走这里。
+    # 宁可报错也不给学生一个空白页。AI练习/同步练习/章节练习三个调用点都走这里。
     ok, why = _aj.html_is_complete(page)
     if not ok:
         raw = _aj.dump_failed_raw("practice-page", page or "")
@@ -4244,7 +4244,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 本批全部题目的 knowledge_point 字段一律填「{kp_name}」。
 """
 
-                logger.info(f"智能练习 AI 补全 第{round_idx+1}轮: kp_id={kp_id}, gap={gap}")
+                logger.info(f"同步练习 AI 补全 第{round_idx+1}轮: kp_id={kp_id}, gap={gap}")
                 try:
                     result_text = await call_ai_async(
                         smart_prompt, api_key,
@@ -4296,16 +4296,16 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 
     # ── 最终检查 ──
     if not all_question_ids:
-        logger.error("智能练习生成失败：题库为空且 AI 未能生成任何题目")
+        logger.error("同步练习生成失败：题库为空且 AI 未能生成任何题目")
         raise HTTPException(status_code=502, detail="无法获取题目，题库中未找到相关题目且 AI 生成失败，请稍后重试或检查 API Key 配置")
 
     all_question_ids = all_question_ids[:10]
     if len(all_question_ids) < 10:
-        logger.error(f"智能练习仅凑到 {len(all_question_ids)} 道题，不足10道")
+        logger.error(f"同步练习仅凑到 {len(all_question_ids)} 道题，不足10道")
         raise HTTPException(status_code=502, detail=f"AI 练习必须包含10道题，当前仅生成{len(all_question_ids)}道，请稍后重试")
 
     # ── 第4步：创建练习任务 + 生成 HTML ──
-    title = f"{kp_name} 智能练习"
+    title = f"{kp_name} 同步练习"
     session_id = q_insert(
         """INSERT INTO practice_sessions
            (title, knowledge_points, creator_username, subject, question_count,
@@ -4371,7 +4371,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 
     bank_source_count = bank_count
     ai_source_count = len(ai_questions)
-    logger.info(f"智能练习生成成功: kp_id={kp_id}, 题库={bank_source_count}, AI补全={ai_source_count}, 总计={len(all_question_ids)}")
+    logger.info(f"同步练习生成成功: kp_id={kp_id}, 题库={bank_source_count}, AI补全={ai_source_count}, 总计={len(all_question_ids)}")
     return {
         "file_url": file_url,
         "filename": filename,
@@ -4379,7 +4379,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         "kp_name": kp_name,
         "bank_count": bank_source_count,
         "ai_count": ai_source_count,
-        "message": f"智能练习已生成（题库 {bank_source_count} 题 + AI 补全 {ai_source_count} 题，共 {len(all_question_ids)} 题）",
+        "message": f"同步练习已生成（题库 {bank_source_count} 题 + AI 补全 {ai_source_count} 题，共 {len(all_question_ids)} 题）",
     }
 
 
@@ -4641,7 +4641,7 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     total_reward = 0
     try:
         # G10: 第 5/7 个位置参数是 teacher_username, 不应填学生自己
-        # R-A: 活动类型必须是 course_practice。历史上这里写 practice, 与智能练习
+        # R-A: 活动类型必须是 course_practice。历史上这里写 practice, 与同步练习
         #      (practice_sessions.id) 共用 activity_id 域 -> 幂等检查互相误判(第二次参与
         #      不加分), 且按活动清理积分流水时会互相误伤。历史流水由 reward_hygiene 归位
         total_reward += award_participation(username, "course_practice", str(kp_id), kp_title)

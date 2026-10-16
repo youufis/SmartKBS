@@ -8,7 +8,7 @@ from typing import Any
 # 活动类型名称映射（供学生数据展示用）
 _ACTIVITY_NAMES = {
     "quiz": "随堂测验", "poll": "快速投票", "question": "课堂提问",
-    "exam": "考试", "practice": "智能练习", "discussion": "分组讨论",
+    "exam": "考试", "practice": "同步练习", "discussion": "分组讨论",
     "rollcall": "点名签到", "chat": "AI对话", "task": "任务",
     "learning": "学习进度", "login": "每日登录", "code": "代码练习",
     "quest": "知识闯关", "quick_quiz": "知识抢答", "course_practice": "课程练习",

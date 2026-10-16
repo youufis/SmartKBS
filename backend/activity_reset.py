@@ -175,9 +175,9 @@ RESET_SCOPES: dict[str, dict[str, Any]] = {
         in_progress=("exam_attempts", "exam_id = :aid AND status = 'in_progress'",
                      "exam_answering", "正在答题的答卷"),
     ),
-    # 2. 智能练习
+    # 2. 同步练习
     "practice": Scope(
-        "practice", "智能练习", db=DB_QDB, master="practice_sessions",
+        "practice", "同步练习", db=DB_QDB, master="practice_sessions",
         targets=[Target("practice_attempts", "session_id = :aid", "练习作答记录", DB_QDB,
                         student_col="student_username")],
         keep=[("practice_config", "练习配置"), ("practice_questions", "练习题组")],

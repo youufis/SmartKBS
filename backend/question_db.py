@@ -199,7 +199,7 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
-            # ── 智能练习：练习任务表 ──
+            # ── 同步练习：练习任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS practice_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -238,7 +238,7 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
-            # ── 智能练习：练习题目关联表 ──
+            # ── 同步练习：练习题目关联表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS practice_session_questions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER NOT NULL,
@@ -251,7 +251,7 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
-            # ── 智能练习：学生答题记录表 ──
+            # ── 同步练习：学生答题记录表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS practice_attempts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER NOT NULL,

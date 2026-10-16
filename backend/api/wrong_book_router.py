@@ -245,7 +245,7 @@ def _collect_wrong_for_plan(student: str) -> tuple[list[dict], set, set, str]:
 
 _SOURCE_FALLBACK_TITLES = {
     "exam": "考试错题",
-    "practice": "智能练习错题",
+    "practice": "同步练习错题",
     "quiz": "随堂测验错题",
     "auto": "系统自动归集",
 }

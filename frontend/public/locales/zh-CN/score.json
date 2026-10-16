@@ -295,7 +295,7 @@
   "reward.activityType.poll": "快速投票",
   "reward.activityType.question": "课堂提问",
   "reward.activityType.exam": "考试",
-  "reward.activityType.practice": "智能练习",
+  "reward.activityType.practice": "同步练习",
   "reward.activityType.discussion": "分组讨论",
   "reward.activityType.rollcall": "点名签到",
   "reward.activityType.chat": "AI 对话",

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """跨活动学生成绩汇总采集服务
 
-把考试/随堂测验/在线任务/智能练习/代码练习/课程练习/知识抢答/知识闯关/
+把考试/随堂测验/在线任务/同步练习/代码练习/课程练习/知识抢答/知识闯关/
 快速投票/分组讨论/课堂积分等分散数据归一化成统一的"学生×活动"明细行,
 再按学生、按活动、按班级三种口径聚合, 供 export_router 的汇总导出端点
 (JSON 预览 / Excel 多 Sheet / CSV) 使用。
@@ -14,7 +14,7 @@
   - 学生: 本服务不对学生开放 (路由层 403)。
 
 分数口径 (方案确认稿):
-  - 考试/智能练习: teacher_score >= 0 (教师已复核) 时优先, 否则用原始/AI 分;
+  - 考试/同步练习: teacher_score >= 0 (教师已复核) 时优先, 否则用原始/AI 分;
   - 在线任务: task_grades.ai_score 为准, 已提交无分记「待评分」;
   - 代码练习: 取学生最高分一条;
   - 知识闯关: 口径为答题正确率 (correct_count / total_questions), 积分不计入均分;
@@ -47,7 +47,7 @@ SUMMARY_TYPES: dict[str, dict[str, str]] = {
     "exam":        {"label": "考试",     "kind": "score"},
     "quiz":        {"label": "随堂测验", "kind": "score"},
     "task":        {"label": "在线任务", "kind": "score"},
-    "practice":    {"label": "智能练习", "kind": "score"},
+    "practice":    {"label": "同步练习", "kind": "score"},
     "code":        {"label": "代码练习", "kind": "score"},
     "course":      {"label": "课程练习", "kind": "score"},
     "quick_quiz":  {"label": "知识抢答", "kind": "score"},
@@ -570,7 +570,7 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
                 ts=r["submitted_at"],
             ))
 
-    # ── 4. 智能练习 ──
+    # ── 4. 同步练习 ──
     if "practice" in t and acts.get("practice"):
         amap = {a["id"]: a for a in acts["practice"]}
         rows = _query_in(list(amap), lambda marks, params: q_execute_query(

@@ -130,7 +130,7 @@
     "activityType": {
       "all": "全部类型",
       "exam": "考试",
-      "practice": "智能练习",
+      "practice": "同步练习",
       "quickQuiz": "知识抢答",
       "task": "对话作业",
       "quiz": "随堂测验",
@@ -644,10 +644,10 @@
   "radar": {
     "noDataHint": "答题后自动生成画像",
     "title": "能力画像",
-    "hint": "基于考试、课程练习、智能练习、错题掌握的真实正确率/完成率计算",
+    "hint": "基于考试、课程练习、同步练习、错题掌握的真实正确率/完成率计算",
     "exam": "考试均分",
     "coursePractice": "课程练习",
-    "practice": "智能练习",
+    "practice": "同步练习",
     "wrongBook": "错题掌握",
     "noData": "完成一些活动后，这里会显示你的能力维度"
   },

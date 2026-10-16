@@ -644,7 +644,7 @@
   "radar": {
     "noDataHint": "Generated automatically once you answer",
     "title": "Ability Profile",
-    "hint": "Based on real accuracy/completion across exams, course practice, smart practice and mistake mastery",
+    "hint": "Based on real accuracy/completion across exams, course practice, practice and mistake mastery",
     "exam": "Exam avg",
     "coursePractice": "Course",
     "practice": "Practice",

@@ -78,7 +78,7 @@ ACTIVITY_TYPE_NAMES = {
     "poll":       "快速投票",
     "question":   "课堂提问",
     "exam":       "考试",
-    "practice":   "智能练习",
+    "practice":   "同步练习",
     "discussion": "分组讨论",
     "rollcall":   "点名签到",
     "chat":       "AI 对话",

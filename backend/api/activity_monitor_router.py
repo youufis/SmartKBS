@@ -21,7 +21,7 @@ router = APIRouter()
 
 ACTIVITY_TYPE_LABELS = {
     "exam": "考试",
-    "practice": "智能练习",
+    "practice": "同步练习",
     "quick_quiz": "知识抢答",
     "task": "在线任务",
     "quiz": "随堂测验",
@@ -66,7 +66,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         e["submitted_count"] = sub[0]["cnt"] if sub else 0
         activities.append(e)
 
-    # ── 2. 智能练习（questions.db）──
+    # ── 2. 同步练习（questions.db）──
     # 排除：错题巩固(source=wrong_book)、定向给个别学生的(target_students不为空)
     practices = qdb_query(
         """SELECT ps.id, ps.title, ps.status, ps.created_at, ps.updated_at,
@@ -940,7 +940,7 @@ def _calc_student_progress(username: str) -> dict[str, Any]:
         )
         pending = exam_pending_rows[0]["cnt"] if exam_pending_rows else 0
 
-        # 智能练习待完成
+        # 同步练习待完成
         practice_pending_rows = qdb_query(
             """SELECT COUNT(*) as cnt FROM practice_sessions ps
                WHERE ps.status='active'
