@@ -188,7 +188,7 @@ app = FastAPI(
 
 # AI 后台任务并发上限: 统一转 429, 避免在每个端点各写一遍 try/except
 from backend.ai_task_manager import TooManyAITasks
-from backend.auth_errors import AuthError, auth_error_body, log_auth_reject
+from backend.auth_errors import AuthError, auth_error_response, log_auth_reject
 
 
 @app.exception_handler(TooManyAITasks)
@@ -201,13 +201,9 @@ async def _handle_too_many_ai_tasks(request, exc: TooManyAITasks):
 # 未登录: 401 里带上原因码(expired / invalid / stale / missing)，前端好区分处理、日志好排查
 @app.exception_handler(AuthError)
 async def _handle_auth_error(request, exc: AuthError):
-    from fastapi.responses import JSONResponse
     log_auth_reject(request, exc.code, where="dependency")
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=auth_error_body(exc.code, exc.message),
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    # 统一走 auth_error_response：401 一律捎带删掉 smartkb_token cookie
+    return auth_error_response(exc.code, exc.message)
 
 
 # CORS 配置（开发环境允许前端 dev server 跨域）

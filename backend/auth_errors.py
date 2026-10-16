@@ -113,12 +113,22 @@ def auth_error_body(code: str, message: Optional[str] = None) -> dict[str, Any]:
 
 
 def auth_error_response(code: str, message: Optional[str] = None) -> JSONResponse:
-    """中间件里直接 return 用（中间件不走异常 handler）。"""
-    return JSONResponse(
+    """中间件里直接 return 用（中间件不走异常 handler）。
+
+    401 一律把 smartkb_token cookie 也删掉：它是 httpOnly 的，前端 JS 清不掉
+    （前端 401 收口只清 localStorage），但中间件取凭证的顺序是
+    Authorization -> cookie -> query，所以会话被顶下线/过期后，浏览器仍会
+    每轮自动带上这张旧 cookie，服务端只能一遍遍回 401（日志里表现为
+    code=token_stale 而不是 auth_missing），直到 24 小时的 max_age 到期。
+    凭证既然已经判定无效，就别再让它回来。
+    """
+    response = JSONResponse(
         status_code=status.HTTP_401_UNAUTHORIZED,
         content=auth_error_body(code, message),
         headers={"WWW-Authenticate": "Bearer"},
     )
+    response.delete_cookie("smartkb_token", path="/")
+    return response
 
 
 # ── 401 拒绝日志（限流：同一 原因+方法+路径 每分钟一条，避免挂机页面刷屏）──
@@ -127,8 +137,12 @@ _REJECT_LOG_INTERVAL = 60.0
 _reject_logged: dict[str, float] = {}
 
 
-def log_auth_reject(request: Request, code: str, where: str = "middleware") -> None:
+def log_auth_reject(request: Request, code: str, where: str = "middleware",
+                    username: str = "") -> None:
     """记一条可排查的 401：原因码 + 来源 IP + UA + 来源页（access log 里没有 UA）。
+
+    username 由调用方从"签名有效但已失效"的凭证里解出来（见 auth.peek_token_username）。
+    没有它就只能看到 IP/UA（挂 NAT 时一堆人共用一个出口 IP），排查时得靠猜。
 
     同时把这次失败喂给 security_guard 做"同 IP 连续失败 -> 临时封禁"的计数。
     """
@@ -151,5 +165,7 @@ def log_auth_reject(request: Request, code: str, where: str = "middleware") -> N
         _reject_logged.clear()
     logger.warning(
         f"[401] {request.method} {request.url.path} code={code} "
-        f"ip={client_ip(request)} from={where} ua={user_agent(request, 80)} ref={referer(request)}"
+        f"ip={client_ip(request)} from={where} ua={user_agent(request, 80)}"
+        + (f" user={username}" if username else "")
+        + f" ref={referer(request)}"
     )

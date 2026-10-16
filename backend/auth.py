@@ -158,6 +158,25 @@ def authenticate_payload(token: str) -> dict[str, Any] | None:
     return payload
 
 
+def peek_token_username(token: str) -> str:
+    """取出"签名有效、但已失效"的凭证里的 username，**只用于 401 日志排查**。
+
+    被顶下线 / 已登出 / 已过期这三种失败场景，凭证本身是本站真签发的，
+    记下"是谁的旧凭证还在打"比只有一个出口 IP 有用得多（校内 NAT 下一个 IP
+    后面是一堆人）。签名不通过的令牌一律返回空串 —— 不能把攻击者伪造的
+    用户名写进日志；本函数任何情况下都不参与鉴权判定。
+    """
+    if not token:
+        return ""
+    try:
+        # 只跳过 exp：签名仍要验，保证解出来的 username 是本站签发过的
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM],
+                             options={"verify_exp": False})
+    except Exception:
+        return ""
+    return str(payload.get("username", "") or "")
+
+
 def increment_token_version(username: str) -> int:
     """递增 token 版本号（使旧 token 失效），返回新版本号"""
     with get_connection() as conn:

@@ -14,6 +14,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from backend.auth import (
     get_token_ttl_hours,
+    peek_token_username,
     renew_token_if_needed,
     update_active_token,
     verify_token,
@@ -109,7 +110,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 # 放在 update_active_token 之前：被挡的人不该再算进在线人数。
                 _blocked_key = login_block_message_key(payload.get("role"), client_ip(request))
                 if _blocked_key:
-                    log_auth_reject(request, AUTH_LOGIN_BLOCKED, where="middleware_gate")
+                    log_auth_reject(request, AUTH_LOGIN_BLOCKED, where="middleware_gate",
+                                    username=payload.get("username", ""))
                     return auth_error_response(
                         AUTH_LOGIN_BLOCKED,
                         T(_blocked_key, resolve_lang_from_request(request)),
@@ -125,7 +127,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 set_current_user(None)
                 if not is_public:
                     # 带上原因码: 前端能区分"没带凭证/过期/被顶下线", 日志也能一眼看懂
-                    log_auth_reject(request, code, where="middleware")
+                    # 另外把"这是谁的旧凭证"也记上：挂 NAT 时一个 IP 后面是一堆人
+                    log_auth_reject(request, code, where="middleware",
+                                    username=peek_token_username(token))
                     return auth_error_response(code)
         else:
             request.state.user = None

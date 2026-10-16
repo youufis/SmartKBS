@@ -3,12 +3,14 @@
  * 支持三种模式：演示/互动/自习
  */
 import React, { useEffect, useRef, useCallback, useState } from 'react'
+import { isAxiosError } from 'axios'
 import { Tldraw, type Editor, type TLStoreSnapshot, type TLComponents } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { useWhiteboardStore } from '../../stores/whiteboardStore'
 import { useWhiteboardWS } from '../../hooks/useWhiteboardWS'
 import apiClient from '../../api/client'
 import { reportLoadError } from '../../utils/loadError'
+import { startPoller, stopPoller } from '../../utils/poller'
 
 // 使用自建 WebSocket 后端，屏蔽 TLDraw 默认的云同步面板和右下角水印
 const minimalComponents: TLComponents = {
@@ -140,8 +142,24 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
 
     if (readOnly) {
       // 只读端（演示模式学生 / 未授权的互动学生）：自适应兜底轮询
-      let timer = 0
+      //
+      // ★ 回归修复：这里以前是"自链 setTimeout"——timer 在回调内部才赋值，
+      //   组件卸载（或本 effect 因 mode / readOnly / ws.send 变化而重跑）若正好
+      //   发生在 pollOnce() 在途时，clearTimeout 清的是已经烧掉的旧 id，await 回来
+      //   后 schedule() 又挂上一个没人能清的新定时器。链子就此活下来：页面早就跳到
+      //   登录页了，还在每 3 秒带着失效凭证刷 401（现场：一台 Mac 挂着 room 3 连刷
+      //   10 小时）。现在改收进统一轮询表（utils/poller，见其开篇注释），三件事一次拿到：
+      //     · 本地没有 token 时不发（跳登录页后自然静默）；
+      //     · 标签页在后台时不发，回到前台补一轮；
+      //     · 401 时 stopAllPollers() 一定停得掉，这里再补一道显式停止。
+      //   节拍仍自适应：tick 走最快档，真正发不发由 lastPollAt 决定
+      //   （WS 正常 20 秒、掉线 3 秒），保留 8.6.0 的省流意图。
+      const pollKey = `whiteboard-snapshot-${roomId}`
+      let disposed = false
+      let lastPollAt = 0
       const pollOnce = async () => {
+        if (disposed) return
+        lastPollAt = Date.now()
         try {
           const { data } = await apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`, {
             params: snapshotHashRef.current ? { sig: snapshotHashRef.current } : {},
@@ -168,18 +186,24 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
             // 服务端说没变：留住指纹，下一轮继续省掉整份传输
             snapshotHashRef.current = data.sig as string
           }
-        } catch { /* 静默 */ }
+        } catch (err) {
+          // 401 = 凭证已失效：拦截器那边已经清凭证 + 跳登录，这里绝不再发。
+          // （继续发的唯一后果就是把后端日志刷满，浏览器还会自动带上那张
+          //   JS 清不掉的旧 cookie，服务端只能一遍遍回 401）
+          if (isAxiosError(err) && err.response?.status === 401) {
+            disposed = true
+            stopPoller(pollKey)
+          }
+          // 其余错误（网络抖动等）保持静默，下一轮再试
+        }
       }
-      const schedule = () => {
+      startPoller(pollKey, async () => {
         const healthy = wsStateRef.current === 'open'
           && Date.now() - lastWSUpdateRef.current < 15000
-        timer = window.setTimeout(async () => {
-          await pollOnce()
-          schedule()
-        }, healthy ? POLL_SLOW_MS : POLL_FAST_MS)
-      }
-      schedule()
-      return () => clearTimeout(timer)
+        if (Date.now() - lastPollAt < (healthy ? POLL_SLOW_MS : POLL_FAST_MS)) return
+        await pollOnce()
+      }, POLL_FAST_MS, { immediate: false })
+      return () => { disposed = true; stopPoller(pollKey) }
     }
 
     if (isBroadcaster) {

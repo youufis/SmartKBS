@@ -38,6 +38,11 @@ _POLL_401_NOISE = (
     "/api/companion/push",
     "/api/tasks/active",
     "/api/auth/online-count",
+    # 白板只读端兜底轮询（/api/whiteboard/rooms/{id}/snapshot）：WS 不通时 3 秒一轮，
+    # 挂机页面 token 一旦失效就是一片 401 海。前端已改成"401 即停表 + 跳登录"，
+    # 这里再叠一层：缓存着旧 bundle 的浏览器不至于把 access log 刷满
+    #（每 60 秒仍汇总一条带样例的 WARN，线索不丢）。全站只有这一个路由带 snapshot。
+    "/snapshot",
 )
 
 
@@ -94,6 +99,12 @@ class _PollAuthNoiseFilter(logging.Filter):
 
     SUMMARY_INTERVAL = 60.0
 
+    #: uvicorn(0.4x) 的 raw message 形如 `addr - "GET /x HTTP/1.1" 401` ——
+    #  状态码在结尾、后面**没有**空格。这里以前写的是 `" 401 " in msg`，
+    #  于是这条过滤器从上线起就没命中过一次（日志里从来没见过"抑制 N 条"的汇总）。
+    #  改成按结尾匹配，顺带把状态码位置锁死在引号收尾之后，不会误伤路径里的数字。
+    _STATUS_401 = re.compile(r'"\s+401\s*$')
+
     def __init__(self, name: str = ""):
         super().__init__(name)
         self._suppressed = 0
@@ -105,7 +116,8 @@ class _PollAuthNoiseFilter(logging.Filter):
             msg = record.getMessage()
         except Exception:
             return True
-        if not (" 401 " in msg and any(path in msg for path in _POLL_401_NOISE)):
+        if not (self._STATUS_401.search(msg)
+                and any(path in msg for path in _POLL_401_NOISE)):
             return True
 
         self._suppressed += 1
