@@ -243,6 +243,8 @@
   "roomCreated": "房间「{{title}}」已创建！房间码：{{code}}",
   "quizManageDesc": "管理抢答活动，创建和监控抢答房间",
   "quizPlayDesc": "查看可加入的房间，参与抢答挑战",
+  "activityName": "活动名称",
+  "quizMeta": "题量 / 时限",
   "activityList": "活动列表（共 {{count}} 个）",
   "noActivitiesTeacher": "暂无抢答活动，点击上方按钮创建",
   "noActivitiesStudent": "暂无进行中的活动，向老师获取房间码",

@@ -206,11 +206,13 @@ const ExamPage: React.FC = () => {
   // ── 学生查看答题详情 ──
   const [detailModal, setDetailModal] = useState(false)
   const [detailData, setDetailData] = useState<any>(null)
+  const [detailAttempt, setDetailAttempt] = useState<any>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const handleViewMyDetail = async (attempt: ExamAttempt) => {
     setDetailModal(true)
     setDetailLoading(true)
     setDetailData(null)
+    setDetailAttempt(attempt)      // 弹窗标题要显示"考试名（科目）"，详情接口不带这两个字段
     try {
       const { data } = await apiClient.get(`/api/exams/attempt/${attempt.id}/exam/${attempt.exam_id}`)
       setDetailData(data)
@@ -1999,7 +2001,8 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 成绩查看弹窗（E2：概览 / 每题 / 名册 三段；E3：宽度自适应 + 语义色） ── */}
-      <Modal title={`${t('result')} - ${resultExam?.title || ''}`}
+      {/* 标题带上科目：同一场考试在不同学科下常常同名，光看标题分不清 */}
+      <Modal title={`${t('result')} - ${resultExam?.title || ''}${resultExam?.subject ? `（${resultExam.subject}）` : ''}`}
         open={resultModal}
         onCancel={() => setResultModal(false)}
         width="min(1040px, 96vw)"
@@ -2318,7 +2321,8 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 答题详情弹窗（学生查看） ── */}
-      <Modal title={t('detailTitle')} open={detailModal}
+      <Modal title={`${t('detailTitle')}${detailAttempt?.exam_title ? ` - ${detailAttempt.exam_title}${detailAttempt.exam_subject ? `（${detailAttempt.exam_subject}）` : ''}` : ''}`}
+        open={detailModal}
         onCancel={() => setDetailModal(false)}
         width={800}
         footer={<Button onClick={() => setDetailModal(false)}>{t('close')}</Button>}

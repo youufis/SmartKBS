@@ -239,6 +239,8 @@
   "roomCreated": "Room \"{{title}}\" created! Code: {{code}}",
   "quizManageDesc": "Manage quiz rooms, create and monitor",
   "quizPlayDesc": "View available rooms and join quizzes",
+  "activityName": "Activity",
+  "quizMeta": "Questions / Limit",
   "activityList": "Activities ({{count}})",
   "noActivitiesTeacher": "No activities. Click above to create.",
   "noActivitiesStudent": "No active activities. Ask teacher for a code.",

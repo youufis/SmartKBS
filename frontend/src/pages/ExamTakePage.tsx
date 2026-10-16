@@ -588,6 +588,8 @@ const ExamTakePage: React.FC = () => {
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>{t('exitBtn')}</Button>
           <Title level={5} style={{ margin: 0 }}>{exam.title}</Title>
+          {/* 科目：答题页以前只显示标题，学生在答题时看不到这是哪一科 */}
+          {exam.subject && <Tag style={{ marginInlineStart: 4 }}>{exam.subject}</Tag>}
         </Space>
         <Space size={24}>
           <span>

@@ -12,15 +12,26 @@ export async function createTask(name: string, description?: string, scope?: {
   target_grade?: string;
   target_class?: string;
   target_users?: string;
-}): Promise<{ task: TaskInfo; message: string }> {
+}, subject?: string): Promise<{ task: TaskInfo; message: string }> {
   const { data } = await apiClient.post('/api/tasks/create', {
     name,
     description,
+    // 学科：落库后活动监控/作业列表才显示得出科目
+    subject: subject || '',
     target_scope: scope?.target_scope || 'teacher_classes',
     target_grade: scope?.target_grade || '',
     target_class: scope?.target_class || '',
     target_users: scope?.target_users || '',
   });
+  return data;
+}
+
+/** 编辑作业：名称 / 要求 / 学科（其它字段涉及发布范围，后端不放） */
+export async function updateTask(
+  task_id: string,
+  patch: { name?: string; description?: string; subject?: string },
+): Promise<{ task: TaskInfo; message: string }> {
+  const { data } = await apiClient.put('/api/tasks/update', { task_id, ...patch });
   return data;
 }
 

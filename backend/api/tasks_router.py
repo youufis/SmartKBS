@@ -137,6 +137,7 @@ router = APIRouter()
 class CreateTaskRequest(BaseModel):
     name: str
     description: str = ""
+    subject: str = ""          # 学科（对话作业的创建弹窗里选的，落库后活动监控/列表才显示得出科目）
     target_scope: str = "teacher_classes"
     target_grade: str = ""
     target_class: str = ""
@@ -168,6 +169,8 @@ def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, An
         "target_grade": target_grade,
         "target_class": target_class,
         "target_users": target_users,
+        # 学科：追加在最后（老查询只取前 6 列，这里给空串给界面显示"-"）
+        "subject": (row[10] if len(row) > 10 else "") or "",
     }
     if submissions is not None:
         task["submissions"] = submissions
@@ -182,7 +185,7 @@ def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, An
 def get_all_tasks() -> list[dict[str, Any]]:
     """从数据库获取所有活跃任务"""
     rows = execute_query(
-        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users FROM tasks WHERE status='active' ORDER BY created_at DESC"
+        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users, subject FROM tasks WHERE status='active' ORDER BY created_at DESC"
     )
     return [_task_row_to_dict(row) for row in rows]
 
@@ -190,7 +193,7 @@ def get_all_tasks() -> list[dict[str, Any]]:
 def _get_all_tasks_raw() -> list[dict[str, Any]]:
     """从数据库获取所有任务（含非活跃）"""
     rows = execute_query(
-        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users FROM tasks ORDER BY created_at DESC"
+        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users, subject FROM tasks ORDER BY created_at DESC"
     )
     return [_task_row_to_dict(row) for row in rows]
 
@@ -198,7 +201,7 @@ def _get_all_tasks_raw() -> list[dict[str, Any]]:
 def _get_creator_tasks(username: str) -> list[dict[str, Any]]:  # type: ignore[valid-type]
     """获取指定创建者的所有任务"""
     rows = execute_query(
-        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users FROM tasks WHERE creator_username=? ORDER BY created_at DESC",
+        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users, subject FROM tasks WHERE creator_username=? ORDER BY created_at DESC",
         (username,),
     )
     return [_task_row_to_dict(row) for row in rows]
@@ -335,10 +338,10 @@ async def create_task(req: CreateTaskRequest, request: Request):
     now = time.strftime("%Y-%m-%d %H:%M:%S")
 
     execute_insert_update(
-        """INSERT INTO tasks (id, creator_username, name, description, status, created_at, updated_at,
+        """INSERT INTO tasks (id, creator_username, name, description, subject, status, created_at, updated_at,
                               target_scope, target_grade, target_class, target_users)
-           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
-        (task_id, username, task_name, req.description.strip(), now, now,
+           VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+        (task_id, username, task_name, req.description.strip(), (req.subject or "").strip(), now, now,
          req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
@@ -347,6 +350,7 @@ async def create_task(req: CreateTaskRequest, request: Request):
         "creator": username,
         "name": task_name,
         "description": req.description.strip(),
+        "subject": (req.subject or "").strip(),
         "status": "active",
         "created_time": now,
         "target_scope": req.target_scope,
@@ -358,6 +362,67 @@ async def create_task(req: CreateTaskRequest, request: Request):
 
     logger.info(f"任务已创建: {task_name}, creator={username}")
     return {"task": new_task, "message": f"任务 '{task_name}' 创建成功"}
+
+
+class UpdateTaskRequest(BaseModel):
+    task_id: str
+    name: str | None = None
+    description: str | None = None
+    subject: str | None = None
+
+
+@router.put("/update")
+async def update_task(req: UpdateTaskRequest, request: Request):
+    """编辑任务：名称 / 要求 / 学科。
+
+    只放开这三项 —— 目标范围与状态决定"谁能看到、还能不能交"，改动影响已发布的活动，
+    要改得走专门流程，这里不碰。以前对话作业完全没有编辑入口，学科（新加的字段）
+    在存量作业上也就无从补起。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    rows = execute_query("SELECT creator_username FROM tasks WHERE id=?", (req.task_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if role != 0 and rows[0][0] != username:
+        raise HTTPException(status_code=403, detail="只能编辑自己创建的作业")
+
+    fields: list[str] = []
+    params: list[Any] = []
+    if req.name is not None:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="任务名称不能为空")
+        if len(name) > TASK_NAME_MAX:
+            raise HTTPException(status_code=400, detail=f"任务名称最长 {TASK_NAME_MAX} 字")
+        fields.append("name=?")
+        params.append(name)
+    if req.description is not None:
+        desc = req.description.strip()
+        if len(desc) > TASK_DESC_MAX:
+            raise HTTPException(status_code=400, detail=f"任务描述最长 {TASK_DESC_MAX} 字")
+        fields.append("description=?")
+        params.append(desc)
+    if req.subject is not None:
+        fields.append("subject=?")
+        params.append(req.subject.strip())
+    if not fields:
+        return {"message": "没有需要更新的字段"}
+
+    fields.append("updated_at=?")
+    params.append(time.strftime("%Y-%m-%d %H:%M:%S"))
+    params.append(req.task_id)
+    execute_insert_update(f"UPDATE tasks SET {', '.join(fields)} WHERE id=?", tuple(params))
+    logger.info(f"任务已更新: {req.task_id}, by={username}, fields={[f.split('=')[0] for f in fields]}")
+
+    row = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at, target_scope,"
+        " target_grade, target_class, target_users, subject FROM tasks WHERE id=?",
+        (req.task_id,),
+    )
+    return {"task": _task_row_to_dict(row[0]) if row else None, "message": "作业已更新"}
 
 
 def _strip_json_fence(text: str) -> str:

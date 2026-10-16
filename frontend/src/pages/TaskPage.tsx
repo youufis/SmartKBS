@@ -8,6 +8,7 @@ import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
   CheckCircleOutlined, EyeOutlined, UndoOutlined,
   RobotOutlined, BarChartOutlined, QuestionCircleOutlined, BulbOutlined, ExpandAltOutlined,
+  EditOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
 import { useSearchParams } from 'react-router-dom'
@@ -23,6 +24,7 @@ import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
 import MobileCardTable from '../components/MobileCardTable'
 import { useIsMobile } from '../hooks/useIsMobile'
+import useSubjectOptions from '../hooks/useSubjectOptions'
 
 const TaskPage: React.FC = () => {
   const { t } = useTranslation('system')
@@ -102,6 +104,15 @@ const TaskPage: React.FC = () => {
   const [createModal, setCreateModal] = useState(false)
   const [taskName, setTaskName] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
+  // 学科：与其它活动一致（默认取系统配置的第一个），落库后列表/活动监控才显示科目
+  const [taskSubject, setTaskSubject] = useState('')
+  // 正在编辑的作业 id（null = 新建）：同一个弹窗两用
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const { subjects: subjectOptions } = useSubjectOptions()
+  // 学科清单到位后补默认值（留空太容易漏填，作业就没有科目了）
+  useEffect(() => {
+    if (subjectOptions.length > 0) setTaskSubject(prev => prev || subjectOptions[0])
+  }, [subjectOptions])
   const [taskScope, setTaskScope] = useState<ActivityScopeValue>({
     target_scope: 'teacher_classes',
     target_grade: '',
@@ -167,7 +178,18 @@ const TaskPage: React.FC = () => {
   const handleCreate = async () => {
     if (!taskName.trim()) { message.warning(t('enterTaskName')); return }
     try {
-      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope)
+      if (editingTaskId) {
+        const res = await tasksApi.updateTask(editingTaskId, {
+          name: taskName.trim(), description: taskDesc.trim(), subject: taskSubject,
+        })
+        message.success(res.message)
+        setCreateModal(false)
+        setEditingTaskId(null)
+        setTaskName(''); setTaskDesc('')
+        loadTasks()
+        return
+      }
+      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope, taskSubject)
       message.success(res.message)
       setCreateModal(false)
       setTaskName('')
@@ -393,6 +415,9 @@ const TaskPage: React.FC = () => {
 
   const columns = [
     { title: t('taskName'), dataIndex: 'name', key: 'name', width: 180 },
+    // 科目：创建作业时选的（tasks.subject），列表以前没展示
+    { title: t('subject'), dataIndex: 'subject', key: 'subject', width: 90,
+      render: (v: string) => v || '-' },
     {
       title: t('taskDescription'), dataIndex: 'description', key: 'description', width: 230,
       render: (d: string) => d ? (
@@ -481,6 +506,20 @@ const TaskPage: React.FC = () => {
             <Tooltip title={t('details')}>
               <Button size="small" icon={<EyeOutlined />}
                 onClick={() => handleViewSubmissions(record)}
+              />
+            </Tooltip>
+          )}
+          {/* 编辑：名称/要求/学科（老作业的科目也在这里补） */}
+          {isAdminOrTeacher && (
+            <Tooltip title={t('edit')}>
+              <Button size="small" icon={<EditOutlined />}
+                onClick={() => {
+                  setEditingTaskId(record.id)
+                  setTaskName(record.name || '')
+                  setTaskDesc(record.description || '')
+                  setTaskSubject(record.subject || '')
+                  setCreateModal(true)
+                }}
               />
             </Tooltip>
           )}
@@ -579,11 +618,16 @@ const TaskPage: React.FC = () => {
 
       {/* 创建任务弹窗 */}
       <Modal maskClosable={false}
-        title={t('createNewTask')}
+        title={editingTaskId ? t('edit') : t('createNewTask')}
         open={createModal}
         onOk={handleCreate}
-        onCancel={() => { setCreateModal(false); setTaskName(''); setTaskDesc(''); setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
-        okText={t('createTask')} cancelText={t('cancel')}
+        onCancel={() => {
+          setCreateModal(false); setEditingTaskId(null)
+          setTaskName(''); setTaskDesc('')
+          setTaskSubject(subjectOptions[0] || '')
+          setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
+        }}
+        okText={editingTaskId ? t('save') : t('createTask')} cancelText={t('cancel')}
         width={640}
       >
         <Input
@@ -601,9 +645,22 @@ const TaskPage: React.FC = () => {
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
           {t('taskDescHint')}
         </Typography.Text>
-        <div style={{ marginTop: 16 }}>
-          <ActivityScopeSelector value={taskScope} onChange={setTaskScope} />
+        {/* 学科：落库后作业列表与活动监控的"科目"列才显示得出来 */}
+        <div style={{ marginTop: 12 }}>
+          <Select
+            value={taskSubject || undefined}
+            onChange={setTaskSubject}
+            style={{ width: 160 }}
+            placeholder={t('subject')}
+            options={subjectOptions.map(s => ({ value: s, label: s }))}
+          />
         </div>
+        {/* 目标范围只在新建时可选：改它会影响已发布作业的可见范围，编辑模式隐藏 */}
+        {!editingTaskId && (
+          <div style={{ marginTop: 16 }}>
+            <ActivityScopeSelector value={taskScope} onChange={setTaskScope} />
+          </div>
+        )}
       </Modal>
 
       {/* 提交任务确认弹窗 */}

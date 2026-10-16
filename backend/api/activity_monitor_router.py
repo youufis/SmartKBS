@@ -114,7 +114,8 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     # ── 4. 在线任务（smartkb.db）──
     task_rows = db_query_dict(
         """SELECT t.id, t.name as title, t.status, t.created_at, t.updated_at,
-                  '' as subject, 0 as total_score, 0 as pass_score, 0 as duration,
+                  COALESCE(t.subject, '') as subject,
+                  0 as total_score, 0 as pass_score, 0 as duration,
                   t.target_scope, t.target_grade, t.target_class,
                   'task' as activity_type
            FROM tasks t
@@ -290,7 +291,8 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     # ── 8. 快速投票（smartkb.db）──
     poll_rows = db_query_dict(
         """SELECT p.id, p.question as title, p.status, p.created_at, p.created_at as updated_at,
-                  '' as subject, 0 as total_score, 0 as pass_score, 0 as duration,
+                  COALESCE(p.subject, '') as subject,
+                  0 as total_score, 0 as pass_score, 0 as duration,
                   p.target_scope, p.target_grade, p.target_class,
                   'poll' as activity_type
            FROM interaction_polls p

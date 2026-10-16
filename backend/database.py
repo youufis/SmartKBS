@@ -472,6 +472,8 @@ def init_db():
                 ("target_grade", "TEXT DEFAULT ''"),
                 ("target_class", "TEXT DEFAULT ''"),
                 ("target_users", "TEXT DEFAULT ''"),
+                # 学科：对话作业的创建弹窗原先没有这一项，活动监控/列表的"科目"只能显示"-"
+                ("subject", "TEXT DEFAULT ''"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE tasks ADD COLUMN {col_def[0]} {col_def[1]}")
@@ -697,6 +699,8 @@ def init_db():
                 ("target_grade", "TEXT DEFAULT ''"),
                 ("target_class", "TEXT DEFAULT ''"),
                 ("target_users", "TEXT DEFAULT ''"),
+                # 学科：投票的创建弹窗原先没有这一项，活动监控/列表的"科目"只能显示"-"
+                ("subject", "TEXT DEFAULT ''"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE interaction_polls ADD COLUMN {col_def[0]} {col_def[1]}")

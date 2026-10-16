@@ -183,26 +183,30 @@ const QuickQuizPage: React.FC = () => {
 
   // ── 教师房间列表 ──
   const teacherColumns = [
-    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 100,
-      render: (code: string) => <Text code strong style={{ fontSize: 16 }}>{code}</Text>
+    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 86,
+      render: (code: string) => <Text code strong style={{ fontSize: 15 }}>{code}</Text>
     },
-    { title: t('title'), dataIndex: 'title', key: 'title', width: 160 },
+    // 列标题原先写的是 t('title') —— 这个 key 在 interaction 命名空间里是页面标题「随堂测验」，
+    // 于是抢答列表的"活动名称"列一直显示成"随堂测验"（内容其实是竞赛名称）。改用 activityName。
+    { title: t('activityName'), dataIndex: 'title', key: 'title', width: 150, ellipsis: true },
+    // 科目：房间表本来就有 subject（建活动时选的），列表以前没展示
+    { title: t('subject'), dataIndex: 'subject', key: 'subject', width: 90,
+      render: (v: string) => v || '-' },
     { title: t('status'), dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
-    { title: t('questions'), dataIndex: 'question_count', key: 'count', width: 60 },
-    { title: t('timeLimit'), dataIndex: 'time_limit', key: 'time', width: 60,
-      render: (t: number) => `${t}s`
-    },
+    // 题量与时限合成一格：少一列、行更短，一眼读完
+    { title: t('quizMeta'), key: 'meta', width: 104,
+      render: (_: any, r: any) => `${r.question_count ?? 0} ${t('questions')} · ${r.time_limit ?? 0}s` },
     { title: t('players'), key: 'players', width: 60,
       render: (_: any, r: any) => (
         <span><TeamOutlined /> {r.player_count || 0}</span>
       )
     },
-    { title: t('gradeClass'), key: 'scope', width: 160,
+    { title: t('gradeClass'), key: 'scope', width: 150,
       render: (_: any, r: any) => (
         <ScopeTag scope={r.target_scope} grade={r.target_grade} classes={r.target_class} users={r.target_users} />
       )
     },
-    { title: t('creator'), key: 'creator_time', width: 120,
+    { title: t('creator'), key: 'creator_time', width: 110,
       render: (_: any, r: any) => (
         <div>
           <div>{r.creator_username || '-'}</div>
@@ -211,7 +215,7 @@ const QuickQuizPage: React.FC = () => {
       )
     },
     {
-      title: t('actions'), key: 'action', width: 200,
+      title: t('actions'), key: 'action', width: 176,
       render: (_: any, record: any) => (
         <Space>
           {record.status === 'waiting' && (
@@ -280,16 +284,17 @@ const QuickQuizPage: React.FC = () => {
 
   // ── 学生房间列表 ──
   const studentColumns = [
-    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 100,
-      render: (code: string) => <Text code strong style={{ fontSize: 16 }}>{code}</Text>
+    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 86,
+      render: (code: string) => <Text code strong style={{ fontSize: 15 }}>{code}</Text>
     },
-    { title: t('title'), dataIndex: 'title', key: 'title', width: 160 },
+    // 同教师视图：这里以前也是 t('title')（= 页面标题"随堂测验"），改为活动名称
+    { title: t('activityName'), dataIndex: 'title', key: 'title', width: 150, ellipsis: true },
+    { title: t('subject'), dataIndex: 'subject', key: 'subject', width: 90,
+      render: (v: string) => v || '-' },
     { title: t('status'), dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
-    { title: t('questions'), dataIndex: 'question_count', key: 'count', width: 60 },
-    { title: t('timeLimit'), dataIndex: 'time_limit', key: 'time', width: 60,
-      render: (t: number) => `${t}s`
-    },
-    { title: t('teacher'), key: 'teacher_time', width: 120,
+    { title: t('quizMeta'), key: 'meta', width: 104,
+      render: (_: any, r: any) => `${r.question_count ?? 0} ${t('questions')} · ${r.time_limit ?? 0}s` },
+    { title: t('teacher'), key: 'teacher_time', width: 110,
       render: (_: any, r: any) => (
         <div>
           <div>{r.creator_username || '-'}</div>
@@ -336,7 +341,7 @@ const QuickQuizPage: React.FC = () => {
 
   // 抢答历史记录列定义（桌面表格与窄屏卡片共用同一份）
   const historyColumns = [
-                { title: t('title'), dataIndex: 'title', key: 'title' },
+                { title: t('activityName'), dataIndex: 'title', key: 'title', ellipsis: true },
                 { title: t('status'), dataIndex: 'status', key: 'status', render: getStatusTag },
                 { title: t('score'), dataIndex: 'total_score', key: 'score',
                   render: (s: number) => <Text strong style={{ color: '#faad14' }}>{s}</Text>
@@ -410,6 +415,8 @@ const QuickQuizPage: React.FC = () => {
             rowKey="id"
             pagination={{ pageSize: 20 }}
             size="small"
+            /* 列多而窗外窄时横向滚动，别把右边列挤没/裁掉（此前"详情"会被切掉） */
+            scroll={{ x: 'max-content' }}
           />
           )
         )}

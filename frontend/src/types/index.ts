@@ -102,6 +102,8 @@ export interface TaskInfo {
   creator: string;
   name: string;
   description?: string;
+  /** 学科（对话作业创建/编辑时选的；老数据为空） */
+  subject?: string;
   status: 'active' | 'inactive';
   created_time: string;
   submissions: string[];

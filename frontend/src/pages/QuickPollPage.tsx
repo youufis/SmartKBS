@@ -22,6 +22,7 @@ import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
 import { RowList } from '../components/RowList'
 import ScopeTag from '../components/ScopeTag'
+import useSubjectOptions from '../hooks/useSubjectOptions'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -48,6 +49,8 @@ const QuickPollPage: React.FC = () => {
   const [aiPollForm] = Form.useForm()
   const [editPollModal, setEditPollModal] = useState<any>(null)
   const [editPollForm] = Form.useForm()
+  // 学科：与其它活动一致（默认取系统配置的第一个），落库后列表/活动监控才显示科目
+  const { subjects: subjectOptions } = useSubjectOptions()
   const [pollScope, setPollScope] = useState<ActivityScopeValue>({
     target_scope: 'teacher_classes',
     target_grade: '',
@@ -116,6 +119,7 @@ const QuickPollPage: React.FC = () => {
         question: values.question,
         options,
         poll_type: values.poll_type || 'single',
+        subject: values.subject || subjectOptions[0] || '',
         target_scope: pollScope.target_scope,
         target_grade: pollScope.target_grade,
         target_class: pollScope.target_class,
@@ -196,6 +200,7 @@ const QuickPollPage: React.FC = () => {
         question: values.question,
         options: values.options.split('\n').filter((l: string) => l.trim()),
         poll_type: values.poll_type || 'single',
+        subject: values.subject || '',
       })
       message.success(t('updateSuccess')); setEditPollModal(null); await loadPolls()
     } catch { message.error(t('updateFailed')) }
@@ -245,6 +250,7 @@ const QuickPollPage: React.FC = () => {
                             {isMultiple ? t('multiple') : t('single')}
                           </Tag>
                           <Tag color="blue">{poll.creator_username || poll.creator_name}</Tag>
+                          {poll.subject && <Tag color="cyan">{poll.subject}</Tag>}
                           {isTeacherOrAdmin && (
                             <ScopeTag scope={poll.target_scope} grade={poll.target_grade}
                               classes={poll.target_class} users={poll.target_users} />
@@ -273,6 +279,7 @@ const QuickPollPage: React.FC = () => {
                                   question: poll.question,
                                   options: poll.options.map((o: any) => o.text).join('\n'),
                                   poll_type: poll.poll_type,
+                                  subject: poll.subject || '',
                                 })
                                 setEditPollModal(poll)
                               }} />
@@ -386,6 +393,10 @@ const QuickPollPage: React.FC = () => {
               <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
             </Select>
           </Form.Item>
+          {/* 学科：落库后投票列表与活动监控的"科目"列才显示得出来 */}
+          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
+            <Select options={subjectOptions.map((s) => ({ value: s, label: s }))} />
+          </Form.Item>
           <Form.Item name="option_count" label={t('optionCount')} initialValue={4}>
             <Select>
               {[2, 3, 4, 5, 6].map(n => <Select.Option key={n} value={n}>{t('optionsCountValue', { n })}</Select.Option>)}
@@ -448,6 +459,10 @@ const QuickPollPage: React.FC = () => {
           </Form.Item>
           <Form.Item name="options" label={t('optionsPerLine')} rules={[{ required: true }]}>
             <TextArea rows={4} />
+          </Form.Item>
+          {/* 学科：老投票可以在这里补上（列表与活动监控随即显示） */}
+          <Form.Item name="subject" label={t('subject')}>
+            <Select allowClear options={subjectOptions.map((s) => ({ value: s, label: s }))} />
           </Form.Item>
         </Form>
       </Modal>

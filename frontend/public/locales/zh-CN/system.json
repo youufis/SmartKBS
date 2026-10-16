@@ -105,6 +105,7 @@
   "selfPasswordOnly": "只能修改自己的密码",
   "usernamePasswordRequired": "用户名和新密码不能为空",
   "teachingSubjects": "任教科目",
+  "subject": "科目",
   "allSubjects": "全部学科",
   "bulkDelete": "批量删除",
   "bulkImport": "批量导入",

@@ -71,6 +71,7 @@ class PollCreate(BaseModel):
     question: str
     options: list[str]
     poll_type: str = "single"  # single / multiple
+    subject: str = ""          # 学科（投票创建弹窗里选的，落库后活动监控/列表才显示得出科目）
     target_scope: str = "teacher_classes"
     target_grade: str = ""
     target_class: str = ""
@@ -475,6 +476,7 @@ class PollUpdate(BaseModel):
     question: str | None = None
     options: list[str] | None = None
     poll_type: str | None = None
+    subject: str | None = None    # 学科（老投票可以在编辑弹窗里补上）
 
 
 class QuestionUpdate(BaseModel):
@@ -743,6 +745,9 @@ async def update_poll(poll_id: int, req: PollUpdate, request: Request):
     if req.poll_type is not None:
         execute_insert_update("UPDATE interaction_polls SET poll_type = ? WHERE id = ?",
                               (req.poll_type, poll_id))
+    if req.subject is not None:
+        execute_insert_update("UPDATE interaction_polls SET subject = ? WHERE id = ?",
+                              (req.subject.strip(), poll_id))
     return {"message": "投票已更新"}
 
 
@@ -1373,9 +1378,10 @@ async def create_poll(req: PollCreate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     poll_id = execute_insert_update(
         """INSERT INTO interaction_polls (creator_username, question, options, poll_type, status, created_at,
-                                          target_scope, target_grade, target_class, target_users)
-           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)""",
+                                          subject, target_scope, target_grade, target_class, target_users)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
         (user["username"], req.question, json.dumps(req.options, ensure_ascii=False), req.poll_type, now,
+         (req.subject or "").strip(),
          req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
@@ -1417,7 +1423,8 @@ async def list_polls(request: Request):
         all_rows = execute_query(
             """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
                       p.target_scope, p.target_grade, p.target_class, p.target_users,
-                      COALESCE(u.name, u.username) AS creator_name
+                      COALESCE(u.name, u.username) AS creator_name,
+                      COALESCE(p.subject, '') AS subject
                FROM interaction_polls p
                JOIN users u ON p.creator_username = u.username AND u.role IN (0, 1)
                WHERE p.status = 'active'
@@ -1441,7 +1448,8 @@ async def list_polls(request: Request):
         rows = execute_query(
             """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
                         p.target_scope, p.target_grade, p.target_class, p.target_users,
-                        COALESCE(u.name, u.username) AS creator_name
+                        COALESCE(u.name, u.username) AS creator_name,
+                      COALESCE(p.subject, '') AS subject
                FROM interaction_polls p
                LEFT JOIN users u ON p.creator_username = u.username
                WHERE p.status = 'active' AND p.creator_username = ?
@@ -1452,7 +1460,8 @@ async def list_polls(request: Request):
         rows = execute_query(
             """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
                         p.target_scope, p.target_grade, p.target_class, p.target_users,
-                        COALESCE(u.name, u.username) AS creator_name
+                        COALESCE(u.name, u.username) AS creator_name,
+                      COALESCE(p.subject, '') AS subject
                FROM interaction_polls p
                LEFT JOIN users u ON p.creator_username = u.username
                WHERE p.status = 'active'
@@ -1508,6 +1517,8 @@ async def list_polls(request: Request):
             "target_grade": (r[8] if len(r) > 10 else "") or "",
             "target_class": (r[9] if len(r) > 10 else "") or "",
             "target_users": (r[10] if len(r) > 10 else "") or "",
+            # 学科：第 13 列（两条 SELECT 都加了；老查询没有这列时给空串）
+            "subject": (r[12] if len(r) > 12 else "") or "",
         })
 
     return {"polls": polls}

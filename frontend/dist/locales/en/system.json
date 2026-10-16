@@ -104,6 +104,7 @@
   "selfPasswordOnly": "Can only change your own password",
   "usernamePasswordRequired": "Username and new password are required",
   "teachingSubjects": "Teaching Subjects",
+  "subject": "Subject",
   "allSubjects": "All Subjects",
   "bulkDelete": "Bulk Delete",
   "bulkImport": "Bulk Import",
