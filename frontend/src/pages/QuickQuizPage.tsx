@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import MobileCardTable from '../components/MobileCardTable'
+import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 import { useIsMobile } from '../hooks/useIsMobile'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
@@ -53,6 +54,9 @@ const QuickQuizPage: React.FC = () => {
   const [editModal, setEditModal] = useState(false)
   const [editRoom, setEditRoom] = useState<any>(null)
   const [editForm] = Form.useForm()
+  // 知识点下拉选项跟随所选学科过滤（创建/编辑两个表单各一份）
+  const createKpSubject = Form.useWatch('subject', form)
+  const editKpSubject = Form.useWatch('subject', editForm)
   const [history, setHistory] = useState<any[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyTab, setHistoryTab] = useState('active')
@@ -537,8 +541,11 @@ const QuickQuizPage: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="knowledge_points" label={t('knowledgePoints')}>
-            <Input placeholder={t('kpExample')} />
+          {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输） */}
+          <Form.Item name="knowledge_points" label={t('knowledgePoints')}
+            getValueProps={(v) => ({ value: splitKps(v) })}
+            normalize={(v) => joinKps(v)}>
+            <KnowledgePointSelect subject={createKpSubject || ''} />
           </Form.Item>
           <Form.Item label={t('activityScope')} style={{ marginBottom: 16 }}>
             <ActivityScopeSelector
@@ -638,8 +645,11 @@ const QuickQuizPage: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="knowledge_points" label={t('knowledgePoints')}>
-            <Input placeholder={t('kpExample')} />
+          {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输） */}
+          <Form.Item name="knowledge_points" label={t('knowledgePoints')}
+            getValueProps={(v) => ({ value: splitKps(v) })}
+            normalize={(v) => joinKps(v)}>
+            <KnowledgePointSelect subject={editKpSubject || ''} />
           </Form.Item>
           <Form.Item label={t('activityScope')} style={{ marginBottom: 16 }}>
             <ActivityScopeSelector

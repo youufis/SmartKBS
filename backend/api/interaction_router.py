@@ -55,6 +55,7 @@ class QuizCreate(BaseModel):
     description: str = ""
     questions: str  # JSON 字符串 [{type, question, options, answer, score}]
     subject: str = ""      # 学科（AI 建测验的弹窗里选的那个，落库后活动监控/列表才显示得出科目）
+    knowledge_points: str = ""   # 知识点（AI 弹窗的"主题"即知识点；手动建卷也可填）
     target_scope: str = "teacher_classes"
     target_grade: str = ""
     target_class: str = ""
@@ -469,6 +470,7 @@ class QuizUpdate(BaseModel):
     questions: str | None = None
     status: str | None = None
     subject: str | None = None      # 学科（老测验可以补上，列表/活动监控随即显示）
+    knowledge_points: str | None = None   # 知识点（老测验可以补）
     auto_scores: bool = True
 
 
@@ -552,11 +554,12 @@ async def create_quiz(req: QuizCreate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     quiz_id = execute_insert_update(
         """INSERT INTO interaction_quizzes
-           (creator_username, title, description, questions, subject, status, created_at, updated_at,
+           (creator_username, title, description, questions, subject, knowledge_points,
+            status, created_at, updated_at,
             target_scope, target_grade, target_class, target_users)
-           VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
         (user["username"], req.title, req.description, json.dumps(questions, ensure_ascii=False),
-         (req.subject or "").strip(), now, now,
+         (req.subject or "").strip(), (req.knowledge_points or "").strip(), now, now,
          req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
@@ -610,7 +613,7 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     updates = ["updated_at = ?"]
     params: list[Any] = [now]
-    for field in ("title", "description", "status", "subject"):
+    for field in ("title", "description", "status", "subject", "knowledge_points"):
         val = getattr(req, field, None)
         if val is not None:
             updates.append(f"{field} = ?")
@@ -862,7 +865,8 @@ async def list_quizzes(
                       q.created_at, q.updated_at,
                       q.target_scope, q.target_grade, q.target_class, q.target_users,
                       COALESCE(u.name, u.username) AS creator_name,
-                      COALESCE(q.subject, '') AS subject
+                      COALESCE(q.subject, '') AS subject,
+                      COALESCE(q.knowledge_points, '') AS knowledge_points
                 FROM interaction_quizzes q
                 JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
                 WHERE {where}
@@ -890,7 +894,8 @@ async def list_quizzes(
             f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at,
                         q.target_scope, q.target_grade, q.target_class, q.target_users,
                         COALESCE(u.name, u.username) AS creator_name,
-                        COALESCE(q.subject, '') AS subject
+                        COALESCE(q.subject, '') AS subject,
+                        COALESCE(q.knowledge_points, '') AS knowledge_points
                 FROM interaction_quizzes q
                 LEFT JOIN users u ON q.creator_username = u.username
                 WHERE {where}
@@ -916,8 +921,9 @@ async def list_quizzes(
             "target_grade": (r[9] if len(r) > 12 else "") or "",
             "target_class": (r[10] if len(r) > 12 else "") or "",
             "target_users": (r[11] if len(r) > 12 else "") or "",
-            # 学科：第 14 列（列序必须与上面两条 SELECT 一致；老查询没有这列时给空串）
+            # 学科/知识点：第 14、15 列（列序必须与上面两条 SELECT 一致；老查询没有这列时给空串）
             "subject": (r[13] if len(r) > 13 else "") or "",
+            "knowledge_points": (r[14] if len(r) > 14 else "") or "",
         }
         # 统一字段名：svg_code → svg_content
         questions = q.get("questions", [])

@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import type { ActivityScopeValue } from './ActivityScopeSelector'
 import { distributeScores } from '../utils/score'
 import useSubjectOptions from '../hooks/useSubjectOptions'
+import KnowledgePointSelect from './KnowledgePointSelect'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -28,7 +29,7 @@ interface QuizEditorProps {
   open: boolean
   onCancel: () => void
   onSave: (title: string, description: string, questions: Question[],
-           scope?: ActivityScopeValue, subject?: string) => Promise<void>
+           scope?: ActivityScopeValue, subject?: string, knowledgePoints?: string[]) => Promise<void>
   initialTitle?: string
   initialDescription?: string
   initialQuestions?: Question[]
@@ -51,6 +52,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState(initialDescription)
   const [subject, setSubject] = useState('')
+  const [kps, setKps] = useState<string[]>([])   // 知识点（多选，落库后可按知识点统计）
   const [questions, setQuestions] = useState<Question[]>(initialQuestions || [])
   const [saving, setSaving] = useState(false)
   // R2(Step B): 默认由系统把总分均摊成 100(与同步练习/考试同一口径); 教师改过任一题分值即转手动
@@ -67,6 +69,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
       setTitle(initialTitle)
       setDescription(initialDescription)
       setSubject('')
+      setKps([])
       setQuestions(initialQuestions || [])
       setAutoScore(true)
       setScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
@@ -189,7 +192,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     try {
       // 自动模式: 把均摊后的分值显式写进题目(后端据此判定"已配过分值"不再覆盖)
       const payload = questions.map((q, i) => ({ ...q, score: effectiveScore(q, i) }))
-      await onSave(title, description, payload, scope, subject)
+      await onSave(title, description, payload, scope, subject, kps)
     } finally {
       setSaving(false)
     }
@@ -253,6 +256,11 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               placeholder={t('subject')}
               options={subjects.map(s => ({ value: s, label: s }))}
             />
+          </Form.Item>
+          {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输），科目联动过滤 */}
+          <Form.Item label={t('knowledgePoint')}>
+            <KnowledgePointSelect subject={subject} value={kps}
+              onChange={(v) => setKps(Array.isArray(v) ? v : [])} />
           </Form.Item>
         </Form>
       </div>

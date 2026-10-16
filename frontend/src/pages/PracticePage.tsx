@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import { RowList } from '../components/RowList'
+import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 import MediaDisplay from '../components/MediaDisplay'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
@@ -952,8 +953,13 @@ const TeacherView: React.FC = () => {
         <>
           <Card size="small" style={{ marginBottom: 16 }}>
             <Space orientation="vertical" style={{ width: '100%' }}>
-              <TextArea rows={2} placeholder={t('kpPlaceholder')}
-                value={kpInput} onChange={e => setKpInput(e.target.value)} />
+              {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 直接手输，逗号/顿号分词） */}
+              <KnowledgePointSelect
+                subject={subject}
+                value={splitKps(kpInput)}
+                onChange={(v) => setKpInput(joinKps(v as string[]))}
+                style={{ width: '100%' }}
+              />
               <Space wrap>
                 <Select value={subject} onChange={setSubject} style={{ width: 130 }}>
                   {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}

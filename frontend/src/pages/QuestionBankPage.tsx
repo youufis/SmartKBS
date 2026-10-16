@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image,
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
+import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 import { pollAiTask, runAiTaskJob, type AiTaskProgress } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
@@ -50,33 +51,6 @@ function describeProgress(p: AiTaskProgress, t: (k: string, o?: any) => string):
   }
 }
 
-interface KpOption {
-  value: string
-  label: string
-  subject: string
-}
-
-/** 把课程树摊平成"知识点"下拉项（与课堂抽问同一口径：按课程名区分，同名知识点只留一条） */
-function flattenKnowledgePoints(courses: any[]): KpOption[] {
-  const out: KpOption[] = []
-  const seen = new Set<string>()
-  const walk = (nodes: any[], courseName: string, subject: string) => {
-    for (const node of nodes || []) {
-      walk(node?.children || [], courseName, subject)
-      for (const kp of node?.knowledge_points || []) {
-        const name = String(kp?.name || '').trim()
-        if (!name || seen.has(name)) continue
-        seen.add(name)
-        out.push({ value: name, label: `${name}（${courseName}）`, subject })
-      }
-    }
-  }
-  for (const course of courses || []) {
-    walk(course?.chapters || [], String(course?.name || ''), String(course?.subject || ''))
-  }
-  return out
-}
-
 const DIFFICULTY_COLORS: Record<string, string> = {
   easy: 'green',
   medium: 'gold',
@@ -106,18 +80,8 @@ const QuestionBankPage: React.FC = () => {
   }, [])
   // ── 生成试题表单 ──
   const [generateForm] = Form.useForm()
-  // 课程知识点选项: 与课堂抽问一样从课程树拉取, 支持"下拉选择 + 手动输入"两种方式
-  const [kpOptions, setKpOptions] = useState<KpOption[]>([])
+  // 知识点候选由共用控件从课程树拉取（含模块级缓存），此处只负责按学科过滤
   const genSubject = Form.useWatch('subject', generateForm)
-  const kpSelectOptions = useMemo(() => {
-    const filtered = genSubject ? kpOptions.filter(o => o.subject === genSubject) : kpOptions
-    return (filtered.length ? filtered : kpOptions).map(o => ({ value: o.value, label: o.label }))
-  }, [kpOptions, genSubject])
-  useEffect(() => {
-    apiClient.get('/api/curriculum/tree')
-      .then(({ data }) => setKpOptions(flattenKnowledgePoints(Array.isArray(data) ? data : [])))
-      .catch(() => { /* 知识点拿不到时仍可手动输入 */ })
-  }, [])
   const [generating, setGenerating] = useState(false)
   const [genProgress, setGenProgress] = useState({ step: 0, text: '', count: 0, total: 0 })
   const [generatedQuestions, setGeneratedQuestions] = useState<QuestionInfo[]>([])
@@ -822,16 +786,8 @@ const QuestionBankPage: React.FC = () => {
                           name="knowledge_points"
                           rules={[{ required: true, message: t('enterQuestionContent') }]}
                         >
-                          <Select
-                            mode="tags"
-                            allowClear
-                            showSearch
-                            optionFilterProp="label"
-                            maxTagCount="responsive"
-                            tokenSeparators={[',', '，', '、']}
-                            placeholder={t('selectOrInputKnowledgePoints')}
-                            options={kpSelectOptions}
-                          />
+                          {/* 全站统一控件：下拉选课程知识点 + 手输（本控件的原型就是这一处） */}
+                          <KnowledgePointSelect subject={genSubject || ''} />
                         </Form.Item>
                         <Form.Item>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1373,8 +1329,11 @@ const QuestionBankPage: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label={t('knowledgePoint')} name="knowledge_points">
-                <Input placeholder={t('knowledgePoint')} />
+              {/* 与"生成试题"表单同款控件：下拉选课程知识点 + 手输；表单值仍是"、"连接的字符串 */}
+              <Form.Item label={t('knowledgePoint')} name="knowledge_points"
+                getValueProps={(v) => ({ value: splitKps(v) })}
+                normalize={(v) => joinKps(v)}>
+                <KnowledgePointSelect />
               </Form.Item>
             </Col>
             <Col span={12}>

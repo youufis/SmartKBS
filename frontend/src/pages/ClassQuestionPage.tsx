@@ -7,10 +7,10 @@
  *
  * 学生不使用自己的设备，本页只面向教师投屏；积分落现有积分表（教师积分 / 学生成长档案同源）。
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Card, Button, Space, Typography, Select, Switch, Tag, Empty, message,
-  Divider, Segmented, Input, Popconfirm, Spin, Alert, Collapse, Tooltip,
+  Divider, Popconfirm, Spin, Alert, Collapse, Tooltip,
 } from 'antd'
 import {
   AimOutlined, ThunderboltOutlined, CheckOutlined, ForwardOutlined,
@@ -20,6 +20,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import useSubjectOptions from '../hooks/useSubjectOptions'
+import KnowledgePointSelect from '../components/KnowledgePointSelect'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import { reportLoadError } from '../utils/loadError'
@@ -35,12 +36,6 @@ const { Text } = Typography
 /** 教师自己的播报偏好（与点名页分开记，互不影响） */
 const SPEAK_PREF_KEY = 'class_drill_speak_on'
 
-interface KpOption {
-  value: string
-  label: string
-  subject: string
-}
-
 /**
  * 取选项的"作答键"：单选题是字母（A/B/C/D…），判断题就是「对 / 错」。
  * 题库来的选项文字带 "A. " 前缀，AI 来的也带；两处都按前缀取，取不到才退回序号字母。
@@ -49,27 +44,6 @@ function optionKey(opt: string, idx: number, questionType: string): string {
   if (questionType === 'true_false') return String(opt || '').trim()
   const matched = String(opt || '').trim().match(/^([A-Ha-h])[.、．]/)
   return matched ? matched[1].toUpperCase() : String.fromCharCode(65 + idx)
-}
-
-/** 把课程树摊平成"知识点"下拉项（按课程名做区分，同名知识点只留一条） */
-function flattenKnowledgePoints(courses: any[]): KpOption[] {
-  const out: KpOption[] = []
-  const seen = new Set<string>()
-  const walk = (nodes: any[], courseName: string, subject: string) => {
-    for (const node of nodes || []) {
-      walk(node?.children || [], courseName, subject)
-      for (const kp of node?.knowledge_points || []) {
-        const name = String(kp?.name || '').trim()
-        if (!name || seen.has(name)) continue
-        seen.add(name)
-        out.push({ value: name, label: `${name}（${courseName}）`, subject })
-      }
-    }
-  }
-  for (const course of courses || []) {
-    walk(course?.chapters || [], String(course?.name || ''), String(course?.subject || ''))
-  }
-  return out
 }
 
 const ClassQuestionPage: React.FC = () => {
@@ -85,10 +59,7 @@ const ClassQuestionPage: React.FC = () => {
   const [grade, setGrade] = useState('')
   const [cls, setCls] = useState('')
   const [subject, setSubject] = useState('')
-  const [kpOptions, setKpOptions] = useState<KpOption[]>([])
-  const [kpMode, setKpMode] = useState<'course' | 'manual'>('course')
   const [courseKp, setCourseKp] = useState('')
-  const [manualKp, setManualKp] = useState('')
   const [questionType, setQuestionType] = useState('mixed')
   const [allowAi, setAllowAi] = useState(false)
 
@@ -131,13 +102,8 @@ const ClassQuestionPage: React.FC = () => {
   const decelTimers = useRef<number[]>([])
   const frameRef = useRef(0)
 
-  const topic = kpMode === 'manual' ? manualKp.trim() : courseKp
+  const topic = courseKp.trim()   // 知识点：统一用同一个控件（下拉选或手输都落在 courseKp）
   const ready = Boolean(grade && cls && topic)
-
-  const kpFiltered = useMemo(
-    () => (subject ? kpOptions.filter((o) => o.subject === subject) : kpOptions),
-    [kpOptions, subject],
-  )
 
   const clearAllTimers = useCallback(() => {
     if (rollInterval.current) {
@@ -161,10 +127,6 @@ const ClassQuestionPage: React.FC = () => {
     apiClient.get('/api/rollcall/grades')
       .then(({ data }) => setGrades(Array.isArray(data) ? data : []))
       .catch((e) => reportLoadError(e, { key: 'classdrill-grades' }))
-
-    apiClient.get('/api/curriculum/tree')
-      .then(({ data }) => setKpOptions(flattenKnowledgePoints(Array.isArray(data) ? data : [])))
-      .catch(() => { /* 知识点拿不到时仍可手动输入 */ })
 
     apiClient.get('/api/rollcall/speech-status')
       .then(({ data }) => setTtsEnabled(!!data?.enabled))
@@ -433,25 +395,14 @@ const ClassQuestionPage: React.FC = () => {
             style={{ width: 130 }} allowClear
             options={subjects.map((s) => ({ label: s, value: s }))}
           />
-          <Segmented
-            value={kpMode} onChange={(v) => setKpMode(v as 'course' | 'manual')}
-            options={[{ label: t('kpModeCourse'), value: 'course' }, { label: t('kpModeManual'), value: 'manual' }]}
+          {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 直接手输），不再"二选一" */}
+          <KnowledgePointSelect
+            multiple={false}
+            subject={subject}
+            value={courseKp}
+            onChange={(v) => setCourseKp(String(v || ''))}
+            style={{ width: 220 }}
           />
-          {kpMode === 'course' ? (
-            <Select
-              placeholder={t('kpPlaceholder')} value={courseKp || undefined}
-              onChange={setCourseKp} style={{ width: 220 }}
-              showSearch optionFilterProp="label" allowClear
-              options={kpFiltered}
-              notFoundContent={kpFiltered.length === 0 ? t('kpEmpty') : undefined}
-            />
-          ) : (
-            <Input
-              placeholder={t('kpManualPlaceholder')} value={manualKp}
-              onChange={(e) => setManualKp(e.target.value)}
-              style={{ width: 220 }} allowClear
-            />
-          )}
           <Select
             value={questionType} onChange={setQuestionType} style={{ width: 150 }}
             options={(config?.question_types || [

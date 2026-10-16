@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 import ScopeTag from '../components/ScopeTag'
 import AnswerLine from '../components/AnswerLine'
 import { useAuthStore } from '../stores/authStore'
+import KnowledgePointSelect, { joinKps } from '../components/KnowledgePointSelect'
 import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
@@ -84,6 +85,7 @@ const InteractionPage: React.FC = () => {
   const [aiQuizLoading, setAiQuizLoading] = useState(false)
   const [aiQuizResult, setAiQuizResult] = useState<any>(null)
   const [aiQuizForm] = Form.useForm()
+  const aiQuizSubject = Form.useWatch('subject', aiQuizForm)
   const [aiQuizScope, setAiQuizScope] = useState<ActivityScopeValue>({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
   // 列表分页
   const [quizPage, setQuizPage] = useState(1)
@@ -151,6 +153,7 @@ const InteractionPage: React.FC = () => {
         await apiClient.post('/api/interaction/quizzes', {
           title: t('ipQuizSuffix', { topic: aiQuizForm.getFieldValue('topic') }),
           questions: JSON.stringify(aiQuizResult.questions),
+          knowledge_points: aiQuizForm.getFieldValue('topic') || '',
           // 学科：AI 弹窗里选过（图一那个下拉），必须一起落库 —— 否则活动监控/列表显示不出科目
           subject: aiQuizForm.getFieldValue('subject') || '',
           target_scope: aiQuizScope.target_scope,
@@ -171,7 +174,7 @@ const InteractionPage: React.FC = () => {
 
   // ── 创建测验（使用 QuizEditor） ──
   const handleCreateQuiz = async (title: string, description: string, questions: Question[],
-                                  scope?: any, subject?: string) => {
+                                  scope?: any, subject?: string, kps?: string[]) => {
     try {
       const formatted = questions.map(q => ({
         type: q.type,
@@ -186,6 +189,7 @@ const InteractionPage: React.FC = () => {
         description: description || '',
         questions: JSON.stringify(formatted),
         subject: subject || '',
+        knowledge_points: joinKps(kps || []),
         target_scope: scope?.target_scope || 'teacher_classes',
         target_grade: scope?.target_grade || '',
         target_class: scope?.target_class || '',
@@ -1044,8 +1048,12 @@ const InteractionPage: React.FC = () => {
           <Button key="apply" type="primary" onClick={handleApplyAiQuiz}>{t('fillForm')}</Button>,
         ] : null}>
         <Form form={aiQuizForm} layout="vertical" onFinish={handleAiGenerateQuiz}>
-          <Form.Item name="topic" label={t('inputTopic')} rules={[{ required: true, message: t('pleaseInputTopic') }]}>
-            <Input placeholder={t('topicPlaceholder')} />
+          {/* 知识点（= 出题主题）：与试题管理同款控件，下拉选课程知识点或直接手输 */}
+          <Form.Item name="topic" label={t('knowledgePoint')} rules={[{ required: true, message: t('pleaseInputTopic') }]}>
+            <KnowledgePointSelect
+              multiple={false}
+              subject={aiQuizSubject}
+            />
           </Form.Item>
           <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
             <Select>

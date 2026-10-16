@@ -646,6 +646,9 @@ def init_db():
                 # 学科：AI 建测验的弹窗里一直有"学科"下拉，但以前没落库，
                 # 于是活动监控/测验列表都显示不出科目（只能显示"-"）。这里补列。
                 ("subject", "TEXT DEFAULT ''"),
+                # 知识点：AI 建测验的"主题"就是知识点（2026-10-17 起统一成一个字段），
+                # 手动建卷也加了这个字段 —— 落库后可按知识点统计/复用
+                ("knowledge_points", "TEXT DEFAULT ''"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE interaction_quizzes ADD COLUMN {col_def[0]} {col_def[1]}")

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Form, Input, Select, InputNumber, Row, Col, Button, Space, Divider, Typography, Tag } from 'antd'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import type * as examsApiTypes from '../api/exams'
+import KnowledgePointSelect from './KnowledgePointSelect'
 const { Option } = Select
 
 /** 组卷可选题型；显示名一律走 i18n 的 pcType_* 键，不再在这里硬编码中文标签 */
@@ -43,6 +44,8 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
   const configs = Form.useWatch('type_configs', undefined) as
     { type?: string; count?: number; score_per_question?: number }[] | undefined
   const targetScore = Form.useWatch('total_score', undefined) as number | undefined
+  // 知识点候选跟随「学科」联动过滤（表单实例由父组件 ComposeWizard 提供，走 context）
+  const kpSubject = Form.useWatch('subject', undefined) as string | undefined
   const configTotal = useMemo(
     () => (configs || []).reduce((s, c) => s + (Number(c?.count) || 0) * (Number(c?.score_per_question) || 0), 0),
     [configs],
@@ -213,23 +216,13 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
       {/* 知识点范围 */}
       <CardSection title={t('pcKpScope')} subtitle={t('pcKpScopeSub')}>
         <Form.Item name="knowledge_points">
-          <Select
-            mode="multiple"
-            placeholder={t('pcKpPh')}
-            allowClear
-            maxTagCount={8}
+          {/* 全站统一控件：课程树知识点下拉 + 手输；extraOptions 是本学科题库里
+              真实出现过的标签（compose-config/defaults 下发），比课程树更贴出题实际 */}
+          <KnowledgePointSelect
+            subject={kpSubject || ''}
+            extraOptions={knowledgePoints}
             style={{ width: '100%' }}
-            showSearch
-            filterOption={(input, option) =>
-              (option?.value as string)?.toLowerCase().includes(input.toLowerCase())
-            }
-          >
-            {knowledgePoints.map((kp) => (
-              <Option key={kp} value={kp}>
-                {kp}
-              </Option>
-            ))}
-          </Select>
+          />
         </Form.Item>
       </CardSection>
 

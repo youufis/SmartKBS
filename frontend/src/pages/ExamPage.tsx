@@ -31,6 +31,7 @@ import MediaDisplay from '../components/MediaDisplay'
 import { TYPE_OPTIONS } from '../constants/questionTypes'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import KnowledgePointSelect from '../components/KnowledgePointSelect'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import { reportLoadError } from '../utils/loadError'
@@ -147,6 +148,8 @@ const ExamPage: React.FC = () => {
   const [qKeyword, setQKeyword] = useState('')
   const [autoSelectForm] = Form.useForm()
   const [autoSelecting, setAutoSelecting] = useState(false)
+  // 智能选题的知识点候选跟随所选学科过滤（下拉选课程知识点 + 手输关键词）
+  const autoSelectSubject = Form.useWatch('subject', autoSelectForm) as string | undefined
 
   // ── AI 智能组卷 ──
   const [aiComposing, setAiComposing] = useState(false)
@@ -1786,8 +1789,14 @@ const ExamPage: React.FC = () => {
                   <Option value="hard">{t('hard')}</Option>
                 </Select>
               </Form.Item>
-              <Form.Item name="knowledge_keyword" style={{ minWidth: 160 }}>
-                <Input placeholder={t('keywordPlaceholder')} />
+              {/* 与试题管理同款控件：下拉选课程知识点 + 手输；单个值（多选会把"或"语义变成"与"） */}
+              <Form.Item name="knowledge_keyword" style={{ minWidth: 220 }}>
+                <KnowledgePointSelect
+                  multiple={false}
+                  subject={autoSelectSubject || ''}
+                  placeholder={t('keywordPlaceholder')}
+                  style={{ width: 220 }}
+                />
               </Form.Item>
               <Form.Item name="count" label={t('selectCount')} style={{ width: 100 }}>
                 <InputNumber min={1} max={100} />

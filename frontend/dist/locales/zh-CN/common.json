@@ -1,4 +1,5 @@
 {
+  "knowledgePointHint": "下拉选择课程知识点，也可直接输入（多个用逗号或顿号分隔）",
   "guardUnansweredTitle": "还有 {{n}} 题未作答",
   "guardAllBlankTitle": "一道题都还没作答",
   "guardUnansweredList": "未作答：第 {{list}} 题。",

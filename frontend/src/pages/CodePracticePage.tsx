@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import apiClient from '../api/client'
+import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import CodeEditor from '../components/CodeEditor'
@@ -992,12 +993,10 @@ const CodePracticePage: React.FC = () => {
                     style={{ width: 120 }}
                     options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]}
                   />
-                  <Input
-                    placeholder={t('kpPlaceholder')}
-                    value={createForm.knowledge_points}
-                    onChange={e => setCreateForm({ ...createForm, knowledge_points: e.target.value })}
-                    style={{ width: 200 }}
-                  />
+                  {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输） */}
+                  <KnowledgePointSelect subject={createForm.subject} style={{ width: 200 }}
+                    value={splitKps(createForm.knowledge_points)}
+                    onChange={(v) => setCreateForm({ ...createForm, knowledge_points: joinKps(v as string[]) })} />
                 </Space>
               </Space>
             ),
@@ -1217,8 +1216,9 @@ const CodePracticePage: React.FC = () => {
                   <Select value={editForm.language} onChange={v => setEditForm({ ...editForm, language: v })}
                     style={{ width: 120 }}
                     options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]} />
-                  <Input placeholder={t('cpKpPh')} value={editForm.knowledge_points}
-                    onChange={e => setEditForm({ ...editForm, knowledge_points: e.target.value })} style={{ width: 200 }} />
+                  <KnowledgePointSelect subject={editForm.subject} style={{ width: 200 }}
+                    value={splitKps(editForm.knowledge_points)}
+                    onChange={(v) => setEditForm({ ...editForm, knowledge_points: joinKps(v as string[]) })} />
                 </Space>
               </Space>
             ),

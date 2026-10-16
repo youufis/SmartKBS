@@ -239,6 +239,7 @@
   "roomCreated": "Room \"{{title}}\" created! Code: {{code}}",
   "quizManageDesc": "Manage quiz rooms, create and monitor",
   "quizPlayDesc": "View available rooms and join quizzes",
+  "knowledgePoint": "Knowledge point",
   "activityName": "Activity",
   "quizMeta": "Questions / Limit",
   "activityList": "Activities ({{count}})",
