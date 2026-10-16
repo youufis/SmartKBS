@@ -509,21 +509,32 @@ const InteractionPage: React.FC = () => {
                             onClick={(e) => { e.stopPropagation(); void handleStartQuiz(quiz) }}>{t('startQuiz')}</Button>
                         )}
                         {quiz.status === 'active' && isStudent && quiz.answered && (
-                          <Button size="small" icon={<BarChartOutlined />}
-                            onClick={(e) => { e.stopPropagation(); void handleViewQuizResults(quiz.id) }}>{t('results')}</Button>
+                          <Tooltip title={t('results')}>
+                            <Button size="small" icon={<BarChartOutlined />}
+                              onClick={(e) => { e.stopPropagation(); void handleViewQuizResults(quiz.id) }} />
+                          </Tooltip>
                         )}
                         {isTeacherOrAdmin && (
                           <>
-                            <Button size="small" icon={<BarChartOutlined />}
-                              onClick={(e) => { e.stopPropagation(); void handleViewQuizResults(quiz.id) }}>{t('results')}</Button>
-                            <Button size="small" icon={<DownloadOutlined />}
-                              onClick={(e) => { e.stopPropagation(); window.open(`/api/export/quiz/${quiz.id}`, '_blank') }}>{t('ipExport')}</Button>
-                            <Button size="small" icon={<EditOutlined />}
-                              onClick={(e) => { e.stopPropagation(); editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }}>{t('ipEdit')}</Button>
+                            {/* 操作按钮只留图标 + tooltip：文字按钮太占地方，整行会被挤长 */}
+                            <Tooltip title={t('results')}>
+                              <Button size="small" icon={<BarChartOutlined />}
+                                onClick={(e) => { e.stopPropagation(); void handleViewQuizResults(quiz.id) }} />
+                            </Tooltip>
+                            <Tooltip title={t('ipExport')}>
+                              <Button size="small" icon={<DownloadOutlined />}
+                                onClick={(e) => { e.stopPropagation(); window.open(`/api/export/quiz/${quiz.id}`, '_blank') }} />
+                            </Tooltip>
+                            <Tooltip title={t('ipEdit')}>
+                              <Button size="small" icon={<EditOutlined />}
+                                onClick={(e) => { e.stopPropagation(); editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }} />
+                            </Tooltip>
                             <ResetActivityButton activityType="quiz" activityId={quiz.id}
                                 iconOnly stopPropagation onSuccess={loadQuizzes} />
                             <Popconfirm title={t('confirmDeleteQuiz')} onConfirm={() => handleDeleteQuiz(quiz.id)}>
-                              <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                              <Tooltip title={t('delete')}>
+                                <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                              </Tooltip>
                             </Popconfirm>
                           </>
                         )}

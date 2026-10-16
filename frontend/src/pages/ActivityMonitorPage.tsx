@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Card, Table, Select, Input, Tag, Space, Typography, Row, Col,
-  Statistic, message, Button, Radio, Empty, Spin, Tabs,
+  Statistic, message, Button, Radio, Empty, Spin, Tabs, Tooltip, Pagination,
 } from 'antd';
 import {
   ReloadOutlined, FileTextOutlined,
@@ -21,6 +21,7 @@ import ResourceViewStatsPage from './ResourceViewStatsPage';
 import ResetActivityButton from '../components/ResetActivityButton';
 import { reportLoadError } from '../utils/loadError'
 import ScopeTag from '../components/ScopeTag'
+import { RowList } from '../components/RowList'
 
 const { Title, Text } = Typography;
 
@@ -220,95 +221,6 @@ const ActivityMonitorPage: React.FC = () => {
   };
 
   // ── 活动列表列定义 ──
-  const activityColumns: ColumnsType<ActivityItem> = [
-    {
-      title: t('activityMonitor.columns.activityName'),
-      dataIndex: 'title',
-      key: 'title',
-      ellipsis: true,
-      render: (text: string, record: ActivityItem) => (
-        <Space>
-          {ACTIVITY_TYPE_ICONS[record.activity_type]}
-          <Text strong>{text}</Text>
-          <Tag color={ACTIVITY_TYPE_COLORS[record.activity_type]}>
-            {getActivityTypeOptions(t).find(o => o.value === record.activity_type)?.label || record.activity_type}
-          </Tag>
-        </Space>
-      ),
-    },
-    {
-      title: t('activityMonitor.columns.subject'),
-      dataIndex: 'subject',
-      key: 'subject',
-      width: 100,
-      render: (v: string) => v || '-',
-    },
-    {
-      // 与其它活动列表同口径: 目标范围(年级/班级)
-      title: t('activityMonitor.columns.gradeClass'),
-      key: 'scope',
-      width: 160,
-      render: (_: any, record: ActivityItem) => (
-        <ScopeTag scope={record.target_scope} grade={record.target_grade}
-          classes={record.target_class} users={record.target_users} />
-      ),
-    },
-    {
-      // 创建者+创建时间双行, 少占一列
-      title: t('activityMonitor.columns.creator'),
-      key: 'creator_time',
-      width: 120,
-      render: (_: any, record: ActivityItem) => (
-        <div>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{record.creator_username || '-'}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{record.created_at ? String(record.created_at).slice(0, 16) : '-'}</div>
-        </div>
-      ),
-    },
-    {
-      title: t('activityMonitor.columns.status'),
-      dataIndex: 'status',
-      key: 'status',
-      width: 100,
-      render: (status: string) => (
-        <Tag color={STATUS_COLORS[status] || 'default'}>
-          {getStatusLabels(t)[status] || status}
-        </Tag>
-      ),
-    },
-    {
-      title: t('activityMonitor.columns.submitted'),
-      dataIndex: 'submitted_count',
-      key: 'submitted_count',
-      width: 100,
-      sorter: (a, b) => a.submitted_count - b.submitted_count,
-      render: (count: number) => <Text strong>{count}</Text>,
-    },
-    {
-      title: t('activityMonitor.columns.action'),
-      key: 'action',
-      width: 230,
-      render: (_: any, record: ActivityItem) => (
-        <Space size={4}>
-          <Button
-            type="primary"
-            size="small"
-            icon={<BarChartOutlined />}
-            onClick={() => handleViewStatus(record)}
-          >
-            {t('activityMonitor.viewCompletion')}
-          </Button>
-          {/* 重置：清空该活动的参与数据但保留活动内容；管理员可重置全部，教师仅本人 */}
-          <ResetActivityButton
-            activityType={record.activity_type}
-            activityId={record.id}
-            activityTitle={record.title}
-            onSuccess={handleRefresh}
-          />
-        </Space>
-      ),
-    },
-  ];
 
   // ── 学生状态列定义 ──
   const studentColumns: ColumnsType<StudentStatus> = [
@@ -458,21 +370,60 @@ const ActivityMonitorPage: React.FC = () => {
 
       {/* ── 活动列表 ── */}
       <Card title={t('activityMonitor.activityList')} size="small" style={{ marginBottom: 16 }}>
-        <Table
-          dataSource={activities}
-          columns={activityColumns}
-          rowKey={(r) => `${r.activity_type}-${r.id}`}
-          loading={loading}
-          size="small"
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            showTotal: (total) => t('activityMonitor.pagination.totalActivities', { count: total }),
-            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
-          }}
-        />
+        {loading ? (
+          <Spin style={{ display: 'block', margin: '32px auto' }} />
+        ) : activities.length === 0 ? (
+          <Empty />
+        ) : (
+          <>
+            {/* 卡片列表：与同步练习/随堂测验/快速投票同款，列宽不再需要博弈 */}
+            <RowList
+              items={activities}
+              split={false}
+              renderItem={(record: ActivityItem) => (
+                <Card size="small" style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Space size={6} wrap>
+                        {ACTIVITY_TYPE_ICONS[record.activity_type] || <FileTextOutlined />}
+                        <Text strong>{record.title}</Text>
+                        <Tag color={ACTIVITY_TYPE_COLORS[record.activity_type]}>
+                          {getActivityTypeOptions(t).find(o => o.value === record.activity_type)?.label}
+                        </Tag>
+                      </Space>
+                      <div style={{ marginTop: 4 }}>
+                        <Tag>{record.subject || '-'}</Tag>
+                        <ScopeTag scope={record.target_scope} grade={record.target_grade}
+                          classes={record.target_class} users={record.target_users} />
+                        <Tag color="blue">{record.creator_username || '-'}</Tag>
+                        <Tag color={STATUS_COLORS[record.status] || 'default'}>
+                          {getStatusLabels(t)[record.status] || record.status}
+                        </Tag>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {t('activityMonitor.columns.submitted')} {record.submitted_count ?? 0}
+                          {' · '}{record.created_at ? String(record.created_at).slice(0, 16) : '-'}
+                        </Text>
+                      </div>
+                    </div>
+                    <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+                      <Tooltip title={t('activityMonitor.viewCompletion')}>
+                        <Button type="primary" size="small" icon={<BarChartOutlined />}
+                          onClick={() => handleViewStatus(record)} />
+                      </Tooltip>
+                      <ResetActivityButton activityType={record.activity_type} activityId={record.id}
+                        activityTitle={record.title} iconOnly onSuccess={handleRefresh} />
+                    </Space>
+                  </div>
+                </Card>
+              )}
+            />
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <Pagination current={page} pageSize={pageSize} total={total} showSizeChanger
+                showTotal={(total: number) => t('activityMonitor.pagination.totalActivities', { count: total })}
+                onChange={(p2, ps) => { setPage(p2); setPageSize(ps) }} />
+            </div>
+          </>
+        )}
       </Card>
 
       {/* ── 活动完成详情 ── */}

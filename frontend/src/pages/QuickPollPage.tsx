@@ -6,7 +6,7 @@ import React, { useState, useEffect } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import {
   Card, Button, Space, Typography, Tag, Modal,
-  Form, Input, Select, message, Empty, Spin, Radio, Popconfirm,
+  Form, Input, Select, message, Empty, Spin, Radio, Popconfirm, Tooltip,
   Checkbox, Progress, Divider, Pagination,
 } from 'antd'
 import {
@@ -104,6 +104,8 @@ const QuickPollPage: React.FC = () => {
         question: aiPollResult.poll.question,
         options: aiPollResult.poll.options.join('\n'),
         poll_type: aiPollForm.getFieldValue('poll_type') || 'single',
+        // AI 弹窗里选的学科要一起带进创建表单，否则保存出来投票的科目又是空的
+        subject: aiPollForm.getFieldValue('subject') || subjectOptions[0] || '',
       })
       message.success(t('pollFilled'))
       setAiPollModal(false)
@@ -264,29 +266,40 @@ const QuickPollPage: React.FC = () => {
                             onClick={() => handleStartPoll(poll)}>{t('vote')}</Button>
                         )}
                         {isStudent && hasVoted && (
-                          <Button size="small" icon={<BarChartOutlined />}
-                            onClick={() => handleViewPollResults(poll.id)}>{t('results')}</Button>
+                          <Tooltip title={t('results')}>
+                            <Button size="small" icon={<BarChartOutlined />}
+                              onClick={() => handleViewPollResults(poll.id)} />
+                          </Tooltip>
                         )}
                         {isTeacherOrAdmin && (
                           <>
-                            <Button size="small" icon={<BarChartOutlined />}
-                              onClick={() => handleViewPollResults(poll.id)}>{t('results')}</Button>
-                            <Button size="small" icon={<DownloadOutlined />}
-                              onClick={() => window.open(`/api/export/poll/${poll.id}`, '_blank')}>{t('export')}</Button>
-                            <Button size="small" type="text" icon={<EditOutlined />}
-                              onClick={() => {
-                                editPollForm.setFieldsValue({
-                                  question: poll.question,
-                                  options: poll.options.map((o: any) => o.text).join('\n'),
-                                  poll_type: poll.poll_type,
-                                  subject: poll.subject || '',
-                                })
-                                setEditPollModal(poll)
-                              }} />
+                            {/* 操作按钮只留图标 + tooltip：文字按钮太占地方，整行会被挤长 */}
+                            <Tooltip title={t('results')}>
+                              <Button size="small" icon={<BarChartOutlined />}
+                                onClick={() => handleViewPollResults(poll.id)} />
+                            </Tooltip>
+                            <Tooltip title={t('export')}>
+                              <Button size="small" icon={<DownloadOutlined />}
+                                onClick={() => window.open(`/api/export/poll/${poll.id}`, '_blank')} />
+                            </Tooltip>
+                            <Tooltip title={t('edit')}>
+                              <Button size="small" type="text" icon={<EditOutlined />}
+                                onClick={() => {
+                                  editPollForm.setFieldsValue({
+                                    question: poll.question,
+                                    options: poll.options.map((o: any) => o.text).join('\n'),
+                                    poll_type: poll.poll_type,
+                                    subject: poll.subject || '',
+                                  })
+                                  setEditPollModal(poll)
+                                }} />
+                            </Tooltip>
                             <ResetActivityButton activityType="poll" activityId={poll.id}
                                 iconOnly stopPropagation onSuccess={loadPolls} />
                             <Popconfirm title={t('confirmDeletePoll')} onConfirm={() => handleDeletePoll(poll.id)}>
-                              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                              <Tooltip title={t('delete')}>
+                                <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                              </Tooltip>
                             </Popconfirm>
                           </>
                         )}
@@ -433,6 +446,10 @@ const QuickPollPage: React.FC = () => {
               <Select.Option value="single">{t('singleChoice')}</Select.Option>
               <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
             </Select>
+          </Form.Item>
+          {/* 学科：创建投票时选（默认第一个），落库后投票列表与活动监控的"科目"列才显示得出来 */}
+          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
+            <Select options={subjectOptions.map((s) => ({ value: s, label: s }))} />
           </Form.Item>
           <Form.Item name="options" label={t('optionsPerLine')} rules={[{ required: true }]}>
             <TextArea rows={4} placeholder={t('optionsPlaceholder')} />

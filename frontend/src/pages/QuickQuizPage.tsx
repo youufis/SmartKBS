@@ -6,13 +6,13 @@
 import React, { useState, useEffect } from 'react'
 import {
   Card, Button, Typography, Space, Table, Tag, message, Spin, Empty,
-  Modal, Form, Input, InputNumber, Select, Switch, Row, Col, Statistic, Popconfirm,
+  Modal, Form, Input, InputNumber, Select, Switch, Row, Col, Statistic, Popconfirm, Tooltip,
 } from 'antd'
 import {
   ThunderboltOutlined, PlusOutlined, PlayCircleOutlined,
   HistoryOutlined, TeamOutlined, ClockCircleOutlined,
   TrophyOutlined, SettingOutlined, QuestionCircleOutlined,
-  UserOutlined,
+  UserOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -215,29 +215,32 @@ const QuickQuizPage: React.FC = () => {
       )
     },
     {
-      title: t('actions'), key: 'action', width: 176,
+      // 操作列全用图标 + tooltip（文字按钮太占地方，整行会被挤到屏幕外）；
+      // 宽度按"主操作 + 4 个图标"给足，避免图标被挤到第二行
+      title: t('actions'), key: 'action', width: 168,
       render: (_: any, record: any) => (
-        <Space>
+        <Space size={2} wrap={false} align="center" style={{ whiteSpace: 'nowrap' }}>
           {record.status === 'waiting' && (
-            <Button type="primary" size="small" icon={<PlayCircleOutlined />}
-              onClick={() => handleStart(record.id)}>
-              {t('startGame')}
-            </Button>
+            <Tooltip title={t('startGame')}>
+              <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                onClick={() => handleStart(record.id)} />
+            </Tooltip>
           )}
           {record.status === 'playing' && (
-            <Button type="primary" size="small"
-              onClick={() => navigate(`/quick-quiz/console/${record.id}`)}>
-              {t('console')}
-            </Button>
+            <Tooltip title={t('console')}>
+              <Button type="primary" size="small" icon={<ThunderboltOutlined />}
+                onClick={() => navigate(`/quick-quiz/console/${record.id}`)} />
+            </Tooltip>
           )}
           {record.status === 'ended' && (
-            <Button size="small"
-              onClick={() => navigate(`/quick-quiz/result/${record.id}`)}>
-              {t('viewResults')}
-            </Button>
+            <Tooltip title={t('viewResults')}>
+              <Button size="small" icon={<TrophyOutlined />}
+                onClick={() => navigate(`/quick-quiz/result/${record.id}`)} />
+            </Tooltip>
           )}
           {record.status === 'waiting' && (
-            <Button size="small"
+            <Tooltip title={t('edit')}>
+            <Button size="small" icon={<EditOutlined />}
               onClick={() => {
                 setEditRoom(record)
                 setActivityScope({
@@ -259,24 +262,26 @@ const QuickQuizPage: React.FC = () => {
                   max_players: record.max_players,
                 })
                 setEditModal(true)
-              }}>
-              {t('edit')}
-            </Button>
+              }} />
+            </Tooltip>
           )}
           {/* 重置：清参与数据、留房间配置；进行中也能重置（弹窗里会要求强制确认） */}
           <ResetActivityButton activityType="quick_quiz" activityId={record.id}
+            iconOnly
             onSuccess={() => { void loadRooms(); void loadHistory(); }} />
           {record.status !== 'playing' && (
             <Popconfirm title={t('confirmDeleteActivity')}
               description={t('deleteActivityHint')}
               onConfirm={() => handleDelete(record.id)}>
-              <Button size="small" danger>{t('delete')}</Button>
+              <Tooltip title={t('delete')}>
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Tooltip>
             </Popconfirm>
           )}
-          <Button size="small"
-            onClick={() => navigate(`/quick-quiz/lobby/${record.id}`)}>
-            {t('details')}
-          </Button>
+          <Tooltip title={t('details')}>
+            <Button size="small" icon={<EyeOutlined />}
+              onClick={() => navigate(`/quick-quiz/lobby/${record.id}`)} />
+          </Tooltip>
         </Space>
       )
     },

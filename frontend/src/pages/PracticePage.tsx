@@ -4,16 +4,17 @@ import AnswerLine from '../components/AnswerLine'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
   Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Pagination, Checkbox,
-  Switch, Tooltip, Tabs, Dropdown, Statistic, Row, Col, Skeleton,
+  Switch, Tooltip, Tabs, Statistic, Row, Col, Skeleton,
   Alert, Segmented,
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, StopOutlined, DeleteOutlined,
-  ThunderboltOutlined, DownloadOutlined, MoreOutlined, BellOutlined,
-  SearchOutlined,
+  ThunderboltOutlined, DownloadOutlined, BellOutlined,
+  SearchOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
+import { RowList } from '../components/RowList'
 import MediaDisplay from '../components/MediaDisplay'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
@@ -124,14 +125,9 @@ const SessionRoster: React.FC<{
         locale={{ emptyText: t('noStudentSubmissions') }}
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }) }}
         columns={[
-          // 列合并(去横向滚动): 姓名+学号同格双行, 得分改百分制(原始分作次要说明)
-          { title: t('studentName'), key: 'student', width: 132,
-            render: (_: any, r: any) => (
-              <div>
-                <div>{r.name || '-'}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{r.username}</div>
-              </div>
-            ) },
+          // 姓名只留一行（下面那行学号去掉）：名册本来就要短，学号对老师是噪音
+          { title: t('studentName'), key: 'student', width: 104,
+            render: (_: any, r: any) => <div>{r.name || '-'}</div> },
           { title: t('gradeClass'), key: 'grade_class', width: 116,
             render: (_: any, r: any) => (
               <ScopeTag variant="text" grade={r.grade} classes={String(r.class ?? '')} />
@@ -692,6 +688,7 @@ const TeacherView: React.FC = () => {
   })
   const [publishing, setPublishing] = useState(false)
   const [sessions, setSessions] = useState<any[]>([])
+  const [sessionPage, setSessionPage] = useState(1)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const user = useAuthStore(s => s.user)
   const isAdmin = user?.role === 'admin'
@@ -1021,92 +1018,75 @@ const TeacherView: React.FC = () => {
       {tab === 'sessions' && (
         loadingSessions ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : sessions.length === 0 ? <Result icon={<FileTextOutlined />} title={t('publishedRecords')} />
-        // 去横向滚动: 题数+满分、状态+提交数 合并为双行单元格, 低频操作收进「更多」
-        : <Table dataSource={sessions} rowKey="id"
-            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }), pageSizeOptions: ['5', '10', '20', '50'] }}
-            columns={[
-              { title: t('title_'), dataIndex: 'title', ellipsis: true },
-              // 科目：建立练习时就选了（practice_sessions.subject），列表以前没展示
-              { title: t('subject'), dataIndex: 'subject', width: 100,
-                render: (v: string) => v || '-' },
-              { title: t('publisher'), dataIndex: 'creator_username', width: 88, ellipsis: true },
-              {
-                // 与其它活动列表同口径: 目标范围(年级/班级 / 指定N人), 定向名单优先
-                title: t('gradeClass'), key: 'scope', width: 150,
-                render: (_: any, r: any) => {
-                  const students: string[] = r.target_students || []
-                  const scope = students.length
-                    ? 'individual'
-                    : (r.target_scope || (String(r.target_grade || '').trim() ? 'grade' : 'teacher_classes'))
-                  return (
-                    <Space size={4} wrap>
-                      <ScopeTag scope={scope} grade={r.target_grade} classes={r.target_class}
-                        users={students.join(',')} />
-                      {r.source === 'wrong_book' && <Tag color="purple">{t('sourceWrongBook')}</Tag>}
-                    </Space>
-                  )
-                },
-              },
-              { title: t('questionCountTitle'), key: 'meta', width: 90,
-                render: (_: any, r: any) => (
-                  <div>
-                    <div>{t('questionCountTitle')} {r.question_count}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                      {t('totalScoreTitle')} {r.total_score}
+        // 卡片列表（与随堂测验/快速投票同款）：列宽不用斤斤计较，操作图标也一定在同一行
+        : <>
+          <RowList
+            items={sessions.slice((sessionPage - 1) * 10, sessionPage * 10)}
+            split={false}
+            renderItem={(r: any) => {
+              const students: string[] = r.target_students || []
+              const scope = students.length
+                ? 'individual'
+                : (r.target_scope || (String(r.target_grade || '').trim() ? 'grade' : 'teacher_classes'))
+              return (
+                <Card size="small" hoverable style={{ marginBottom: 8, cursor: 'pointer' }}
+                  onClick={() => viewSessionDetail(r.id)}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Text strong>{r.title}</Text>
+                      <div style={{ marginTop: 4 }}>
+                        {r.status === 'active'
+                          ? <Tag color="processing">{t('inProgress')}</Tag>
+                          : <Tag>{t('endedSuccess')}</Tag>}
+                        <Tag color="blue">{r.creator_username}</Tag>
+                        <Tag>{t('subject')}：{r.subject || '-'}</Tag>
+                        <ScopeTag scope={scope} grade={r.target_grade} classes={r.target_class}
+                          users={students.join(',')} />
+                        {r.source === 'wrong_book' && <Tag color="purple">{t('sourceWrongBook')}</Tag>}
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {t('questionCountTitle')} {r.question_count} · {t('totalScoreTitle')} {r.total_score}
+                          {' · '}{t('submitted')} {r.submitted_count}/{r.student_count}
+                        </Text>
+                      </div>
                     </div>
-                  </div>
-                ) },
-              { title: t('status'), key: 'state', width: 108,
-                render: (_: any, r: any) => (
-                  <div>
-                    <div>{r.status === 'active' ? <Tag color="processing">{t('inProgress')}</Tag> : <Tag>{t('endedSuccess')}</Tag>}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                      {t('submitted')} {r.submitted_count}/{r.student_count}
-                    </div>
-                  </div>
-                ) },
-              { title: t('actions'), key: 'actions', width: 186,
-                render: (_: any, r: any) => (
-                  <Space size={4} wrap={false} style={{ whiteSpace: 'nowrap' }}>
-                    <Button size="small" onClick={() => viewSessionDetail(r.id)}>{t('detail')}</Button>
-                    <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
-                    <Dropdown
-                      trigger={['click']}
-                      menu={{
-                        items: [
-                          ...(r.status === 'active' ? [{ key: 'end', icon: <StopOutlined />, label: t('endedSuccess') }] : []),
-                          { key: 'export', icon: <DownloadOutlined />, label: t('exportResult') },
-                          { key: 'delete', icon: <DeleteOutlined />, label: t('delete'), danger: true },
-                        ],
-                        onClick: ({ key, domEvent }) => {
-                          domEvent.stopPropagation()
-                          if (key === 'end') {
-                            Modal.confirm({
-                              title: t('endConfirm'),
-                              okText: t('endedSuccess'),
-                              cancelText: t('cancel'),
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+                        <Tooltip title={t('detail')}>
+                          <Button size="small" icon={<EyeOutlined />} onClick={() => viewSessionDetail(r.id)} />
+                        </Tooltip>
+                        <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
+                        {/* 结束 / 导出 / 删除 直接摊成图标显示（不再藏进"更多"菜单），都配 tooltip */}
+                        {r.status === 'active' && (
+                          <Tooltip title={t('endedSuccess')}>
+                            <Button size="small" icon={<StopOutlined />} onClick={() => Modal.confirm({
+                              title: t('endConfirm'), okText: t('endedSuccess'), cancelText: t('cancel'),
                               onOk: () => endSession(r.id),
-                            })
-                          } else if (key === 'export') {
-                            window.open(`/api/export/practice/${r.id}`, '_blank')
-                          } else if (key === 'delete') {
-                            Modal.confirm({
-                              title: t('deleteConfirm'),
-                              okText: t('delete'),
-                              okButtonProps: { danger: true },
-                              cancelText: t('cancel'),
-                              onOk: () => deleteSession(r.id),
-                            })
-                          }
-                        },
-                      }}
-                    >
-                      <Button size="small" icon={<MoreOutlined />} />
-                    </Dropdown>
-                  </Space>
-                ) },
-            ]}
+                            })} />
+                          </Tooltip>
+                        )}
+                        <Tooltip title={t('exportResult')}>
+                          <Button size="small" icon={<DownloadOutlined />}
+                            onClick={() => window.open(`/api/export/practice/${r.id}`, '_blank')} />
+                        </Tooltip>
+                        <Tooltip title={t('delete')}>
+                          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({
+                            title: t('deleteConfirm'), okText: t('delete'), okButtonProps: { danger: true },
+                            cancelText: t('cancel'), onOk: () => deleteSession(r.id),
+                          })} />
+                        </Tooltip>
+                      </Space>
+                    </span>
+                  </div>
+                </Card>
+              )
+            }}
           />
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Pagination current={sessionPage} pageSize={10} total={sessions.length}
+              onChange={(p) => setSessionPage(p)}
+              showTotal={(total: number) => t('totalItems', { count: total })} />
+          </div>
+        </>
       )}
       {/* ── S-GRADE: 练习详情(题目 + 名册 + 逐个看答卷批改) —— 居中弹窗，与随堂测验结果一致 ── */}
       <Modal
