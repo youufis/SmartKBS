@@ -349,14 +349,21 @@ const ActivityMonitorPage: React.FC = () => {
       dataIndex: 'score',
       key: 'score',
       width: 120,
-      render: (score: number, record: StudentStatus) =>
-        record.status === 'completed' ? (
-          <Text strong style={{ color: score >= (statusDetail?.activity?.pass_score || 60) ? '#52c41a' : '#f5222d' }}>
+      render: (score: number, record: StudentStatus) => {
+        if (record.status !== 'completed') return <Text type="secondary">-</Text>
+        // 主观题还在后台批改：分数未定，不能拿半个分当最终成绩（与随堂测验页一致）
+        if (record.pending_ai) return <Tag color="processing">{t('activityMonitor.grading')}</Tag>
+        // 讨论/投票这类本来就没有分数：显示 "0 / 0" 只会让人以为考了 0 分
+        if (!record.total_score) return <Text type="secondary">-</Text>
+        // 及格线用后端下发的真实 pass_score（随堂测验 = 满分 × 60%），回退才用 60
+        const pass = statusDetail?.activity?.pass_score || record.total_score * 0.6
+        return (
+          <Text strong title={record.percentage != null ? `${record.percentage}%` : undefined}
+                style={{ color: score >= pass ? '#52c41a' : '#f5222d' }}>
             {score} / {record.total_score}
           </Text>
-        ) : (
-          <Text type="secondary">-</Text>
-        ),
+        )
+      },
     },
     {
       title: t('activityMonitor.columns.submittedAt'),
@@ -516,7 +523,9 @@ const ActivityMonitorPage: React.FC = () => {
                   <Statistic title={t('activityMonitor.stats.completionRate')} value={statusDetail.statistics.completion_rate} suffix="%" precision={1} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title={t('activityMonitor.stats.avgScore')} value={statusDetail.statistics.avg_score} precision={1} />
+                  {/* 满分跟着活动走：随堂测验的老卷满分等于题数，"平均分 2.0"不写满分没人看得懂 */}
+                  <Statistic title={t('activityMonitor.stats.avgScore')} value={statusDetail.statistics.avg_score} precision={1}
+                    suffix={statusDetail.activity.total_score ? `/ ${statusDetail.activity.total_score}` : undefined} />
                 </Col>
               </Row>
 

@@ -60,6 +60,48 @@ TTS_DIR_NAME = "tts"
 _SYNTH_SEMAPHORE = threading.Semaphore(2)
 _KEY_LOCK = threading.Lock()
 
+# ── 失败分类与重试（点名"偶尔念不出名字"的现场治理）──
+# 现场日志：websocket connection could not established within 5s —— SDK 内部把建链
+# 超时硬编码成 5 秒（SpeechSynthesizer.__start_stream → self.__connect(5)），公网
+# 抖一下就会吃满。这类失败绝大多数是**瞬时**的：重试一次基本就好了，而老师看到的
+# 却是一个英文异常弹窗。所以这里做三件事：抬一点建链超时、瞬时失败自动重试一次、
+# 把失败按"谁能处理"分类（前端据此决定要不要打扰老师）。
+WS_CONNECT_TIMEOUT_SEC = 8      # SDK 写死 5 秒，这里抬到 8 秒（仅首次建链，正常时无感）
+MAX_ATTEMPTS = 2                # 首次 + 1 次重试
+RETRY_BACKOFF_SEC = 0.4
+
+#: 失败分类（与前端 utils/nameSpeech.ts 的提示策略一一对应）
+FAIL_TRANSIENT = "transient"    # 网络抖动/建链超时/服务端 5xx：重试，UI 静默
+FAIL_QUOTA = "quota"            # 账号限额或并发受限：跟老师无关，UI 静默
+FAIL_CONFIG = "config"          # 音色与模型不匹配、没配 Key：需要管理员动手，UI 提示一次
+FAIL_DISABLED = "disabled"      # 总开关关掉了
+FAIL_INVALID = "invalid"        # 入参问题（空文本、超长、姓名不在名册）
+FAIL_UNKNOWN = "unknown"        # 认不出来：不重试，UI 用一句人话 + 重试按钮兜着
+
+_TRANSIENT_HINTS = (
+    "websocket", "could not established", "connection", "timed out", "timeout",
+    "temporarily", "unavailable", "reset by peer", "broken pipe", "eof",
+    "502", "503", "504", "internal error",
+)
+
+
+def classify_error(raw: str) -> tuple[str, str]:
+    """SDK/服务端异常文本 → (error_kind, 给老师看的一句话)。
+
+    原始文本既不友好也不可执行（`websocket connection could not established
+    within 5s. Please check your network connection, firewall settings, or
+    server status.`），前端绝不直接展示；完整内容只进后端日志，管理员在
+    「系统配置 → 语音合成 → 自检」里看得到。
+    """
+    low = (raw or "").lower()
+    if "411" in low or "invalidparameter" in low or "engine error" in low:
+        return FAIL_CONFIG, "音色与模型不匹配，请到「系统配置 → 语音合成」把音色改成与当前模型配套的"
+    if "throttl" in low or "quota" in low or "limit" in low:
+        return FAIL_QUOTA, "语音服务当前限流或配额不足，稍后会自动恢复"
+    if any(h in low for h in _TRANSIENT_HINTS):
+        return FAIL_TRANSIENT, "语音服务连接超时（网络抖动），本次未生成语音"
+    return FAIL_UNKNOWN, "语音服务暂时不可用，本次未生成语音"
+
 
 # ══════════════════════════════ 配置读取 ══════════════════════════════
 
@@ -146,50 +188,52 @@ def _fix_wav_sizes(data: bytes) -> bytes:
     return bytes(buf)
 
 
-def _failure_reason(synth: Any) -> str:
-    """从 SDK 的最后一个事件里抠出可读原因（call() 失败不抛异常，只能这么取）"""
+def _failure_reason(synth: Any) -> tuple[str, str, str]:
+    """从 SDK 的最后一个事件里抠出失败原因（call() 失败不抛异常，只能这么取）
+
+    返回 (error_kind, 给老师看的一句话, 原始 code/message 供写日志)。
+    """
     try:
         resp = synth.get_response() or {}
     except Exception:
-        return "服务端未返回音频"
+        return FAIL_TRANSIENT, "语音服务未返回音频，本次未生成语音", "get_response 异常"
     header = (resp.get("header") or {}) if isinstance(resp, dict) else {}
     code = str(header.get("error_code") or "")
     msg = str(header.get("error_message") or "")[:200]
-    if "411" in msg or "InvalidParameter" in code:
-        return (f"音色与模型不匹配（{code or 'InvalidParameter'}）："
-                "voice 必须属于所填 model，跨模型混用会报 411")
-    if "Throttling" in code or "quota" in msg.lower():
-        return f"账号配额或并发受限：{msg}"
-    return f"{code or 'task-failed'}: {msg}" or "服务端未返回音频"
+    raw = f"{code or 'task-failed'}: {msg}".strip(": ")
+    kind, friendly = classify_error(f"{code} {msg}")
+    return kind, friendly, raw or "服务端未返回音频"
 
 
-def synthesize_blocking(text: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    """同步合成一段音频并落盘（**不要在事件循环里直接调**，用 synthesize()）。
+def _make_synthesizer(dashscope: Any, SpeechSynthesizer: Any, params: dict[str, Any],
+                      fmt: Any) -> Any:
+    """构造 SpeechSynthesizer，并把 SDK 写死的 5 秒建链超时抬到 8 秒。
 
-    Returns:
-        {ok, url, cached, error, cost_ms, bytes, text}
-        失败时 ok=False 且带中文 error，不抛异常 —— 点名不能被音频问题挡住。
+    SDK 里 `__start_stream()` 是 `self.__connect(5)` —— 5 是显式传的实参，
+    所以只能覆写这个私有方法并**忽略传入值**。SDK 内部结构将来变了也不怕：
+    取不到私有方法、或子类构造失败，就原样返回原类实例（退回 5 秒 + 重试兜底）。
     """
-    text = str(text or "").strip()
-    params = params or current_params()
-    if not text:
-        return {"ok": False, "error": "播报文本为空", "cached": False}
-    if len(text) > MAX_TEXT_CHARS:
-        return {"ok": False, "error": f"播报文本超过 {MAX_TEXT_CHARS} 字上限", "cached": False}
-    if not params.get("enabled"):
-        return {"ok": False, "error": "语音合成未启用", "cached": False}
+    kwargs = dict(model=params["model"], voice=params["voice"], format=fmt,
+                  volume=params["volume"], speech_rate=params["speech_rate"],
+                  pitch_rate=params["pitch_rate"])
+    if not hasattr(SpeechSynthesizer, "_SpeechSynthesizer__connect"):
+        return SpeechSynthesizer(**kwargs)
 
-    key = resolve_api_key()
-    if not key:
-        return {"ok": False, "error": "API Key 未配置，请在系统配置中填写 DashScope API Key",
-                "cached": False}
+    class _Synth(SpeechSynthesizer):                      # type: ignore[misc, valid-type]
+        def _SpeechSynthesizer__connect(self, timeout_seconds: int = 5) -> None:
+            return super()._SpeechSynthesizer__connect(WS_CONNECT_TIMEOUT_SEC)
 
-    dest = cache_path(params, text)
-    if dest.exists() and dest.stat().st_size > 1024:
-        return {"ok": True, "url": url_for(extra=TTS_DIR_NAME, filename=dest.name),
-                "cached": True, "cost_ms": 0, "bytes": dest.stat().st_size, "text": text}
+    try:
+        return _Synth(**kwargs)
+    except Exception as exc:                              # 覆写失败不影响主流程
+        logger.debug(f"[tts] 建链超时覆写未生效，回退原始 SDK 类: {exc}")
+        return SpeechSynthesizer(**kwargs)
 
+
+def _synth_once(text: str, params: dict[str, Any], dest: Path) -> dict[str, Any]:
+    """单次合成尝试：调 SDK → 校验音频 → 原子落盘。失败不抛异常，带 error_kind 返回。"""
     t0 = time.time()
+    synth = None
     with _SYNTH_SEMAPHORE:
         try:
             import dashscope
@@ -200,23 +244,25 @@ def synthesize_blocking(text: str, params: dict[str, Any] | None = None) -> dict
             # SDK 在构造时读全局 dashscope.api_key，所以赋值与构造要在同一把锁里；
             # 本系统全线共用同一个 Key，加锁只是避免读到半初始化状态。
             with _KEY_LOCK:
-                dashscope.api_key = key
-                synth = SpeechSynthesizer(
-                    model=params["model"], voice=params["voice"], format=fmt,
-                    volume=params["volume"], speech_rate=params["speech_rate"],
-                    pitch_rate=params["pitch_rate"],
-                )
+                dashscope.api_key = resolve_api_key()
+                synth = _make_synthesizer(dashscope, SpeechSynthesizer, params, fmt)
                 audio = synth.call(text, timeout_millis=SYNTH_TIMEOUT_SEC * 1000)
         except Exception as exc:
-            logger.warning(f"[tts] 合成异常 model={params['model']} voice={params['voice']}: {exc}")
-            return {"ok": False, "error": f"合成异常：{type(exc).__name__}: {str(exc)[:160]}",
-                    "cached": False, "cost_ms": int((time.time() - t0) * 1000)}
+            raw = f"{type(exc).__name__}: {exc}"
+            kind, friendly = classify_error(raw)
+            logger.warning(f"[tts] 合成异常 model={params['model']} voice={params['voice']} "
+                           f"kind={kind}: {raw[:300]}")
+            return {"ok": False, "error": friendly, "error_kind": kind,
+                    "error_detail": raw[:200], "cached": False,
+                    "cost_ms": int((time.time() - t0) * 1000)}
 
     cost_ms = int((time.time() - t0) * 1000)
     if not audio or len(audio) < 512:
-        reason = _failure_reason(synth)
-        logger.warning(f"[tts] 合成失败({cost_ms}ms) text={text[:20]!r} voice={params['voice']} :: {reason}")
-        return {"ok": False, "error": reason, "cached": False, "cost_ms": cost_ms}
+        kind, friendly, raw = _failure_reason(synth)
+        logger.warning(f"[tts] 合成失败({cost_ms}ms) kind={kind} text={text[:20]!r} "
+                       f"voice={params['voice']} :: {raw}")
+        return {"ok": False, "error": friendly, "error_kind": kind,
+                "error_detail": raw[:200], "cached": False, "cost_ms": cost_ms}
 
     if params["fmt"] == "wav":
         audio = _fix_wav_sizes(audio)
@@ -226,11 +272,58 @@ def synthesize_blocking(text: str, params: dict[str, Any] | None = None) -> dict
         tmp.replace(dest)                    # 原子落盘，避免并发下把半个文件当完整的播出去
     except OSError as exc:
         logger.warning(f"[tts] 音频落盘失败 {dest}: {exc}")
-        return {"ok": False, "error": f"音频写入失败：{exc}", "cached": False, "cost_ms": cost_ms}
+        return {"ok": False, "error": f"音频写入失败：{exc}", "error_kind": FAIL_UNKNOWN,
+                "cached": False, "cost_ms": cost_ms}
 
     logger.info(f"[tts] 合成成功 {cost_ms}ms {len(audio)}B voice={params['voice']} text={text[:20]!r}")
     return {"ok": True, "url": url_for(extra=TTS_DIR_NAME, filename=dest.name),
             "cached": False, "cost_ms": cost_ms, "bytes": len(audio), "text": text}
+
+
+def synthesize_blocking(text: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """同步合成一段音频并落盘（**不要在事件循环里直接调**，用 synthesize()）。
+
+    Returns:
+        {ok, url, cached, error, error_kind, error_detail, cost_ms, bytes, text}
+        失败时 ok=False 且带中文 error，不抛异常 —— 点名不能被音频问题挡住。
+        瞬时失败（建链超时/网络抖动）会自动重试一次：点名现场"偶尔念不出名字"
+        绝大多数就是这么来的，重试一次通常就好了，老师不会看到任何提示。
+    """
+    text = str(text or "").strip()
+    params = params or current_params()
+    if not text:
+        return {"ok": False, "error": "播报文本为空", "error_kind": FAIL_INVALID, "cached": False}
+    if len(text) > MAX_TEXT_CHARS:
+        return {"ok": False, "error": f"播报文本超过 {MAX_TEXT_CHARS} 字上限",
+                "error_kind": FAIL_INVALID, "cached": False}
+    if not params.get("enabled"):
+        return {"ok": False, "error": "语音合成未启用", "error_kind": FAIL_DISABLED, "cached": False}
+
+    key = resolve_api_key()
+    if not key:
+        return {"ok": False, "error": "API Key 未配置，请在系统配置中填写 DashScope API Key",
+                "error_kind": FAIL_CONFIG, "cached": False}
+
+    dest = cache_path(params, text)
+    if dest.exists() and dest.stat().st_size > 1024:
+        return {"ok": True, "url": url_for(extra=TTS_DIR_NAME, filename=dest.name),
+                "cached": True, "cost_ms": 0, "bytes": dest.stat().st_size, "text": text}
+
+    # 瞬时失败自动重试一次：第一次多半死在"建链超时"（5→8 秒仍不通就是真抖了），
+    # 0.4 秒后再来一次通常就成功，而且成功即落缓存 —— 同一名学生下一轮秒回。
+    result: dict[str, Any] = {}
+    attempts = 0
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        attempts = attempt
+        result = _synth_once(text, params, dest)
+        if result.get("ok") or result.get("error_kind") != FAIL_TRANSIENT \
+                or attempt >= MAX_ATTEMPTS:
+            break
+        logger.info(f"[tts] 第 {attempt} 次失败（{result.get('error')}），"
+                    f"{RETRY_BACKOFF_SEC}s 后重试")
+        time.sleep(RETRY_BACKOFF_SEC)
+    result["attempts"] = attempts
+    return result
 
 
 async def synthesize(text: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -258,7 +351,11 @@ async def self_test() -> dict[str, Any]:
     if not params["enabled"]:
         return {**out, "ok": False, "disabled": True, "error": "语音合成未启用（总开关关闭）"}
     result = await synthesize(SELFTEST_TEXT, params)
-    out.update({k: v for k, v in result.items() if k in ("ok", "url", "cached", "cost_ms", "bytes", "error")})
+    # 失败时把 error_kind / error_detail / attempts 一并回给管理员自检页：
+    # error 是给老师看的人话，error_detail 才是"到底为什么"（如建链超时原文）
+    out.update({k: v for k, v in result.items()
+                if k in ("ok", "url", "cached", "cost_ms", "bytes", "error",
+                         "error_kind", "error_detail", "attempts")})
     if out.get("ok"):
         out["text"] = SELFTEST_TEXT
     return out

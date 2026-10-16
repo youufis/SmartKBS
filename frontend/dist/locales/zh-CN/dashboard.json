@@ -124,6 +124,7 @@
     "loadStatusFailed": "加载完成情况失败",
     "completed": "已完成",
     "incomplete": "未完成",
+    "grading": "批改中",
     "all": "全部",
     "filter": "筛选：",
     "activityType": {

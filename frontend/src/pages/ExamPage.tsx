@@ -2216,11 +2216,16 @@ const ExamPage: React.FC = () => {
                                   </Tooltip>
                                 }
                                 const pct = Number(r.percentage ?? toPercent(r.score, r.total_score))
+                                const total = Number(r.total_score ?? 0)
+                                // 得分列就写得分（卷面分 / 满分），得分率放副行 ——
+                                // 不再用「原始 x/y」这类注解（2026-10-16 口径统一）
                                 return (
                                   <div>
-                                    <Typography.Text strong color={percentStatus(pct)}>{pct}</Typography.Text>
+                                    <Typography.Text strong color={percentStatus(pct)}>
+                                      {total > 0 ? `${r.score ?? 0} / ${total}` : `${r.score ?? 0}`}
+                                    </Typography.Text>
                                     <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                                      {t('exRawScoreHint', { score: r.score ?? 0, total: r.total_score ?? 0 })}
+                                      {pct}%
                                     </div>
                                   </div>
                                 )

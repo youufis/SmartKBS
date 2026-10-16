@@ -447,7 +447,8 @@ def _list_course_activities(ctx: SummaryContext) -> list[dict[str, Any]]:
 
 def _make_record(ctx: SummaryContext, *, type_key: str, act: dict[str, Any],
                  student: dict[str, Any], score: Any = None, total: Any = None,
-                 rate: Any = None, status: str = "", ts: Any = "") -> dict[str, Any]:
+                 rate: Any = None, status: str = "", ts: Any = "",
+                 raw_score: Any = None, raw_total_score: Any = None) -> dict[str, Any]:
     return {
         "type": type_key,
         "type_label": SUMMARY_TYPES[type_key]["label"],
@@ -463,6 +464,9 @@ def _make_record(ctx: SummaryContext, *, type_key: str, act: dict[str, Any],
         "score": _round1(score),
         "total_score": _round1(total) if total is not None else None,
         "rate": _round1(rate) if rate is not None else _rate(score, total),
+        # 随堂测验专有: 得分对外统一 100 分制, 原始分放这里供导出/核对(其它类型恒为 None)
+        "raw_score": _round1(raw_score),
+        "raw_total_score": _round1(raw_total_score),
         "status": status,
         "time": str(ts or ""),
     }
@@ -526,10 +530,17 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
             stu = ctx.student_map.get(r["student_username"])
             if not stu or not ctx.in_window(r["submitted_at"]):
                 continue
+            # R2-a + 2026-10-16: 得分统一 100 分制 —— 分母是测验真实满分（老测验=题数），
+            # 折算成百分制后再写进记录；原始分保留在 raw_* 里，导出时可对照。
+            _raw_total = amap[r["quiz_id"]].get("total_score") or None
+            _raw = float(r["score"] or 0)
+            _cent = _rate(_raw, _raw_total)
             records.append(_make_record(
                 ctx, type_key="quiz", act=amap[r["quiz_id"]], student=stu,
-                # R2-a: 分母用该测验真实满分(老测验=题数, 新测验=100)
-                score=r["score"], total=amap[r["quiz_id"]].get("total_score") or None,
+                score=_cent if _cent is not None else _raw,
+                total=100.0 if _cent is not None else _raw_total,
+                rate=_cent,
+                raw_score=_raw, raw_total_score=_raw_total,
                 status="待批改" if r["ai_pending"] else "已完成",
                 ts=r["submitted_at"],
             ))

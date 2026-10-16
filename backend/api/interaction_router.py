@@ -28,6 +28,7 @@ from backend.quiz_stats import (
     quiz_graded as _quiz_graded,
     quiz_questions as _quiz_questions,
     quiz_total as _quiz_total,
+    centesimal as _centesimal,
     normalize_quiz_scores,
     answer_index_map as _answer_index_map,
     is_question_correct as _is_question_correct,
@@ -1118,8 +1119,11 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
 
     questions = _quiz_questions(quiz_row0)
     user_answers = json.loads(answers[0][0]) if isinstance(answers[0][0], str) else answers[0][0]
-    total_score = answers[0][1]
+    raw_score = float(answers[0][1] or 0)
     q_score = sum(float(q.get("score", 1) or 0) for q in questions)
+    # 得分统一 100 分制（老测验满分=题数也折算），原始分照旧给界面做"原始分 3/5"提示
+    cent = _centesimal(raw_score, q_score)
+    cent_total = 100.0 if q_score > 0 else q_score
     # S-GRADING(P3): 判分结果以提交/批改时写下的 graded 为准。
     # 旧实现这里"再精确匹配一遍"，简答题(AI 判的 8 分)被重算成 0 分并标成答错。
     graded_map = _quiz_graded(answers[0][3])
@@ -1176,9 +1180,11 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
         # P2-14: 显式声明视角 —— 前端原来靠 "有无 quiz_title 字段" 区分师生, 语义脆弱
         "view": "student",
         "quiz_title": quiz_row0.get("title"),
-        "score": total_score,
-        "total_score": q_score,
-        "percentage": round(float(total_score or 0) / max(q_score, 1) * 100, 1),
+        "score": cent if cent is not None else round(raw_score, 1),   # 百分制
+        "total_score": cent_total,                                   # 固定 100
+        "raw_score": round(raw_score, 1),
+        "raw_total_score": q_score,
+        "percentage": cent,
         "details": details,
         # S-GRADING(P3): 还有几题在后台批改 / 几题待教师人工批改
         "pending_ai": pending_ai,
@@ -1256,6 +1262,9 @@ async def get_quiz_results(quiz_id: int, request: Request):
             stu_map[r[0]] = {"name": r[1] or r[0], "grade": str(r[2] or "").strip(), "class_name": (cls_disp or "").strip()}
 
     # R2/P0: 逐人成绩统一口径 —— 百分制折算 + 批改中的题不计入"答对题数"
+    # 2026-10-16: 得分统一 100 分制：老测验(满分=题数)也折算过来，对外只给百分制，
+    #   原始分另用 raw_score/raw_total_score 暴露（界面"原始分 3/5"提示与 CSV 导出读它）。
+    cent_total = 100.0 if quiz_total > 0 else quiz_total
     student_answers = []
     for a, m, gm in parsed:
         pending_set = pending_keys(gm)
@@ -1265,15 +1274,19 @@ async def get_quiz_results(quiz_id: int, request: Request):
             _is_question_correct(gm.get(str(i2)), m.get(i2, ""),
                                  str(q2.get("answer", "")).strip(), q2.get("type", "single"))
         )
+        raw_score = float(a[2] or 0)
+        cent = _centesimal(raw_score, quiz_total)
         student_answers.append({
             "student": a[0],
             "student_name": stu_map.get(a[0], {}).get("name", a[0]),
             "grade": stu_map.get(a[0], {}).get("grade", ""),
             "class_name": stu_map.get(a[0], {}).get("class_name", ""),
-            "score": a[2],
-            "total_score": quiz_total,
+            "score": cent if cent is not None else round(raw_score, 1),   # 百分制
+            "total_score": cent_total,                                    # 固定 100
+            "raw_score": round(raw_score, 1),                             # 原始分(附注用)
+            "raw_total_score": quiz_total,                                # 原始满分
             # R2(Step A): 前端只读这个字段, 不再各自 Math.round(score/total*100)
-            "percentage": round(float(a[2] or 0) / max(quiz_total, 1) * 100, 1),
+            "percentage": cent,
             "submitted_at": a[3],
             "correct_count": correct_count,
             "total_questions": len(questions),
@@ -1292,9 +1305,10 @@ async def get_quiz_results(quiz_id: int, request: Request):
             "id": quiz_row.get("id"),
             "title": quiz_row.get("title"),
             "question_count": len(questions),
-            # R2: 满分 —— 新测验恒为 100, 老测验等于题数, 前端据此折算百分制
-            "total_score": quiz_total,
-            "pass_score": round(quiz_total * 0.6, 1),
+            # R2 + 2026-10-16: 对外满分统一 100（老测验的"满分=题数"只留在 raw_total_score）
+            "total_score": cent_total,
+            "pass_score": round(cent_total * 0.6, 1),
+            "raw_total_score": quiz_total,
         },
         "total_answers": len(answers),
         # 班级整体统计(与同步练习详情同口径)

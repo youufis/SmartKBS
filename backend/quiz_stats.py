@@ -56,6 +56,27 @@ def quiz_total(questions: Any) -> float:
     return total
 
 
+def centesimal(score: Any, total: Any) -> float | None:
+    """原始分 → 百分制得分（满分固定 100，保留 1 位小数）。
+
+    全站"得分"统一 100 分制：R2 之后新建的测验满分本来就是 100，但**老测验**
+    满分等于题数（每题 1 分），同一份答卷在两处会显示成 3/5 与 3/100 —— 老师
+    看到的是两个数。对外的 score/total_score 一律走这个折算（total_score 固定
+    100），原始分用 raw_score/raw_total_score 单独暴露，界面上的"原始分 3/5"
+    提示与 CSV 导出都读它。
+
+    total<=0（讨论/投票这类没有分数的活动）返回 None，由调用方决定怎么显示。
+    """
+    try:
+        s = float(score if score is not None else 0)
+        t = float(total if total is not None else 0)
+    except (TypeError, ValueError):
+        return None
+    if t <= 0:
+        return None
+    return round(max(0.0, min(100.0, s / t * 100.0)), 1)
+
+
 def normalize_quiz_scores(questions: list[Any], auto: bool = True) -> list[Any]:
     """R2(Step B): 把题面分值折算成合计 100（与同步练习/考试对齐）。
 

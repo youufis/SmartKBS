@@ -604,6 +604,7 @@
   "speakOffHint": "Voice announcement is off. Click to enable",
   "speakDisabledByAdmin": "Speech synthesis is disabled by the admin (System Settings → AI & Models → Speech)",
   "speakFailed": "Voice announcement unavailable",
+  "speakRetry": "Retry",
   "quizPercentScore": "{{percent}} / 100 pts",
   "quizRawScoreHint": "Raw score {{score}}/{{total}}",
   "colScoreRate": "Score rate",

@@ -38,6 +38,9 @@ export interface SummaryRecord {
   score: number | null
   total_score: number | null
   rate: number | null
+  /** 随堂测验专有：得分已统一 100 分制，原始分放这里备查（其余类型为 null） */
+  raw_score?: number | null
+  raw_total_score?: number | null
   status: string
   time: string
 }

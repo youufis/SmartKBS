@@ -181,10 +181,13 @@ const SummaryExportPage: React.FC = () => {
     { title: t('summaryExport.col.activity'), dataIndex: 'activity_title', ellipsis: { showTitle: false },
       render: (v: string) => <Tooltip title={v} placement="topLeft">{v}</Tooltip> },
     { title: t('summaryExport.col.creator'), dataIndex: 'creator_username', width: 90 },
+    // 得分统一 100 分制（随堂测验的老卷已由后端折算）：得分就写得分本身，
+    // 满分不是 100 的（如满分 120 的试卷）才补一句得分率帮老师换算
     { title: t('summaryExport.col.score'), key: 'score', width: 140,
-      render: (_, r) => (r.total_score != null
-        ? `${numOr(r.score)} / ${numOr(r.total_score)}（${rateOr(r.rate)}）`
-        : numOr(r.score)) },
+      render: (_, r) => (r.total_score == null
+        ? numOr(r.score)
+        : `${numOr(r.score)} / ${numOr(r.total_score)}`
+          + (Number(r.total_score) === 100 ? '' : `（${rateOr(r.rate)}）`)) },
     { title: t('summaryExport.col.status'), dataIndex: 'status', width: 120 },
     { title: t('summaryExport.col.time'), dataIndex: 'time', width: 150 },
   ]

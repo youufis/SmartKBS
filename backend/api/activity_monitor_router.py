@@ -13,6 +13,7 @@ from backend.question_db import execute_query as qdb_query
 from backend.permission_service import (
     get_students_in_scope,
 )
+from backend import quiz_stats
 from backend.auth import is_admin
 from backend.logger import logger
 
@@ -426,8 +427,15 @@ def _get_students_with_completion(
             }
 
     elif activity_type == "quiz":
+        # ★ 与随堂测验页共用同一份口径（backend/quiz_stats.py，全站唯一实现）：
+        #   得分统一 100 分制 —— 满分固定 100，老测验(满分=题数)按得分率折算过来，
+        #   原始分另给 raw_score/raw_total_score。旧实现这里把满分写死 100 却又直接
+        #   塞原始分，于是"5 题答对 3 题"显示成 3/100（3%），随堂测验页却是 3/5（60%）。
+        _q_rows = db_query_dict("SELECT questions FROM interaction_quizzes WHERE id=?", (activity_id,))
+        quiz_total = quiz_stats.quiz_total(quiz_stats.quiz_questions(_q_rows[0])) if _q_rows else 0.0
+        cent_total = 100.0 if quiz_total > 0 else quiz_total
         rows = db_query_dict(
-            """SELECT student_username, score, submitted_at
+            """SELECT student_username, score, submitted_at, graded, ai_pending
                FROM interaction_quiz_answers WHERE quiz_id=?""",
             (activity_id,),
         )
@@ -435,13 +443,22 @@ def _get_students_with_completion(
             uname = a["student_username"]
             if uname not in student_map:
                 continue
+            # 主观题还在后台批改时分数未定：随堂测验页会标"批改中"、不计入正确率，
+            # 监控这边同样不能把半个分当成最终成绩展示
+            pending = len(quiz_stats.pending_keys(quiz_stats.quiz_graded(a.get("graded"))))
+            raw_score = float(a.get("score") or 0)
+            cent = quiz_stats.centesimal(raw_score, quiz_total)
             completed_map[uname] = {
                 "username": uname,
                 "name": student_map[uname].get("name", ""),
                 "grade": student_map[uname].get("grade", ""),
                 "class_name": student_map[uname].get("class", ""),
-                "score": a.get("score", 0),
-                "total_score": 100,
+                "score": cent if cent is not None else round(raw_score, 1),   # 百分制
+                "total_score": cent_total,                                    # 固定 100
+                "raw_score": round(raw_score, 1),                             # 原始分(附注用)
+                "raw_total_score": quiz_total,
+                "percentage": cent,
+                "pending_ai": pending,
                 "submitted_at": a.get("submitted_at", ""),
                 "status": "completed",
             }
@@ -714,6 +731,15 @@ async def get_activity_completion_status(
         raise HTTPException(status_code=404, detail="活动不存在或无权查看")
 
     activity_rec = result[0]
+
+    # 随堂测验表没有 total_score/pass_score 列：按全站统一口径现算 —— 对外满分固定
+    # 100（得分也已是百分制），原始满分放进 raw_total_score 备查。
+    if activity_type == "quiz":
+        _q_total = quiz_stats.quiz_total(quiz_stats.quiz_questions(activity_rec))
+        _cent_total = 100.0 if _q_total > 0 else _q_total
+        activity_rec = {**activity_rec, "total_score": _cent_total,
+                        "pass_score": round(_cent_total * 0.6, 1),
+                        "raw_total_score": _q_total}
 
     # 获取学生完成情况
     completed, incomplete = _get_students_with_completion(

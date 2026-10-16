@@ -690,13 +690,13 @@ const InteractionPage: React.FC = () => {
           <Result
             status={Number(quizResult.pending_ai || 0) > 0 ? 'info'
               : (toPercent(quizResult.score, quizResult.total_score) >= 60 ? 'success' : 'warning')}
-            /* R2(Step A): 得分统一按百分制显示 —— 老数据显示"3/5"会被当成 3 分 */
+            /* R2(Step A) + 2026-10-16: 得分统一 100 分制 —— 后端直接给百分制得分 */
             title={t('quizPercentScore', {
               percent: toPercent(quizResult.score, quizResult.total_score),
             })}
             subTitle={Number(quizResult.pending_ai || 0) > 0
               ? t('ipGradingPendingHint', { count: quizResult.pending_ai })
-              : `${t('accuracyRate', { percent: quizResult.percentage })} · ${t('quizRawScoreHint', { score: quizResult.score, total: quizResult.total_score })}`}
+              : t('accuracyRate', { percent: quizResult.percentage })}
           />
         )}
       </Modal>
@@ -762,11 +762,6 @@ const InteractionPage: React.FC = () => {
                         {t(percentLevelKey(toPercent(quizResultsView.score, quizResultsView.total_score)))}
                       </Tag>
                     </Space>
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {t('quizRawScoreHint', { score: quizResultsView.score, total: quizResultsView.total_score })}
-                      </Text>
-                    </div>
                   </div>
                 </Card>
                 {quizResultsView.details?.map((r: any, i: number) => (
@@ -914,7 +909,8 @@ const InteractionPage: React.FC = () => {
                                 </Text>
                           ),
                         },
-                        // R2: 得分列统一百分制, 副行给得分率(两者一致, 便于教师对照)
+                        // R2 + 2026-10-16: 得分列统一 100 分制 —— 按 x/y 展示（满分即 100），
+                        // 不再附"原始得分 x/y"之类的注解
                         { title: t('ipScoreCol'), key: 'score', width: 96,
                           render: (_: any, r: any) => {
                             const pct = r.percentage ?? toPercent(r.score, r.total_score)
@@ -924,12 +920,9 @@ const InteractionPage: React.FC = () => {
                               </Tooltip>
                             }
                             return (
-                              <div>
-                                <Text strong color={percentStatus(pct)}>{pct}</Text>
-                                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                                  {' '}({t('colScoreRate')} {pct}%)
-                                </span>
-                              </div>
+                              <Text strong color={percentStatus(pct)}>
+                                {r.score ?? pct} / {r.total_score ?? 100}
+                              </Text>
                             )
                           },
                         },

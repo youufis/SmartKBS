@@ -23,6 +23,7 @@ import useSubjectOptions from '../hooks/useSubjectOptions'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import { reportLoadError } from '../utils/loadError'
+import useNameSpeech from '../hooks/useNameSpeech'
 import {
   DrillConfig, DrillQuestion, DrillRecord,
   drawDrillQuestion, getDrillConfig, getDrillRecords, judgeDrillAnswer,
@@ -116,9 +117,15 @@ const ClassQuestionPage: React.FC = () => {
   // ── 语音播报 ──
   const [ttsEnabled, setTtsEnabled] = useState(false)
   const [speakOn, setSpeakOn] = useState(() => localStorage.getItem(SPEAK_PREF_KEY) !== '0')
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const speechRef = useRef<{ name: string; task: Promise<string | null> } | null>(null)
-  const speakWarnedRef = useRef(false)
+  // 播报交给 useNameSpeech（与点名页同一份实现）：失败只给一句人话 + 重试入口
+  const {
+    prepare: prepareSpeech, cancel: cancelSpeech, play: playSpeech,
+    retry: retrySpeech, failure: speechFailure, clearFailure: clearSpeechFailure,
+  } = useNameSpeech({
+    grade, class: cls, enabled: ttsEnabled, speakOn,
+    onDisabled: () => setTtsEnabled(false),
+    onConfigIssue: (msg) => message.warning(msg, 6),
+  })
 
   const rollInterval = useRef<number | null>(null)
   const decelTimers = useRef<number[]>([])
@@ -139,11 +146,10 @@ const ClassQuestionPage: React.FC = () => {
     }
     decelTimers.current.forEach(clearTimeout)
     decelTimers.current = []
-    speechRef.current = null
-  }, [])
+    cancelSpeech()
+  }, [cancelSpeech])
 
   useEffect(() => clearAllTimers, [clearAllTimers])
-  useEffect(() => () => { audioRef.current?.pause() }, [])
 
   // ── 初始化：配置 / 年级 / 知识点 / TTS ──
   useEffect(() => {
@@ -244,41 +250,6 @@ const ClassQuestionPage: React.FC = () => {
     }
   }, [ready, grade, cls, subject, topic, questionType, allowAi, usedIds, t])
 
-  // ── 语音播报（复用点名接口） ──
-  const requestSpeech = useCallback(async (name: string): Promise<string | null> => {
-    try {
-      const { data } = await apiClient.get('/api/rollcall/speech', {
-        params: { grade, class: cls, name },
-      })
-      if (data?.ok && data.url) return String(data.url)
-      if (!speakWarnedRef.current) {
-        speakWarnedRef.current = true
-        if (data?.disabled) setTtsEnabled(false)
-        message.warning(String(data?.error || t('speakFailed')))
-      }
-      return null
-    } catch {
-      return null
-    }
-  }, [grade, cls, t])
-
-  const playSpeech = useCallback(async (name: string) => {
-    if (!ttsEnabled || !speakOn) return
-    const pending = speechRef.current
-    speechRef.current = null
-    if (!pending || pending.name !== name) return
-    const url = await Promise.race([
-      pending.task, new Promise<null>((r) => window.setTimeout(() => r(null), 2000)),
-    ])
-    if (!url) return
-    try {
-      audioRef.current?.pause()
-      const audio = new Audio(url)
-      audioRef.current = audio
-      await audio.play()
-    } catch { /* 浏览器拦截自动播放：静默 */ }
-  }, [ttsEnabled, speakOn])
-
   // ── 抽人（老虎机动画） ──
   const pickStudent = useCallback(async () => {
     if (!grade || !cls) { message.warning(t('selectGradeClass')); return }
@@ -290,7 +261,7 @@ const ClassQuestionPage: React.FC = () => {
     setSubmitted(false)
     setShowAnswer(false)
     clearAllTimers()
-    speakWarnedRef.current = false
+    clearSpeechFailure()      // 上一轮的播报失败提示不带到这一轮
 
     const pool = studentNames
     setRolling(true)
@@ -306,9 +277,7 @@ const ClassQuestionPage: React.FC = () => {
         clearInterval(rollInterval.current)
         rollInterval.current = null
       }
-      speechRef.current = (ttsEnabled && speakOn)
-        ? { name: data.student, task: requestSpeech(data.student) }
-        : null
+      prepareSpeech(data.student)
 
       const decelSteps = [
         { ms: 120, count: 8 }, { ms: 200, count: 5 }, { ms: 320, count: 3 },
@@ -346,7 +315,7 @@ const ClassQuestionPage: React.FC = () => {
       setPicking(false)
       message.error(String(e?.response?.data?.detail || t('pickFailed')))
     }
-  }, [grade, cls, studentNames, ttsEnabled, speakOn, requestSpeech, playSpeech, clearAllTimers, t])
+  }, [grade, cls, studentNames, prepareSpeech, playSpeech, clearAllTimers, clearSpeechFailure, t])
 
   // ── 判定与计分 ──
   // 传 selected（学生所选项）时由**服务端**比答案判对错；只传 result 时是老师直接定判（跳过）。
@@ -610,6 +579,16 @@ const ClassQuestionPage: React.FC = () => {
           }}>
             {displayName}
           </span>
+          {/* 播报失败：一句话 + 重试入口，不弹窗、不影响抽问流程 */}
+          {speechFailure && (
+            <span style={{ fontSize: 12, color: 'var(--text-tertiary, #8c8c8c)' }}>
+              {speechFailure.kind === 'network' ? t('speakFailed') : (speechFailure.message || t('speakFailed'))}
+              <Button type="link" size="small" style={{ fontSize: 12, padding: '0 4px' }}
+                onClick={() => { void retrySpeech() }}>
+                {t('speakRetry')}
+              </Button>
+            </span>
+          )}
           <Button
             type="primary" size="large" icon={<CheckOutlined />} loading={submitting}
             onClick={submitAnswer}

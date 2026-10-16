@@ -686,17 +686,20 @@ async def api_speech(request: Request):
     if not name or len(name) > 20:
         raise HTTPException(status_code=400, detail="姓名长度不合法")
 
-    from backend.tts_service import speak_student_name, tts_enabled
+    from backend.tts_service import (FAIL_DISABLED, FAIL_INVALID, FAIL_QUOTA,
+                                     speak_student_name, tts_enabled)
 
     if not tts_enabled():
-        return {"ok": False, "disabled": True, "error": "语音合成未启用，请在系统配置中开启"}
+        return {"ok": False, "disabled": True, "error_kind": FAIL_DISABLED,
+                "error": "语音合成未启用，请在系统配置中开启"}
     if _speech_throttled(username):
-        return {"ok": False, "throttled": True, "error": "播报过于频繁，请稍候再试"}
+        return {"ok": False, "throttled": True, "error_kind": FAIL_QUOTA,
+                "error": "播报过于频繁，请稍候再试"}
 
     roster = {str(x.get("name") or "") for x in _load_students(grade) if x.get("class") == cls}
     if name not in roster:
         logger.info(f"[rollcall] 拒绝播报不在名册的姓名 user={username} {grade}/{cls} {name[:12]!r}")
-        return {"ok": False, "error": "该姓名不在本班名册中"}
+        return {"ok": False, "error_kind": FAIL_INVALID, "error": "该姓名不在本班名册中"}
 
     return await speak_student_name(name)
 

@@ -1872,13 +1872,23 @@ def _recent_done(username: str, days: int = 30, limit: int = 30) -> list[dict[st
         (username, since))
     # R2-d: 带上满分与百分制得分, 不再直接甩原始分(看着像满分 100 只拿 3 分)
     _quiz_tot = _quiz_totals([r[4] for r in _quiz_rows])
-    _push(_quiz_rows,
-          lambda r: {"id": f"done-quiz-{r[0]}", "type": "quiz", "title": str(r[3] or ""),
-                     "detail": "",
-                     "score": round(float(r[2] or 0) / _quiz_tot[r[4]] * 100, 1)
-                     if _quiz_tot.get(r[4]) else r[2],
-                     "total": _quiz_tot.get(r[4]) or None,
-                     "time": r[1], "url": "/interaction"})
+    from backend.quiz_stats import centesimal
+
+    def _quiz_done(r):
+        """2026-10-16: 得分统一 100 分制 —— 得分折成百分制，满分固定 100。
+
+        旧实现"百分制得分 + 原始满分"会渲染成 `60 / 5`（学生端最近完成卡片读这两个
+        字段），同一份成绩又变成两个数。
+        """
+        raw, tot = float(r[2] or 0), float(_quiz_tot.get(r[4]) or 0)
+        cent = centesimal(raw, tot)
+        return {"id": f"done-quiz-{r[0]}", "type": "quiz", "title": str(r[3] or ""),
+                "detail": "",
+                "score": cent if cent is not None else raw,
+                "total": 100 if cent is not None else None,
+                "time": r[1], "url": "/interaction"}
+
+    _push(_quiz_rows, _quiz_done)
 
     # 6) 投票（smartkb.db）
     _push(_act_q(

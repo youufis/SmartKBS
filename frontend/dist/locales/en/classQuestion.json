@@ -23,6 +23,7 @@
   "speakOffHint": "Voice announcement is off. Click to enable.",
   "speakDisabledByAdmin": "Text-to-speech is disabled by the administrator",
   "speakFailed": "Voice announcement unavailable",
+  "speakRetry": "Retry",
   "questionCard": "Question",
   "sourceBank": "Bank",
   "sourceAi": "AI generated",

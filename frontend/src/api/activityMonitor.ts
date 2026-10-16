@@ -41,6 +41,10 @@ export interface StudentStatus {
   class_name: string;
   score: number;
   total_score: number;
+  /** 百分制得分率（后端统一口径；无满分的活动为 null） */
+  percentage?: number | null;
+  /** 仍在后台批改的题数（>0 时分数未定，前端应显示「批改中」而不是半个分） */
+  pending_ai?: number;
   submitted_at: string;
   status: 'completed' | 'incomplete';
 }

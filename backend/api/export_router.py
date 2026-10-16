@@ -757,7 +757,8 @@ def export_quiz_result(quiz_id: int, request: Request):
         (quiz_id,),
     )
 
-    csv_headers = ["学生", "百分制得分", "原始分", "满分", "得分率(%)", "批改状态"]
+    # 2026-10-16: 全站"得分"统一 100 分制 —— 百分制得分是主口径，原始分/原始满分并列备查
+    csv_headers = ["学生", "得分(百分制)", "原始分", "原始满分", "得分率(%)", "批改状态"]
     for i, _q in enumerate(questions):
         csv_headers.append(f"第{i + 1}题答案")
         csv_headers.append(f"第{i + 1}题是否正确")

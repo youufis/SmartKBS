@@ -124,6 +124,7 @@
     "loadStatusFailed": "Failed to load completion status",
     "completed": "Completed",
     "incomplete": "Incomplete",
+    "grading": "Grading",
     "all": "All",
     "filter": "Filter: ",
     "activityType": {

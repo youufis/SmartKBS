@@ -145,13 +145,11 @@ const SessionRoster: React.FC<{
             render: (_: any, r: any) => {
               if (!r.submitted) return '-'
               const pct = toPercent(r.score, r.total_score)
+              // 得分统一 100 分制: 按 x/y 展示（满分即 100），不再附"原始得分 x/y"
               return (
-                <div>
-                  <Text strong color={percentStatus(pct)}>{pct}</Text>
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                    {t('rawScoreHint', { score: r.score ?? 0, total: r.total_score ?? 0 })}
-                  </div>
-                </div>
+                <Text strong color={percentStatus(pct)}>
+                  {r.score ?? 0} / {r.total_score ?? 100}
+                </Text>
               )
             },
           },
@@ -334,14 +332,6 @@ const StudentView: React.FC = () => {
                     })}</Text>
                     <Tag color={percentStatus(pct)}>{t(percentLevelKey(pct))}</Tag>
                   </Space>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {t('rawScoreHint', {
-                        score: submittedView.attempt?.score ?? 0,
-                        total: submittedView.attempt?.total_score ?? 0,
-                      })}
-                    </Text>
-                  </div>
                 </div>
               </>
             )

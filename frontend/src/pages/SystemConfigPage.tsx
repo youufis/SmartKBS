@@ -2374,6 +2374,10 @@ const SystemConfigPage: React.FC = () => {
                       {ttsTestResult.ok && ttsTestResult.url && (
                         <audio controls src={ttsTestResult.url} style={{ width: '100%', marginTop: 6 }} />
                       )}
+                      {/* 失败时把技术原文留给管理员排查（点名页同样失败只显示上面那句人话） */}
+                      {!ttsTestResult.ok && ttsTestResult.error_detail && (
+                        <div style={{ marginTop: 2, opacity: 0.75 }}>{ttsTestResult.error_detail}</div>
+                      )}
                     </div>
                   )}
                 />
