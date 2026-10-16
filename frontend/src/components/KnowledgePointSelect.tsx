@@ -102,7 +102,7 @@ const KnowledgePointSelect: React.FC<Props> = ({
   extraOptions,
   allowClear = true, disabled = false, placeholder, style, className,
 }) => {
-  // 提示语统一由控件给出（common:knowledgePointHint），四处调用点不必各写一份
+  // 提示语统一由控件给出（common:knowledgePointHint*），调用点不必各写一份
   const { t } = useTranslation('common')
   const [all, setAll] = useState<KpOption[]>(_cache || [])
   useEffect(() => {
@@ -128,6 +128,7 @@ const KnowledgePointSelect: React.FC<Props> = ({
     onChange?.(multiple ? cleaned : (cleaned[cleaned.length - 1] || ''))
   }
 
+  // 单选时不能说"多个用逗号分隔" —— 那个提示只对多选成立
   return (
     <Select
       mode="tags"
@@ -137,7 +138,7 @@ const KnowledgePointSelect: React.FC<Props> = ({
       disabled={disabled}
       maxTagCount={multiple ? 'responsive' : 1}
       tokenSeparators={[',', '，', '、']}
-      placeholder={placeholder ?? t('knowledgePointHint')}
+      placeholder={placeholder ?? t(multiple ? 'knowledgePointHint' : 'knowledgePointHintSingle')}
       options={options}
       value={arr}
       onChange={handle}

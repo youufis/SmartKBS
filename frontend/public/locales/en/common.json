@@ -1,5 +1,6 @@
 {
   "knowledgePointHint": "Pick a course knowledge point, or type your own (separate several with commas)",
+  "knowledgePointHintSingle": "Select or type a knowledge point",
   "guardUnansweredTitle": "{{n}} question(s) left unanswered",
   "guardAllBlankTitle": "Nothing has been answered yet",
   "guardUnansweredList": "Unanswered: {{list}}.",

@@ -5,8 +5,8 @@
  */
 import React, { useState, useEffect } from 'react'
 import {
-  Card, Button, Typography, Space, Table, Tag, message, Spin, Empty,
-  Modal, Form, Input, InputNumber, Select, Switch, Row, Col, Statistic, Popconfirm, Tooltip,
+  Card, Button, Typography, Space, Tag, message, Spin, Empty, Pagination,
+  Modal, Form, Input, InputNumber, Select, Row, Col, Popconfirm, Tooltip,
 } from 'antd'
 import {
   ThunderboltOutlined, PlusOutlined, PlayCircleOutlined,
@@ -17,9 +17,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import MobileCardTable from '../components/MobileCardTable'
+import { RowList } from '../components/RowList'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
-import { useIsMobile } from '../hooks/useIsMobile'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
@@ -36,8 +35,6 @@ const fmtRoomTime = (v?: string) => v?.split('.')[0]?.replace('T', ' ').slice(0,
 
 const QuickQuizPage: React.FC = () => {
   const { t } = useTranslation('interaction')
-  // 窄屏：活动列表与历史记录改卡片渲染（桌面仍为 Table）
-  const isMobile = useIsMobile()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
@@ -60,6 +57,11 @@ const QuickQuizPage: React.FC = () => {
   const [history, setHistory] = useState<any[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyTab, setHistoryTab] = useState('active')
+  // 卡片列表分页（原来靠 Table 内置分页；换卡片后自己管）
+  const [roomPage, setRoomPage] = useState(1)
+  const [roomPageSize, setRoomPageSize] = useState(10)
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(10)
   const [activityScope, setActivityScope] = useState<ActivityScopeValue>({
     target_scope: 'teacher_classes',
     target_grade: '',
@@ -185,191 +187,170 @@ const QuickQuizPage: React.FC = () => {
     return <Tag color={s.color}>{s.text}</Tag>
   }
 
-  // ── 教师房间列表 ──
-  const teacherColumns = [
-    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 86,
-      render: (code: string) => <Text code strong style={{ fontSize: 15 }}>{code}</Text>
-    },
-    // 列标题原先写的是 t('title') —— 这个 key 在 interaction 命名空间里是页面标题「随堂测验」，
-    // 于是抢答列表的"活动名称"列一直显示成"随堂测验"（内容其实是竞赛名称）。改用 activityName。
-    { title: t('activityName'), dataIndex: 'title', key: 'title', width: 150, ellipsis: true },
-    // 科目：房间表本来就有 subject（建活动时选的），列表以前没展示
-    { title: t('subject'), dataIndex: 'subject', key: 'subject', width: 90,
-      render: (v: string) => v || '-' },
-    { title: t('status'), dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
-    // 题量与时限合成一格：少一列、行更短，一眼读完
-    { title: t('quizMeta'), key: 'meta', width: 104,
-      render: (_: any, r: any) => `${r.question_count ?? 0} ${t('questions')} · ${r.time_limit ?? 0}s` },
-    { title: t('players'), key: 'players', width: 60,
-      render: (_: any, r: any) => (
-        <span><TeamOutlined /> {r.player_count || 0}</span>
-      )
-    },
-    { title: t('gradeClass'), key: 'scope', width: 150,
-      render: (_: any, r: any) => (
-        <ScopeTag scope={r.target_scope} grade={r.target_grade} classes={r.target_class} users={r.target_users} />
-      )
-    },
-    { title: t('creator'), key: 'creator_time', width: 110,
-      render: (_: any, r: any) => (
-        <div>
-          <div>{r.creator_username || '-'}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{fmtRoomTime(r.created_at)}</div>
+  // ── 活动列表 / 抢答记录：卡片列表（与随堂测验、同步练习、活动监控同款） ──
+  // 这张表是“列宽博弈”的典型：房间码 + 名称 + 学科 + 状态 + 题量时限 + 参与者 +
+  // 年级班级 + 创建者 + 最多 5 个操作图标，窄窗必然横向滚动、图标被挤到第二行。
+  // 换卡片后不用再给每列定宽，操作图标也一定在同一行（与其它活动列表统一）。
+  const openEditRoom = (record: any) => {
+    setEditRoom(record)
+    setActivityScope({
+      target_scope: record.target_scope || 'teacher_classes',
+      target_grade: record.target_grade || '',
+      target_class: record.target_class || '',
+      target_users: record.target_users || '',
+    })
+    editForm.setFieldsValue({
+      title: record.title,
+      question_source: record.question_source || 'bank_academic',
+      question_count: record.question_count,
+      time_limit: record.time_limit,
+      scoring_mode: record.scoring_mode,
+      subject: record.subject,
+      difficulty: record.difficulty,
+      knowledge_points: record.knowledge_points,
+      min_players: record.min_players,
+      max_players: record.max_players,
+    })
+    setEditModal(true)
+  }
+
+  const renderRoomCard = (record: any) => (
+    <Card size="small" hoverable={isTeacherOrAdmin}
+      style={{ marginBottom: 8, cursor: isTeacherOrAdmin ? 'pointer' : 'default' }}
+      onClick={isTeacherOrAdmin ? () => navigate(`/quick-quiz/lobby/${record.id}`) : undefined}>
+      <div className="page-header-flex stack-row"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Space size={8} align="center" wrap>
+            <Text code strong style={{ fontSize: 15 }}>{record.room_code}</Text>
+            <Text strong>{record.title}</Text>
+            {getStatusTag(record.status)}
+          </Space>
+          <div style={{ marginTop: 4 }}>
+            <Tag>{t('subject')}：{record.subject || '-'}</Tag>
+            {isTeacherOrAdmin && (
+              <ScopeTag scope={record.target_scope} grade={record.target_grade}
+                classes={record.target_class} users={record.target_users} />
+            )}
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {record.question_count ?? 0} {t('questions')} · {record.time_limit ?? 0}s
+              {isTeacherOrAdmin && <>{' · '}<TeamOutlined /> {record.player_count || 0}</>}
+              {' · '}{isTeacherOrAdmin ? '' : `${t('teacher')}：`}{record.creator_username || '-'}
+              {' · '}{fmtRoomTime(record.created_at)}
+            </Text>
+          </div>
         </div>
-      )
-    },
-    {
-      // 操作列全用图标 + tooltip（文字按钮太占地方，整行会被挤到屏幕外）；
-      // 宽度按"主操作 + 4 个图标"给足，避免图标被挤到第二行
-      title: t('actions'), key: 'action', width: 168,
-      render: (_: any, record: any) => (
-        <Space size={2} wrap={false} align="center" style={{ whiteSpace: 'nowrap' }}>
-          {record.status === 'waiting' && (
-            <Tooltip title={t('startGame')}>
-              <Button type="primary" size="small" icon={<PlayCircleOutlined />}
-                onClick={() => handleStart(record.id)} />
-            </Tooltip>
-          )}
-          {record.status === 'playing' && (
-            <Tooltip title={t('console')}>
-              <Button type="primary" size="small" icon={<ThunderboltOutlined />}
-                onClick={() => navigate(`/quick-quiz/console/${record.id}`)} />
-            </Tooltip>
-          )}
-          {record.status === 'ended' && (
-            <Tooltip title={t('viewResults')}>
-              <Button size="small" icon={<TrophyOutlined />}
-                onClick={() => navigate(`/quick-quiz/result/${record.id}`)} />
-            </Tooltip>
-          )}
-          {record.status === 'waiting' && (
-            <Tooltip title={t('edit')}>
-            <Button size="small" icon={<EditOutlined />}
-              onClick={() => {
-                setEditRoom(record)
-                setActivityScope({
-                  target_scope: record.target_scope || 'teacher_classes',
-                  target_grade: record.target_grade || '',
-                  target_class: record.target_class || '',
-                  target_users: record.target_users || '',
-                })
-                editForm.setFieldsValue({
-                  title: record.title,
-                  question_source: record.question_source || 'bank_academic',
-                  question_count: record.question_count,
-                  time_limit: record.time_limit,
-                  scoring_mode: record.scoring_mode,
-                  subject: record.subject,
-                  difficulty: record.difficulty,
-                  knowledge_points: record.knowledge_points,
-                  min_players: record.min_players,
-                  max_players: record.max_players,
-                })
-                setEditModal(true)
-              }} />
-            </Tooltip>
-          )}
-          {/* 重置：清参与数据、留房间配置；进行中也能重置（弹窗里会要求强制确认） */}
-          <ResetActivityButton activityType="quick_quiz" activityId={record.id}
-            iconOnly
-            onSuccess={() => { void loadRooms(); void loadHistory(); }} />
-          {record.status !== 'playing' && (
-            <Popconfirm title={t('confirmDeleteActivity')}
-              description={t('deleteActivityHint')}
-              onConfirm={() => handleDelete(record.id)}>
-              <Tooltip title={t('delete')}>
-                <Button size="small" danger icon={<DeleteOutlined />} />
-              </Tooltip>
-            </Popconfirm>
-          )}
-          <Tooltip title={t('details')}>
+        {/* 卡片整块可点 → 操作区必须掉断冒泡，否则点“删除”会先跳进房间 */}
+        <span onClick={(e) => e.stopPropagation()}>
+          <Space size={2} wrap={false} align="center" style={{ whiteSpace: 'nowrap' }}>
+            {isTeacherOrAdmin ? (
+              <>
+                {record.status === 'waiting' && (
+                  <Tooltip title={t('startGame')}>
+                    <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                      onClick={() => handleStart(record.id)} />
+                  </Tooltip>
+                )}
+                {record.status === 'playing' && (
+                  <Tooltip title={t('console')}>
+                    <Button type="primary" size="small" icon={<ThunderboltOutlined />}
+                      onClick={() => navigate(`/quick-quiz/console/${record.id}`)} />
+                  </Tooltip>
+                )}
+                {record.status === 'ended' && (
+                  <Tooltip title={t('viewResults')}>
+                    <Button size="small" icon={<TrophyOutlined />}
+                      onClick={() => navigate(`/quick-quiz/result/${record.id}`)} />
+                  </Tooltip>
+                )}
+                {record.status === 'waiting' && (
+                  <Tooltip title={t('edit')}>
+                    <Button size="small" icon={<EditOutlined />} onClick={() => openEditRoom(record)} />
+                  </Tooltip>
+                )}
+                {/* 重置：清参与数据、留房间配置；进行中也能重置（弹窗里会要求强制确认） */}
+                <ResetActivityButton activityType="quick_quiz" activityId={record.id}
+                  iconOnly stopPropagation
+                  onSuccess={() => { void loadRooms(); void loadHistory() }} />
+                {record.status !== 'playing' && (
+                  <Popconfirm title={t('confirmDeleteActivity')}
+                    description={t('deleteActivityHint')}
+                    onConfirm={() => handleDelete(record.id)}>
+                    <Tooltip title={t('delete')}>
+                      <Button size="small" danger icon={<DeleteOutlined />}
+                        onClick={(e) => e.stopPropagation()} />
+                    </Tooltip>
+                  </Popconfirm>
+                )}
+                <Tooltip title={t('details')}>
+                  <Button size="small" icon={<EyeOutlined />}
+                    onClick={() => navigate(`/quick-quiz/lobby/${record.id}`)} />
+                </Tooltip>
+              </>
+            ) : (
+              <>
+                {record.status === 'waiting' && (
+                  <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                    onClick={async () => {
+                      try {
+                        await apiClient.post('/api/quick-quiz/join', { room_code: record.room_code })
+                      } catch { /* 可能已加入 */ }
+                      navigate(`/quick-quiz/lobby/${record.id}`)
+                    }}>
+                    {t('joinRoom')}
+                  </Button>
+                )}
+                {record.status === 'playing' && (
+                  <Button type="primary" size="small" icon={<ThunderboltOutlined />}
+                    onClick={async () => {
+                      try {
+                        await apiClient.post('/api/quick-quiz/join', { room_code: record.room_code })
+                      } catch { /* 可能已加入 */ }
+                      navigate(`/quick-quiz/play/${record.id}`)
+                    }}>
+                    {t('participateQuiz')}
+                  </Button>
+                )}
+                {record.status === 'ended' && (
+                  <Button size="small" icon={<TrophyOutlined />}
+                    onClick={() => navigate(`/quick-quiz/result/${record.id}`)}>
+                    {t('viewResults')}
+                  </Button>
+                )}
+              </>
+            )}
+          </Space>
+        </span>
+      </div>
+    </Card>
+  )
+
+  // 学生的“我的抢答记录”
+  const renderHistoryCard = (r: any) => (
+    <Card size="small" hoverable style={{ marginBottom: 8, cursor: 'pointer' }}
+      onClick={() => navigate(`/quick-quiz/result/${r.id}`)}>
+      <div className="page-header-flex stack-row"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Text strong>{r.title}</Text>
+          <div style={{ marginTop: 4 }}>
+            {getStatusTag(r.status)}
+            <Tag color="gold">{t('score')} {r.total_score}</Tag>
+            <Tag>{t('correct')} {r.correct_count}</Tag>
+            <Tag>{t('wrong')} {r.wrong_count}</Tag>
+            {r.max_streak > 1 && <Tag color="volcano">🔥 x{r.max_streak}</Tag>}
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('teacher')}：{r.creator_username || '-'}</Text>
+          </div>
+        </div>
+        <span onClick={(e) => e.stopPropagation()}>
+          <Tooltip title={t('viewDetails')}>
             <Button size="small" icon={<EyeOutlined />}
-              onClick={() => navigate(`/quick-quiz/lobby/${record.id}`)} />
+              onClick={() => navigate(`/quick-quiz/result/${r.id}`)} />
           </Tooltip>
-        </Space>
-      )
-    },
-  ]
-
-  // ── 学生房间列表 ──
-  const studentColumns = [
-    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 86,
-      render: (code: string) => <Text code strong style={{ fontSize: 15 }}>{code}</Text>
-    },
-    // 同教师视图：这里以前也是 t('title')（= 页面标题"随堂测验"），改为活动名称
-    { title: t('activityName'), dataIndex: 'title', key: 'title', width: 150, ellipsis: true },
-    { title: t('subject'), dataIndex: 'subject', key: 'subject', width: 90,
-      render: (v: string) => v || '-' },
-    { title: t('status'), dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
-    { title: t('quizMeta'), key: 'meta', width: 104,
-      render: (_: any, r: any) => `${r.question_count ?? 0} ${t('questions')} · ${r.time_limit ?? 0}s` },
-    { title: t('teacher'), key: 'teacher_time', width: 110,
-      render: (_: any, r: any) => (
-        <div>
-          <div>{r.creator_username || '-'}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{fmtRoomTime(r.created_at)}</div>
-        </div>
-      )
-    },
-    {
-      title: t('actions'), key: 'action', width: 120,
-      render: (_: any, record: any) => (
-        <Space>
-          {record.status === 'waiting' && (
-            <Button type="primary" size="small"
-              onClick={async () => {
-                try {
-                  await apiClient.post('/api/quick-quiz/join', { room_code: record.room_code })
-                } catch { /* 可能已加入 */ }
-                navigate(`/quick-quiz/lobby/${record.id}`)
-              }}>
-              {t('joinRoom')}
-            </Button>
-          )}
-          {record.status === 'playing' && (
-            <Button type="primary" size="small"
-              onClick={async () => {
-                try {
-                  await apiClient.post('/api/quick-quiz/join', { room_code: record.room_code })
-                } catch { /* 可能已加入 */ }
-                navigate(`/quick-quiz/play/${record.id}`)
-              }}>
-              {t('participateQuiz')}
-            </Button>
-          )}
-          {record.status === 'ended' && (
-            <Button size="small"
-              onClick={() => navigate(`/quick-quiz/result/${record.id}`)}>
-              {t('viewResults')}
-            </Button>
-          )}
-        </Space>
-      )
-    },
-  ]
-
-  // 抢答历史记录列定义（桌面表格与窄屏卡片共用同一份）
-  const historyColumns = [
-                { title: t('activityName'), dataIndex: 'title', key: 'title', ellipsis: true },
-                { title: t('status'), dataIndex: 'status', key: 'status', render: getStatusTag },
-                { title: t('score'), dataIndex: 'total_score', key: 'score',
-                  render: (s: number) => <Text strong style={{ color: '#faad14' }}>{s}</Text>
-                },
-                { title: t('correct'), dataIndex: 'correct_count', key: 'correct' },
-                { title: t('wrong'), dataIndex: 'wrong_count', key: 'wrong' },
-                { title: t('maxStreak'), dataIndex: 'max_streak', key: 'streak',
-                  render: (s: number) => s > 1 ? <Tag color="volcano">🔥 x{s}</Tag> : '-'
-                },
-                { title: t('teacher'), dataIndex: 'creator_username', key: 'teacher' },
-                {
-                  title: t('actions'), key: 'action',
-                  render: (_: any, r: any) => (
-                    <Button size="small" onClick={() => navigate(`/quick-quiz/result/${r.id}`)}>
-                      {t('viewDetails')}
-                    </Button>
-                  )
-                },
-                ]
+        </span>
+      </div>
+    </Card>
+  )
 
   return (
     <Card style={{ borderRadius: 8 }}>
@@ -411,23 +392,19 @@ const QuickQuizPage: React.FC = () => {
         ) : rooms.length === 0 ? (
           <Empty description={isTeacherOrAdmin ? t('noActivitiesTeacher') : t('noActivitiesStudent')} />
         ) : (
-          isMobile ? (
-            <MobileCardTable
-              dataSource={rooms}
-              columns={isTeacherOrAdmin ? teacherColumns : studentColumns}
-              rowKey="id"
-            />
-          ) : (
-          <Table
-            dataSource={rooms}
-            columns={isTeacherOrAdmin ? teacherColumns : studentColumns}
-            rowKey="id"
-            pagination={{ pageSize: 20 }}
-            size="small"
-            /* 列多而窗外窄时横向滚动，别把右边列挤没/裁掉（此前"详情"会被切掉） */
-            scroll={{ x: 'max-content' }}
-          />
-          )
+          <>
+            <RowList items={rooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize)}
+              split={false} renderItem={renderRoomCard} />
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <Pagination
+                current={roomPage} pageSize={roomPageSize} total={rooms.length}
+                showSizeChanger showTotal={(total) => t('totalCount', { count: total })}
+                pageSizeOptions={['10', '20', '50']}
+                onChange={(p, ps) => { setRoomPage(p); setRoomPageSize(ps) }}
+                size="small"
+              />
+            </div>
+          </>
         )}
       </Card>
 
@@ -437,17 +414,19 @@ const QuickQuizPage: React.FC = () => {
           {historyLoading ? <Spin /> : history.length === 0 ? (
             <Empty description={t('noHistory')} />
           ) : (
-            isMobile ? (
-              <MobileCardTable dataSource={history} columns={historyColumns} rowKey="id" />
-            ) : (
-            <Table
-              dataSource={history}
-              rowKey="id"
-              size="small"
-              pagination={{ pageSize: 10 }}
-              columns={historyColumns}
-            />
-            )
+            <>
+              <RowList items={history.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)}
+                split={false} renderItem={renderHistoryCard} />
+              <div style={{ marginTop: 12, textAlign: 'center' }}>
+                <Pagination
+                  current={historyPage} pageSize={historyPageSize} total={history.length}
+                  showSizeChanger showTotal={(total) => t('totalCount', { count: total })}
+                  pageSizeOptions={['10', '20', '50']}
+                  onChange={(p, ps) => { setHistoryPage(p); setHistoryPageSize(ps) }}
+                  size="small"
+                />
+              </div>
+            </>
           )}
         </Card>
       )}

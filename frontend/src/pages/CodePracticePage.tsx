@@ -514,7 +514,9 @@ const CodePracticePage: React.FC = () => {
             subject: aiGenSubject || prev.subject,
             title: d.title || prev.title,
             description: d.description || prev.description,
-            knowledge_points: d.knowledge_points || prev.knowledge_points,
+            // 知识点：AI 自带标签时以它为准（常是 2-3 个更细的标签）；AI 没给就退回
+            // 老师在弹窗里选/输的主题，免得存出一道没有知识点的题（老 #2/#4 就是这样）
+            knowledge_points: d.knowledge_points || aiGenTopic.trim() || prev.knowledge_points,
             template_code: d.template_code || d.starter_code || prev.template_code,
             starter_code: d.starter_code || '',
             test_cases: (d.test_cases || []).map((tc: any) => ({
@@ -1141,12 +1143,15 @@ const CodePracticePage: React.FC = () => {
         <Space orientation="vertical" style={{ width: '100%' }}>
           <Text>{t('aiGenerateDesc')}</Text>
           <Space>
-            <Input
-              placeholder={t('aiGenTopicPlaceholder')}
+            {/* 主题即知识点：与「创建题目」用同一个控件（下拉选课程知识点 + 手输），
+                这样出题的口径与课程树一致，后面按知识点统计/复用才对得上 */}
+            <KnowledgePointSelect
+              multiple={false}
+              subject={aiGenSubject}
               value={aiGenTopic}
-              onChange={e => setAiGenTopic(e.target.value)}
+              onChange={(v) => setAiGenTopic(String(v || ''))}
+              placeholder={t('aiGenTopicPlaceholder')}
               style={{ width: 300 }}
-              onPressEnter={handleAiGenerate}
             />
             <Select
               value={aiGenSubject}
