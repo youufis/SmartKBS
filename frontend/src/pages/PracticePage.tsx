@@ -1026,6 +1026,9 @@ const TeacherView: React.FC = () => {
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }), pageSizeOptions: ['5', '10', '20', '50'] }}
             columns={[
               { title: t('title_'), dataIndex: 'title', ellipsis: true },
+              // 科目：建立练习时就选了（practice_sessions.subject），列表以前没展示
+              { title: t('subject'), dataIndex: 'subject', width: 100,
+                render: (v: string) => v || '-' },
               { title: t('publisher'), dataIndex: 'creator_username', width: 88, ellipsis: true },
               {
                 // 与其它活动列表同口径: 目标范围(年级/班级 / 指定N人), 定向名单优先

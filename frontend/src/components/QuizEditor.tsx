@@ -73,6 +73,11 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     }
   }, [open, initialTitle, initialDescription, initialQuestions])
 
+  // 学科默认取第一个（与 AI 建测验弹窗一致）：留空太容易漏填，落库就是空科目
+  useEffect(() => {
+    if (open && !subject && subjects.length > 0) setSubject(subjects[0])
+  }, [open, subjects, subject])
+
   /** 自动模式下的每题分值(合计恒为 100); 手动模式用题目自身的 score */
   const autoScores = useMemo(() => distributeScores(questions.length, 100), [questions.length])
   const effectiveScore = (q: Question, i: number) => (autoScore ? (autoScores[i] ?? 1) : q.score)

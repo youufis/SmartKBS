@@ -414,7 +414,13 @@ const InteractionPage: React.FC = () => {
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setQuizEditorOpen(true)}>
                 {t('createQuiz')}
               </Button>
-              <Button icon={<RobotOutlined />} onClick={() => { setAiQuizModal(true); setAiQuizResult(null); aiQuizForm.resetFields(); }}>
+              <Button icon={<RobotOutlined />} onClick={() => {
+                setAiQuizModal(true); setAiQuizResult(null)
+                aiQuizForm.resetFields()
+                // 学科默认第一个（resetFields 走的是字段注册时的 initialValue，
+                // 若学科清单当时还没加载完就会留空 → 这里显式补一次）
+                aiQuizForm.setFieldValue('subject', subjectOptions[0] || '')
+              }}>
                 AI {t('createQuiz')}
               </Button>
             </Space>

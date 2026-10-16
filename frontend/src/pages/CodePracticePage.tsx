@@ -378,7 +378,10 @@ const CodePracticePage: React.FC = () => {
       message.success(t('createSuccess'))
       setCreateModalOpen(false)
       setCreateForm({
-        title: '', description: '', subject: '', knowledge_points: '',
+        title: '', description: '',
+        // 学科仍默认第一个：以前这里复位成空，建完一题再开弹窗就没科目了
+        subject: subjectOptions[0] || '',
+        knowledge_points: '',
         difficulty: 'medium', language: 'python',
         template_code: '# 在此编写你的代码\n\ndef solution():\n    pass\n',
         starter_code: '', time_limit: 5, test_cases: [],
@@ -505,6 +508,9 @@ const CodePracticePage: React.FC = () => {
           const d = result.data
           setCreateForm(prev => ({
             ...prev,
+            // 学科是老师在 AI 弹窗里选的，AI 结果里不带它 —— 必须自己带进表单，
+            // 否则"AI 生成 → 保存"出来的题目 subject 为空（#2/#4 两条老题即如此）
+            subject: aiGenSubject || prev.subject,
             title: d.title || prev.title,
             description: d.description || prev.description,
             knowledge_points: d.knowledge_points || prev.knowledge_points,
@@ -737,7 +743,14 @@ const CodePracticePage: React.FC = () => {
       if (data?.languages) setSupportedLangs(data.languages)
     }).catch(() => { /* ignore */ })
     apiClient.get('/api/config/subjects').then(({ data }) => {
-      if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
+      if (data?.subjects?.length > 0) {
+        setSubjectOptions(data.subjects)
+        // 学科默认取第一个（与随堂测验 AI 弹窗一致）：默认留空太容易漏填，
+        // 生成出来的题目 subject 就是空的，活动监控/列表的"科目"列只能显示"-"
+        const first = data.subjects[0]
+        setAiGenSubject(prev => prev || first)
+        setCreateForm(prev => ({ ...prev, subject: prev.subject || first }))
+      }
     }).catch(() => {})
     if (isTeacherOrAdmin) {
       apiClient.get('/api/code/teachers/statistics').then(() => {}).catch(() => {})
@@ -808,6 +821,9 @@ const CodePracticePage: React.FC = () => {
                 </Space>
               ),
             },
+            // 科目：创建/AI 生成时选的（code_problems.subject），列表以前没展示
+            { title: t('subject'), dataIndex: 'subject', width: 100,
+              render: (v: string) => v || '-' },
             {
               title: t('gradeClass'),
               key: 'scope',
