@@ -3554,12 +3554,18 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
 
     questions_json = json.dumps(_safe_questions, ensure_ascii=False)
 
+    # 这个答题页模板被两条链路共用，而它们是**两种不同的活动**，署名必须按归属来：
+    #   · 课程练习（/ai-practice/{kp_id}）：不建 practice_sessions、成绩进 ai_practice_results → session_id=0
+    #   · 同步练习（smart-generate / from-bank）：先建 practice_sessions 再出答题页 → session_id>0
+    # 历史上这里固定写"AI 智能练习"，对两条链路都不准确；两种活动各有其名，不互相套用。
+    practice_label = "同步练习" if session_id else "课程练习"
+
     page = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{kp_name} - AI练习</title>
+<title>{kp_name} - {practice_label}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
@@ -3756,7 +3762,7 @@ body {{
         <button class="btn-submit" style="margin-top: 20px; padding: 10px 32px; font-size: 15px;" onclick="location.reload()">🔄 重新答题</button>
     </div>
 
-    <div class="footer">AI 同步练习 · 系统自动批改</div>
+    <div class="footer">AI {practice_label} · 系统自动批改</div>
 </div>
 
 <script>

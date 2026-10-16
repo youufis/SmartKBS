@@ -5,7 +5,7 @@
 ----------
 会往 question_bank 写题的"出题指令"一共 6 处：chat.py 两份（AI 出题 / 出题含配图）、
 practice.py（同步练习·练习页）、teaching.py（课程练习 10 道单选）、quiz.py（随堂测验）、
-curriculum_router 里内联拼的同步练习（课程页）补题。同一套规则各写各的，实测就出现这些**互相矛盾**：
+curriculum_router 里内联拼的同步练习补题。同一套规则各写各的，实测就出现这些**互相矛盾**：
 
 1. 题型清单里写着 code，可这两个出题端点进门就先拒 code（编程题走「代码练习」），
    question_factory 也拒收机器生成的 code 题 —— 模型真给出一道 code 就少一道题；
