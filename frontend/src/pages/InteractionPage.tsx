@@ -273,12 +273,22 @@ const InteractionPage: React.FC = () => {
       setQuizResult(data)
       clearDraft(quizDraftK)                 // A1: 提交成功即清草稿
       setQuizDraftInfo(null)
+      // 交卷后必须就地更新列表：旧实现只 setQuizResult，学生关掉结果弹窗返回后，
+      // 卡片仍是「开始测验」，要手动刷新整页才变成「已完成」。
+      // 先乐观更新（关闭弹窗立刻就是对的），再拉一次服务端（参与人数/批改状态以服务端为准）。
+      setQuizzes((prev: any[]) => prev.map((q) => q.id === takingQuiz.id
+        ? { ...q, answered: true, answer_count: (Number(q.answer_count) || 0) + 1 }
+        : q))
+      void loadQuizzes()
       // S-GRADING(P3): 主观题改由后台批量批改, 提交即刻返回, 成绩稍后自动更新
       if (Number(data?.pending_ai || 0) > 0) message.info(t('ipGradingQueued', { count: data.pending_ai }))
     } catch (err: any) {
       const msg = err.response?.data?.detail || t('submitFailed')
       message.error(msg)
       setQuizSubmitError(msg)
+      // 4xx 多半是"老师刚结束 / 已不再分配给你"：顺手拉一次列表，
+      // 免得关掉弹窗返回后卡片还停在「开始测验」的旧状态（网络错误则不动，避免二次报错）
+      if (err?.response?.status && err.response.status < 500) void loadQuizzes()
     } finally {
       setQuizSubmitting(false)
     }
