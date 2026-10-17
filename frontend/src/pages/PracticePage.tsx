@@ -9,7 +9,7 @@ import {
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
-  FormOutlined, FileTextOutlined, StopOutlined, DeleteOutlined,
+  FormOutlined, FileTextOutlined, DeleteOutlined,
   ThunderboltOutlined, DownloadOutlined, BellOutlined,
   SearchOutlined, EyeOutlined,
 } from '@ant-design/icons'
@@ -624,6 +624,8 @@ const StudentView: React.FC = () => {
                                 </Text>
                               )}
                               <Tag color="processing">{t('submitted')}</Tag>
+                              {/* 已结束的练习仍保留在列表里（只读），别让学生以为白做了 */}
+                              {s.status && s.status !== 'active' && <Tag>{t('endedSuccess')}</Tag>}
                             </Space>
                           : state === 'draft'
                           ? <Space size={6} wrap>
@@ -747,7 +749,8 @@ const TeacherView: React.FC = () => {
     finally { setGenerating(false) }
   }
 
-  const publishSession = async () => {
+  // publish=false → 存为草稿（学生看不到），之后在列表里用「发布」开关放出去
+  const publishSession = async (publish = true) => {
     if (!title.trim()) { message.warning(t('inputTitle')); return }
     setPublishing(true)
     try {
@@ -760,6 +763,7 @@ const TeacherView: React.FC = () => {
         target_class: publishScope.target_class,
         target_users: publishScope.target_users,
         subject,
+        publish,
       })
       message.success(data.message)
       setQuestions([])
@@ -933,6 +937,20 @@ const TeacherView: React.FC = () => {
     } catch (e: any) { message.error(e.response?.data?.detail || t('operationFailed')) }
   }
 
+  // 发布开关：草稿 → 发布；进行中 → 结束（确认后）；已结束 → 重新开启
+  const [statusBusy, setStatusBusy] = useState<number | null>(null)
+  const publishOrReopen = async (r: any) => {
+    setStatusBusy(r.id)
+    try {
+      const action = r.status === 'draft' ? 'publish' : 'reopen'
+      await apiClient.post(`/api/practice/sessions/${r.id}/${action}`)
+      message.success(action === 'publish' ? t('publishedOk') : t('reopenedOk'))
+      await loadSessions()
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || t('updateFailed'))
+    } finally { setStatusBusy(null) }
+  }
+
   const deleteSession = async (sid: number) => {
     try {
       await apiClient.delete(`/api/practice/sessions/${sid}`)
@@ -1012,9 +1030,15 @@ const TeacherView: React.FC = () => {
               <Space orientation="vertical" style={{ width: '100%' }}>
                 <Input placeholder={t('title')} value={title} onChange={e => setTitle(e.target.value)} />
                 <ActivityScopeSelector value={publishScope} onChange={setPublishScope} showAllOption={isAdmin} />
-                <Button type="primary" loading={publishing} onClick={publishSession}>
-                  {t('publishPractice')}
-                </Button>
+                <Space wrap>
+                  <Button type="primary" loading={publishing} onClick={() => publishSession(true)}>
+                    {t('publishPractice')}
+                  </Button>
+                  {/* 存为草稿：先出题、课上再发布（学生此时看不到） */}
+                  <Button loading={publishing} onClick={() => publishSession(false)}>
+                    {t('saveDraft')}
+                  </Button>
+                </Space>
               </Space>
             </Card>
           )}
@@ -1041,7 +1065,9 @@ const TeacherView: React.FC = () => {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <Text strong>{r.title}</Text>
                       <div style={{ marginTop: 4 }}>
-                        {r.status === 'active'
+                        {r.status === 'draft'
+                          ? <Tag>{t('draft')}</Tag>
+                          : r.status === 'active'
                           ? <Tag color="processing">{t('inProgress')}</Tag>
                           : <Tag>{t('endedSuccess')}</Tag>}
                         <Tag color="blue">{r.creator_username}</Tag>
@@ -1057,19 +1083,25 @@ const TeacherView: React.FC = () => {
                     </div>
                     <span onClick={(e) => e.stopPropagation()}>
                       <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+                        {/* 发布开关：开=对学生开放；关=结束（草稿则保持未发布） */}
+                        <Tooltip title={r.status === 'active' ? t('endAction')
+                          : r.status === 'draft' ? t('publishAction') : t('reopenAction')}>
+                          <Switch size="small" checked={r.status === 'active'}
+                            loading={statusBusy === r.id}
+                            onChange={(on) => {
+                              if (on) { void publishOrReopen(r); return }
+                              Modal.confirm({
+                                title: t('endConfirm'), okText: t('endAction'), cancelText: t('cancel'),
+                                okButtonProps: { danger: true },
+                                onOk: () => endSession(r.id),
+                              })
+                            }} />
+                        </Tooltip>
                         <Tooltip title={t('detail')}>
                           <Button size="small" icon={<EyeOutlined />} onClick={() => viewSessionDetail(r.id)} />
                         </Tooltip>
                         <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
-                        {/* 结束 / 导出 / 删除 直接摊成图标显示（不再藏进"更多"菜单），都配 tooltip */}
-                        {r.status === 'active' && (
-                          <Tooltip title={t('endedSuccess')}>
-                            <Button size="small" icon={<StopOutlined />} onClick={() => Modal.confirm({
-                              title: t('endConfirm'), okText: t('endedSuccess'), cancelText: t('cancel'),
-                              onOk: () => endSession(r.id),
-                            })} />
-                          </Tooltip>
-                        )}
+                        {/* 导出 / 删除 直接摊成图标显示（不再藏进"更多"菜单），都配 tooltip */}
                         <Tooltip title={t('exportResult')}>
                           <Button size="small" icon={<DownloadOutlined />}
                             onClick={() => window.open(`/api/export/practice/${r.id}`, '_blank')} />

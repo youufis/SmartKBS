@@ -1,4 +1,11 @@
 {
+  "draft": "Draft",
+  "saveDraft": "Save as draft",
+  "publishAction": "Publish",
+  "reopenAction": "Reopen",
+  "endAction": "End",
+  "publishedOk": "Published",
+  "reopenedOk": "Reopened",
   "title": "Title",
   "syncPractice": "Practice",
   "startPractice": "Start Practice",

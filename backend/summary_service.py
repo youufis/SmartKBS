@@ -282,6 +282,7 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
         cw, cp = _creator_where(ctx)
         conds = ["(source IS NULL OR source != 'wrong_book')",
                  "(target_students IS NULL OR target_students = '')"]
+        conds.append("COALESCE(status, 'active') != 'draft'")   # 草稿还没发布，不进课堂总结
         if cw:
             conds.insert(0, cw)
         acts["practice"] = q_execute_query(
@@ -305,7 +306,9 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
 
     if "quiz" in t:
         cw, cp = _creator_where(ctx)
-        where = f"WHERE {cw}" if cw else ""
+        # 草稿还没发布，不进课堂总结
+        where = f"WHERE {cw} AND COALESCE(status, 'active') != 'draft'" if cw \
+            else "WHERE COALESCE(status, 'active') != 'draft'"
         acts["quiz"] = execute_query_dict(
             f"""SELECT id, title, creator_username, status, questions,
                        IFNULL(target_scope,'') AS target_scope, IFNULL(target_grade,'') AS target_grade,

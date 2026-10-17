@@ -29,7 +29,8 @@ interface QuizEditorProps {
   open: boolean
   onCancel: () => void
   onSave: (title: string, description: string, questions: Question[],
-           scope?: ActivityScopeValue, subject?: string, knowledgePoints?: string[]) => Promise<void>
+           scope?: ActivityScopeValue, subject?: string, knowledgePoints?: string[],
+           publish?: boolean) => Promise<void>
   initialTitle?: string
   initialDescription?: string
   initialQuestions?: Question[]
@@ -148,7 +149,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     }))
   }
 
-  const handleSave = async () => {
+  // publish=false → 存为草稿（学生看不到），回列表里用「发布」开关放出去
+  const handleSave = async (publish = true) => {
     if (!title.trim()) { message.warning(t('enterQuizTitle')); return }
     if (questions.length === 0) { message.warning(t('addAtLeastOneQuestion')); return }
 
@@ -192,7 +194,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     try {
       // 自动模式: 把均摊后的分值显式写进题目(后端据此判定"已配过分值"不再覆盖)
       const payload = questions.map((q, i) => ({ ...q, score: effectiveScore(q, i) }))
-      await onSave(title, description, payload, scope, subject, kps)
+      await onSave(title, description, payload, scope, subject, kps, publish)
     } finally {
       setSaving(false)
     }
@@ -223,7 +225,10 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
       onCancel={onCancel}
       footer={[
         <Button key="cancel" onClick={onCancel}>{t('cancel')}</Button>,
-        <Button key="save" type="primary" loading={saving} onClick={handleSave}>
+        <Button key="draft" loading={saving} onClick={() => handleSave(false)}>
+          {t('saveDraft')}
+        </Button>,
+        <Button key="save" type="primary" loading={saving} onClick={() => handleSave(true)}>
           {t('createQuizCount', { count: questions.length })}
         </Button>,
       ]}

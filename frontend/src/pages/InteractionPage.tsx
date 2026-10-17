@@ -5,7 +5,7 @@ import {
   Card, Tabs, Button, Space, Typography, Tag, Modal,
   Form, Input, InputNumber, Select, message, Empty, Spin, Radio, Result,
   Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination, Tooltip,
-  Alert, Segmented,
+  Alert, Segmented, Switch,
 } from 'antd'
 import {
   ThunderboltOutlined, BarChartOutlined,
@@ -116,6 +116,24 @@ const InteractionPage: React.FC = () => {
       message.success(t('updated')); setEditQuizModal(null); await loadQuizzes()
     } catch { message.error(t('updateFailed')) }
   }
+  // 发布开关：草稿 → 发布；进行中 → 结束（确认后）；已结束 → 重新开启
+  const [quizStatusBusy, setQuizStatusBusy] = useState<number | null>(null)
+  const toggleQuizStatus = async (quiz: any, next: 'active' | 'ended') => {
+    setQuizStatusBusy(quiz.id)
+    try {
+      if (next === 'ended') {
+        await apiClient.post(`/api/interaction/quizzes/${quiz.id}/end`)
+        message.success(t('ipStatusEnded'))
+      } else {
+        const action = quiz.status === 'draft' ? 'publish' : 'reopen'
+        await apiClient.post(`/api/interaction/quizzes/${quiz.id}/${action}`)
+        message.success(action === 'publish' ? t('publishedOk') : t('reopenedOk'))
+      }
+      await loadQuizzes()
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || t('updateFailed'))
+    } finally { setQuizStatusBusy(null) }
+  }
   // ── 加载数据 ──
   const loadQuizzes = async () => {
     setQuizLoading(true)
@@ -174,7 +192,7 @@ const InteractionPage: React.FC = () => {
 
   // ── 创建测验（使用 QuizEditor） ──
   const handleCreateQuiz = async (title: string, description: string, questions: Question[],
-                                  scope?: any, subject?: string, kps?: string[]) => {
+                                  scope?: any, subject?: string, kps?: string[], publish = true) => {
     try {
       const formatted = questions.map(q => ({
         type: q.type,
@@ -194,8 +212,11 @@ const InteractionPage: React.FC = () => {
         target_grade: scope?.target_grade || '',
         target_class: scope?.target_class || '',
         target_users: scope?.target_users || '',
+        publish,
       })
-      message.success(t('quizCreatedWithTitle', { title, count: questions.length }))
+      message.success(publish
+        ? t('quizCreatedWithTitle', { title, count: questions.length })
+        : t('savedAsDraft'))
       setQuizEditorOpen(false)
       await loadQuizzes()
     } catch (err: any) {
@@ -487,9 +508,11 @@ const InteractionPage: React.FC = () => {
                         )}
                         <div style={{ marginTop: 4 }}>
                           <Tag>{t('ipNCount', { count: quiz.questions?.length || 0 })}</Tag>
-                          <Tag color={quiz.status === 'active' ? 'green' : 'default'}>
-                            {quiz.status === 'active' ? t('started') : t('ended')}
-                          </Tag>
+                          {quiz.status === 'draft'
+                            ? <Tag>{t('draft')}</Tag>
+                            : <Tag color={quiz.status === 'active' ? 'green' : 'default'}>
+                                {quiz.status === 'active' ? t('started') : t('ended')}
+                              </Tag>}
                           {/* 学生最关心的是"我答没答"，教师名单里则没这一格 */}
                           {isStudent && (
                             quiz.answered
@@ -512,7 +535,8 @@ const InteractionPage: React.FC = () => {
                           <Button size="small" type="primary" icon={<PlayCircleOutlined />}
                             onClick={(e) => { e.stopPropagation(); void handleStartQuiz(quiz) }}>{t('startQuiz')}</Button>
                         )}
-                        {quiz.status === 'active' && isStudent && quiz.answered && (
+                        {/* 已结束的测验仍留在学生列表里（自己答过），给「结果」入口 */}
+                        {isStudent && quiz.answered && (
                           <Tooltip title={t('results')}>
                             <Button size="small" icon={<BarChartOutlined />}
                               onClick={(e) => { e.stopPropagation(); void handleViewQuizResults(quiz.id) }} />
@@ -520,6 +544,23 @@ const InteractionPage: React.FC = () => {
                         )}
                         {isTeacherOrAdmin && (
                           <>
+                            {/* 发布开关：开=学生可答；关=结束（草稿保持未发布） */}
+                            <Tooltip title={quiz.status === 'active' ? t('endAction')
+                              : quiz.status === 'draft' ? t('publishAction') : t('reopenAction')}>
+                              <Switch size="small" checked={quiz.status === 'active'}
+                                loading={quizStatusBusy === quiz.id}
+                                onClick={(_, e) => e.stopPropagation()}
+                                onChange={(on) => {
+                                  if (on) { void toggleQuizStatus(quiz, 'active'); return }
+                                  Modal.confirm({
+                                    title: t('endQuizConfirm'),
+                                    okText: t('endAction'),
+                                    cancelText: t('cancel'),
+                                    okButtonProps: { danger: true },
+                                    onOk: () => toggleQuizStatus(quiz, 'ended'),
+                                  })
+                                }} />
+                            </Tooltip>
                             {/* 操作按钮只留图标 + tooltip：文字按钮太占地方，整行会被挤长 */}
                             <Tooltip title={t('results')}>
                               <Button size="small" icon={<BarChartOutlined />}
@@ -1141,12 +1182,7 @@ const InteractionPage: React.FC = () => {
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="status" label={t('ipStatus')}>
-            <Select>
-              <Select.Option value="active">{t('ipStatusActive')}</Select.Option>
-              <Select.Option value="closed">{t('ipStatusEnded')}</Select.Option>
-            </Select>
-          </Form.Item>
+          {/* 状态不在这里改：列表上的「发布开关」负责发布/结束/重开，各有前置校验 */}
         </Form>
       </Modal>
 

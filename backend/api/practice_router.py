@@ -77,6 +77,9 @@ class PracticeCreateSession(BaseModel):
     # 统一活动范围体系(与随堂测验/投票/公告一致): teacher_classes|all|grade|class|individual
     target_scope: str = ""
     target_users: str = ""
+    # 立即发布：True(默认)=创建即进行中，与旧行为一致；False=存为草稿，
+    # 之后在列表里用「发布」开关放出去（与考试/随堂测验同一套状态机）
+    publish: bool = True
 
 
 class PracticeSubmitRequest(BaseModel):
@@ -191,8 +194,15 @@ def _session_visible_to_student(sess: dict, username: str, grade: str, cls: str)
 
 def _assert_student_session(sess: dict, username: str) -> None:
     """学生取题/提交前的范围与状态校验"""
-    if (sess.get("status") or "") == "ended":
-        raise HTTPException(status_code=400, detail="该练习已结束，无法继续作答或提交")
+    # 只认 active：草稿/已结束都不许作答（旧写法只拒 ended，加草稿后必须收紧，
+    # 否则学生猜到 id 就能提前看到还没发布的练习）
+    status = (sess.get("status") or "").strip()
+    if status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="该练习已结束，无法继续作答或提交" if status in ("ended", "closed")
+            else "该练习尚未发布",
+        )
     grade, cls = _student_scope(username)
     if not _session_visible_to_student(sess, username, grade, cls):
         raise HTTPException(status_code=403, detail="该练习未分配给你")
@@ -543,15 +553,17 @@ async def create_session(req: PracticeCreateSession, request: Request):
 
     target_students_str = json.dumps(req.target_students, ensure_ascii=False) if req.target_students else ""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 状态：draft=草稿(学生看不到) / active=进行中 / ended=已结束
+    status = "active" if req.publish else "draft"
     session_id = execute_insert(
         """INSERT INTO practice_sessions
            (title, knowledge_points, creator_username, subject, question_count,
             total_score, target_grade, target_class, target_students, status, created_at, updated_at,
             target_scope, target_users)
-           VALUES (?,?,?,?,?,?,?,?,?,'active',?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (req.title.strip(), req.knowledge_points, username, req.subject,
          len(req.question_ids), total, req.target_grade, req.target_class,
-         target_students_str, now, now,
+         target_students_str, status, now, now,
          (req.target_scope or "").strip(), (req.target_users or "").strip()),
     )
 
@@ -561,8 +573,9 @@ async def create_session(req: PracticeCreateSession, request: Request):
             (session_id, qid, i, scores[i]),
         )
 
-    logger.info(f"教师 {username} 创建练习任务 {session_id} → {req.target_grade or '全部年级'} {req.target_class or '全部班级'}")
-    return {"session_id": session_id, "message": "练习任务已发布", "total_score": total}
+    logger.info(f"教师 {username} 创建练习任务 {session_id}({status}) → {req.target_grade or '全部年级'} {req.target_class or '全部班级'}")
+    return {"session_id": session_id, "status": status, "total_score": total,
+            "message": "练习任务已发布" if req.publish else "已存为草稿"}
 
 
 @router.get("/sessions")
@@ -921,7 +934,7 @@ async def delete_session(session_id: int, request: Request):
 
 @router.put("/sessions/{session_id}/end")
 async def end_session(session_id: int, request: Request):
-    """[教师] 结束练习任务（标记为结束，学生不可再提交）"""
+    """[教师] 结束练习任务（学生不可再进入/提交；已提交的成绩与记录保留）"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -937,6 +950,73 @@ async def end_session(session_id: int, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update("UPDATE practice_sessions SET status='ended', updated_at=? WHERE id=?", (now, session_id))
     return {"message": "已结束"}
+
+
+def _practice_question_stats(session_id: int) -> tuple[int, int]:
+    """发布前的硬指标：题目数、分值合计（都不达标不许放给学生）"""
+    row = execute_query_one(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(score), 0) AS total "
+        "FROM practice_session_questions WHERE session_id=?",
+        (session_id,),
+    ) or {}
+    return int(row.get("n") or 0), int(row.get("total") or 0)
+
+
+@router.post("/sessions/{session_id}/publish")
+async def publish_session(session_id: int, request: Request):
+    """[教师] 发布草稿（draft → active）：发布后学生才看得到、才能作答"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
+    if not sess:
+        raise HTTPException(status_code=404, detail="练习不存在")
+    if role != 0 and sess["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="只能发布自己的练习")
+
+    status = (sess.get("status") or "").strip()
+    if status == "active":
+        return {"message": "该练习已在进行中", "status": "active"}
+    if status in ("ended", "closed"):
+        raise HTTPException(status_code=400, detail="已结束的练习请用「重新开启」")
+    n, total = _practice_question_stats(session_id)
+    if n <= 0:
+        raise HTTPException(status_code=400, detail="练习里还没有题目，无法发布")
+    if total <= 0:
+        raise HTTPException(status_code=400, detail="题目分值合计为 0，无法发布")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update("UPDATE practice_sessions SET status='active', updated_at=? WHERE id=?", (now, session_id))
+    logger.info(f"教师 {username} 发布练习 {session_id}（{n} 题 / {total} 分）")
+    return {"message": "已发布", "status": "active"}
+
+
+@router.post("/sessions/{session_id}/reopen")
+async def reopen_session(session_id: int, request: Request):
+    """[教师] 重新开启（ended → active）：已交的答卷与积分都不动"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
+    if not sess:
+        raise HTTPException(status_code=404, detail="练习不存在")
+    if role != 0 and sess["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="只能开启自己的练习")
+
+    status = (sess.get("status") or "").strip()
+    if status == "active":
+        return {"message": "该练习已在进行中", "status": "active"}
+    if status not in ("ended", "closed"):
+        raise HTTPException(status_code=400, detail="只有已结束的练习才能重新开启")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update("UPDATE practice_sessions SET status='active', updated_at=? WHERE id=?", (now, session_id))
+    logger.info(f"教师 {username} 重新开启练习 {session_id}")
+    return {"message": "已重新开启", "status": "active"}
 
 
 @router.post("/sessions/{session_id}/grade-now")
@@ -1111,6 +1191,9 @@ async def list_my_practices(request: Request):
     # P9: 可见性只由 target_* 决定。旧实现额外要求"发布者必须是本班教师或管理员",
     #     导致①任教该课程但未列该班的教师发的年级练习学生永远看不到;
     #     ②系统自动生成的错题巩固练习(creator=system)学生看不到。
+    # 学生可见：进行中的 + **自己已交过的已结束练习**。
+    # 旧写法只放 active，老师一点「结束」，学生连自己交过的记录都看不到了
+    # （加了发布开关后老师会频繁结束，必须把这条补上）。
     rows = execute_query(
         """SELECT ps.*,
                   (SELECT COUNT(*) FROM practice_attempts pa
@@ -1118,7 +1201,14 @@ async def list_my_practices(request: Request):
                   ,(SELECT pa.score FROM practice_attempts pa
                      WHERE pa.session_id = ps.id AND pa.student_username = ?) AS my_score
            FROM practice_sessions ps
-           WHERE ps.status = 'active'
+           WHERE (
+                   ps.status = 'active'
+                   OR (
+                     ps.status IN ('ended', 'closed')
+                     AND EXISTS (SELECT 1 FROM practice_attempts pa2
+                                  WHERE pa2.session_id = ps.id AND pa2.student_username = ?)
+                   )
+                 )
              AND (
                (COALESCE(ps.target_students, '') <> '' AND ps.target_students LIKE ?)
                OR
@@ -1130,8 +1220,8 @@ async def list_my_practices(request: Request):
                    OR ps.target_grade LIKE ?
                  ))
              )
-           ORDER BY ps.created_at DESC""",
-        (username, username, f'%"{username}"%', grade, f"%{grade}%"),
+           ORDER BY CASE WHEN ps.status = 'active' THEN 0 ELSE 1 END, ps.created_at DESC""",
+        (username, username, username, f'%"{username}"%', grade, f"%{grade}%"),
     )
     # 精确判定(班级归一化 + 定向名单成员), SQL 只做粗筛
     visible = [r for r in rows if _session_visible_to_student(r, username, grade, cls)]
@@ -1146,6 +1236,7 @@ async def list_my_practices(request: Request):
             "total_score": s_["total_score"],
             "creator_name": creator_map.get(s_.get("creator_username", ""), {}).get("name") or s_.get("creator_username", ""),
             "source": s_.get("source") or "teacher",
+            "status": (s_.get("status") or "active"),
             "attempted": bool(s_["attempted"]),
             "score": s_.get("my_score"),
             "created_at": s_["created_at"],

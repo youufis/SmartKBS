@@ -1,4 +1,11 @@
 {
+  "draft": "草稿",
+  "saveDraft": "存为草稿",
+  "publishAction": "发布",
+  "reopenAction": "重新开启",
+  "endAction": "结束",
+  "publishedOk": "已发布",
+  "reopenedOk": "已重新开启",
   "title": "标题",
   "syncPractice": "同步练习",
   "startPractice": "开始练习",

@@ -75,6 +75,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
                   'practice' as activity_type
            FROM practice_sessions ps
            WHERE ps.creator_username = ?
+             AND COALESCE(ps.status, 'active') != 'draft'   -- 草稿还没发布，不算一场活动
              AND (ps.source IS NULL OR ps.source != 'wrong_book')
              AND (ps.target_students IS NULL OR ps.target_students = '')
            ORDER BY ps.created_at DESC""",
@@ -141,6 +142,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
                   'quiz' as activity_type
            FROM interaction_quizzes iq
            WHERE iq.creator_username = ?
+             AND COALESCE(iq.status, 'active') != 'draft'   -- 同上：草稿不进活动监控
            ORDER BY iq.created_at DESC""",
         (teacher_username,),
     )

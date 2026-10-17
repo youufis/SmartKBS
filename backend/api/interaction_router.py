@@ -62,6 +62,9 @@ class QuizCreate(BaseModel):
     target_users: str = ""
     # R2(Step B): True=由后端把各题分值折算成合计 100(教师没手工配分值时)
     auto_scores: bool = True
+    # 立即发布：True(默认)=创建即进行中（课堂里出完题就能答）；False=存为草稿，
+    # 之后在列表里用「发布」开关放出去（与考试/同步练习同一套状态机）
+    publish: bool = True
 
 
 class QuizAnswerSubmit(BaseModel):
@@ -468,10 +471,11 @@ class QuizUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
     questions: str | None = None
-    status: str | None = None
     subject: str | None = None      # 学科（老测验可以补上，列表/活动监控随即显示）
     knowledge_points: str | None = None   # 知识点（老测验可以补）
     auto_scores: bool = True
+    # 状态不再走编辑接口：发布/结束/重开各有显式端点，避免绕过"发布前校验"，
+    # 也避免历史上那个 `closed`（与 ended 两套写法并存）再被写进来
 
 
 class PollUpdate(BaseModel):
@@ -552,20 +556,23 @@ async def create_quiz(req: QuizCreate, request: Request):
     questions = normalize_quiz_scores(questions, req.auto_scores)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 状态：draft=草稿(学生看不到) / active=进行中 / ended=已结束
+    status = "active" if req.publish else "draft"
     quiz_id = execute_insert_update(
         """INSERT INTO interaction_quizzes
            (creator_username, title, description, questions, subject, knowledge_points,
             status, created_at, updated_at,
             target_scope, target_grade, target_class, target_users)
-           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (user["username"], req.title, req.description, json.dumps(questions, ensure_ascii=False),
-         (req.subject or "").strip(), (req.knowledge_points or "").strip(), now, now,
+         (req.subject or "").strip(), (req.knowledge_points or "").strip(), status, now, now,
          req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
-    logger.info(f"用户 {user['username']} 创建随堂测验: {req.title} (id={quiz_id})")
+    logger.info(f"用户 {user['username']} 创建随堂测验: {req.title} (id={quiz_id}, {status})")
 
     # ── 异步通知学生（不阻塞创建操作） ──
+    # 草稿不发通知：还没发布就推给学生会让人点进来发现答不了
     async def _notify_quiz():
         try:
             from backend.api.notification_router import notify_users_by_scope
@@ -584,9 +591,11 @@ async def create_quiz(req: QuizCreate, request: Request):
             )
         except Exception as e:
             logger.warning(f"发送随堂测验通知失败: {e}")
-    asyncio.create_task(_notify_quiz())
+    if req.publish:
+        asyncio.create_task(_notify_quiz())
 
-    return {"message": "测验创建成功", "quiz_id": quiz_id, "total_score": _quiz_total(questions)}
+    return {"message": "测验已发布" if req.publish else "已存为草稿",
+            "quiz_id": quiz_id, "status": status, "total_score": _quiz_total(questions)}
 
 
 def _can_manage_quiz(username: str, role: int, quiz_id: int) -> bool:
@@ -613,7 +622,8 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     updates = ["updated_at = ?"]
     params: list[Any] = [now]
-    for field in ("title", "description", "status", "subject", "knowledge_points"):
+    # 状态不在编辑接口里改（发布/结束/重开各有显式端点，带各自的前置校验）
+    for field in ("title", "description", "subject", "knowledge_points"):
         val = getattr(req, field, None)
         if val is not None:
             updates.append(f"{field} = ?")
@@ -637,6 +647,89 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
         tuple(params),
     )
     return {"message": "测验已更新"}
+
+
+def _quiz_question_count(quiz_id: int) -> int:
+    rows = execute_query_dict("SELECT questions FROM interaction_quizzes WHERE id=?", (quiz_id,))
+    if not rows:
+        return 0
+    raw = rows[0].get("questions")
+    try:
+        items = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except (json.JSONDecodeError, TypeError):
+        items = []
+    return len(items) if isinstance(items, list) else 0
+
+
+@router.post("/quizzes/{quiz_id}/publish", summary="发布随堂测验（草稿 → 进行中）")
+async def publish_quiz(quiz_id: int, request: Request):
+    """发布草稿：发布后学生才看得到、才能作答（发布前校验题数与分值）"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    if not _can_manage_quiz(user["username"], role, quiz_id):
+        raise HTTPException(status_code=403, detail="无权发布此测验")
+
+    rows = execute_query_dict("SELECT status, questions FROM interaction_quizzes WHERE id=?", (quiz_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    status = str(rows[0].get("status") or "").strip()
+    if status == "active":
+        return {"message": "该测验已在进行中", "status": "active"}
+    if status in ("ended", "closed"):
+        raise HTTPException(status_code=400, detail="已结束的测验请用「重新开启」")
+    if _quiz_question_count(quiz_id) <= 0:
+        raise HTTPException(status_code=400, detail="测验里还没有题目，无法发布")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE interaction_quizzes SET status='active', updated_at=? WHERE id=?", (now, quiz_id))
+    logger.info(f"教师 {user['username']} 发布随堂测验 {quiz_id}")
+    return {"message": "已发布", "status": "active"}
+
+
+@router.post("/quizzes/{quiz_id}/end", summary="结束随堂测验")
+async def end_quiz(quiz_id: int, request: Request):
+    """结束测验：学生不能再答；已交的答卷与统计保留"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    if not _can_manage_quiz(user["username"], role, quiz_id):
+        raise HTTPException(status_code=403, detail="无权结束此测验")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE interaction_quizzes SET status='ended', updated_at=? WHERE id=?", (now, quiz_id))
+    logger.info(f"教师 {user['username']} 结束随堂测验 {quiz_id}")
+    return {"message": "已结束", "status": "ended"}
+
+
+@router.post("/quizzes/{quiz_id}/reopen", summary="重新开启随堂测验（已结束 → 进行中）")
+async def reopen_quiz(quiz_id: int, request: Request):
+    """重新开启：已交的答卷与积分都不动，未交的学生可以继续作答"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    if not _can_manage_quiz(user["username"], role, quiz_id):
+        raise HTTPException(status_code=403, detail="无权开启此测验")
+
+    rows = execute_query_dict("SELECT status FROM interaction_quizzes WHERE id=?", (quiz_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    status = str(rows[0].get("status") or "").strip()
+    if status == "active":
+        return {"message": "该测验已在进行中", "status": "active"}
+    if status not in ("ended", "closed"):
+        raise HTTPException(status_code=400, detail="只有已结束的测验才能重新开启")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE interaction_quizzes SET status='active', updated_at=? WHERE id=?", (now, quiz_id))
+    logger.info(f"教师 {user['username']} 重新开启随堂测验 {quiz_id}")
+    return {"message": "已重新开启", "status": "active"}
 
 
 @router.delete("/quizzes/{quiz_id}", summary="删除测验")
@@ -840,8 +933,14 @@ async def list_quizzes(
     params: list[Any] = []
 
     if role == 2:
-        # 学生：获取所有活跃测验后按目标范围过滤
-        conditions.append("q.status = 'active'")
+        # 学生：进行中的 + **自己已答过的**（已结束也保留，方便回看自己的结果）。
+        # 旧写法只放 active，老师一结束，学生连自己的答题记录都找不到了。
+        conditions.append(
+            "(q.status = 'active' OR (q.status IN ('ended','closed') AND EXISTS ("
+            "SELECT 1 FROM interaction_quiz_answers a "
+            "WHERE a.quiz_id = q.id AND a.student_username = ?)))"
+        )
+        params.append(username)
     elif role == 1:
         conditions.append("q.creator_username = ?")
         params.append(username)
@@ -870,7 +969,7 @@ async def list_quizzes(
                 FROM interaction_quizzes q
                 JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
                 WHERE {where}
-                ORDER BY q.created_at DESC""",
+                ORDER BY CASE WHEN q.status = 'active' THEN 0 ELSE 1 END, q.created_at DESC""",
             tuple(params),
         )
         rows = []

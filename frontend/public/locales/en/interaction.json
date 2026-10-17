@@ -1,4 +1,13 @@
 {
+  "draft": "Draft",
+  "saveDraft": "Save as draft",
+  "savedAsDraft": "Saved as draft",
+  "publishAction": "Publish",
+  "reopenAction": "Reopen",
+  "endAction": "End",
+  "publishedOk": "Published",
+  "reopenedOk": "Reopened",
+  "endQuizConfirm": "End this quiz? Students can no longer answer (submitted answers and stats are kept)",
   "ipQuizOneShot": "You cannot answer this quiz again after submitting.",
   "kpOptionalHint": "Leave empty for random questions from the selected subject",
   "qqPeoplePercent": "{{v}} people ({{pct}}%)",

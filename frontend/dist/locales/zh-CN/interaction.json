@@ -1,4 +1,13 @@
 {
+  "draft": "草稿",
+  "saveDraft": "存为草稿",
+  "savedAsDraft": "已存为草稿",
+  "publishAction": "发布",
+  "reopenAction": "重新开启",
+  "endAction": "结束",
+  "publishedOk": "已发布",
+  "reopenedOk": "已重新开启",
+  "endQuizConfirm": "结束此测验？学生将无法再作答（已交的答卷与统计保留）",
   "ipQuizOneShot": "提交后不能重复作答。",
   "kpOptionalHint": "留空则不限知识点，按所选学科随机出题",
   "qqPeoplePercent": "{{v}} 人（{{pct}}%）",
