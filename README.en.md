@@ -35,18 +35,22 @@
 
 ---
 
-> 📌 **Highlights of V8.7.0** (2026-10-06 ~ 10-16)
+> 📌 **Highlights of V8.7.0**
 >
-> - 🎯 **New: Class Drill** — pick a grade/class and a knowledge point, draw from the question bank first (optional AI top-up stored for reuse), pick a student fairly, and the student taps an answer on screen; submitting judges and scores it instantly (correct 5 / wrong 2 / skipped 0), looping as long as you like
-> - 🎧 **New: AI Podcast** — one click turns a knowledge point into a **two-host dialogue** audio page (male / female voices, 3 / 4 / 5 minutes), the model only writes the script while the backend renders the player, truncated at the limit; each page carries the transcript and four themes, and students can listen once it is bound to a knowledge point
-> - 🎨 **Whiteboard usability and a rebuilt realtime path** — refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
-> - 🧱 **One door into the question bank** — nine insert paths merged into a single exit (validate → de-duplicate → one transaction → link knowledge points); bank first, AI covers the shortfall, AI questions stored before returning; question counts are real parameters that fail loudly when out of range
-> - 📊 **One results view for exercises, quizzes and exams** — three tabs (Overview / Questions / Roster), per-question accuracy, AI analysis and an absent list; scores normalised to 100 points with papers still being graded excluded from the average and pass rate
-> - 🖼 **"Weekly Portrait" becomes "My Portrait"** — the period switches to monthly in system settings, lifetime identity is separated from this period's performance, generation moved to a background task with a retry-image path, and the image prompt drops name and gender
-> - 🏆 **Hall of Glory without teacher work** — any student with points appears on the wall automatically (0 never does) and points plus ranks re-sync every 60 seconds; ranks are shown only where they flatter, alongside a full-screen wall with six bright themes and a weekly-progress board
-> - 🧑‍🎓 **The whole answering flow is protected for students** — exercises and quizzes keep a per-user local draft, confirm before leaving, accept a partial submit, and gained a question-number strip and a progress bar; the exercise, quiz and exam entry pages gained search, filters and sorting
-> - 🛡 **User management and permissions tightened** — the data-loss bug where editing a name wiped a student's grade and class is fixed, students no longer hit an error on the change-password page, teachers can reset passwords within their classes and search the whole school, and the points API now requires login
-> - 📊 **Consistency and polish** — creators shown consistently by username, grade/class scope tags unified, wide tables no longer scroll sideways, and the dashboard redesigned with motion (respecting the system "reduce motion" setting)
+> - 🎯 **New: Class Drill** — pick a class and a knowledge point, draw from the question bank first (optional AI top-up), pick a student fairly, and the student taps an answer to be judged instantly (correct 5 / wrong 2 / skipped 0)
+> - 🎧 **New: AI Podcast** — one click turns a knowledge point into a two-host dialogue audio page (male / female voices, 3 / 4 / 5 minutes, four themes); the model writes the script, the backend renders the player
+> - 🧩 **One knowledge-point control everywhere** — dropdown of course knowledge points plus free typing, comma-separated and filtered by subject; shared by nine entry points, and a quiz's topic is that knowledge point, now stored
+> - 🗂 **Every activity list is a card list** — exam centre, quizzes, quick polls, buzzer, sync practice, activity monitor and whiteboard, with icon-only actions plus tooltips
+> - 🎨 **Whiteboard rebuilt** — refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
+> - 🧱 **One door into the question bank** — nine insert paths merged into a single exit (validate → de-duplicate → one transaction → link knowledge points); filling is always bank first, AI covers the shortfall, AI questions stored before returning
+> - 📊 **One results view for exercises, quizzes and exams** — three tabs plus per-question accuracy, AI analysis and an absent list; 100-point scores with papers still being graded excluded from the average and pass rate
+> - 🖼 **"Weekly Portrait" becomes "My Portrait"** — period configurable (weekly / monthly); background generation with a retry-image path; no name or gender in the image prompt
+> - 🏆 **Hall of Glory without teacher work** — points appear automatically (0 never does); ranks, a weekly-progress board and a full-screen wall with six themes re-sync every 60 seconds
+> - 🧑‍🎓 **Answering protected end to end** — local drafts, a confirm before leaving, partial submits, a question-number strip and a progress bar; search, filters and sorting on the exercise, quiz and exam entry pages
+> - 🛡 **User management and permissions** — the "editing a name wiped grade and class" data loss is fixed, students no longer hit an error on change-password, and teachers can reset passwords within their classes and search the whole school
+> - 📊 **Consistency** — creators shown by username, grade/class scope tags unified, wide tables no longer scroll sideways, quieter dashboard motion (respecting "reduce motion")
+> - 🧭 **Settings and operations** — one model catalogue behind dropdowns with self-test buttons; uncached entry page; login-page visit statistics
+> - ⚠️ **Breaking changes**: none
 
 ---
 
@@ -1097,44 +1101,46 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.7.0** (2026-10-06 ~ 10-16). Each release lists the changes a user can notice; per-commit detail lives in the git history.
+Current version **8.7.0**. Each release lists the changes a user can notice; per-commit detail lives in the git history.
 
-### v8.7.0 (2026-10-06 ~ 10-16)
+### v8.7.0
 
 - 🎯 **New: Class Drill and AI Podcast** — the drill draws by knowledge point, picks a student fairly and scores the answer on submit; the podcast turns one click into a two-host dialogue audio page (3 / 4 / 5 minutes, four themes)
+- 🧩 **One knowledge-point control everywhere** — dropdown plus free typing (comma-separated, filtered by subject) shared by nine entry points; a quiz's topic is that knowledge point and is now stored; an empty knowledge point means "unlimited" and draws from the subject instead of nothing
+- 🗂 **Every activity list is a card list** — exam centre, quizzes, quick polls, buzzer, sync practice, activity monitor and whiteboard, with icon-only actions plus tooltips
 - 🎨 **Whiteboard usability and a rebuilt realtime path** — refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect; creation follows the platform-wide activity scope
 - 🧱 **One door into the question bank** — nine insert paths merged into one exit, one filling policy (bank first → AI covers the shortfall → stored before returning), question counts that fail loudly when out of range, and generation timeouts that retry across endpoints
 - 📊 **All three results screens completed and aligned** — three tabs (Overview / Questions / Roster) with per-question accuracy, AI analysis and an absent list; 100-point scores with papers still being graded excluded, one implementation each for judging and full-score rules, and four reporting bugs fixed
 - 🖼 **"Weekly Portrait" renamed "My Portrait"** — configurable period (weekly / monthly), background generation with a retry-image path, and no name or gender in the image prompt
-- 🏆 **Hall of Glory without teacher work** — any points appear automatically (0 never does, taken-down cards stay down), teachers switch to Take down / Put back, and ranks, a weekly-progress board and a full-screen wall with six bright themes re-sync every 60 seconds
+- 🏆 **Hall of Glory without teacher work** — any points appear automatically (0 never does, taken-down cards stay down), teachers switch to Take down / Put back, and ranks, a weekly-progress board and a full-screen wall with six themes re-sync every 60 seconds
 - 🧑‍🎓 **Answering protected end to end** — local drafts, a confirm before leaving, partial submits, a question-number strip and a progress bar in exercises and quizzes, plus an in-place retry when a submit fails
-- 🧑‍🎓 **The three student entry pages reworked** (exercise history / quizzes / exam centre) — search, filters and sorting, cards that say not started / in progress / submitted, and an exam centre that reports your real status with a taken / not-taken filter and a deadline column
-- 🛡 **User management and permissions** — the data-loss bug where editing a name wiped a student's grade and class is fixed, the change-password page no longer errors, teachers can reset passwords within their classes and search the whole school, and the points API requires login
+- 🧑‍🎓 **The three student entry pages reworked** (exercise history / quizzes / exam centre) — search, filters and sorting, cards that say not started / in progress / submitted, and an exam centre that reports your real status with a taken / not-taken filter and a deadline
+- 🛡 **User management and permissions** — the "editing a name wiped grade and class" data loss is fixed, the change-password page no longer errors, teachers can reset passwords within their classes and search the whole school, and the points API requires login
 - 📊 **Consistency** — creators shown by username, grade/class scope tags unified, wide tables no longer scrolling sideways, and a redesigned dashboard with a quieter activity feed
 - 🧭 **Settings and operations** — one model catalogue behind dropdowns with self-test buttons and measured size limits, an uncached entry page, and login-page visit statistics
 - 🧪 1000+ regression tests passing in total
 - ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error; the whiteboard, portrait and exam-centre batches need a backend restart; new quizzes spread their points across 100 while existing quizzes and historical answers are untouched
 
-### v8.0 – v8.6 (2026-09-05 ~ 10-05)
+### v8.0 – v8.6
 
-- 🔊 **Speech synthesis and roll-call voice**: a new "Speech synthesis" settings section (master switch / model / voice / speed / volume) listing only the 23 voices measured to produce audio, with zero billing while off; the name is read out behind the reveal animation with polyphonic surnames corrected, and the endpoint checks the class roster and rate-limits per minute
-- 🔒 **Auth and privilege lockdown**: 16 review rounds closed anonymous reads and cross-teacher writes; activities limited to one's own classes, secrets masked, roll-call writes require login and teaching scope
-- ⏱️ **AI calls fully async**: grading left the request thread, submissions became idempotent, long endpoints got their own timeouts, AI generation and figure creation moved to background jobs (with progress and click de-duplication), streaming output fixed with a startup self-check
-- 🧮 **Paper and score semantics**: paper totals became a hard invariant (rebalancing only simulates until confirmed), in-flight answers lock the paper and name the student, three selection engines became one, drag-to-reorder and per-student shuffling finally apply, export rendering fixed, paper header stored per exam
-- 🎯 **Class activity stability**: buzzer advances when everyone answered and restarts safely, quests start instantly with the rest filled in the background, code questions moved to Code Practice
-- 🧮 **Points and data semantics**: nine activity types support "clear participation, keep content" resets (dry run, confirm, rollback, audited) and totals recompute immediately; points anti-farming and honour cleanup
-- 📝 **Teaching main flow**: Tasks became Conversational Homework with per-requirement evidence, formula rendering unified in 23 places, history grouped per session, four-table export
-- 📚 **Knowledge base and analytics**: generation, lesson plans, grading, analytics and whiteboard all retrieve first and degrade gracefully with visible citations; skill injection restricted by scene
-- 📰 **News, dashboard and mobile**: per-feed validation with circuit breaker and backup pool, brief cold start 57.2s → 6.6s, teacher home is task-driven, phone support landed, figure pipeline governed
-- 🔐 **Login, security and operations**: admin login history and three login kill switches, daily request limits moved into the AI chat permissions section, multi-mirror online upgrade and bulk deletion of upgrade history; 🧪 480+ regression tests passing in total
-- ⚠️ **Breaking changes**: roll-call writes require login and teaching scope; quizzes / polls target only one's own classes; Tasks renamed to Conversational Homework (when old papers already contain duplicates, the unique index degrades to a normal index with a log line — no data deleted)
+- 🔊 **Speech synthesis and roll-call voice** — a new "Speech synthesis" settings section (master switch / model / voice / speed / volume) listing only the 23 voices measured to produce audio, zero billing while off; the name is read out behind the reveal animation with polyphonic surnames corrected, and the endpoint checks the roster and rate-limits per minute
+- 🔒 **Auth and privilege lockdown** — 16 review rounds closed anonymous reads and cross-teacher writes; activities limited to one's own classes, secrets masked, roll-call writes require login and teaching scope
+- ⏱️ **AI calls fully async** — grading left the request thread, submissions became idempotent, long endpoints got their own timeouts, AI generation and figure creation moved to background jobs (with progress and click de-duplication), streaming output fixed with a startup self-check
+- 🧮 **Paper and score semantics** — paper totals became a hard invariant (rebalancing only simulates until confirmed), in-flight answers lock the paper and name the student, three selection engines became one, drag-to-reorder and per-student shuffling finally apply, export rendering fixed, paper header stored per exam
+- 🎯 **Class activity stability** — buzzer advances when everyone answered and restarts safely, quests start instantly with the rest filled in the background, code questions moved to Code Practice
+- 🧮 **Points and data semantics** — nine activity types support "clear participation, keep content" resets (dry run, confirm, rollback, audited) and totals recompute immediately; points anti-farming and honour cleanup
+- 📝 **Teaching main flow** — Tasks became Conversational Homework with per-requirement evidence, formula rendering unified in 23 places, history grouped per session, four-table export
+- 📚 **Knowledge base and analytics** — generation, lesson plans, grading, analytics and whiteboard all retrieve first and degrade gracefully with visible citations; skill injection restricted by scene
+- 📰 **News, dashboard and mobile** — per-feed validation with circuit breaker and backup pool, brief cold start 57.2s → 6.6s, teacher home is task-driven, phone support landed, figure pipeline governed
+- 🔐 **Login, security and operations** — admin login history and three login kill switches, daily request limits moved into the AI chat permissions section, multi-mirror online upgrade and bulk deletion of upgrade history; 🧪 480+ regression tests passing in total
+- ⚠️ **Breaking changes** — roll-call writes require login and teaching scope; quizzes / polls target only one's own classes; Tasks renamed to Conversational Homework (when old papers already contain duplicates, the unique index degrades to a normal index with a log line — no data deleted)
 
-### v7.x and earlier (H1 2026)
+### v7.x and earlier
 
-- 🎯 **AI skill system and i18n**: 20 modular skills injected across 40+ routes by scene, whole UI switchable between Chinese and English
-- 🏆 **Hall of Fame and UI unification**: honour wall, 10 gradient themes, container and spacing rules across 70+ pages
-- 📰 **Knowledge and interaction**: daily discovery cards, RSS hot topics and a daily brief, three AI companion personalities, lesson and paper generation, collaborative whiteboard, auto grading
-- 🧱 **Platform rebuild**: subject hardcoding removed for any stage and subject, bulk import and grade promotion, learning analytics and portfolios, paper composition with Word export, full security audit
+- 🎯 **AI skill system and i18n** — 20 modular skills injected across 40+ routes by scene, whole UI switchable between Chinese and English
+- 🏆 **Hall of Fame and UI unification** — honour wall, 10 gradient themes, container and spacing rules across 70+ pages
+- 📰 **Knowledge extension and class interaction** — daily pick cards with RSS headlines and a daily brief, three AI companion personas, AI-assisted lesson and paper creation, collaborative whiteboard, automatic exercise grading
+- 🧱 **Platform rework** — subject hard-coding removed so any grade and subject works, bulk import and grade promotion, analytics and growth portfolio, paper composition with Word export, full security audit
 
 ---
 
