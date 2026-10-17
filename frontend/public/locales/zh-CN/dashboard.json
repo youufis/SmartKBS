@@ -140,6 +140,9 @@
       "course": "课程练习"
     },
       "assignedAt": "布置于",
+      "scopeLabel": "统计范围",
+      "scopeAllClasses": "全部班级",
+      "scopeAllSchool": "全校学生",
       "status": {
         "available": "可作答",
       "draft": "草稿",

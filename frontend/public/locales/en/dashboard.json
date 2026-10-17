@@ -140,6 +140,9 @@
       "course": "Course"
     },
       "assignedAt": "Assigned",
+      "scopeLabel": "Scope",
+      "scopeAllClasses": "All classes",
+      "scopeAllSchool": "All students",
       "status": {
         "available": "Available",
       "draft": "Draft",

@@ -677,7 +677,8 @@ async def list_teacher_activities(
     # ── 统一完成口径（只有选了班级才给分母）──
     # 分子必须与「完成情况」详情同一个函数算出来，否则列表和详情必然对不上；
     # 名册走 get_students_in_scope：教师只取本人任教班级，管理员可取任意班级。
-    if grade_id and class_id:
+    # 只选年级也统计（= 该年级全部班级）；两个都不选就不给分母。
+    if grade_id or class_id:
         roster = get_students_in_scope(username, grade_id=grade_id, class_id=class_id)
         total_students = len(roster)
         for act in page_items:

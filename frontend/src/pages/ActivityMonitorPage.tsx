@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Card, Table, Select, Input, Tag, Space, Typography, Row, Col,
-  Statistic, message, Button, Radio, Empty, Spin, Tabs, Tooltip, Pagination,
+  Statistic, message, Button, Radio, Empty, Spin, Tabs, Tooltip, Pagination, Modal,
 } from 'antd';
 import {
   ReloadOutlined, FileTextOutlined,
@@ -159,7 +159,9 @@ const ActivityMonitorPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [activityType, keyword, page, pageSize, refreshKey, selectedGradeId, selectedClassId]);
 
-  // ── 加载活动完成数据（仅当活动+年级+班级都选定时才请求）──
+  // ── 加载活动完成数据 ──
+  // 只选年级、或什么都不选（= 本人任教范围内全部班级）也能看：
+  // 后端 get_students_in_scope 本来就支持"不传班级"（教师=本人任教范围，管理员=全校）。
   const loadStatusData = async (
     activity: ActivityItem,
     gradeId?: number,
@@ -168,7 +170,6 @@ const ActivityMonitorPage: React.FC = () => {
     p: number = 1,
     kw?: string
   ) => {
-    if (!gradeId || !classId) return;
     setStatusLoading(true);
     try {
       const res = await activityMonitorApi.getActivityStatus(
@@ -185,16 +186,13 @@ const ActivityMonitorPage: React.FC = () => {
     }
   };
 
-  // ── 选择活动：仅记录选中项，不自动请求（等待年级+班级）──
+  // ── 选择活动：按当前的年级/班级范围直接出结果（都不选就是全部班级）──
   const handleViewStatus = (activity: ActivityItem) => {
     setSelectedActivity(activity);
     setStatusDetail(null);
     setStatusPage(1);
     setStatusFilter('all');
-    // 如果年级和班级已选定，直接加载
-    if (selectedGradeId && selectedClassId) {
-      loadStatusData(activity, selectedGradeId, selectedClassId);
-    }
+    loadStatusData(activity, selectedGradeId, selectedClassId);
   };
 
   // ── 切换年级 ──
@@ -203,6 +201,8 @@ const ActivityMonitorPage: React.FC = () => {
     setSelectedClassId(undefined);
     setStatusDetail(null);
     setPage(1);          // 换范围后列表的完成口径也变了，回到第 1 页
+    // 已经打开了某个活动的完成情况时，跟着换范围重新统计
+    if (selectedActivity) loadStatusData(selectedActivity, gradeId, undefined);
   };
 
   // ── 切换班级 ──
@@ -210,9 +210,7 @@ const ActivityMonitorPage: React.FC = () => {
     setSelectedClassId(classId);
     setStatusDetail(null);
     setPage(1);
-    if (selectedActivity && selectedGradeId && classId) {
-      loadStatusData(selectedActivity, selectedGradeId, classId);
-    }
+    if (selectedActivity) loadStatusData(selectedActivity, selectedGradeId, classId);
   };
 
 
@@ -222,10 +220,10 @@ const ActivityMonitorPage: React.FC = () => {
     if (!selectedActivity) return;
     setStatusFilter(newFilter);
     setStatusPage(1);
-    if (selectedGradeId && selectedClassId) {
-      loadStatusData(selectedActivity, selectedGradeId, selectedClassId, newFilter, 1);
-    }
+    loadStatusData(selectedActivity, selectedGradeId, selectedClassId, newFilter, 1);
   };
+
+  const closeStatus = () => { setSelectedActivity(null); setStatusDetail(null); };
 
   // ── 活动列表列定义 ──
 
@@ -304,6 +302,14 @@ const ActivityMonitorPage: React.FC = () => {
         label: c.display_name,
       }))
     : [];
+
+  // 完成情况当前的统计范围：班级 → 年级 → 全部（教师=本人任教范围，管理员=全校）
+  const scopeGradeName = gradeClasses.find(g => g.grade_id === selectedGradeId)?.grade_name || '';
+  const scopeClassName = classOptions.find(c => c.value === selectedClassId)?.label || '';
+  const scopeText = scopeClassName || scopeGradeName
+    || (user?.role === 'admin'
+      ? t('activityMonitor.scopeAllSchool')
+      : t('activityMonitor.scopeAllClasses'));
 
   if (!isTeacherOrAdmin) {
     return (
@@ -450,31 +456,27 @@ const ActivityMonitorPage: React.FC = () => {
         )}
       </Card>
 
-      {/* ── 活动完成详情 ── */}
+      {/* ── 活动完成详情：弹窗展示（原来排在整张列表下面，点完还得往下滚） ── */}
       {selectedActivity && (
-        <Card
+        <Modal
+          maskClosable={false}
+          open={!!selectedActivity}
+          onCancel={closeStatus}
+          footer={<Button onClick={closeStatus}>{t('activityMonitor.close')}</Button>}
+          width="min(980px, 94vw)"
+          styles={{ body: { maxHeight: '70vh', overflowY: 'auto', paddingTop: 8 } }}
           title={
             <Space>
               <span>{t('activityMonitor.completionDetail')}{selectedActivity.title}</span>
               <Tag color={ACTIVITY_TYPE_COLORS[selectedActivity.activity_type]}>
                 {getActivityTypeOptions(t).find(o => o.value === selectedActivity.activity_type)?.label}
               </Tag>
+              {/* 范围说清楚：不选年级/班级时统计的是"全部班级"，别让人误以为是某个班 */}
+              <Tag>{t('activityMonitor.scopeLabel')}：{scopeText}</Tag>
             </Space>
           }
-          size="small"
-          extra={
-            <Button size="small" onClick={() => { setSelectedActivity(null); setStatusDetail(null); }}>
-              {t('activityMonitor.close')}
-            </Button>
-          }
         >
-          {!selectedGradeId || !selectedClassId ? (
-            /* ── 未选定年级/班级时提示 ── */
-            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-tertiary)' }}>
-              <BarChartOutlined style={{ fontSize: 48, marginBottom: 16 }} />
-              <div>{t('activityMonitor.selectHint')}</div>
-            </div>
-          ) : statusLoading ? (
+          {statusLoading ? (
             /* ── 加载中 ── */
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <Spin />
@@ -483,21 +485,21 @@ const ActivityMonitorPage: React.FC = () => {
           ) : statusDetail ? (
             /* ── 有数据时 ── */
             <>
-              {/* 统计概览 */}
-              <Row gutter={24} style={{ marginBottom: 16 }}>
-                <Col span={4}>
+              {/* 统计概览：窄屏两列，宽屏五列一行（弹窗里不再挤成一条） */}
+              <Row gutter={[24, 12]} style={{ marginBottom: 16 }}>
+                <Col xs={12} sm={8} md={4}>
                   <Statistic title={t('activityMonitor.stats.totalStudents')} value={statusDetail.statistics.total_students} suffix={t('activityMonitor.stats.personSuffix')} />
                 </Col>
-                <Col span={4}>
+                <Col xs={12} sm={8} md={4}>
                   <Statistic title={t('activityMonitor.stats.completed')} value={statusDetail.statistics.completed_count} suffix={t('activityMonitor.stats.personSuffix')} styles={{ content: { color: '#52c41a' } }} />
                 </Col>
-                <Col span={4}>
+                <Col xs={12} sm={8} md={4}>
                   <Statistic title={t('activityMonitor.stats.incomplete')} value={statusDetail.statistics.incomplete_count} suffix={t('activityMonitor.stats.personSuffix')} styles={{ content: { color: '#f5222d' } }} />
                 </Col>
-                <Col span={4}>
+                <Col xs={12} sm={8} md={4}>
                   <Statistic title={t('activityMonitor.stats.completionRate')} value={statusDetail.statistics.completion_rate} suffix="%" precision={1} />
                 </Col>
-                <Col span={4}>
+                <Col xs={12} sm={8} md={4}>
                   {/* 满分跟着活动走：随堂测验的老卷满分等于题数，"平均分 2.0"不写满分没人看得懂 */}
                   <Statistic title={t('activityMonitor.stats.avgScore')} value={statusDetail.statistics.avg_score} precision={1}
                     suffix={statusDetail.activity.total_score ? `/ ${statusDetail.activity.total_score}` : undefined} />
@@ -505,7 +507,7 @@ const ActivityMonitorPage: React.FC = () => {
               </Row>
 
               {/* 状态筛选 */}
-              <Space style={{ marginBottom: 12 }}>
+              <Space style={{ marginBottom: 12 }} wrap>
                 <Text strong>{t('activityMonitor.filter')}</Text>
                 <Radio.Group
                   value={statusFilter}
@@ -523,7 +525,7 @@ const ActivityMonitorPage: React.FC = () => {
                   onChange={(e) => {
                     const v = e.target.value
                     setStudentKeyword(v)
-                    if (selectedActivity && selectedGradeId && selectedClassId) {
+                    if (selectedActivity) {
                       loadStatusData(selectedActivity, selectedGradeId, selectedClassId, statusFilter, 1, v)
                     }
                   }} />
@@ -543,7 +545,7 @@ const ActivityMonitorPage: React.FC = () => {
                   showTotal: (total) => t('activityMonitor.pagination.totalStudents', { count: total }),
                   onChange: (p) => {
                     setStatusPage(p);
-                    if (selectedActivity && selectedGradeId && selectedClassId) {
+                    if (selectedActivity) {
                       loadStatusData(selectedActivity, selectedGradeId, selectedClassId, statusFilter, p);
                     }
                   },
@@ -551,7 +553,7 @@ const ActivityMonitorPage: React.FC = () => {
               />
             </>
           ) : null}
-        </Card>
+        </Modal>
       )}
         </>),
         },
