@@ -67,6 +67,7 @@ const getStatusLabels = (t: (key: string) => string): Record<string, string> => 
   published: t('activityMonitor.status.published'),
   ended: t('activityMonitor.status.ended'),
   active: t('activityMonitor.status.active'),
+  available: t('activityMonitor.status.available'),
   inactive: t('activityMonitor.status.inactive'),
   waiting: t('activityMonitor.status.waiting'),
   playing: t('activityMonitor.status.playing'),
@@ -79,6 +80,7 @@ const STATUS_COLORS: Record<string, string> = {
   published: 'green',
   ended: 'red',
   active: 'processing',
+  available: 'green',
   inactive: 'default',
   waiting: 'orange',
   playing: 'green',
@@ -136,6 +138,9 @@ const ActivityMonitorPage: React.FC = () => {
           keyword: keyword || undefined,
           page,
           page_size: pageSize,
+          // 选了班级就让列表也按这个班统计（显示 已完成 X/Y）；没选则只显示"已提交 N"
+          grade_id: selectedGradeId,
+          class_id: selectedClassId,
         });
         if (!cancelled) {
           setActivities(res.activities);
@@ -152,7 +157,7 @@ const ActivityMonitorPage: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [activityType, keyword, page, pageSize, refreshKey]);
+  }, [activityType, keyword, page, pageSize, refreshKey, selectedGradeId, selectedClassId]);
 
   // ── 加载活动完成数据（仅当活动+年级+班级都选定时才请求）──
   const loadStatusData = async (
@@ -197,12 +202,14 @@ const ActivityMonitorPage: React.FC = () => {
     setSelectedGradeId(gradeId);
     setSelectedClassId(undefined);
     setStatusDetail(null);
+    setPage(1);          // 换范围后列表的完成口径也变了，回到第 1 页
   };
 
   // ── 切换班级 ──
   const handleClassChange = (classId: number | undefined) => {
     setSelectedClassId(classId);
     setStatusDetail(null);
+    setPage(1);
     if (selectedActivity && selectedGradeId && classId) {
       loadStatusData(selectedActivity, selectedGradeId, classId);
     }
@@ -400,8 +407,19 @@ const ActivityMonitorPage: React.FC = () => {
                           {getStatusLabels(t)[record.status] || record.status}
                         </Tag>
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          {t('activityMonitor.columns.submitted')} {record.submitted_count ?? 0}
-                          {' · '}{record.created_at ? String(record.created_at).slice(0, 16) : '-'}
+                          {/* 选了班级才给分母（与「完成情况」同一个后端函数算出来），
+                              没选班级只显示"已提交 N"，不造一个看不出真假的完成率 */}
+                          {record.student_count
+                            ? <>
+                                {t('activityMonitor.completed')} {record.submitted_count ?? 0}/{record.student_count}
+                                {typeof record.completion_rate === 'number' ? `（${record.completion_rate}%）` : ''}
+                                {' · '}{t('activityMonitor.incomplete')} {record.incomplete_count ?? 0}
+                              </>
+                            : <>{t('activityMonitor.columns.submitted')} {record.submitted_count ?? 0}</>}
+                          {' · '}
+                          {/* 课程练习显示"布置于"（绑定时间）；其它活动显示创建时间 */}
+                          {record.activity_type === 'course' && t('activityMonitor.assignedAt') + ' '}
+                          {record.created_at ? String(record.created_at).slice(0, 16) : '-'}
                         </Text>
                       </div>
                     </div>
@@ -410,8 +428,14 @@ const ActivityMonitorPage: React.FC = () => {
                         <Button type="primary" size="small" icon={<BarChartOutlined />}
                           onClick={() => handleViewStatus(record)} />
                       </Tooltip>
-                      <ResetActivityButton activityType={record.activity_type} activityId={record.id}
-                        activityTitle={record.title} iconOnly onSuccess={handleRefresh} />
+                      {/* 课程练习没有 creator 列：只有资源属主或管理员能重置（后端同样校验，
+                          这里先藏起来，避免老师点了才吃 403） */}
+                      {(record.activity_type !== 'course'
+                        || user?.role === 'admin'
+                        || record.creator_username === user?.username) && (
+                        <ResetActivityButton activityType={record.activity_type} activityId={record.id}
+                          activityTitle={record.title} iconOnly onSuccess={handleRefresh} />
+                      )}
                     </Space>
                   </div>
                 </Card>

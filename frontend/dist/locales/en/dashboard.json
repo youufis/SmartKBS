@@ -139,7 +139,9 @@
       "poll": "Poll",
       "course": "Course"
     },
-    "status": {
+      "assignedAt": "Assigned",
+      "status": {
+        "available": "Available",
       "draft": "Draft",
       "published": "Published",
       "ended": "Ended",

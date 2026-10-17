@@ -11,6 +11,12 @@ export interface ActivityItem {
   status: string;
   activity_type: ActivityType;
   submitted_count: number;
+  /** 选了班级时返回的分母（该班学生数）；未选班级为 undefined/0 */
+  student_count?: number;
+  /** 未完成人数（= student_count - submitted_count），仅在选了班级时返回 */
+  incomplete_count?: number;
+  /** 完成率百分比（0-100，一位小数），仅在选了班级时返回 */
+  completion_rate?: number;
   total_score: number;
   pass_score: number;
   duration: number;
@@ -96,6 +102,9 @@ export async function listActivities(params?: {
   keyword?: string;
   page?: number;
   page_size?: number;
+  /** 按班级统计完成情况（可选）：传了才会在列表上显示 已完成 X/Y */
+  grade_id?: number;
+  class_id?: number;
 }): Promise<ActivityListResponse> {
   const { data } = await apiClient.get('/api/activity-monitor/activities', { params });
   return data;

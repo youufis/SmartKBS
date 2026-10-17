@@ -191,12 +191,13 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         (teacher_username,),
     )
     for d in disc_rows:
-        # 讨论完成 = 有成员加入（至少参与了讨论）
+        # 讨论完成 = 至少发过一条言（与完成详情同一口径；旧口径"加入小组"会把
+        # 点进去又没说话的学生也算完成，完成率虚高）
         sub = db_query_dict(
-            """SELECT COUNT(DISTINCT dm.username) as cnt
+            """SELECT COUNT(DISTINCT m.username) as cnt
                FROM discussion_groups dg
-               JOIN discussion_members dm ON dm.group_id = dg.id
-               WHERE dg.discussion_id = ?""",
+               JOIN discussion_messages m ON m.group_id = dg.id
+               WHERE dg.discussion_id = ? AND m.username IS NOT NULL AND m.username <> ''""",
             (d["id"],),
         )
         d["submitted_count"] = sub[0]["cnt"] if sub else 0
@@ -221,7 +222,9 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         """SELECT cb.id as binding_id, cb.knowledge_point_id,
                   kp.name as kp_name, c.name as course_name, c.id as course_id,
                   c.subject, c.status as course_status, c.grade as course_grade,
-                  c.created_at, c.updated_at,
+                  -- 时间取"绑定/布置时间"，不再用课程创建时间（那是整门课的建课时间，
+                  -- 与这份练习何时布置给班级无关，实测会出现标题 06-17、卡片 05-30）
+                  cb.created_at as binding_at, c.updated_at,
                   COALESCE(sr.file_path, '') as fp, COALESCE(sr.file_name, '') as fn,
                   sr.owner_username
            FROM curriculum_bindings cb
@@ -240,7 +243,8 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
             continue
 
         course_grade = (b.get("course_grade") or "").strip()
-        # 管理员：显示全部课程练习；教师：仅显示自己共享的 + 匹配任教年级的课程
+        # 管理员：显示全部课程练习；教师：只看**自己共享**的练习，且课程年级必须在
+        # 本人任教范围内（权限口径与重置接口 _authorize 一致，不多看一眼别人的活动）
         if not is_admin(teacher_username):
             if b.get("owner_username") != teacher_username:
                 continue
@@ -276,8 +280,9 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
             "title": practice_name,
             "creator_name": _owner_name,
             "creator_username": owner or teacher_username,
-            "status": b["course_status"],
-            "created_at": b["created_at"],
+            # 课程练习没有开始/结束概念：只表达"课程在启用中 → 可作答 / 课程已停用"
+            "status": "available" if (b.get("course_status") or "") == "active" else "inactive",
+            "created_at": b.get("binding_at") or b.get("updated_at") or "",
             "updated_at": b["updated_at"],
             "subject": b.get("subject", "") or "",
             "total_score": 0,
@@ -285,7 +290,8 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
             "duration": 0,
             "activity_type": "course",
             "submitted_count": done_count[0]["cnt"] if done_count else 0,
-            "target_scope": "",
+            # 课程练习的可用范围 = 课程年级（全部班级），显式标成 grade 让范围标签说清楚
+            "target_scope": "grade" if course_grade else "",
             "target_grade": course_grade,
             "target_class": "",
         })
@@ -333,14 +339,19 @@ def _get_students_with_completion(
     grade_id: Optional[int] = None,
     class_id: Optional[int] = None,
     teacher_username: str = "",
+    all_students: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     获取某活动的已完成和未完成学生列表
     返回: (completed_students, incomplete_students)
+
+    all_students：调用方（活动列表）已经查过同一份名册时传进来，避免一页 20 条活动
+    重复查 20 次名册；不传则按 grade_id/class_id 现查。
     """
-    all_students = get_students_in_scope(
-        teacher_username, grade_id=grade_id, class_id=class_id  # type: ignore[arg-type]
-    )
+    if all_students is None:
+        all_students = get_students_in_scope(
+            teacher_username, grade_id=grade_id, class_id=class_id  # type: ignore[arg-type]
+        )
     if not all_students:
         return [], []
 
@@ -507,11 +518,14 @@ def _get_students_with_completion(
             }
 
     elif activity_type == "discussion":
+        # 完成 = 至少发过一条言。旧口径是"加入小组就算"，学生点进小组什么都不做
+        # 也算完成，完成率会虚高；这里改成看 discussion_messages 里的真实发言。
         rows = db_query_dict(
-            """SELECT dm.username, dm.joined_at as submitted_at
+            """SELECT m.username, MIN(m.created_at) as submitted_at
                FROM discussion_groups dg
-               JOIN discussion_members dm ON dm.group_id = dg.id
-               WHERE dg.discussion_id=?""",
+               JOIN discussion_messages m ON m.group_id = dg.id
+               WHERE dg.discussion_id=? AND m.username IS NOT NULL AND m.username <> ''
+               GROUP BY m.username""",
             (activity_id,),
         )
         for a in rows:
@@ -541,7 +555,8 @@ def _get_students_with_completion(
         if bind_rows:
             kp_id = bind_rows[0]["knowledge_point_id"]
             done_rows = qdb_query(
-                "SELECT DISTINCT student_username, accuracy as score FROM ai_practice_results WHERE kp_id=?",
+                "SELECT DISTINCT student_username, accuracy as score, submitted_at "
+                "FROM ai_practice_results WHERE kp_id=?",
                 (kp_id,),
             )
             for a in done_rows:
@@ -555,7 +570,8 @@ def _get_students_with_completion(
                     "class_name": student_map[uname].get("class", ""),
                     "score": round(a.get("score", 0) or 0, 1),
                     "total_score": 100,
-                    "submitted_at": "",
+                    # 之前这里写死空串，名册里的"完成时间"永远是空的（列本身有值，白丢）
+                    "submitted_at": a.get("submitted_at") or "",
                     "status": "completed",
                 }
 
@@ -613,6 +629,8 @@ async def list_teacher_activities(
     keyword: str = Query("", description="搜索活动名称关键词"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    grade_id: Optional[int] = Query(None, description="按班级统计完成情况时的年级ID"),
+    class_id: Optional[int] = Query(None, description="按班级统计完成情况时的班级ID"),
 ):
     """获取教师创建的所有活动列表"""
     user = get_current_user(request)
@@ -656,6 +674,29 @@ async def list_teacher_activities(
     offset = (page - 1) * page_size
     page_items = all_activities[offset:offset + page_size]
 
+    # ── 统一完成口径（只有选了班级才给分母）──
+    # 分子必须与「完成情况」详情同一个函数算出来，否则列表和详情必然对不上；
+    # 名册走 get_students_in_scope：教师只取本人任教班级，管理员可取任意班级。
+    if grade_id and class_id:
+        roster = get_students_in_scope(username, grade_id=grade_id, class_id=class_id)
+        total_students = len(roster)
+        for act in page_items:
+            try:
+                done, _ = _get_students_with_completion(
+                    act["activity_type"], act["id"],
+                    grade_id=grade_id, class_id=class_id,
+                    teacher_username=username, all_students=roster,
+                )
+                completed_n = len(done)
+            except Exception as e:      # 单个活动统计失败不该让整页打不开
+                logger.warning(f"[活动监控] {act.get('activity_type')}#{act.get('id')} 完成统计失败: {e}")
+                completed_n = int(act.get("submitted_count") or 0)
+            act["student_count"] = total_students
+            act["submitted_count"] = completed_n
+            act["incomplete_count"] = max(total_students - completed_n, 0)
+            act["completion_rate"] = (round(completed_n * 100.0 / total_students, 1)
+                                      if total_students else 0.0)
+
     return {
         "activities": page_items,
         "total": total,
@@ -692,18 +733,24 @@ def _lookup_activity(activity_type: str, activity_id: int, username: str):
     elif activity_type in db_types:
         table = _DB_TABLES[activity_type]
         if activity_type == "course":
-            # 课程练习按 binding_id 查询，与活动列表保持一致
+            # 课程练习按 binding_id 查询，与活动列表保持一致；
+            # 带上资源属主，供权限判断（教师只能看自己共享的练习，与列表/重置同口径）
             rows = db_query_dict(
                 """SELECT cb.id, cb.knowledge_point_id, kp.name as kp_name,
                           c.name as title, c.status, c.subject, c.created_at,
+                          COALESCE(sr.owner_username, '') as owner_username,
                           0 as total_score, 0 as pass_score
                    FROM curriculum_bindings cb
                    JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
                    JOIN chapters ch ON kp.chapter_id = ch.id
                    JOIN courses c ON ch.course_id = c.id
+                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
                    WHERE cb.id=?""",
                 (activity_id,),
             )
+            if rows and not is_admin(username) and (rows[0].get("owner_username") or "") != username:
+                # 别人共享的练习：详情一律按"不存在"处理，避免绕过列表直接查
+                return None, "db"
         else:
             rows = db_query_dict(f"SELECT * FROM {table} WHERE id=? AND creator_username=?", (activity_id, username))
             if not rows and is_admin(username):

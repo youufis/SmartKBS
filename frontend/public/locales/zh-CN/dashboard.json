@@ -139,7 +139,9 @@
       "poll": "快速投票",
       "course": "课程练习"
     },
-    "status": {
+      "assignedAt": "布置于",
+      "status": {
+        "available": "可作答",
       "draft": "草稿",
       "published": "已发布",
       "ended": "已结束",
