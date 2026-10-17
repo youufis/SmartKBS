@@ -76,6 +76,11 @@ export interface ActivityStatusDetail {
     pass_score: number;
     subject: string;
     created_at: string;
+    /** 活动自身的对象范围（用于显示"统计范围"；应完成人数按此收窄） */
+    target_scope?: string;
+    target_grade?: string;
+    target_class?: string;
+    target_users?: string;
   };
   students: StudentStatus[];
   statistics: ActivityStatistics;

@@ -143,6 +143,8 @@
       "scopeLabel": "统计范围",
       "scopeAllClasses": "全部班级",
       "scopeAllSchool": "全校学生",
+      "scopeTeacherClasses": "任教班级",
+      "scopeIndividuals": "指定学生 {{count}} 人",
       "status": {
         "available": "可作答",
       "draft": "草稿",

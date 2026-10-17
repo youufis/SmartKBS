@@ -143,6 +143,8 @@
       "scopeLabel": "Scope",
       "scopeAllClasses": "All classes",
       "scopeAllSchool": "All students",
+      "scopeTeacherClasses": "Teaching classes",
+      "scopeIndividuals": "{{count}} selected students",
       "status": {
         "available": "Available",
       "draft": "Draft",

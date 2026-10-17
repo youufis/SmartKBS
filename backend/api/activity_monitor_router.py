@@ -3,6 +3,8 @@
 教师查看各种活动（考试、练习、任务、测验等）的完成情况
 支持按活动名称、年级、班级筛选已完成/未完成学生及简要成绩
 """
+import json
+import re
 from typing import Optional, Dict, List, Any, Tuple
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -51,7 +53,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     exams = qdb_query(
         """SELECT e.id, e.title, e.status, e.created_at, e.updated_at,
                   e.total_score, e.pass_score, e.duration, e.subject,
-                  e.target_scope, e.target_grade, e.target_class,
+                  e.target_scope, e.target_grade, e.target_class, e.target_users,
                   'exam' as activity_type
            FROM exams e
            WHERE e.creator_username = ?
@@ -72,6 +74,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         """SELECT ps.id, ps.title, ps.status, ps.created_at, ps.updated_at,
                   COALESCE(ps.total_score,0) as total_score,
                   ps.subject, ps.target_grade, ps.target_class, ps.source,
+                  ps.target_scope, ps.target_users, ps.target_students,
                   'practice' as activity_type
            FROM practice_sessions ps
            WHERE ps.creator_username = ?
@@ -117,7 +120,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         """SELECT t.id, t.name as title, t.status, t.created_at, t.updated_at,
                   COALESCE(t.subject, '') as subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
-                  t.target_scope, t.target_grade, t.target_class,
+                  t.target_scope, t.target_grade, t.target_class, t.target_users,
                   'task' as activity_type
            FROM tasks t
            WHERE t.creator_username = ?
@@ -138,7 +141,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
                   iq.questions,
                   COALESCE(iq.subject, '') as subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
-                  iq.target_scope, iq.target_grade, iq.target_class,
+                  iq.target_scope, iq.target_grade, iq.target_class, iq.target_users,
                   'quiz' as activity_type
            FROM interaction_quizzes iq
            WHERE iq.creator_username = ?
@@ -163,7 +166,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     code_rows = qdb_query(
         """SELECT cp.id, cp.title, cp.status, cp.created_at, cp.updated_at,
                   cp.subject, 0 as total_score, 0 as pass_score, 0 as duration,
-                  cp.target_scope, cp.target_grade, cp.target_class,
+                  cp.target_scope, cp.target_grade, cp.target_class, cp.target_users,
                   'code' as activity_type
            FROM code_problems cp
            WHERE cp.creator_username = ?
@@ -301,7 +304,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         """SELECT p.id, p.question as title, p.status, p.created_at, p.created_at as updated_at,
                   COALESCE(p.subject, '') as subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
-                  p.target_scope, p.target_grade, p.target_class,
+                  p.target_scope, p.target_grade, p.target_class, p.target_users,
                   'poll' as activity_type
            FROM interaction_polls p
            WHERE p.creator_username = ?
@@ -332,6 +335,85 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
 # ═══════════════════════════════════════════════════════════
 # 辅助：获取学生完成情况
 # ═══════════════════════════════════════════════════════════
+
+def _split_targets(value: Any) -> List[str]:
+    """target_users / target_grade / target_class 都是逗号串（可能混中文逗号）"""
+    raw = str(value or "").replace("，", ",").replace("、", ",")
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def _num_class(value: Any) -> str:
+    """班级归一：'1' / '1班' / '高一1班' 都取数字部分；没有数字就原样返回"""
+    s = str(value or "").strip()
+    m = re.search(r"(\d+)", s)
+    return m.group(1) if m else s
+
+
+def _activity_scope(rec: Dict[str, Any]) -> str:
+    return str(rec.get("target_scope") or "").strip() or "teacher_classes"
+
+
+def _filter_activity_target(students: List[Dict[str, Any]], rec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """按**活动自身**的对象范围收窄名册。
+
+    旧口径只按"查看者权限范围"算应完成人数：一份只发给高一1班的练习，在没选班级时
+    会按全校 1406 人算应完成/未完成（截图里的 0/1406 就是这么来的）。
+    这里先看活动发给谁（点名 → 年级/班级），再与查看者权限、页面筛选取交集。
+    """
+    scope = _activity_scope(rec)
+
+    # 点名到人：同步练习用 target_students(JSON)，其它活动用 target_users(逗号串)
+    named: List[str] = []
+    raw_named = rec.get("target_students")
+    if raw_named:
+        try:
+            parsed = json.loads(raw_named) if isinstance(raw_named, str) else raw_named
+            if isinstance(parsed, list):
+                named = [str(x).strip() for x in parsed if str(x).strip()]
+        except (json.JSONDecodeError, TypeError):
+            named = _split_targets(raw_named)
+    if not named:
+        named = _split_targets(rec.get("target_users"))
+    if named:
+        keep = set(named)
+        return [s for s in students if s.get("username") in keep]
+
+    if scope in ("grade", "class"):
+        grades = _split_targets(rec.get("target_grade"))
+        if grades:
+            students = [s for s in students if (s.get("grade") or "").strip() in grades]
+        if scope == "class":
+            classes = {_num_class(x) for x in _split_targets(rec.get("target_class"))}
+            if classes:
+                students = [s for s in students if _num_class(s.get("class")) in classes]
+    return students
+
+
+def _activity_roster(
+    rec: Dict[str, Any],
+    viewer_username: str,
+    role: int,
+    grade_id: Optional[int] = None,
+    class_id: Optional[int] = None,
+    cache: Optional[Dict[Tuple[str, Any, Any], List[Dict[str, Any]]]] = None,
+) -> List[Dict[str, Any]]:
+    """应完成名册 = 活动对象范围 ∩ 查看者权限范围 ∩ 页面筛选。
+
+    管理员看老活动（默认 teacher_classes）时按**创建者**的任教范围算，
+    否则会退化成全校学生。
+    """
+    creator = str(rec.get("creator_username") or "").strip()
+    scope = _activity_scope(rec)
+    owner = creator if (role == 0 and creator and scope == "teacher_classes") else viewer_username
+    key = (owner, grade_id, class_id)
+    if cache is not None and key in cache:
+        base = cache[key]
+    else:
+        base = get_students_in_scope(owner, grade_id=grade_id, class_id=class_id)
+        if cache is not None:
+            cache[key] = base
+    return _filter_activity_target(base, rec)
+
 
 def _get_students_with_completion(
     activity_type: str,
@@ -679,9 +761,11 @@ async def list_teacher_activities(
     # 名册走 get_students_in_scope：教师只取本人任教班级，管理员可取任意班级。
     # 只选年级也统计（= 该年级全部班级）；两个都不选就不给分母。
     if grade_id or class_id:
-        roster = get_students_in_scope(username, grade_id=grade_id, class_id=class_id)
-        total_students = len(roster)
+        # 每场活动各自的名册：活动对象范围（年级/班级/指定学生）∩ 查看者权限 ∩ 页面筛选
+        roster_cache: Dict[Tuple[str, Any, Any], List[Dict[str, Any]]] = {}
         for act in page_items:
+            roster = _activity_roster(act, username, role, grade_id, class_id, roster_cache)
+            total_students = len(roster)
             try:
                 done, _ = _get_students_with_completion(
                     act["activity_type"], act["id"],
@@ -697,6 +781,10 @@ async def list_teacher_activities(
             act["incomplete_count"] = max(total_students - completed_n, 0)
             act["completion_rate"] = (round(completed_n * 100.0 / total_students, 1)
                                       if total_students else 0.0)
+
+    # 定向名单只在服务端用来算名册，不下发给前端
+    for act in page_items:
+        act.pop("target_students", None)
 
     return {
         "activities": page_items,
@@ -740,6 +828,7 @@ def _lookup_activity(activity_type: str, activity_id: int, username: str):
                 """SELECT cb.id, cb.knowledge_point_id, kp.name as kp_name,
                           c.name as title, c.status, c.subject, c.created_at,
                           COALESCE(sr.owner_username, '') as owner_username,
+                          'grade' as target_scope, c.grade as target_grade,
                           0 as total_score, 0 as pass_score
                    FROM curriculum_bindings cb
                    JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
@@ -803,23 +892,31 @@ async def get_activity_completion_status(
         activity_rec["subject"] = ((activity_rec.get("subject") or "").strip()
                                    or quiz_stats.quiz_subjects([activity_rec]).get(activity_rec.get("id"), ""))
 
+    # 应完成名册：活动对象范围（高一1班 / 指定学生…）∩ 查看者权限 ∩ 页面筛选。
+    # 不这样收窄的话，"只发给一个班"的练习会被算成全校 1406 人应完成。
+    roster = _activity_roster(activity_rec, username, role, grade_id, class_id)
+
     # 获取学生完成情况
     completed, incomplete = _get_students_with_completion(
         activity_type, activity_id,
         grade_id=grade_id, class_id=class_id,
-        teacher_username=username,
+        teacher_username=username, all_students=roster,
     )
 
-    # 根据状态筛选
+    # 统计卡片永远按"全量名册"算：旧写法先按状态筛选再取长度，切到「已完成」时
+    # 应完成人数会跟着变成已完成人数、完成率直接显示 100%，是个误导人的口径。
+    _all_students = completed + incomplete
+    _stats_base = len(_all_students)
+
+    # 根据状态筛选（只影响下面的名单，不影响统计数字）
     if status_filter == "completed":
         students = completed
     elif status_filter == "incomplete":
         students = incomplete
     else:
-        students = completed + incomplete
+        students = _all_students
 
     # 学生关键字过滤（姓名/学号/年级/班级）——仅过滤列表，统计卡片保持过滤前口径
-    _stats_base = len(students)
     _kw = (student_kw or "").strip().lower()
     if _kw:
         students = [
@@ -850,6 +947,11 @@ async def get_activity_completion_status(
             "pass_score": activity_rec.get("pass_score", 0) or 0,
             "subject": activity_rec.get("subject", "") or "",
             "created_at": activity_rec.get("created_at", "") or "",
+            # 活动自己的对象范围（前端据此显示"统计范围：高一1班 / 指定学生 N 人"）
+            "target_scope": activity_rec.get("target_scope", "") or "",
+            "target_grade": activity_rec.get("target_grade", "") or "",
+            "target_class": activity_rec.get("target_class", "") or "",
+            "target_users": activity_rec.get("target_users", "") or "",
         },
         "students": page_items,
         "statistics": {

@@ -303,10 +303,25 @@ const ActivityMonitorPage: React.FC = () => {
       }))
     : [];
 
-  // 完成情况当前的统计范围：班级 → 年级 → 全部（教师=本人任教范围，管理员=全校）
+  // 完成情况当前的统计范围：页面筛选（班级 → 年级）→ 活动自己的对象范围 → 兜底。
+  // "应完成人数"按 活动范围 ∩ 查看者权限 ∩ 页面筛选 计算，所以标签也要跟着活动走。
   const scopeGradeName = gradeClasses.find(g => g.grade_id === selectedGradeId)?.grade_name || '';
   const scopeClassName = classOptions.find(c => c.value === selectedClassId)?.label || '';
-  const scopeText = scopeClassName || scopeGradeName
+  const actScope = statusDetail?.activity;
+  const actScopeText = actScope
+    ? (actScope.target_scope === 'individual'
+        ? t('activityMonitor.scopeIndividuals', {
+            count: String(actScope.target_users || '').split(/[,，]/).filter(Boolean).length,
+          })
+        : actScope.target_scope === 'class'
+        ? [actScope.target_grade, actScope.target_class].filter(Boolean).join(' ')
+        : actScope.target_scope === 'grade'
+        ? (actScope.target_grade || '')
+        : actScope.target_scope === 'all'
+        ? t('activityMonitor.scopeAllSchool')
+        : t('activityMonitor.scopeTeacherClasses'))
+    : '';
+  const scopeText = scopeClassName || scopeGradeName || actScopeText
     || (user?.role === 'admin'
       ? t('activityMonitor.scopeAllSchool')
       : t('activityMonitor.scopeAllClasses'));
