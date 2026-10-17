@@ -369,8 +369,18 @@ if __name__ == "__main__":
         port=SERVER_PORT,
         reload=True,
         log_level="info",
+        # 白板快照/补丁是较大的单条消息。websockets 的 legacy 实现没有发送锁：
+        # uvicorn 自己的 keepalive ping 和业务 send_json 会同时进入 drain，
+        # 触发 `assert waiter is None or waiter.cancelled()`（现场日志里的
+        # "keepalive ping failed"）。sansio 实现由协议层串行化写入，才是正确选择。
+        ws="websockets-sansio",
+        # 前端已有 15s 的应用层 ping/pong；库心跳只负责兜底，放稀一点少占带宽。
+        ws_ping_interval=45,
+        ws_ping_timeout=20,
         # 按消息压缩：白板一份快照实测 21KB，且是重复度极高的 JSON。一个班 55 人
         # 同时在线时，下行带宽能降到原来的十分之一上下（浏览器默认就带
         # permessage-deflate 扩展；实现不支持时 uvicorn 只会忽略并提示）。
+        # 注意：图片资产 base64 的重复度很低，实测只压到 0.74；真正的解法是
+        # 资产外链 + 增量补丁，不能指望 deflate。
         ws_per_message_deflate=True,
     )

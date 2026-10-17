@@ -243,6 +243,12 @@ async def serve_static_file(path: str, request: Request):
             # 不阻断访问, 但要留下线索(旧实现静默 pass, 统计缺失时无从排查)
             logger.warning(f"记录资源查看日志失败: {log_err}")
     
+    # 白板图片按内容哈希命名，永不变化：给一年强缓存，学生只下一次。
+    if rel_path.startswith("question_media/whiteboard_assets/"):
+        return FileResponse(
+            requested_path,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
     return FileResponse(requested_path)
 
 

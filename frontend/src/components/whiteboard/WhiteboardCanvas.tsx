@@ -2,9 +2,12 @@
  * 白板画布组件 — 基于 TLDraw
  * 支持三种模式：演示/互动/自习
  */
-import React, { useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react'
 import { isAxiosError } from 'axios'
-import { Tldraw, type Editor, type TLStoreSnapshot, type TLComponents } from 'tldraw'
+import { Tldraw, type Editor, type TLStoreSnapshot, type TLComponents,
+  type TLRecord } from 'tldraw'
+import { squashRecordDiffs, type RecordsDiff } from '@tldraw/store'
+import type { TLAssetStore } from '@tldraw/tlschema'
 import 'tldraw/tldraw.css'
 import { useWhiteboardStore } from '../../stores/whiteboardStore'
 import { useWhiteboardWS } from '../../hooks/useWhiteboardWS'
@@ -45,6 +48,38 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   const internalEditorRef = useRef<Editor | null>(null)
   const editorRef = externalEditorRef || internalEditorRef
   const [ready, setReady] = useState(false)
+
+  // 图片先上传成 URL 再进快照：TLDraw 默认会把 File 转成 data URL 塞进 asset.props.src，
+  // 一张 500KB 的截图会让之后每一笔笔迹的整份快照都变成 600KB+。
+  const assetStore = useMemo<TLAssetStore>(() => ({
+    async upload(asset, file) {
+      const asDataUrl = () => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+      // 非图片（视频等）暂不接管，保持旧行为，避免上传接口把它当图片处理。
+      if (!file.type.startsWith('image/')) {
+        return { src: await asDataUrl() }
+      }
+      try {
+        const form = new FormData()
+        form.append('file', file)
+        const { data } = await apiClient.post(
+          `/api/whiteboard/rooms/${roomId}/assets`, form,
+        )
+        if (data?.src) return { src: String(data.src) }
+      } catch {
+        // 上传失败时退回 data URL：宁可变大，也不能让老师粘贴图片直接失败。
+      }
+      return { src: await asDataUrl(), meta: asset.meta }
+    },
+    resolve(asset) {
+      return (asset.props as { src?: string }).src || null
+    },
+  }), [roomId])
+
   const isSendingRef = useRef(false) // 防止远程变更触发本地发送
   const readOnlyRef = useRef(readOnly)  // 用 ref 追踪 readOnly，避免闭包陈旧
   const httpSyncedRef = useRef(false) // 防止重复 HTTP 同步
@@ -64,32 +99,53 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   }, [ws.state])
 
   // ═══════════════════════════════════════════════════════════
-  // ★ 关键修复：使用 TLDraw store.listen 事件驱动检测内容变更
-  // 替代原来每秒轮询 editor.getSnapshot() 的方式，避免无操作时
-  // 反复创建快照字符串导致的内存泄漏
+  // ★ 增量同步：store.listen 直接拿 RecordsDiff，只发变化的记录
+  //   旧实现每 400ms 发整份快照（含 asset base64），55 人一班直接把 AP 打满。
   // ═══════════════════════════════════════════════════════════
-  const pendingChangesRef = useRef(false) // TLDraw 内容是否发生实际变更
-  const didSaveRef = useRef(false)        // 快照是否有过实际变更发送（控制 HTTP 保存）
+  const pendingDiffsRef = useRef<RecordsDiff<TLRecord>[]>([])
+  const didSaveRef = useRef(false)          // 自上次 keyframe 后是否有变更
+  const appliedSeqRef = useRef(-1)          // 已应用的服务端序号
+  const hasBaseRef = useRef(false)          // 是否已有完整快照作为基线
+  const lastKeyframeSentRef = useRef(0)
+  const keyframeRequestAtRef = useRef(0)
+  const serverSupportsDiffRef = useRef(false)  // 老后端没有 hello_ack：退回整份快照
+  const sendKeyframeRef = useRef<(force?: boolean) => void>(() => {})
+  const requestKeyframeRef = useRef<() => void>(() => {})
 
-  // 监听 TLDraw store 变更：仅在用户操作（非远程同步）且文档内容变化时标记
+  const requestKeyframe = useCallback(() => {
+    const now = Date.now()
+    if (now - keyframeRequestAtRef.current < 1500) return
+    keyframeRequestAtRef.current = now
+    ws.send({ type: 'request_keyframe' })
+  }, [ws])
+
+  useEffect(() => {
+    requestKeyframeRef.current = requestKeyframe
+  }, [requestKeyframe])
+
+  // 监听 TLDraw store 变更：只收用户操作、只收文档记录（不含相机/session）
   useEffect(() => {
     const editor = editorRef.current
     if (!editor || !ready) return
     // 仅在广播端（教师/互动模式已授权学生）注册监听
     if (!isBroadcaster && store.mode !== 'interactive') {
-      pendingChangesRef.current = false
+      pendingDiffsRef.current = []
       return
     }
     const cleanup = editor.store.listen(
-      () => {
-        pendingChangesRef.current = true
+      ({ changes }) => {
+        if (!changes) return
+        if (!Object.keys(changes.added).length
+          && !Object.keys(changes.updated).length
+          && !Object.keys(changes.removed).length) return
+        pendingDiffsRef.current.push(changes)
         lastChangeRef.current = Date.now()
       },
       { source: 'user', scope: 'document' }
     )
     return () => {
       cleanup()
-      pendingChangesRef.current = false
+      pendingDiffsRef.current = []
     }
   }, [isBroadcaster, store.mode, ready])
   // ═══════════════════════════════════════════════════════════
@@ -101,59 +157,98 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   const sigOf = (snap: string) => snap.length + '_' + snap.slice(0, 200)
 
   // ═══════════════════════════════════════════════════════════
-  // ★ 自适应同步节拍（原来是：教师端固定 1s / 台上学生 2s 轮询，
-  //   只读端不管 WS 好坏都每 5s 重下一份全量快照）
-  //   连续书写：最长 MAX_WAIT 推一次 —— 跟手，不再要等满一秒
-  //   落笔停住：QUIET 后立即补发一次 —— 笔画的结尾最该被看到
-  //   兜底轮询：WS 正常降到 20s 心跳，WS 不通收紧到 3s，并带指纹让服务端
-  //             在内容没变时不再回传 21KB 全量（55 人 × 每 5s 一份本身就是全班延迟）
+  // 节拍：patch 每 40ms 检查一次，连续书写最多 120ms 推一批；
+  // 落笔停住 60ms 立刻补发。keyframe 每 10s 一份（给新加入/断号/落库用）。
   // ═══════════════════════════════════════════════════════════
-  const PUSH_TICK_MS = 60
-  const PUSH_QUIET_MS = 160
-  const TEACHER_MAX_WAIT_MS = 400
-  const STAGE_MAX_WAIT_MS = 600
+  const PUSH_TICK_MS = 40
+  const PUSH_QUIET_MS = 60
+  const TEACHER_MAX_WAIT_MS = 120
+  const STAGE_MAX_WAIT_MS = 200
+  const KEYFRAME_INTERVAL_MS = 5000
   const POLL_FAST_MS = 3000
   const POLL_SLOW_MS = 20000
 
+  const takeSnapshot = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) return ''
+    try {
+      const snap = JSON.stringify(editor.getSnapshot())
+      return snap.length > 100 ? snap : ''
+    } catch {
+      return ''
+    }
+  }, [])
+
   // 变更驱动广播 + 自适应兜底轮询
   useEffect(() => {
-    const pushSnapshot = (maxWait: number) => {
-      const editor = editorRef.current
-      if (!editor) return
-      if (!pendingChangesRef.current) return        // 没变化就绝不序列化（原逻辑保留）
+    const pushPatch = (maxWait: number) => {
+      if (!pendingDiffsRef.current.length) return
+      if (!ws.isConnected) return
       const now = Date.now()
-      if (now - lastSentRef.current < maxWait && now - lastChangeRef.current < PUSH_QUIET_MS) return
-      const snapshot = JSON.stringify(editor.getSnapshot())
-      if (snapshot.length <= 100) return
-      pendingChangesRef.current = false
+      const wait = serverSupportsDiffRef.current ? maxWait : Math.max(maxWait, 400)
+      if (now - lastSentRef.current < wait && now - lastChangeRef.current < PUSH_QUIET_MS) return
+      // 兼容老后端（桌面版/未重启的 IIS）：没有 hello_ack 就继续发整份快照，
+      // 否则新前端连老后端时 patch 会被当成未知消息丢掉。
+      if (!serverSupportsDiffRef.current) {
+        const snapshot = takeSnapshot()
+        if (!snapshot) return
+        pendingDiffsRef.current = []
+        lastSentRef.current = now
+        didSaveRef.current = true
+        snapshotHashRef.current = sigOf(snapshot)
+        appliedSigRef.current = snapshotHashRef.current
+        ws.send({
+          type: 'op',
+          op_id: generateUUID(),
+          page: useWhiteboardStore.getState().currentPage,
+          data: { snapshot },
+        })
+        return
+      }
+      const pending = pendingDiffsRef.current
+      pendingDiffsRef.current = []
+      let changes: RecordsDiff<TLRecord>
+      try {
+        changes = squashRecordDiffs(pending)
+      } catch {
+        changes = pending[pending.length - 1]
+      }
       lastSentRef.current = now
-      snapshotHashRef.current = snapshot
       didSaveRef.current = true
-      appliedSigRef.current = sigOf(snapshot)       // 自己这份不用再收一遍
       ws.send({
-        type: 'op',
-        op_id: generateUUID(),
-        // 用当前页，别写死第 1 页：多页白板把内容全存到 page 1，
-        // 后端按「当前页」读快照时就会读到空白页，AI 判定白板为空
+        type: 'patch',
         page: useWhiteboardStore.getState().currentPage,
-        data: { snapshot },
+        changes,
       })
     }
 
+    const sendKeyframe = (force = false) => {
+      if (!ws.isConnected) return
+      // 老后端没有 patch：整份快照已经由 pushPatch 按 400ms 发出，别再叠加 keyframe
+      if (!serverSupportsDiffRef.current && !force) return
+      if (!force && !didSaveRef.current) return
+      // 同一轮多个学生请求 keyframe：只回一份，别把 55 个连接又打一遍
+      if (force && Date.now() - lastKeyframeSentRef.current < 600) return
+      const snapshot = takeSnapshot()
+      if (!snapshot) return
+      // 快照已经包含当前全部本地变更，之前攒的 patch 不必再发一遍
+      pendingDiffsRef.current = []
+      didSaveRef.current = false
+      snapshotHashRef.current = snapshot
+      appliedSigRef.current = sigOf(snapshot)
+      ws.send({
+        type: 'op',
+        op_id: generateUUID(),
+        page: useWhiteboardStore.getState().currentPage,
+        data: { snapshot },
+      })
+      lastKeyframeSentRef.current = Date.now()
+    }
+    sendKeyframeRef.current = sendKeyframe
+
     if (readOnly) {
-      // 只读端（演示模式学生 / 未授权的互动学生）：自适应兜底轮询
-      //
-      // ★ 回归修复：这里以前是"自链 setTimeout"——timer 在回调内部才赋值，
-      //   组件卸载（或本 effect 因 mode / readOnly / ws.send 变化而重跑）若正好
-      //   发生在 pollOnce() 在途时，clearTimeout 清的是已经烧掉的旧 id，await 回来
-      //   后 schedule() 又挂上一个没人能清的新定时器。链子就此活下来：页面早就跳到
-      //   登录页了，还在每 3 秒带着失效凭证刷 401（现场：一台 Mac 挂着 room 3 连刷
-      //   10 小时）。现在改收进统一轮询表（utils/poller，见其开篇注释），三件事一次拿到：
-      //     · 本地没有 token 时不发（跳登录页后自然静默）；
-      //     · 标签页在后台时不发，回到前台补一轮；
-      //     · 401 时 stopAllPollers() 一定停得掉，这里再补一道显式停止。
-      //   节拍仍自适应：tick 走最快档，真正发不发由 lastPollAt 决定
-      //   （WS 正常 20 秒、掉线 3 秒），保留 8.6.0 的省流意图。
+      // 只读端（演示模式学生 / 未授权的互动学生）：自适应兜底轮询。
+      // WS 正常时 20s 一轮，掉线时 3s；带 sig 让服务端内容没变就只回 unchanged。
       const pollKey = `whiteboard-snapshot-${roomId}`
       let disposed = false
       let lastPollAt = 0
@@ -171,9 +266,8 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
             readOnlyRef.current = true
             editorRef.current?.updateInstanceState({ isReadonly: true })
           }
-          // 只有当前仍是只读状态才加载快照（防止初始 demo 定时器在切自习后覆盖学生内容）
           if (data.snapshot && editorRef.current && readOnlyRef.current) {
-            if (Date.now() - lastWSUpdateRef.current > 5000) {   // WS 刚推过就别覆盖
+            if (Date.now() - lastWSUpdateRef.current > 5000) {
               const sig = (data.sig as string) || sigOf(data.snapshot)
               if (sig === snapshotHashRef.current) return
               snapshotHashRef.current = sig
@@ -181,20 +275,21 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
               editorRef.current.store.mergeRemoteChanges(() => {
                 try { editorRef.current?.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
               })
+              hasBaseRef.current = true
+              const seq = Number(data.seq)
+              if (Number.isFinite(seq) && seq > appliedSeqRef.current) {
+                appliedSeqRef.current = seq
+              }
             }
           } else if (data.sig) {
-            // 服务端说没变：留住指纹，下一轮继续省掉整份传输
             snapshotHashRef.current = data.sig as string
           }
         } catch (err) {
-          // 401 = 凭证已失效：拦截器那边已经清凭证 + 跳登录，这里绝不再发。
-          // （继续发的唯一后果就是把后端日志刷满，浏览器还会自动带上那张
-          //   JS 清不掉的旧 cookie，服务端只能一遍遍回 401）
+          // 401 = 凭证已失效：拦截器已经清凭证 + 跳登录，这里绝不再发。
           if (isAxiosError(err) && err.response?.status === 401) {
             disposed = true
             stopPoller(pollKey)
           }
-          // 其余错误（网络抖动等）保持静默，下一轮再试
         }
       }
       startPoller(pollKey, async () => {
@@ -207,37 +302,65 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     }
 
     if (isBroadcaster) {
-      // 教师端：事件驱动 + 双阈值，代替原来每秒一次的定时序列化
-      const tick = setInterval(() => pushSnapshot(TEACHER_MAX_WAIT_MS), PUSH_TICK_MS)
-      // ★ HTTP 保存：WS 正常时 30s 一次（服务端自己也按房间节流落库）；WS 掉了就收紧到
-      //   10s —— 这时它是唯一能把板书送进服务端的路径，学生端兜底轮询要靠它才拿得到新内容
+      const tick = setInterval(() => pushPatch(TEACHER_MAX_WAIT_MS), PUSH_TICK_MS)
+      const keyTimer = setInterval(() => sendKeyframe(false), KEYFRAME_INTERVAL_MS)
+      // HTTP 保存：WS 正常 30s，掉线 10s。它是 WS 不通时唯一能把板书送进
+      // 服务端的路径；正常时 keyframe 已经覆盖，这里基本是空转。
       let httpTimer = 0
       const httpSave = async () => {
-        if (didSaveRef.current && snapshotHashRef.current) {
-          didSaveRef.current = false
-          try {
-            await apiClient.put(
-              `/api/whiteboard/rooms/${roomId}/pages/${useWhiteboardStore.getState().currentPage}`,
-              { snapshot_data: snapshotHashRef.current },
-            )
-          } catch { /* 静默：下一轮再试 */ }
+        if (didSaveRef.current) {
+          const snap = takeSnapshot()
+          if (snap) {
+            didSaveRef.current = false
+            snapshotHashRef.current = snap
+            try {
+              await apiClient.put(
+                `/api/whiteboard/rooms/${roomId}/pages/${useWhiteboardStore.getState().currentPage}`,
+                { snapshot_data: snap },
+              )
+            } catch {
+              didSaveRef.current = true
+            }
+          }
         }
         httpTimer = window.setTimeout(httpSave, wsStateRef.current === 'open' ? 30000 : 10000)
       }
       httpTimer = window.setTimeout(httpSave, 30000)
       return () => {
-        clearInterval(tick); clearTimeout(httpTimer)
-        snapshotHashRef.current = ''; didSaveRef.current = false
+        clearInterval(tick); clearInterval(keyTimer); clearTimeout(httpTimer)
+        sendKeyframeRef.current = () => {}
       }
     }
 
     if (store.mode === 'interactive') {
-      // 互动模式已授权学生：同样事件驱动，节拍放宽一档（一人对着全班，带宽省着用）
-      const tick = setInterval(() => pushSnapshot(STAGE_MAX_WAIT_MS), PUSH_TICK_MS)
-      return () => { clearInterval(tick); snapshotHashRef.current = '' }
+      // 互动模式已授权学生：只发 patch，不发 keyframe（权威快照仍由老师出）
+      const tick = setInterval(() => pushPatch(STAGE_MAX_WAIT_MS), PUSH_TICK_MS)
+      return () => { clearInterval(tick) }
     }
     // 自习模式学生：自己画自己的，不做任何同步
-  }, [roomId, store.mode, readOnly, isBroadcaster, ws.send])
+  }, [roomId, store.mode, readOnly, isBroadcaster, ws.isConnected, ws.send, takeSnapshot])
+
+  // 连接建立/重连：声明能力；只读端/台上学生本地可能落后，要一份 keyframe 重新对齐。
+  // 老师自己就是权威副本，不需要向别人要快照。
+  useEffect(() => {
+    if (ws.state !== 'open') return
+    ws.send({ type: 'hello', caps: ['diff'] })
+    serverSupportsDiffRef.current = false
+    hasBaseRef.current = false
+    appliedSeqRef.current = -1
+    keyframeRequestAtRef.current = 0
+    if (!isBroadcaster) requestKeyframeRef.current()
+  }, [ws.state, ws.send, isBroadcaster])
+
+  // 切到后台/关标签页前补一份 keyframe：patch 不落库，最后几秒不能丢。
+  useEffect(() => {
+    if (!isBroadcaster) return
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') sendKeyframeRef.current(true)
+    }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  }, [isBroadcaster])
 
 
   const [tldrawEditor, setTldrawEditor] = useState<Editor | null>(null)
@@ -260,12 +383,17 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     const pending = pendingSnapshots.current
     if (pending.length > 0) {
       pendingSnapshots.current = []
+      const last = pending[pending.length - 1]
       try {
         editor.store.mergeRemoteChanges(() => {
-          pending.forEach(snap => {
-            try { editor.loadSnapshot(JSON.parse(snap)) } catch { /* skip */ }
-          })
+          editor.loadSnapshot(JSON.parse(last.snapshot))
         })
+        hasBaseRef.current = true
+        snapshotHashRef.current = last.snapshot.length + '_' + last.snapshot.slice(0, 200)
+        appliedSigRef.current = snapshotHashRef.current
+        if (typeof last.seq === 'number' && last.seq >= 0) {
+          appliedSeqRef.current = Math.max(appliedSeqRef.current, last.seq)
+        }
       } catch { /* skip */ }
     }
     // HTTP 兜底拉取初始快照：只读端之外，WS 已被拒/已断的端也要（仅一次）。
@@ -279,9 +407,17 @@ if ((readOnlyRef.current || ws.state === 'rejected' || ws.state === 'closed') &&
       if (!readOnlyRef.current && ws.state === 'open') return
       const data = res.data
       if (data.snapshot) {
-        editor.store.mergeRemoteChanges(() => {
-          try { editor.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
-        })
+        try {
+          editor.store.mergeRemoteChanges(() => {
+            editor.loadSnapshot(JSON.parse(data.snapshot))
+          })
+          hasBaseRef.current = true
+          snapshotHashRef.current = (data.sig as string) || ''
+          const seq = Number(data.seq)
+          if (Number.isFinite(seq) && seq >= 0) {
+            appliedSeqRef.current = Math.max(appliedSeqRef.current, seq)
+          }
+        } catch { /* 静默 */ }
       }
     })
     .catch((err) => { reportLoadError(err, { key: 'whiteboard.snapshot' }) })
@@ -298,12 +434,41 @@ ws.send({ type: 'request_sync' })
     }
   }, [readOnly])
 
-  const pendingSnapshots = useRef<string[]>([]) // editor 就绪前的消息缓冲
+  // editor 就绪前的消息缓冲（带 seq，就绪后才知道自己对齐到哪一号）
+  const pendingSnapshots = useRef<Array<{ snapshot: string; seq?: number }>>([])
 
   // ★ 解构出稳定函数引用，避免整个 store 对象作为依赖
   const setCurrentPage = store.setCurrentPage
 
   useEffect(() => {
+    const applyFullSnapshot = (snapshot: string, seq?: number) => {
+      const ed = editorRef.current
+      if (!ed) return
+      const sig = snapshot.length + '_' + snapshot.slice(0, 200)
+      if (sig === appliedSigRef.current) {
+        if (typeof seq === 'number' && seq >= 0) {
+          appliedSeqRef.current = Math.max(appliedSeqRef.current, seq)
+        }
+        return
+      }
+      appliedSigRef.current = sig
+      snapshotHashRef.current = sig
+      try {
+        isSendingRef.current = true
+        ed.store.mergeRemoteChanges(() => {
+          ed.loadSnapshot(JSON.parse(snapshot))
+        })
+        hasBaseRef.current = true
+        if (typeof seq === 'number' && seq >= 0) {
+          appliedSeqRef.current = Math.max(appliedSeqRef.current, seq)
+        }
+      } catch (e) {
+        console.error('[白板] 应用快照失败:', e)
+      } finally {
+        isSendingRef.current = false
+      }
+    }
+
     const unsub = ws.onMessage((msg) => {
       const editor = editorRef.current
 
@@ -311,7 +476,12 @@ ws.send({ type: 'request_sync' })
       if (!editor) {
         if (msg.type === 'op_broadcast') {
           const snap = (msg.data as { snapshot?: string })?.snapshot
-          if (snap) pendingSnapshots.current.push(snap)
+          if (snap) {
+            pendingSnapshots.current.push({
+              snapshot: snap,
+              seq: typeof msg.seq === 'number' ? msg.seq : undefined,
+            })
+          }
         }
         return
       }
@@ -319,43 +489,106 @@ ws.send({ type: 'request_sync' })
       if (msg.type === 'op_broadcast') {
         const snapshot = (msg.data as { snapshot?: string })?.snapshot
         if (!snapshot) return
+        lastWSUpdateRef.current = Date.now()
+        const seq = typeof msg.seq === 'number' ? msg.seq : undefined
         // 非只读且非广播端（互动模式下已授权学生）：跳过加载，防止覆盖自己正在画的内容
         if (!readOnlyRef.current && !isBroadcaster) {
-          lastWSUpdateRef.current = Date.now()
+          hasBaseRef.current = true
+          if (seq !== undefined && seq >= 0) {
+            appliedSeqRef.current = Math.max(appliedSeqRef.current, seq)
+          }
           return
         }
+        // keyframe 只在进房/切页/断号时出现，整篇替换可以接受
+        applyFullSnapshot(snapshot, seq)
+        return
+      }
+
+      if (msg.type === 'hello_ack') {
+        serverSupportsDiffRef.current = true
+        return
+      }
+
+      // ── 增量补丁：只改变化的记录，不再整篇重建 ──
+      if (msg.type === 'patch_broadcast') {
         lastWSUpdateRef.current = Date.now()
-        // loadSnapshot 是整篇替换（重建全部图形 + 重算几何），一份 21KB 在弱机上就是
-        // 一眼可见的卡顿；内容其实没变的话，跳过这次重载。
-        const sig = snapshot.length + '_' + snapshot.slice(0, 200)
-        if (sig === appliedSigRef.current) return
-        appliedSigRef.current = sig
+        const seq = Number(msg.seq)
+        const changes = msg.changes as RecordsDiff<TLRecord> | undefined
+        if (!changes || !Number.isFinite(seq)) return
+        if (seq <= appliedSeqRef.current) return          // 重复/乱序：丢掉
+        if (!hasBaseRef.current) {                        // 还没有基线，补丁不能落在空板上
+          requestKeyframeRef.current()
+          return
+        }
+        if (appliedSeqRef.current >= 0 && seq > appliedSeqRef.current + 1) {
+          // 断号：让老师补一份完整快照，别在缺记录的状态上继续叠补丁
+          requestKeyframeRef.current()
+          return
+        }
+        const t0 = performance.now()
         try {
           isSendingRef.current = true
           editor.store.mergeRemoteChanges(() => {
-            editor.loadSnapshot(JSON.parse(snapshot))
+            editor.store.applyDiff(changes)
           })
+          appliedSeqRef.current = seq
         } catch (e) {
-          console.error('[白板] 应用快照失败:', e)
+          console.error('[白板] 应用增量补丁失败:', e)
+          requestKeyframeRef.current()
         } finally {
           isSendingRef.current = false
         }
+        const cost = performance.now() - t0
+        if (cost > 60) {
+          console.warn(`[白板][perf] patch apply ${cost.toFixed(1)}ms seq=${seq}`)
+        }
+        return
+      }
+
+      // 发送者的补丁不会回放，用 ack 对齐服务端序号
+      if (msg.type === 'patch_ack' || msg.type === 'keyframe_ack') {
+        const seq = Number(msg.seq)
+        if (Number.isFinite(seq) && seq >= 0) {
+          appliedSeqRef.current = Math.max(appliedSeqRef.current, seq)
+          hasBaseRef.current = true
+        }
+        return
+      }
+
+      if (msg.type === 'resync') {
+        keyframeRequestAtRef.current = 0
+        requestKeyframeRef.current()
+        return
+      }
+
+      if (msg.type === 'keyframe_requested' && isBroadcaster) {
+        sendKeyframeRef.current(true)
+        return
       }
 
       if (msg.type === 'page_switched' && msg.snapshot) {
         setCurrentPage(msg.page as number)
+        appliedSigRef.current = ''
         try {
           const snap = JSON.parse(msg.snapshot as string) as TLStoreSnapshot
-          editor.loadSnapshot(snap)
+          editor.store.mergeRemoteChanges(() => {
+            editor.loadSnapshot(snap)
+          })
+          hasBaseRef.current = true
+          const seq = Number(msg.seq)
+          if (Number.isFinite(seq) && seq >= 0) appliedSeqRef.current = seq
+          const raw = msg.snapshot as string
+          snapshotHashRef.current = raw.length + '_' + raw.slice(0, 200)
         } catch { /* ignore */ }
       }
     })
     return unsub
-  }, [ws, setCurrentPage])
+  }, [ws, setCurrentPage, isBroadcaster])
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Tldraw onMount={handleMount} components={minimalComponents} licenseKey="oss" />
+      <Tldraw onMount={handleMount} components={minimalComponents}
+        assets={assetStore} licenseKey="oss" />
       {/* 隐藏 TLDraw 右下角 "Get a license for production" 水印 */}
       <style>{`
         .tl-watermark,

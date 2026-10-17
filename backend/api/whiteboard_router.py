@@ -3,14 +3,19 @@
 房间管理、页面管理、WebSocket 通信、AI 辅助
 """
 import json
+import hashlib
+import io
+import os
+import re
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import (APIRouter, File, HTTPException, Query, Request, UploadFile,
+                     WebSocket, WebSocketDisconnect)
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend.config import ai_api_base
+from backend.config import BASE_DIR, ai_api_base
 from backend.model_catalog import DEFAULT_VL_MODEL
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
@@ -27,6 +32,57 @@ from backend.logger import logger
 from backend.prompts import apply_skills
 
 router = APIRouter()
+
+# ── 白板图片资产：快照里只放 URL，绝不把 base64 塞进每 400ms 的实时消息 ──
+# 放在 question_media 下是为了让旧版 files_router 也能直接提供（登录即可读），
+# 这样前端/后端不必同时重启也能显示历史图片；路径带内容哈希，天然可长缓存。
+WB_ASSET_DIR = BASE_DIR / "question_media" / "whiteboard_assets"
+WB_ASSET_DIR.mkdir(parents=True, exist_ok=True)
+_WB_ASSET_MAX_BYTES = 8 * 1024 * 1024
+_WB_ASSET_MAX_EDGE = 1600
+_WB_ASSET_NAME_RE = re.compile(r"^[a-f0-9]{64}\.(png|jpg)$")
+
+
+def _wb_normalize_asset(data: bytes) -> tuple[bytes, str, int, int]:
+    """校验并规整图片：最长边 1600，保留 PNG/JPEG 原格式（兼容旧版 files_router 的 MIME）。"""
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        raise HTTPException(status_code=400, detail="图片格式不受支持")
+    src_format = (img.format or "").upper()
+    if img.width * img.height > 40_000_000:
+        raise HTTPException(status_code=413, detail="图片像素过大")
+    if max(img.size) > _WB_ASSET_MAX_EDGE:
+        img.thumbnail((_WB_ASSET_MAX_EDGE, _WB_ASSET_MAX_EDGE), Image.LANCZOS)
+    buf = io.BytesIO()
+    if src_format in ("JPEG", "JPG"):
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        img.save(buf, format="JPEG", quality=90, optimize=True)
+        ext = ".jpg"
+    else:
+        if img.mode not in ("RGB", "RGBA"):
+            has_alpha = img.mode in ("RGBA", "LA", "P") or "transparency" in img.info
+            img = img.convert("RGBA" if has_alpha else "RGB")
+        img.save(buf, format="PNG", optimize=True)
+        ext = ".png"
+    return buf.getvalue(), ext, img.width, img.height
+
+
+def _can_write_board(user: dict, room_id: int) -> bool:
+    """与 WS 的 _can_operate 同口径：只有能在白板上书写的人才允许上传素材。"""
+    role = _get_user_role(user)
+    if role in (0, 1):
+        room = _room_brief(room_id)
+        return bool(room) and _is_room_manager(user, room)
+    mode = whiteboard_manager.get_mode(room_id)
+    if mode == "self_study":
+        return True
+    if mode == "interactive":
+        return whiteboard_manager.is_granted(room_id, user.get("username", ""))
+    return False
 
 
 def _now() -> str:
@@ -448,11 +504,13 @@ async def get_snapshot(room_id: int, request: Request,
     # 获取当前模式和学生授权状态
     mode = whiteboard_manager.get_mode(room_id)
     granted = whiteboard_manager.is_granted(room_id, username)
+    seq = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot_seq", -1)
     # 客户端那份还一样：只回 unchanged，别再传一遍全量
     if sig and snap and _snapshot_sig(snap) == sig:
-        return {"snapshot": "", "unchanged": True, "mode": mode, "granted": granted, "sig": sig}
+        return {"snapshot": "", "unchanged": True, "mode": mode, "granted": granted,
+                "sig": sig, "seq": seq}
     return {"snapshot": snap, "mode": mode, "granted": granted,
-            "sig": _snapshot_sig(snap) if snap else ""}
+            "sig": _snapshot_sig(snap) if snap else "", "seq": seq}
 
 
 @router.patch("/rooms/{room_id}", summary="更新房间配置")
@@ -838,6 +896,57 @@ async def spotlight_student(room_id: int, request: Request):
         "snapshot": rows[0][0] or "{}",
     })
     return {"status": "ok"}
+
+
+# ═══════════════════════════════════════════════════════════
+# 图片资产（白板快照外链）
+# ═══════════════════════════════════════════════════════════
+
+@router.post("/rooms/{room_id}/assets", summary="上传白板图片素材")
+async def upload_whiteboard_asset(room_id: int, request: Request,
+                                  file: UploadFile = File(...)):
+    """把粘贴/拖入的图片先上传成 URL，再进 TLDraw 快照。
+
+    旧做法把 File 转成 data URL 塞进 asset.props.src，于是每笔笔迹的整份快照
+    都带着几百 KB 的 base64；55 个学生 × 2.5 次/秒直接把 AP 打满。
+    """
+    user = get_current_user(request)
+    _assert_room_access(user, room_id, what="上传素材")
+    if not _can_write_board(user, room_id):
+        raise HTTPException(status_code=403, detail="当前状态不允许在该白板上传素材")
+    data = await file.read(_WB_ASSET_MAX_BYTES + 1)
+    if len(data) > _WB_ASSET_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="图片超过 8MB")
+    normalized, ext, width, height = _wb_normalize_asset(data)
+    sha = hashlib.sha256(normalized).hexdigest()
+    name = f"{sha}{ext}"
+    path = WB_ASSET_DIR / name
+    if not path.exists():
+        tmp = path.with_name(f".{sha}.tmp")
+        tmp.write_bytes(normalized)
+        os.replace(tmp, path)
+    return {
+        "src": f"/api/files/question_media/whiteboard_assets/{name}",
+        "width": width,
+        "height": height,
+        "bytes": len(normalized),
+    }
+
+
+@router.get("/assets/{filename}", summary="白板图片素材")
+async def get_whiteboard_asset(filename: str, request: Request):
+    """同源 <img> 会自动带登录 Cookie；URL 用内容哈希，长缓存且不可枚举。"""
+    get_current_user(request)
+    if not _WB_ASSET_NAME_RE.match(filename):
+        raise HTTPException(status_code=404, detail="素材不存在")
+    path = WB_ASSET_DIR / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="素材不存在")
+    return FileResponse(
+        path,
+        media_type="image/jpeg" if filename.endswith(".jpg") else "image/png",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2561,6 +2670,7 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
         "can_manage": can_manage,
         "granted": whiteboard_manager.is_granted(room_id, username),
         "current_page": whiteboard_manager.get_current_page(room_id),
+        "sync_seq": whiteboard_manager.rooms.get(room_id, {}).get("patch_seq", 0),
     })
 
     try:
@@ -2568,8 +2678,21 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
             data = await websocket.receive_json()
             msg_type = data.get("type", "")
 
+            # ── 客户端能力声明（新客户端支持 RecordsDiff 增量补丁）──
+            if msg_type == "hello":
+                conn = whiteboard_manager.rooms.get(room_id, {}).get(
+                    "connections", {}).get(username)
+                if conn is not None:
+                    caps = data.get("caps") or []
+                    conn["caps"] = {c for c in caps if isinstance(c, str)}
+                await whiteboard_manager.send_to_user(room_id, username, {
+                    "type": "hello_ack",
+                    "sync": "diff",
+                    "seq": whiteboard_manager.rooms.get(room_id, {}).get("patch_seq", 0),
+                })
+
             # ── 白板操作 ──
-            if msg_type == "op":
+            elif msg_type == "op":
                 # 使用管理器中的实时模式，而非连接时的缓存值
                 live_mode = whiteboard_manager.get_mode(room_id)
                 if _can_operate(room_id, username, role, live_mode, can_manage):
@@ -2581,6 +2704,24 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                         "type": "op_denied",
                         "reason": _operate_denied_reason(role, live_mode, can_manage),
                     })
+
+            # ── 增量补丁（RecordsDiff）──
+            elif msg_type == "patch":
+                live_mode = whiteboard_manager.get_mode(room_id)
+                if _can_operate(room_id, username, role, live_mode, can_manage):
+                    await whiteboard_manager.handle_patch(room_id, username, data)
+                else:
+                    await whiteboard_manager.notify_once(room_id, username, {
+                        "type": "op_denied",
+                        "reason": _operate_denied_reason(role, live_mode, can_manage),
+                    })
+
+            # ── 学生发现补丁断号：请老师补一份完整快照 ──
+            elif msg_type == "request_keyframe":
+                await whiteboard_manager.broadcast(room_id, {
+                    "type": "keyframe_requested",
+                    "by": username,
+                }, exclude=username)
 
             # ── 心跳 ──
             elif msg_type == "ping":
@@ -2611,6 +2752,7 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                         "type": "page_switched",
                         "page": page,
                         "snapshot": page_rows[0][0] if page_rows else "{}",
+                        "seq": whiteboard_manager.rooms.get(room_id, {}).get("patch_seq", 0),
                     })
 
             # ── 切换模式（教师）──
@@ -2660,6 +2802,8 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                         "type": "op_broadcast",
                         "sender": "system",
                         "data": {"snapshot": last_snap},
+                        "seq": whiteboard_manager.rooms.get(room_id, {}).get(
+                            "last_snapshot_seq", -1),
                     })
 
             # ── 自习模式：学生保存自己的白板 ──
@@ -2688,15 +2832,15 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
         logger.warning(f"白板 WS 异常 room#{room_id} user={username}: {e}", exc_info=True)
         # 不能只留一行日志就悄悄把连接放掉：前端等到的是"连上了但永远没回音"，
         # 现场表现就是"画了没反应"，而且测试也只能干等。先说清楚，再按可重连的码关闭。
-        try:
-            await websocket.send_json({
+        # 走发送队列：绝不能和 _drain 同时往同一个 websocket 写（legacy 实现会断言崩溃）。
+        await whiteboard_manager.send_and_close(
+            room_id, username,
+            {
                 "type": "ws_error",
                 "code": WS_CLOSE_INTERNAL,
                 "reason": "白板实时服务处理这条消息时出错了",
-            })
-            await websocket.close(code=WS_CLOSE_INTERNAL, reason="服务端异常，请重连")
-        except Exception:
-            pass
+            },
+            code=WS_CLOSE_INTERNAL, reason="服务端异常，请重连")
         await whiteboard_manager.leave_room(room_id, username)
 
 

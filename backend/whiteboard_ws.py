@@ -11,6 +11,8 @@
      强制 flush，保证库里的副本不会比内存旧过关键节点。
 """
 import asyncio
+import contextlib
+import json
 import random
 import string
 import time
@@ -23,8 +25,23 @@ from backend.database import execute_query, execute_insert_update
 
 #: 单连接队列上限：超了丢最旧的（状态型消息丢中间值无损，事件型丢一条也远好过全班卡住）
 _MAX_QUEUE = 200
+#: 增量补丁积压阈值：慢连接超过这个条数就不再逐条追，改发 resync 让客户端要一份 keyframe。
+#: patch 不能像快照那样"新值顶替旧值"，但也不能让一条慢连接无限堆积。
+_MAX_PATCH_BACKLOG = 60
 #: 同一房间两次落库的最小间隔（秒）
 _PERSIST_MIN_INTERVAL = 3.0
+
+
+def _encode(message: dict) -> str:
+    """一条消息只序列化一次，广播时所有连接复用同一份 JSON 文本。"""
+    return json.dumps(message, ensure_ascii=False, separators=(",", ":"))
+
+
+def _pct(values: list[int] | list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return float(ordered[min(len(ordered) - 1, int(len(ordered) * q))])
 
 
 class WhiteboardManager:
@@ -70,6 +87,14 @@ class WhiteboardManager:
             "controller": controller,
             "granted_users": set(),
             "last_snapshot": "",
+            "last_snapshot_seq": -1,
+            "patch_seq": 0,
+            "perf": {
+                "ops": 0,
+                "sizes": deque(maxlen=200),
+                "fanout_ms": deque(maxlen=200),
+                "last_report": 0.0,
+            },
             "dirty_pages": {},
             "writing": {},          # 已交给落库线程、还没写完的那一批
             "write_done": None,     # 上面这批写完的哨兵
@@ -100,6 +125,9 @@ class WhiteboardManager:
             "granted": username in room.get("granted_users", set()),
             "outbox": deque(),
             "sending": False,
+            "sender_task": None,
+            "caps": set(),
+            "needs_resync": False,
             "notices_sent": set(),
         }
 
@@ -156,6 +184,7 @@ class WhiteboardManager:
                 "type": "op_broadcast",
                 "sender": "system",
                 "data": {"snapshot": last_snap},
+                "seq": room.get("last_snapshot_seq", -1),
             })
 
     async def leave_room(self, room_id: int, username: str):
@@ -200,21 +229,36 @@ class WhiteboardManager:
             return f"cursor:{message.get('username')}"
         return None
 
-    def _enqueue(self, room_id: int, username: str, message: dict):
-        conn = self.rooms.get(room_id, {}).get("connections", {}).get(username)
-        if conn is None:
-            return
+    def _enqueue_conn(self, room_id: int, username: str, conn: dict,
+                      message: dict, raw: str | None = None):
+        """把消息放进某条连接的队列；raw 由调用方算一次，广播时全班复用。"""
+        if raw is None:
+            raw = _encode(message)
+        item = dict(message)
+        item["_raw"] = raw
         outbox = conn["outbox"]
         key = self._coalesce_key(message)
         if key is not None:
             for i, old in enumerate(outbox):
                 if self._coalesce_key(old) == key:
-                    outbox[i] = message      # 原地顶替：不打乱事件型消息的顺序
+                    outbox[i] = item         # 原地顶替：不打乱事件型消息的顺序
                     break
             else:
-                outbox.append(message)
+                outbox.append(item)
         else:
-            outbox.append(message)
+            outbox.append(item)
+
+        # 增量补丁不能折叠，否则学生端会缺记录。慢连接积压太多时直接放弃逐条追，
+        # 清掉 patch、发一条 resync，让学生端要一份完整 keyframe。
+        if len(outbox) > _MAX_PATCH_BACKLOG:
+            kept = deque(m for m in outbox if m.get("type") != "patch_broadcast")
+            if len(kept) != len(outbox):
+                outbox.clear()
+                outbox.extend(kept)
+                if not any(m.get("type") == "resync" for m in outbox):
+                    resync = {"type": "resync", "reason": "backlog"}
+                    outbox.append(dict(resync, _raw=_encode(resync)))
+
         if len(outbox) > _MAX_QUEUE:
             dropped = outbox.popleft()
             logger.warning(
@@ -223,26 +267,43 @@ class WhiteboardManager:
             )
         if not conn["sending"]:
             conn["sending"] = True
-            asyncio.create_task(self._drain(room_id, username))
+            conn["sender_task"] = asyncio.create_task(
+                self._drain(room_id, username, conn))
 
-    async def _drain(self, room_id: int, username: str):
+    def _enqueue(self, room_id: int, username: str, message: dict,
+                 raw: str | None = None):
+        conn = self.rooms.get(room_id, {}).get("connections", {}).get(username)
+        if conn is None:
+            return
+        self._enqueue_conn(room_id, username, conn, message, raw)
+
+    async def _drain(self, room_id: int, username: str, conn: dict):
         """这条连接唯一的发送任务。发不出去就算断线，绝不回头阻塞别人。"""
-        while True:
-            conn = self.rooms.get(room_id, {}).get("connections", {}).get(username)
-            if conn is None:
-                return
-            outbox = conn["outbox"]
-            try:
-                while outbox:
-                    await conn["ws"].send_json(outbox.popleft())
-            except Exception:
+        try:
+            while True:
+                outbox = conn["outbox"]
+                try:
+                    while outbox:
+                        item = outbox.popleft()
+                        raw = item.get("_raw")
+                        # 预编码文本直接发：全班 55 人不必把同一份 JSON 转义 55 遍。
+                        if raw is not None and hasattr(conn["ws"], "send_text"):
+                            await conn["ws"].send_text(raw)
+                        else:
+                            await conn["ws"].send_json(
+                                {k: v for k, v in item.items() if k != "_raw"})
+                except Exception:
+                    await self.leave_room(room_id, username)
+                    return
                 conn["sending"] = False
-                await self.leave_room(room_id, username)
-                return
-            conn["sending"] = False
-            if not outbox:
-                return
-            conn["sending"] = True        # 让出期间又积压了，继续占位发送
+                if not outbox:
+                    return
+                conn["sending"] = True     # 让出期间又积压了，继续占位发送
+        finally:
+            # 任务被取消/异常退出时，别让 sending 永远为 True 把后续消息卡死。
+            if conn.get("sender_task") is asyncio.current_task():
+                conn["sender_task"] = None
+                conn["sending"] = False
 
     # ── 广播 ──
     async def broadcast(self, room_id: int, message: dict,
@@ -250,10 +311,11 @@ class WhiteboardManager:
         room = self.rooms.get(room_id)
         if not room:
             return
+        raw = _encode(message)             # 一次序列化，全班复用
         for username in list(room["connections"].keys()):
             if username == exclude:
                 continue
-            self._enqueue(room_id, username, message)
+            self._enqueue(room_id, username, message, raw)
 
     async def send_to_user(self, room_id: int, username: str, message: dict):
         self._enqueue(room_id, username, message)
@@ -280,23 +342,59 @@ class WhiteboardManager:
 
         原来只广播一条 room_ended 就把连接和内存房间都留着，于是"已结束"和
         "还在写"同时成立：教师继续在死房间里画、学生再也进不来、在线人数也不清零。
-        收尾消息必须由这里"先发再关"——走队列的话，关闭和排队会打架，
+        收尾消息必须由这里"先发再关"——直写会和发送任务抢同一个 drain，
         学生端只剩一个没有说明的断开。
         """
         await self.flush_persist(room_id)
         room = self.rooms.pop(room_id, None)   # 先摘房间：队列不再进新消息，发送任务也拿不到连接
         if not room:
             return
-        for conn in list(room.get("connections", {}).values()):
-            if final_message is not None:
-                try:
-                    await conn["ws"].send_json(final_message)
-                except Exception:
-                    pass
+        await asyncio.gather(*[
+            self._finish_conn(room_id, username, conn, final_message, code, reason)
+            for username, conn in list(room.get("connections", {}).items())
+        ], return_exceptions=True)
+
+    async def _finish_conn(self, room_id: int, username: str, conn: dict,
+                           final_message: dict | None, code: int, reason: str):
+        """先让队列把收尾帧发出去，再关闭；超时就取消发送任务，绝不并发写。"""
+        if final_message is not None:
+            self._enqueue_conn(room_id, username, conn, final_message)
+        task = conn.get("sender_task")
+        if task is not None:
             try:
-                await conn["ws"].close(code=code, reason=reason)
+                await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
             except Exception:
                 pass
+        try:
+            await conn["ws"].close(code=code, reason=reason)
+        except Exception:
+            pass
+
+    async def send_and_close(self, room_id: int, username: str, message: dict,
+                             code: int = 4500, reason: str = "服务端异常，请重连"):
+        """给单条连接发最后一帧再关闭（错误分支用）；调用方随后走 leave_room。"""
+        conn = self.rooms.get(room_id, {}).get("connections", {}).get(username)
+        if conn is None:
+            return
+        self._enqueue_conn(room_id, username, conn, message)
+        task = conn.get("sender_task")
+        if task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
+            except Exception:
+                pass
+        try:
+            await conn["ws"].close(code=code, reason=reason)
+        except Exception:
+            pass
 
     # ── 落库：不占事件循环、按房间节流、关键节点强制 flush ──
     def _mark_dirty(self, room_id: int, page: Any, snapshot: str):
@@ -406,15 +504,76 @@ class WhiteboardManager:
             room = self.rooms.get(room_id)
             if room is not None:
                 room["last_snapshot"] = snap        # 内存里立刻是最新的，广播与兜底都读它
+                # seq 由服务端统一分配：多端同时写也不会撞号，重连后也不用重新对齐。
+                room["last_snapshot_seq"] = room.get("patch_seq", 0)
             self._mark_dirty(room_id, data.get("page", 1), snap)
+        t0 = time.monotonic()
+        seq = self.rooms.get(room_id, {}).get("last_snapshot_seq", -1)
         await self.broadcast(room_id, {
             "type": "op_broadcast",
             "op_id": op_id,
             "page": data.get("page", 1),
             "sender": username,
             "data": data.get("data", {}),
+            "seq": seq,
         }, exclude=username)
+        await self.send_to_user(room_id, username, {"type": "keyframe_ack", "seq": seq})
+        self._record_perf(room_id, len(snap) if isinstance(snap, str) else 0,
+                          (time.monotonic() - t0) * 1000)
 
+    async def handle_patch(self, room_id: int, username: str, data: dict):
+        """增量补丁：只广播变化的记录，不落库、不折叠。
+
+        TLDraw 的 RecordsDiff：{added:{id:rec}, updated:{id:[from,to]}, removed:{id:rec}}。
+        patch 有严格顺序，慢连接追不上时由 _enqueue_conn 改发 resync。
+        """
+        changes = data.get("changes")
+        if not isinstance(changes, dict):
+            return
+        room = self.rooms.get(room_id)
+        if room is None:
+            return
+        seq = int(room.get("patch_seq", 0)) + 1
+        room["patch_seq"] = seq
+        t0 = time.monotonic()
+        await self.broadcast(room_id, {
+            "type": "patch_broadcast",
+            "seq": seq,
+            "page": data.get("page", 1),
+            "sender": username,
+            "changes": changes,
+        }, exclude=username)
+        # 发送者不回放自己的补丁，但要把"服务端已到第几号"对齐，否则下一条
+        # 别人的补丁会被它当成断号。
+        await self.send_to_user(room_id, username, {"type": "patch_ack", "seq": seq})
+        self._record_perf(room_id, len(_encode(changes)),
+                          (time.monotonic() - t0) * 1000)
+
+    def _record_perf(self, room_id: int, size: int, fanout_ms: float):
+        """轻量观测：每 30 秒或每 200 次输出一行，别让日志自己变成负担。"""
+        room = self.rooms.get(room_id)
+        if room is None:
+            return
+        perf = room.setdefault("perf", {
+            "ops": 0, "sizes": deque(maxlen=200),
+            "fanout_ms": deque(maxlen=200), "last_report": 0.0,
+        })
+        perf["ops"] += 1
+        perf["sizes"].append(size)
+        perf["fanout_ms"].append(fanout_ms)
+        now = time.monotonic()
+        if perf["ops"] % 200 != 0 and now - perf["last_report"] < 30:
+            return
+        perf["last_report"] = now
+        backlog = max((len(c.get("outbox") or ()) for c in room.get("connections", {}).values()),
+                      default=0)
+        logger.info(
+            f"[白板][perf] room={room_id} ops={perf['ops']} "
+            f"payload_p50={_pct(perf['sizes'], 0.5) / 1024:.1f}KB "
+            f"payload_p95={_pct(perf['sizes'], 0.95) / 1024:.1f}KB "
+            f"fanout_p95={_pct(perf['fanout_ms'], 0.95):.2f}ms "
+            f"backlog_max={backlog}"
+        )
     async def handle_cursor(self, room_id: int, username: str, data: dict):
         if room_id in self.rooms and username in self.rooms[room_id]["connections"]:
             x, y = data.get("x", 0), data.get("y", 0)
@@ -439,6 +598,7 @@ class WhiteboardManager:
                     "type": "op_broadcast",
                     "sender": "system",
                     "data": {"snapshot": last_snap},
+                    "seq": self.rooms[room_id].get("last_snapshot_seq", -1),
                 })
             await self.send_to_user(room_id, target, {
                 "type": "control_granted",
