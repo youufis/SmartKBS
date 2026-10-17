@@ -77,9 +77,14 @@ class PracticeCreateSession(BaseModel):
     # 统一活动范围体系(与随堂测验/投票/公告一致): teacher_classes|all|grade|class|individual
     target_scope: str = ""
     target_users: str = ""
-    # 立即发布：True(默认)=创建即进行中，与旧行为一致；False=存为草稿，
-    # 之后在列表里用「发布」开关放出去（与考试/随堂测验同一套状态机）
-    publish: bool = True
+    # 立即发布：默认 False=存为草稿（与考试「新建即草稿」一致），
+    # 老师在列表里点「发布」才对学生开放；显式传 true 才会创建即进行中
+    publish: bool = False
+
+
+class PracticeUpdate(BaseModel):
+    """教师：修改练习基本信息（目前只放开名称 —— 改名不影响已收的答卷）"""
+    title: str | None = None
 
 
 class PracticeSubmitRequest(BaseModel):
@@ -930,6 +935,42 @@ async def delete_session(session_id: int, request: Request):
     execute_update("DELETE FROM practice_sessions WHERE id=?", (session_id,))
     recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
     return {"message": "已删除"}
+
+
+@router.put("/sessions/{session_id}")
+async def update_session(session_id: int, req: PracticeUpdate, request: Request):
+    """[教师] 修改练习名称（草稿/进行中/已结束都可改，不影响已收的答卷）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
+    if not sess:
+        raise HTTPException(status_code=404, detail="练习不存在")
+    if role != 0 and sess["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="只能修改自己的练习")
+
+    updates: list[str] = []
+    params: list[Any] = []
+    if req.title is not None:
+        title = req.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="练习名称不能为空")
+        if len(title) > 100:
+            raise HTTPException(status_code=400, detail="练习名称过长（最多 100 字）")
+        updates.append("title = ?")
+        params.append(title)
+    if not updates:
+        return {"message": "没有需要修改的内容"}
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    updates.append("updated_at = ?")
+    params.append(now)
+    params.append(session_id)
+    execute_update(f"UPDATE practice_sessions SET {', '.join(updates)} WHERE id=?", tuple(params))
+    return {"message": "已更新", "title": req.title.strip() if req.title is not None else ""}
 
 
 @router.put("/sessions/{session_id}/end")

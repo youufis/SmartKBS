@@ -1,6 +1,9 @@
 {
   "draft": "Draft",
   "saveDraft": "Save as draft",
+  "publishNow": "Save and publish",
+  "renameTitle": "Rename practice",
+  "renamedOk": "Name updated",
   "publishAction": "Publish",
   "reopenAction": "Reopen",
   "endAction": "End",

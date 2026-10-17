@@ -225,11 +225,11 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
       onCancel={onCancel}
       footer={[
         <Button key="cancel" onClick={onCancel}>{t('cancel')}</Button>,
-        <Button key="draft" loading={saving} onClick={() => handleSave(false)}>
-          {t('saveDraft')}
+        <Button key="publish" loading={saving} onClick={() => handleSave(true)}>
+          {t('publishNow')}
         </Button>,
-        <Button key="save" type="primary" loading={saving} onClick={() => handleSave(true)}>
-          {t('createQuizCount', { count: questions.length })}
+        <Button key="save" type="primary" loading={saving} onClick={() => handleSave(false)}>
+          {t('saveDraft')}
         </Button>,
       ]}
       width="min(800px, 94vw)"

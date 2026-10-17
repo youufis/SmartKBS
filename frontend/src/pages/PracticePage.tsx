@@ -11,7 +11,7 @@ import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, DeleteOutlined,
   ThunderboltOutlined, DownloadOutlined, BellOutlined,
-  SearchOutlined, EyeOutlined,
+  SearchOutlined, EyeOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined, EditOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import { RowList } from '../components/RowList'
@@ -939,6 +939,23 @@ const TeacherView: React.FC = () => {
 
   // 发布开关：草稿 → 发布；进行中 → 结束（确认后）；已结束 → 重新开启
   const [statusBusy, setStatusBusy] = useState<number | null>(null)
+  // 改名称：任何状态都能改，不影响已收的答卷
+  const [renameTarget, setRenameTarget] = useState<any>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [renaming, setRenaming] = useState(false)
+  const submitRename = async () => {
+    if (!renameTarget) return
+    if (!renameValue.trim()) { message.warning(t('inputTitle')); return }
+    setRenaming(true)
+    try {
+      await apiClient.put(`/api/practice/sessions/${renameTarget.id}`, { title: renameValue.trim() })
+      message.success(t('renamedOk'))
+      setRenameTarget(null)
+      await loadSessions()
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || t('updateFailed'))
+    } finally { setRenaming(false) }
+  }
   const publishOrReopen = async (r: any) => {
     setStatusBusy(r.id)
     try {
@@ -1031,12 +1048,12 @@ const TeacherView: React.FC = () => {
                 <Input placeholder={t('title')} value={title} onChange={e => setTitle(e.target.value)} />
                 <ActivityScopeSelector value={publishScope} onChange={setPublishScope} showAllOption={isAdmin} />
                 <Space wrap>
-                  <Button type="primary" loading={publishing} onClick={() => publishSession(true)}>
-                    {t('publishPractice')}
-                  </Button>
-                  {/* 存为草稿：先出题、课上再发布（学生此时看不到） */}
-                  <Button loading={publishing} onClick={() => publishSession(false)}>
+                  {/* 默认存草稿（与考试一致）：确认无误后再在列表里点「发布」 */}
+                  <Button type="primary" loading={publishing} onClick={() => publishSession(false)}>
                     {t('saveDraft')}
+                  </Button>
+                  <Button loading={publishing} onClick={() => publishSession(true)}>
+                    {t('publishNow')}
                   </Button>
                 </Space>
               </Space>
@@ -1068,8 +1085,8 @@ const TeacherView: React.FC = () => {
                         {r.status === 'draft'
                           ? <Tag>{t('draft')}</Tag>
                           : r.status === 'active'
-                          ? <Tag color="processing">{t('inProgress')}</Tag>
-                          : <Tag>{t('endedSuccess')}</Tag>}
+                          ? <Tag color="green">{t('inProgress')}</Tag>
+                          : <Tag color="red">{t('endedSuccess')}</Tag>}
                         <Tag color="blue">{r.creator_username}</Tag>
                         <Tag>{t('subject')}：{r.subject || '-'}</Tag>
                         <ScopeTag scope={scope} grade={r.target_grade} classes={r.target_class}
@@ -1083,22 +1100,38 @@ const TeacherView: React.FC = () => {
                     </div>
                     <span onClick={(e) => e.stopPropagation()}>
                       <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
-                        {/* 发布开关：开=对学生开放；关=结束（草稿则保持未发布） */}
-                        <Tooltip title={r.status === 'active' ? t('endAction')
-                          : r.status === 'draft' ? t('publishAction') : t('reopenAction')}>
-                          <Switch size="small" checked={r.status === 'active'}
-                            loading={statusBusy === r.id}
-                            onChange={(on) => {
-                              if (on) { void publishOrReopen(r); return }
-                              Modal.confirm({
+                        {/* 发布 / 结束 / 重开：与考试中心同一套（绿=发布、红=结束、灰=重开），图标 + tooltip */}
+                        {r.status === 'draft' && (
+                          <Tooltip title={t('publishAction')}>
+                            <Button size="small" icon={<PlayCircleOutlined />}
+                              style={{ color: '#52c41a' }} loading={statusBusy === r.id}
+                              onClick={() => publishOrReopen(r)} />
+                          </Tooltip>
+                        )}
+                        {r.status === 'active' && (
+                          <Tooltip title={t('endAction')}>
+                            <Button size="small" icon={<PauseCircleOutlined />}
+                              style={{ color: '#ff4d4f' }}
+                              onClick={() => Modal.confirm({
                                 title: t('endConfirm'), okText: t('endAction'), cancelText: t('cancel'),
                                 okButtonProps: { danger: true },
                                 onOk: () => endSession(r.id),
-                              })
-                            }} />
-                        </Tooltip>
+                              })} />
+                          </Tooltip>
+                        )}
+                        {r.status === 'ended' && (
+                          <Tooltip title={t('reopenAction')}>
+                            <Button size="small" icon={<RedoOutlined />}
+                              loading={statusBusy === r.id} onClick={() => publishOrReopen(r)} />
+                          </Tooltip>
+                        )}
                         <Tooltip title={t('detail')}>
                           <Button size="small" icon={<EyeOutlined />} onClick={() => viewSessionDetail(r.id)} />
+                        </Tooltip>
+                        {/* 改名称：任何状态都能改（学生看到的标题同步更新） */}
+                        <Tooltip title={t('renameTitle')}>
+                          <Button size="small" icon={<EditOutlined />}
+                            onClick={() => { setRenameTarget(r); setRenameValue(r.title || '') }} />
                         </Tooltip>
                         <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
                         {/* 导出 / 删除 直接摊成图标显示（不再藏进"更多"菜单），都配 tooltip */}
@@ -1126,6 +1159,22 @@ const TeacherView: React.FC = () => {
           </div>
         </>
       )}
+      {/* ── 修改名称（草稿/进行中/已结束都可改，学生看到的标题同步更新） ── */}
+      <Modal maskClosable={false}
+        title={t('renameTitle')}
+        open={!!renameTarget}
+        onCancel={() => setRenameTarget(null)}
+        onOk={submitRename}
+        confirmLoading={renaming}
+        okText={t('save')}
+        cancelText={t('cancel')}
+      >
+        <Input value={renameValue} maxLength={100} showCount
+          onChange={(e) => setRenameValue(e.target.value)}
+          onPressEnter={submitRename}
+          placeholder={t('title')} />
+      </Modal>
+
       {/* ── S-GRADE: 练习详情(题目 + 名册 + 逐个看答卷批改) —— 居中弹窗，与随堂测验结果一致 ── */}
       <Modal
         title={detail?.session?.title || t('detail')}

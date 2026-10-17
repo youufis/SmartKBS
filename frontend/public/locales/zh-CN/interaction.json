@@ -1,7 +1,8 @@
 {
   "draft": "草稿",
   "saveDraft": "存为草稿",
-  "savedAsDraft": "已存为草稿",
+  "publishNow": "保存并发布",
+  "savedAsDraft": "已存为草稿，可在列表中点「发布」开放给学生",
   "publishAction": "发布",
   "reopenAction": "重新开启",
   "endAction": "结束",

@@ -5,11 +5,11 @@ import {
   Card, Tabs, Button, Space, Typography, Tag, Modal,
   Form, Input, InputNumber, Select, message, Empty, Spin, Radio, Result,
   Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination, Tooltip,
-  Alert, Segmented, Switch,
+  Alert, Segmented,
 } from 'antd'
 import {
   ThunderboltOutlined, BarChartOutlined,
-  PlusOutlined, PlayCircleOutlined,
+  PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined,
   RobotOutlined,
   EditOutlined, DeleteOutlined, DownloadOutlined,
   SearchOutlined,
@@ -179,7 +179,8 @@ const InteractionPage: React.FC = () => {
           target_class: aiQuizScope.target_class,
           target_users: aiQuizScope.target_users,
         })
-        message.success(t('quizCreated', { count: aiQuizResult.questions.length }))
+        // 默认存草稿（与考试一致）：提示老师去列表里发布
+        message.success(t('savedAsDraft'))
         setAiQuizModal(false)
         setAiQuizResult(null)
         setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
@@ -510,9 +511,9 @@ const InteractionPage: React.FC = () => {
                           <Tag>{t('ipNCount', { count: quiz.questions?.length || 0 })}</Tag>
                           {quiz.status === 'draft'
                             ? <Tag>{t('draft')}</Tag>
-                            : <Tag color={quiz.status === 'active' ? 'green' : 'default'}>
-                                {quiz.status === 'active' ? t('started') : t('ended')}
-                              </Tag>}
+                            : quiz.status === 'active'
+                            ? <Tag color="green">{t('started')}</Tag>
+                            : <Tag color="red">{t('ended')}</Tag>}
                           {/* 学生最关心的是"我答没答"，教师名单里则没这一格 */}
                           {isStudent && (
                             quiz.answered
@@ -544,23 +545,37 @@ const InteractionPage: React.FC = () => {
                         )}
                         {isTeacherOrAdmin && (
                           <>
-                            {/* 发布开关：开=学生可答；关=结束（草稿保持未发布） */}
-                            <Tooltip title={quiz.status === 'active' ? t('endAction')
-                              : quiz.status === 'draft' ? t('publishAction') : t('reopenAction')}>
-                              <Switch size="small" checked={quiz.status === 'active'}
-                                loading={quizStatusBusy === quiz.id}
-                                onClick={(_, e) => e.stopPropagation()}
-                                onChange={(on) => {
-                                  if (on) { void toggleQuizStatus(quiz, 'active'); return }
-                                  Modal.confirm({
-                                    title: t('endQuizConfirm'),
-                                    okText: t('endAction'),
-                                    cancelText: t('cancel'),
-                                    okButtonProps: { danger: true },
-                                    onOk: () => toggleQuizStatus(quiz, 'ended'),
-                                  })
-                                }} />
-                            </Tooltip>
+                            {/* 发布 / 结束 / 重开：与考试中心同一套（绿=发布、红=结束、灰=重开） */}
+                            {quiz.status === 'draft' && (
+                              <Tooltip title={t('publishAction')}>
+                                <Button size="small" icon={<PlayCircleOutlined />}
+                                  style={{ color: '#52c41a' }} loading={quizStatusBusy === quiz.id}
+                                  onClick={(e) => { e.stopPropagation(); void toggleQuizStatus(quiz, 'active') }} />
+                              </Tooltip>
+                            )}
+                            {quiz.status === 'active' && (
+                              <Tooltip title={t('endAction')}>
+                                <Button size="small" icon={<PauseCircleOutlined />}
+                                  style={{ color: '#ff4d4f' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    Modal.confirm({
+                                      title: t('endQuizConfirm'),
+                                      okText: t('endAction'),
+                                      cancelText: t('cancel'),
+                                      okButtonProps: { danger: true },
+                                      onOk: () => toggleQuizStatus(quiz, 'ended'),
+                                    })
+                                  }} />
+                              </Tooltip>
+                            )}
+                            {quiz.status === 'ended' && (
+                              <Tooltip title={t('reopenAction')}>
+                                <Button size="small" icon={<RedoOutlined />}
+                                  loading={quizStatusBusy === quiz.id}
+                                  onClick={(e) => { e.stopPropagation(); void toggleQuizStatus(quiz, 'active') }} />
+                              </Tooltip>
+                            )}
                             {/* 操作按钮只留图标 + tooltip：文字按钮太占地方，整行会被挤长 */}
                             <Tooltip title={t('results')}>
                               <Button size="small" icon={<BarChartOutlined />}

@@ -1,7 +1,8 @@
 {
   "draft": "Draft",
   "saveDraft": "Save as draft",
-  "savedAsDraft": "Saved as draft",
+  "publishNow": "Save and publish",
+  "savedAsDraft": "Saved as a draft — publish it from the list when ready",
   "publishAction": "Publish",
   "reopenAction": "Reopen",
   "endAction": "End",

@@ -1,6 +1,9 @@
 {
   "draft": "草稿",
   "saveDraft": "存为草稿",
+  "publishNow": "保存并发布",
+  "renameTitle": "修改练习名称",
+  "renamedOk": "名称已更新",
   "publishAction": "发布",
   "reopenAction": "重新开启",
   "endAction": "结束",

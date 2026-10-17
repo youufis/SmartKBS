@@ -62,9 +62,9 @@ class QuizCreate(BaseModel):
     target_users: str = ""
     # R2(Step B): True=由后端把各题分值折算成合计 100(教师没手工配分值时)
     auto_scores: bool = True
-    # 立即发布：True(默认)=创建即进行中（课堂里出完题就能答）；False=存为草稿，
-    # 之后在列表里用「发布」开关放出去（与考试/同步练习同一套状态机）
-    publish: bool = True
+    # 立即发布：默认 False=存为草稿（与考试「新建即草稿」一致），
+    # 老师在列表里点「发布」才对学生开放；显式传 true 才会创建即进行中
+    publish: bool = False
 
 
 class QuizAnswerSubmit(BaseModel):
