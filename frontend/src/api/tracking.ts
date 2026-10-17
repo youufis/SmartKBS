@@ -58,15 +58,19 @@ export async function getResourceViewStats(
 export async function getResourceViewStudents(
   resourceType: string,
   resourceId: number,
+  statusFilter: 'viewed' | 'unviewed' | 'all' = 'viewed',
 ): Promise<{
   students: ResourceViewStudent[];
   total: number;
+  /** 已浏览人数（与 total 的区别：status_filter=unviewed 时 total 是未浏览人数） */
+  viewed_count?: number;
+  unviewed_count?: number;
   /** 这些学生的累计浏览次数（教师视角只统计本人任教班级） */
   total_views?: number;
   resource_name?: string;
 }> {
   const { data } = await apiClient.get('/api/tracking/resource-view-students', {
-    params: { resource_type: resourceType, resource_id: resourceId },
+    params: { resource_type: resourceType, resource_id: resourceId, status_filter: statusFilter },
   });
   return data;
 }

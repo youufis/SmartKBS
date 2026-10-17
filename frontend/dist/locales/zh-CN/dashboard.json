@@ -215,6 +215,13 @@
       "detailTitle": "👁️ 查看「{{name}}」的学生",
         "searchPh": "搜索资源名称 / 共享者",
         "detailSummary": "共 {{students}} 名学生浏览 · 累计 {{views}} 次",
+        "filterViewed": "已浏览",
+        "filterUnviewed": "未浏览",
+        "filterAll": "全部",
+        "statusCol": "状态",
+        "allViewed": "全部学生都已浏览",
+        "days7": "近 7 天",
+        "days30": "近 30 天",
       "noRecords": "暂无学生查看记录",
       "fileType": "文件",
       "columns": {

@@ -315,12 +315,14 @@ async def get_kp_view_stats(kp_id: int, request: Request):
     """教师查看指定知识点下所有 HTML/下载资源的浏览统计"""
     user = get_current_user(request)
     role = user.get("role", 2)
+    username = user.get("username", "")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
     bindings = execute_query_dict(
         """SELECT cb.id as binding_id, cb.resource_type, cb.resource_id,
-                  COALESCE(sr.file_name, '') as resource_name
+                  COALESCE(sr.file_name, '') as resource_name,
+                  COALESCE(sr.owner_username, '') as owner_username
            FROM curriculum_bindings cb
            LEFT JOIN shared_resources sr ON cb.resource_id=sr.id AND cb.resource_type=sr.resource_type
            WHERE cb.knowledge_point_id=? AND cb.resource_type IN ('html', 'download')
@@ -330,12 +332,17 @@ async def get_kp_view_stats(kp_id: int, request: Request):
 
     result = []
     for b in bindings:
+        # 教师只看自己共享的资源（管理员不限），与"查看学生"同口径；
+        # 否则这里能顺手读到同事资源的浏览次数
+        if role != 0 and (b.get("owner_username") or "") != username:
+            continue
         stats = get_resource_view_stats_sync(b["resource_type"], b["resource_id"])
         result.append({
             "binding_id": b["binding_id"],
             "resource_type": b["resource_type"],
             "resource_id": b["resource_id"],
             "resource_name": b["resource_name"] or f"[{b['resource_type']}:{b['resource_id']}]",
+            "owner": b.get("owner_username") or "",
             **stats,
         })
 
@@ -375,12 +382,16 @@ async def get_resource_view_students(
     request: Request,
     resource_type: str = Query(...),
     resource_id: int = Query(...),
+    status_filter: str = Query("viewed", description="viewed=已浏览 / unviewed=未浏览 / all=全部"),
 ):
-    """获取查看过指定资源的学生列表。
+    """获取某个资源的学生浏览情况（已浏览 / 未浏览 / 全部）。
 
     权限（与活动监控一致）：教师只能看**自己共享**的资源，且只统计**本人任教班级**的
     学生；管理员不限。旧实现只校验了"是教师"，任何老师传任意 (type,id) 都能列出
     全校看过该资源的学生，属于越权读取。
+
+    未浏览 = 名册（教师=本人任教班级，管理员=全部在读学生）减去已浏览的人，
+    这样老师一眼能看出"谁还没看"。
     """
     user = get_current_user(request)
     role = user.get("role", 2)
@@ -408,19 +419,48 @@ async def get_resource_view_students(
         (resource_type, resource_id),
     )
 
-    # 教师只看本人任教班级的学生，管理员看全部
-    if role != 0:
-        from backend.permission_service import get_students_in_scope
-        in_scope = {s["username"] for s in get_students_in_scope(username)}
-        rows = [r for r in rows if r.get("student_username") in in_scope]
+    if status_filter not in ("viewed", "unviewed", "all"):
+        raise HTTPException(status_code=400, detail="status_filter 只能是 viewed / unviewed / all")
+
+    # 名册：教师=本人任教班级，管理员=全部在读学生
+    from backend.permission_service import attach_student_info, get_students_in_scope
+    roster = get_students_in_scope(username)
 
     # 学生明细补年级班级(原本只有学号+姓名)
-    from backend.permission_service import attach_student_info
     attach_student_info(rows, key="student_username", prefix="student_")
+    viewed_names = {r.get("student_username") for r in rows}
+
+    # 教师只看本人任教班级的学生（管理员看全部浏览记录，含已离册学生）
+    if role != 0:
+        scope = {s["username"] for s in roster}
+        rows = [r for r in rows if r.get("student_username") in scope]
+
+    for r in rows:
+        r["viewed"] = True
+
+    # 未浏览：名册里没出现在浏览记录中的人
+    unviewed = [{
+        "student_username": s["username"],
+        "student_name": s.get("name") or s["username"],
+        "student_grade": s.get("grade") or "",
+        "student_class_name": str(s.get("class") or ""),
+        "view_count": 0,
+        "last_viewed": "",
+        "viewed": False,
+    } for s in roster if s["username"] not in viewed_names]
+
+    if status_filter == "viewed":
+        students = rows
+    elif status_filter == "unviewed":
+        students = unviewed
+    else:
+        students = rows + unviewed
 
     return {
-        "students": rows,
-        "total": len(rows),
+        "students": students,
+        "total": len(students),
+        "viewed_count": len(rows),
+        "unviewed_count": len(unviewed),
         "total_views": sum(int(r.get("view_count") or 0) for r in rows),
         "resource_name": share[0].get("file_name") or "",
     }

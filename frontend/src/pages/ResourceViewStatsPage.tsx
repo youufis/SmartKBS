@@ -6,7 +6,7 @@ import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Table, Select, Space, Typography, message, Row, Col,
-  Statistic, Tag, Spin, Empty, Button, Modal, Input,
+  Statistic, Tag, Spin, Empty, Button, Modal, Input, Radio,
 } from 'antd'
 import {
   EyeOutlined, ReloadOutlined, TeamOutlined,
@@ -36,6 +36,8 @@ const ResourceViewStatsPage: React.FC = () => {
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
   const [loading, setLoading] = useState(false)
+  // 概览时间范围（原来是写死的 30 天）
+  const [overviewDays, setOverviewDays] = useState(30)
 
   // 课程列表（用于按知识点筛选）
   const [courses, setCourses] = useState<any[]>([])
@@ -52,6 +54,10 @@ const ResourceViewStatsPage: React.FC = () => {
   const [detailTitle, setDetailTitle] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailSummary, setDetailSummary] = useState({ total: 0, total_views: 0 })
+  // 已浏览 / 未浏览 / 全部（默认只看已浏览）
+  const [detailFilter, setDetailFilter] = useState<'viewed' | 'unviewed' | 'all'>('viewed')
+  const [detailCounts, setDetailCounts] = useState({ viewed: 0, unviewed: 0 })
+  const [detailResource, setDetailResource] = useState<{ type: string; id: number; name: string } | null>(null)
   // 资源列表的本地搜索（原先只能靠翻页找某个资源）
   const [resourceKeyword, setResourceKeyword] = useState('')
 
@@ -68,13 +74,13 @@ const ResourceViewStatsPage: React.FC = () => {
   }
 
   // 加载概览数据
-  const loadOverview = async () => {
+  const loadOverview = async (days = overviewDays) => {
     try {
       const data = await trackingApi.getResourceViewDashboard({
-        days: 30,
+        days,
       })
       setOverview(data)
-    } catch (err) { reportLoadError(err, { key: 'viewStats.overview', retry: () => { void loadOverview() } }) }
+    } catch (err) { reportLoadError(err, { key: 'viewStats.overview', retry: () => { void loadOverview(days) } }) }
   }
 
   useEffect(() => {
@@ -110,16 +116,25 @@ const ResourceViewStatsPage: React.FC = () => {
   }, [])
 
   // 查看某个资源的学生明细
-  const handleViewDetail = async (resourceType: string, resourceId: number, name: string) => {
+  const handleViewDetail = async (
+    resourceType: string, resourceId: number, name: string,
+    filter: 'viewed' | 'unviewed' | 'all' = detailFilter,
+  ) => {
     setDetailTitle(name)
+    setDetailResource({ type: resourceType, id: resourceId, name })
+    setDetailFilter(filter)
     setDetailModalOpen(true)
     setDetailLoading(true)
     setViewDetail([])
     setDetailSummary({ total: 0, total_views: 0 })
     try {
-      const data = await trackingApi.getResourceViewStudents(resourceType, resourceId)
+      const data = await trackingApi.getResourceViewStudents(resourceType, resourceId, filter)
       setViewDetail(data.students)
       setDetailSummary({ total: data.total, total_views: data.total_views ?? 0 })
+      setDetailCounts({
+        viewed: data.viewed_count ?? 0,
+        unviewed: data.unviewed_count ?? 0,
+      })
     } catch (err: any) {
       // 旧写法静默吞掉错误，界面只会显示"暂无记录"，看不出是没数据还是没权限
       message.error(err?.response?.data?.detail || t('activityMonitor.loadStatusFailed'))
@@ -209,9 +224,17 @@ const ResourceViewStatsPage: React.FC = () => {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        <EyeOutlined /> {t('activityMonitor.resourceViews.title')}
-      </Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <Title level={4} style={{ margin: 0 }}>
+          <EyeOutlined /> {t('activityMonitor.resourceViews.title')}
+        </Title>
+        {/* 概览时间范围：原来是写死的 30 天 */}
+        <Radio.Group value={overviewDays} optionType="button" size="small"
+          onChange={(e) => { const d = Number(e.target.value); setOverviewDays(d); void loadOverview(d) }}>
+          <Radio.Button value={7}>{t('activityMonitor.resourceViews.days7')}</Radio.Button>
+          <Radio.Button value={30}>{t('activityMonitor.resourceViews.days30')}</Radio.Button>
+        </Radio.Group>
+      </div>
 
       {/* 概览卡片 */}
       <Row gutter={[16, 12]} style={{ marginBottom: 16 }}>
@@ -336,32 +359,56 @@ const ResourceViewStatsPage: React.FC = () => {
       >
         {detailLoading ? (
           <div style={{ textAlign: 'center', padding: '32px 0' }}><Spin /></div>
-        ) : viewDetail.length === 0 ? (
-          <Empty description={t('activityMonitor.resourceViews.noRecords')} />
         ) : (
           <>
-            <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-              {t('activityMonitor.resourceViews.detailSummary', {
-                students: detailSummary.total, views: detailSummary.total_views,
-              })}
-            </Text>
-            <Table
-              dataSource={viewDetail}
-              rowKey="student_username"
-              size="small"
-              pagination={{
-                pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'],
-                showTotal: (total) => t('activityMonitor.pagination.totalStudents', { count: total }),
-              }}
-              columns={[
-                { title: t('activityMonitor.resourceViews.columns.student'), dataIndex: 'student_name', width: 120 },
-                { title: t('activityMonitor.resourceViews.columns.username'), dataIndex: 'student_username', width: 120 },
-                { title: t('activityMonitor.columns.grade'), dataIndex: 'student_grade', width: 90, render: (v: string) => v || '-' },
-                { title: t('activityMonitor.columns.class'), dataIndex: 'student_class_name', width: 110, render: (v: string) => v || '-' },
-                { title: t('activityMonitor.resourceViews.columns.viewCount'), dataIndex: 'view_count', width: 90 },
-                { title: t('activityMonitor.resourceViews.columns.lastView'), dataIndex: 'last_viewed', width: 180 },
-              ]}
-            />
+            <Space size={16} wrap style={{ marginBottom: 12 }}>
+              <Text type="secondary">
+                {t('activityMonitor.resourceViews.detailSummary', {
+                  students: detailSummary.total, views: detailSummary.total_views,
+                })}
+              </Text>
+              {/* 已浏览 / 未浏览 / 全部：一眼看出"谁还没看" */}
+              <Radio.Group size="small" optionType="button" value={detailFilter}
+                onChange={(e) => {
+                  const f = e.target.value as 'viewed' | 'unviewed' | 'all'
+                  if (detailResource) void handleViewDetail(detailResource.type, detailResource.id, detailResource.name, f)
+                }}>
+                <Radio.Button value="viewed">{t('activityMonitor.resourceViews.filterViewed')} {detailCounts.viewed}</Radio.Button>
+                <Radio.Button value="unviewed">{t('activityMonitor.resourceViews.filterUnviewed')} {detailCounts.unviewed}</Radio.Button>
+                <Radio.Button value="all">{t('activityMonitor.resourceViews.filterAll')}</Radio.Button>
+              </Radio.Group>
+            </Space>
+            {viewDetail.length === 0 ? (
+              <Empty description={detailFilter === 'unviewed'
+                ? t('activityMonitor.resourceViews.allViewed')
+                : t('activityMonitor.resourceViews.noRecords')} />
+            ) : (
+              <Table
+                dataSource={viewDetail}
+                rowKey="student_username"
+                size="small"
+                pagination={{
+                  pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'],
+                  showTotal: (total) => t('activityMonitor.pagination.totalStudents', { count: total }),
+                }}
+                columns={[
+                  { title: t('activityMonitor.resourceViews.columns.student'), dataIndex: 'student_name', width: 120 },
+                  { title: t('activityMonitor.resourceViews.columns.username'), dataIndex: 'student_username', width: 120 },
+                  { title: t('activityMonitor.columns.grade'), dataIndex: 'student_grade', width: 90, render: (v: string) => v || '-' },
+                  { title: t('activityMonitor.columns.class'), dataIndex: 'student_class_name', width: 110, render: (v: string) => v || '-' },
+                  ...(detailFilter === 'all' ? [{
+                    title: t('activityMonitor.resourceViews.statusCol'), key: 'viewed', width: 96,
+                    render: (_: any, r: any) => r.viewed
+                      ? <Tag color="green">{t('activityMonitor.resourceViews.filterViewed')}</Tag>
+                      : <Tag>{t('activityMonitor.resourceViews.filterUnviewed')}</Tag>,
+                  }] : []),
+                  { title: t('activityMonitor.resourceViews.columns.viewCount'), dataIndex: 'view_count', width: 90,
+                    render: (v: number) => (v ? v : '-') },
+                  { title: t('activityMonitor.resourceViews.columns.lastView'), dataIndex: 'last_viewed', width: 180,
+                    render: (v: string) => v || '-' },
+                ]}
+              />
+            )}
           </>
         )}
       </Modal>

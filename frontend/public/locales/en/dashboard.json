@@ -215,6 +215,13 @@
       "detailTitle": "👁️ Students who viewed \"{{name}}\"",
         "searchPh": "Search resource or owner",
         "detailSummary": "{{students}} students · {{views}} views in total",
+        "filterViewed": "Viewed",
+        "filterUnviewed": "Not viewed",
+        "filterAll": "All",
+        "statusCol": "Status",
+        "allViewed": "Every student has viewed it",
+        "days7": "Last 7 days",
+        "days30": "Last 30 days",
       "noRecords": "No view records",
       "fileType": "File",
       "columns": {
