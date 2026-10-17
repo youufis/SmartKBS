@@ -40,17 +40,20 @@
 > - 🎯 **New: Class Drill** — pick a class and a knowledge point, draw from the question bank first (optional AI top-up), pick a student fairly, and the student taps an answer to be judged instantly (correct 5 / wrong 2 / skipped 0)
 > - 🎧 **New: AI Podcast** — one click turns a knowledge point into a two-host dialogue audio page (male / female voices, 3 / 4 / 5 minutes, four themes); the model writes the script, the backend renders the player
 > - 🧩 **One knowledge-point control everywhere** — dropdown of course knowledge points plus free typing, comma-separated and filtered by subject; shared by nine entry points, and a quiz's topic is that knowledge point, now stored
+> - 🔔 **Draft before publishing** — practice and quizzes now follow the exam state machine (draft → active → ended → reopen); new items default to draft with one-click publish / end in the list, and practices can be renamed
 > - 🗂 **Every activity list is a card list** — exam centre, quizzes, quick polls, buzzer, sync practice, activity monitor and whiteboard, with icon-only actions plus tooltips
+> - 📊 **Completion counted against the activity's own audience** — expected = activity target (students / class / grade) ∩ viewer scope ∩ page filter; list cards and the detail view share one source, and filtering no longer changes the totals
+> - 👁 **View stats show who has not opened a resource** — viewer details moved to a wide modal with viewed / not viewed / all tabs; teachers only see their own resources and classes; the overview switches between 7 and 30 days
 > - 🎨 **Whiteboard rebuilt** — refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect
 > - 🧱 **One door into the question bank** — nine insert paths merged into a single exit (validate → de-duplicate → one transaction → link knowledge points); filling is always bank first, AI covers the shortfall, AI questions stored before returning
-> - 📊 **One results view for exercises, quizzes and exams** — three tabs plus per-question accuracy, AI analysis and an absent list; 100-point scores with papers still being graded excluded from the average and pass rate
+> - 📊 **One results view for exercises, quizzes and exams** — three tabs plus per-question accuracy, AI analysis and an absent list; 100-point scores with papers still being graded excluded
 > - 🖼 **"Weekly Portrait" becomes "My Portrait"** — period configurable (weekly / monthly); background generation with a retry-image path; no name or gender in the image prompt
 > - 🏆 **Hall of Glory without teacher work** — points appear automatically (0 never does); ranks, a weekly-progress board and a full-screen wall with six themes re-sync every 60 seconds
-> - 🧑‍🎓 **Answering protected end to end** — local drafts, a confirm before leaving, partial submits, a question-number strip and a progress bar; search, filters and sorting on the exercise, quiz and exam entry pages
-> - 🛡 **User management and permissions** — the "editing a name wiped grade and class" data loss is fixed, students no longer hit an error on change-password, and teachers can reset passwords within their classes and search the whole school
-> - 📊 **Consistency** — creators shown by username, grade/class scope tags unified, wide tables no longer scroll sideways, quieter dashboard motion (respecting "reduce motion")
+> - 🧑‍🎓 **Answering protected end to end** — local drafts, a confirm before leaving, partial submits, a question-number strip and a progress bar; a handed-in quiz shows as done immediately
+> - 🛡 **Permissions tightened** — the "editing a name wiped grade and class" data loss is fixed, students no longer hit an error on change-password; activity monitor and view stats are limited to one's own activities and classes, admins see everything
+> - 📊 **Consistency** — creators shown by username, scope tags unified, wide tables no longer scroll sideways, quieter dashboard motion (respecting "reduce motion")
 > - 🧭 **Settings and operations** — one model catalogue behind dropdowns with self-test buttons; uncached entry page; login-page visit statistics
-> - ⚠️ **Breaking changes**: none
+> - ⚠️ **Breaking changes**: none (new practices and quizzes start as drafts and must be published from the list)
 
 ---
 
@@ -1107,19 +1110,22 @@ Current version **8.7.0**. Each release lists the changes a user can notice; per
 
 - 🎯 **New: Class Drill and AI Podcast** — the drill draws by knowledge point, picks a student fairly and scores the answer on submit; the podcast turns one click into a two-host dialogue audio page (3 / 4 / 5 minutes, four themes)
 - 🧩 **One knowledge-point control everywhere** — dropdown plus free typing (comma-separated, filtered by subject) shared by nine entry points; a quiz's topic is that knowledge point and is now stored; an empty knowledge point means "unlimited" and draws from the subject instead of nothing
+- 🔔 **Publish switch for practices and quizzes** — draft → publish → end → reopen, the same state machine as exams; new items default to draft, with "save as draft / save and publish" in the editors; practices can be renamed in any state; drafts stay hidden from students and from the activity monitor
 - 🗂 **Every activity list is a card list** — exam centre, quizzes, quick polls, buzzer, sync practice, activity monitor and whiteboard, with icon-only actions plus tooltips
+- 📊 **One completion rule everywhere** — expected = activity target ∩ viewer scope ∩ page filter (students / class / grade); list cards and the detail view share one source, grade / class filters refresh the list, and filtering by completed / incomplete no longer changes the totals; the detail view is a wide modal; course practices show their assign time and an available / inactive state, and a discussion counts as completed once a student posts
+- 👁 **View stats completed** — viewer details in a wide modal with viewed / not viewed / all (plus headcount and total views); teachers only see their own resources and classes; per-knowledge-point stats also stay within one's own resources; the overview switches between 7 and 30 days
 - 🎨 **Whiteboard usability and a rebuilt realtime path** — refusals explain themselves, ended rooms reopen, one slow student no longer stalls the class, dropped links reconnect; creation follows the platform-wide activity scope
 - 🧱 **One door into the question bank** — nine insert paths merged into one exit, one filling policy (bank first → AI covers the shortfall → stored before returning), question counts that fail loudly when out of range, and generation timeouts that retry across endpoints
 - 📊 **All three results screens completed and aligned** — three tabs (Overview / Questions / Roster) with per-question accuracy, AI analysis and an absent list; 100-point scores with papers still being graded excluded, one implementation each for judging and full-score rules, and four reporting bugs fixed
 - 🖼 **"Weekly Portrait" renamed "My Portrait"** — configurable period (weekly / monthly), background generation with a retry-image path, and no name or gender in the image prompt
 - 🏆 **Hall of Glory without teacher work** — any points appear automatically (0 never does, taken-down cards stay down), teachers switch to Take down / Put back, and ranks, a weekly-progress board and a full-screen wall with six themes re-sync every 60 seconds
-- 🧑‍🎓 **Answering protected end to end** — local drafts, a confirm before leaving, partial submits, a question-number strip and a progress bar in exercises and quizzes, plus an in-place retry when a submit fails
+- 🧑‍🎓 **Answering protected end to end** — local drafts, a confirm before leaving, partial submits, a question-number strip and a progress bar in exercises and quizzes, plus an in-place retry when a submit fails; a handed-in quiz is marked done immediately
 - 🧑‍🎓 **The three student entry pages reworked** (exercise history / quizzes / exam centre) — search, filters and sorting, cards that say not started / in progress / submitted, and an exam centre that reports your real status with a taken / not-taken filter and a deadline
-- 🛡 **User management and permissions** — the "editing a name wiped grade and class" data loss is fixed, the change-password page no longer errors, teachers can reset passwords within their classes and search the whole school, and the points API requires login
-- 📊 **Consistency** — creators shown by username, grade/class scope tags unified, wide tables no longer scrolling sideways, and a redesigned dashboard with a quieter activity feed
+- 🛡 **User management and permissions** — the "editing a name wiped grade and class" data loss is fixed, the change-password page no longer errors, teachers can reset passwords within their classes and search the whole school, and the points API requires login; activity monitor and view stats are limited to one's own activities and classes, admins see everything
+- 📊 **Consistency** — creators shown by username, grade/class scope tags unified, wide tables no longer scrolling sideways, and a redesigned dashboard with a quieter activity feed; practice cards show their creation time
 - 🧭 **Settings and operations** — one model catalogue behind dropdowns with self-test buttons and measured size limits, an uncached entry page, and login-page visit statistics
 - 🧪 1000+ regression tests passing in total
-- ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error; the whiteboard, portrait and exam-centre batches need a backend restart; new quizzes spread their points across 100 while existing quizzes and historical answers are untouched
+- ⚠️ **Breaking changes**: none. Out-of-range question counts now raise an error; the whiteboard, portrait and exam-centre batches need a backend restart; new quizzes spread their points across 100 while existing quizzes and historical answers are untouched; new practices and quizzes are drafts until published
 
 ### v8.0 – v8.6
 
