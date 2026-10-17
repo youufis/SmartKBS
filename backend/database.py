@@ -733,7 +733,20 @@ def init_db():
                 status TEXT DEFAULT 'pending',
                 answer TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
-                answered_at TEXT
+                answered_at TEXT,
+                answered_by TEXT DEFAULT '',
+                client_request_id TEXT,
+                content_hash TEXT,
+                dedup_bucket INTEGER DEFAULT 0,
+                grade_id INTEGER,
+                class_id INTEGER,
+                subject TEXT DEFAULT '',
+                knowledge_point TEXT DEFAULT '',
+                is_pinned INTEGER DEFAULT 0,
+                is_featured INTEGER DEFAULT 0,
+                is_resolved INTEGER DEFAULT 0,
+                resolved_at TEXT DEFAULT '',
+                resolved_by TEXT DEFAULT ''
             )""")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_iq_student ON interaction_questions(student_username)")
@@ -776,6 +789,91 @@ def init_db():
             # ── 迁移：interaction_questions 添加 answered_by 列（学生互答功能） ──
             try:
                 c.execute("ALTER TABLE interaction_questions ADD COLUMN answered_by TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 迁移：提问幂等 / 短时去重字段 ──
+            # client_request_id：前端提交时生成，网络重试复用同一个值 → 只入库一次
+            # content_hash + dedup_bucket：同一学生 2 分钟内相同内容只入库一次
+            for _ddl in (
+                "ALTER TABLE interaction_questions ADD COLUMN client_request_id TEXT",
+                "ALTER TABLE interaction_questions ADD COLUMN content_hash TEXT",
+                "ALTER TABLE interaction_questions ADD COLUMN dedup_bucket INTEGER DEFAULT 0",
+                "ALTER TABLE interaction_questions ADD COLUMN grade_id INTEGER",
+                "ALTER TABLE interaction_questions ADD COLUMN class_id INTEGER",
+                "ALTER TABLE interaction_questions ADD COLUMN subject TEXT DEFAULT ''",
+                "ALTER TABLE interaction_questions ADD COLUMN knowledge_point TEXT DEFAULT ''",
+                "ALTER TABLE interaction_questions ADD COLUMN is_pinned INTEGER DEFAULT 0",
+                "ALTER TABLE interaction_questions ADD COLUMN is_featured INTEGER DEFAULT 0",
+                "ALTER TABLE interaction_questions ADD COLUMN is_resolved INTEGER DEFAULT 0",
+                "ALTER TABLE interaction_questions ADD COLUMN resolved_at TEXT DEFAULT ''",
+                "ALTER TABLE interaction_questions ADD COLUMN resolved_by TEXT DEFAULT ''",
+            ):
+                try:
+                    c.execute(_ddl)
+                except sqlite3.OperationalError:
+                    pass
+
+            # 历史提问回填“提问时班级”快照：只补空值，不覆盖已写入的快照
+            try:
+                c.execute(
+                    """UPDATE interaction_questions
+                       SET grade_id = COALESCE(grade_id, (
+                               SELECT u.grade_id FROM users u
+                               WHERE u.username = interaction_questions.student_username)),
+                           class_id = COALESCE(class_id, (
+                               SELECT u.class_id FROM users u
+                               WHERE u.username = interaction_questions.student_username))
+                       WHERE grade_id IS NULL OR class_id IS NULL"""
+                )
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_iq_client_req "
+                    "ON interaction_questions(student_username, client_request_id) "
+                    "WHERE client_request_id IS NOT NULL AND client_request_id <> ''"
+                )
+                c.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_iq_content_dedup "
+                    "ON interaction_questions(student_username, content_hash, dedup_bucket) "
+                    "WHERE content_hash IS NOT NULL AND content_hash <> ''"
+                )
+                c.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_iq_scope_created "
+                    "ON interaction_questions(grade_id, class_id, created_at)"
+                )
+                c.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_iq_subject_created "
+                    "ON interaction_questions(subject, created_at)"
+                )
+            except (sqlite3.OperationalError, sqlite3.IntegrityError):
+                pass
+
+            # ── 课堂提问：我也想问 / 追问 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_question_votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(question_id, student_username)
+            )""")
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_question_followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_iqv_qid "
+                    "ON interaction_question_votes(question_id)"
+                )
+                c.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_iqf_qid "
+                    "ON interaction_question_followups(question_id, created_at)"
+                )
             except sqlite3.OperationalError:
                 pass
 

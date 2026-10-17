@@ -8,11 +8,14 @@ import traceback
 import json
 import random
 import re
-from datetime import datetime
+import hashlib
+import sqlite3
+import time
+from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Request, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 
 from backend.api.dependencies import get_current_user
 from backend.text_utils import clip
@@ -44,6 +47,7 @@ from backend.utils import extract_json_from_text
 from backend.question_db import execute_update as qb_execute_update
 from backend.config import BASE_DIR
 from backend.permission_service import get_user_grade_class, check_activity_visibility
+from backend.question_ws import ADMIN_ROOM, class_room, question_ws
 
 router = APIRouter()
 
@@ -83,12 +87,32 @@ class PollCreate(BaseModel):
 
 
 class QuestionCreate(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=500)
     is_anonymous: bool = False
+    subject: str = Field(default="", max_length=50)
+    knowledge_point: str = Field(default="", max_length=100)
+    # 前端每次提问生成、失败重试复用；后端据此做幂等，避免网络重试重复入库
+    client_request_id: str | None = Field(default=None, max_length=64)
 
 
 class QuestionAnswer(BaseModel):
     answer: str
+
+
+class QuestionPin(BaseModel):
+    pinned: bool = True
+
+
+class QuestionFeature(BaseModel):
+    featured: bool = True
+
+
+class QuestionResolve(BaseModel):
+    resolved: bool = True
+
+
+class QuestionFollowupCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
 
 
 class AiGenerateQuiz(BaseModel):
@@ -446,6 +470,10 @@ async def ai_suggest_answer(question_id: int, request: Request):
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师可用")
+    if not _question_scope(question_id):
+        raise HTTPException(status_code=404, detail="问题不存在")
+    if not _can_view_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权查看该提问")
 
     rows = execute_query(
         "SELECT content FROM interaction_questions WHERE id = ?",
@@ -487,6 +515,8 @@ class PollUpdate(BaseModel):
 
 class QuestionUpdate(BaseModel):
     content: str | None = None
+    subject: str | None = None
+    knowledge_point: str | None = None
 
 
 # ── 随堂测验 ──
@@ -869,51 +899,69 @@ async def delete_poll(poll_id: int, request: Request):
 @router.delete("/questions/{question_id}", summary="删除提问")
 async def delete_question(question_id: int, request: Request):
     user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-    # 先查出提问信息用于清理关联数据
-    q_row = execute_query("SELECT student_username FROM interaction_questions WHERE id=?", (question_id,))
-    if not q_row:
+    scope = _question_scope(question_id)
+    if not scope:
         raise HTTPException(status_code=404, detail="提问不存在")
-    q_student = q_row[0][0]
-
-    if role == 0:
-        # 管理员：删除任何提问
-        execute_insert_update("DELETE FROM interaction_questions WHERE id = ?", (question_id,))
-    elif role == 1:
-        # 教师：只能删除自己班级学生的提问
-        from backend.permission_service import check_teacher_access_to_student
-        if not check_teacher_access_to_student(username, q_student):
-            raise HTTPException(status_code=403, detail="无权删除非本班学生的提问")
-        execute_insert_update("DELETE FROM interaction_questions WHERE id=?", (question_id,))
-    else:
-        # 学生：只能删除自己的提问
-        if q_student != username:
-            raise HTTPException(status_code=403, detail="无权删除他人的提问")
-        execute_insert_update("DELETE FROM interaction_questions WHERE id=?", (question_id,))
+    if not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权删除该提问")
+    execute_insert_update("DELETE FROM interaction_questions WHERE id = ?", (question_id,))
 
     # 清理关联数据
     # R9: 不再连带删除该提问已发放的积分记录 —— 学生真实参与过, 悄悄把分扣回去更伤信任;
     # 只清掉已经失去载体的通知。
+    execute_insert_update(
+        "DELETE FROM interaction_question_answers WHERE question_id = ?", (question_id,)
+    )
+    execute_insert_update(
+        "DELETE FROM interaction_question_votes WHERE question_id = ?", (question_id,)
+    )
+    execute_insert_update(
+        "DELETE FROM interaction_question_followups WHERE question_id = ?", (question_id,)
+    )
     execute_insert_update("DELETE FROM notifications WHERE source_type='question' AND source_id=?", (str(question_id),))
+    asyncio.create_task(
+        _broadcast_question_event(scope[1], scope[2], "question_deleted", question_id)
+    )
     return {"message": "提问已删除"}
 
 
 @router.put("/questions/{question_id}", summary="更新提问")
 async def update_question(question_id: int, req: QuestionUpdate, request: Request):
     user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-    if role == 2:
-        rows = execute_query(
-            "SELECT id FROM interaction_questions WHERE id = ? AND student_username = ?",
-            (question_id, username),
-        )
-        if not rows:
-            raise HTTPException(status_code=403, detail="无权修改")
+    scope = _question_scope(question_id)
+    if not scope:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    # 学生只能改自己的；教师只能改任教范围内学生的；管理员不受限
+    if not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权修改")
     if req.content is not None:
-        execute_insert_update("UPDATE interaction_questions SET content = ? WHERE id = ?",
-                              (req.content, question_id))
+        content = req.content.strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="提问内容不能为空")
+        if len(content) > 500:
+            raise HTTPException(status_code=400, detail="问题最多 500 字")
+        # 编辑后不再参与“提交时的 2 分钟内容去重”，避免唯一索引挡住正常修改
+        execute_insert_update(
+            "UPDATE interaction_questions SET content = ?, content_hash = NULL, dedup_bucket = 0 WHERE id = ?",
+            (content, question_id),
+        )
+    fields = []
+    values: list[Any] = []
+    if req.subject is not None:
+        fields.append("subject = ?")
+        values.append(req.subject.strip())
+    if req.knowledge_point is not None:
+        fields.append("knowledge_point = ?")
+        values.append(req.knowledge_point.strip())
+    if fields:
+        values.append(question_id)
+        execute_insert_update(
+            f"UPDATE interaction_questions SET {', '.join(fields)} WHERE id = ?",
+            tuple(values),
+        )
+    asyncio.create_task(
+        _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+    )
     return {"message": "提问已更新"}
 
 
@@ -1873,16 +1921,9 @@ def _record_rejection(username: str, content: str):
         logger.warning(f"用户 {username} 触发审核频率限制，封禁 {_BLOCK_SECONDS} 秒")
 
 
-def _ai_content_review(content: str, username: str, role: str = "question") -> tuple[bool, str]:
-    """调用 AI 审核内容是否合规，含重复提交和频率限制，返回 (是否通过, 原因)"""
-    # 先检查频率限制和重复提交
-    allowed, msg = _check_review_rate_limit(username, content)
-    if not allowed:
-        return False, msg
-
-    import json
+def _review_prompt(content: str, role: str) -> str:
     role_desc = "提问" if role == "question" else "回答"
-    prompt = (
+    return (
         '你是一个课堂内容审核助手。请判断以下学生' + role_desc + '是否包含：\n'
         '1. 违反法律法规的内容\n'
         '2. 违反道德规范、社会公序良俗的内容\n'
@@ -1893,29 +1934,334 @@ def _ai_content_review(content: str, username: str, role: str = "question") -> t
         '请严格判断。只返回以下JSON格式（不要包含其他文字）：\n'
         '{"safe": true, "reason": ""} 或 {"safe": false, "reason": "简要说明违规原因（10字以内）"}'
     )
+
+
+async def _ai_content_review_async(
+    content: str, username: str, role: str = "question"
+) -> tuple[bool, str]:
+    """异步 AI 内容审核。
+
+    旧实现直接在 async 路由里 `future.result()`，会把整个事件循环卡住 6～15 秒：
+    同一时间其他学生的请求、甚至老师刷新列表都只能排队。这里改成
+    `run_in_executor + asyncio.wait_for`，事件循环始终可响应其他请求。
+    """
+    # 先检查频率限制和重复提交（纯内存操作，很快）
+    allowed, msg = _check_review_rate_limit(username, content)
+    if not allowed:
+        return False, msg
+
     api_key, _ = get_api_keys(username)
     if not api_key:
         return True, ""
 
+    prompt = _review_prompt(content, role)
     try:
-        import json, re, concurrent.futures
         from backend.api.ai_service import _ai_thread_pool
         from backend.api.discussion_router import _call_review_sync
-        future = _ai_thread_pool.submit(_call_review_sync, prompt, api_key)
-        try:
-            result = future.result(timeout=15)
-        except concurrent.futures.TimeoutError:
-            logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
-            return True, ""
         from backend import ai_json
-        jm = re.search(r'\{[^}]+\}', result)
-        data = (ai_json.try_parse(jm.group()) if jm else None) or ai_json.try_parse(result) or {}
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(_ai_thread_pool, _call_review_sync, prompt, api_key),
+            timeout=8,
+        )
+        jm = re.search(r'\{[^}]+\}', result or "")
+        data = (ai_json.try_parse(jm.group()) if jm else None) or ai_json.try_parse(result or "") or {}
         if isinstance(data, dict) and not data.get("safe", True):
-                _record_rejection(username, content)
-                return False, data.get("reason", "内容不合规")
+            _record_rejection(username, content)
+            return False, data.get("reason", "内容不合规")
+        return True, ""
+    except asyncio.TimeoutError:
+        logger.warning(f"AI 内容审核超时（8秒），已放行: user={username}")
         return True, ""
     except Exception:
         return True, ""
+
+
+# ── 提问幂等 / 去重辅助 ──
+
+_DAILY_QUESTION_LIMIT = 5
+_QUESTION_DEDUP_WINDOW_SECONDS = 120
+_QUESTION_COLUMNS = (
+    "id, student_username, content, is_anonymous, status, answer, "
+    "created_at, answered_at, answered_by, grade_id, class_id, "
+    "subject, knowledge_point, is_pinned, is_featured, is_resolved, resolved_at, resolved_by"
+)
+
+
+def _normalize_question_content(content: str) -> str:
+    """给去重用的归一化：忽略空白与大小写，避免「积分 」和「积分」算两条。"""
+    return re.sub(r"\s+", "", content or "").strip().lower()
+
+
+def _question_content_hash(content: str) -> str:
+    return hashlib.sha256(_normalize_question_content(content).encode("utf-8")).hexdigest()
+
+
+def _today_question_count(username: str) -> int:
+    today_start = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
+    rows = execute_query(
+        "SELECT COUNT(*) FROM interaction_questions WHERE student_username = ? AND created_at >= ?",
+        (username, today_start),
+    )
+    return int(rows[0][0]) if rows else 0
+
+
+def _question_payload(
+    row: dict[str, Any], *, role: int, username: str, duplicate: bool = False
+) -> dict[str, Any]:
+    """把 interaction_questions 行转成前端使用的结构（提问/重复提交共用）。"""
+    qid = row["id"]
+    student_username = row["student_username"]
+    is_anonymous = bool(row["is_anonymous"])
+    payload: dict[str, Any] = {
+        "id": qid,
+        "content": row["content"],
+        "is_anonymous": is_anonymous,
+        "status": row["status"],
+        "answer": row["answer"] or "",
+        "created_at": row["created_at"],
+        "answered_at": row["answered_at"] or "",
+        "answered_by": row["answered_by"] or "",
+        "grade_id": row.get("grade_id"),
+        "class_id": row.get("class_id"),
+        "subject": row.get("subject") or "",
+        "knowledge_point": row.get("knowledge_point") or "",
+        "is_pinned": bool(row.get("is_pinned")),
+        "is_featured": bool(row.get("is_featured")),
+        "is_resolved": bool(row.get("is_resolved")),
+        "resolved_at": row.get("resolved_at") or "",
+        "resolved_by": row.get("resolved_by") or "",
+        "student_answer_count": 0,
+        "approved_answer_count": 0,
+        "pending_answer_count": 0,
+        "my_answer_status": None,
+        "vote_count": 0,
+        "my_voted": False,
+        "followup_count": 0,
+        "is_own": student_username == username,
+    }
+    if role != 2:
+        # 匿名只对同学隐藏；教师/管理员始终能看到提问者
+        payload["student_username"] = student_username
+
+    counts = execute_query(
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0), "
+        "COALESCE(SUM(CASE WHEN status = 'pending_approval' THEN 1 ELSE 0 END), 0) "
+        "FROM interaction_question_answers WHERE question_id = ?",
+        (qid,),
+    )
+    if counts:
+        payload["student_answer_count"] = int(counts[0][0] or 0)
+        payload["approved_answer_count"] = int(counts[0][1] or 0)
+        payload["pending_answer_count"] = int(counts[0][2] or 0)
+
+    if role == 2:
+        mine = execute_query(
+            "SELECT status FROM interaction_question_answers WHERE question_id = ? AND student_username = ?",
+            (qid, username),
+        )
+        if mine:
+            payload["my_answer_status"] = mine[0][0]
+
+    if duplicate:
+        payload["duplicate"] = True
+    return payload
+
+
+def _find_question_by_request_id(username: str, request_id: str | None) -> dict[str, Any] | None:
+    if not request_id:
+        return None
+    rows = execute_query_dict(
+        f"SELECT {_QUESTION_COLUMNS} FROM interaction_questions "
+        "WHERE student_username = ? AND client_request_id = ? LIMIT 1",
+        (username, request_id),
+    )
+    return rows[0] if rows else None
+
+
+def _find_recent_duplicate(
+    username: str, content_hash: str, cutoff: str
+) -> dict[str, Any] | None:
+    rows = execute_query_dict(
+        f"SELECT {_QUESTION_COLUMNS} FROM interaction_questions "
+        "WHERE student_username = ? AND content_hash = ? AND created_at >= ? "
+        "ORDER BY id DESC LIMIT 1",
+        (username, content_hash, cutoff),
+    )
+    return rows[0] if rows else None
+
+
+def _duplicate_question_response(
+    row: dict[str, Any], *, role: int, username: str
+) -> dict[str, Any]:
+    return {
+        "message": "该问题刚刚已提交，请勿重复提交",
+        "duplicate": True,
+        "question_id": row["id"],
+        "question": _question_payload(row, role=role, username=username, duplicate=True),
+    }
+
+
+def _attach_question_answer_stats(
+    questions: list[dict[str, Any]], *, role: int, username: str
+) -> None:
+    """批量补齐回答统计，避免列表里每道题 3 次查询（30 秒自动刷新时尤其明显）。"""
+    if not questions:
+        return
+    qids = [q["id"] for q in questions]
+    placeholders = ",".join("?" for _ in qids)
+    stats = execute_query(
+        "SELECT question_id, COUNT(*), "
+        "COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0), "
+        "COALESCE(SUM(CASE WHEN status = 'pending_approval' THEN 1 ELSE 0 END), 0) "
+        f"FROM interaction_question_answers WHERE question_id IN ({placeholders}) "
+        "GROUP BY question_id",
+        tuple(qids),
+    )
+    stats_map = {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in stats}
+
+    mine_map: dict[int, str] = {}
+    if role == 2:
+        mine = execute_query(
+            "SELECT question_id, status FROM interaction_question_answers "
+            f"WHERE question_id IN ({placeholders}) AND student_username = ?",
+            tuple(qids + [username]),
+        )
+        mine_map = {r[0]: r[1] for r in mine}
+
+    for q in questions:
+        count, approved, pending = stats_map.get(q["id"], (0, 0, 0))
+        q["student_answer_count"] = count
+        q["approved_answer_count"] = approved
+        q["pending_answer_count"] = pending
+        q["my_answer_status"] = mine_map.get(q["id"])
+
+
+def _attach_question_votes(
+    questions: list[dict[str, Any]], *, role: int, username: str
+) -> None:
+    """批量补齐“我也想问”票数与当前学生是否已投。"""
+    if not questions:
+        return
+    qids = [q["id"] for q in questions]
+    placeholders = ",".join("?" for _ in qids)
+    rows = execute_query(
+        f"SELECT question_id, COUNT(*) FROM interaction_question_votes "
+        f"WHERE question_id IN ({placeholders}) GROUP BY question_id",
+        tuple(qids),
+    )
+    counts = {r[0]: int(r[1] or 0) for r in rows}
+    voted: set[int] = set()
+    if role == 2:
+        rows = execute_query(
+            f"SELECT question_id FROM interaction_question_votes "
+            f"WHERE question_id IN ({placeholders}) AND student_username = ?",
+            tuple(qids + [username]),
+        )
+        voted = {r[0] for r in rows}
+    for q in questions:
+        q["vote_count"] = counts.get(q["id"], 0)
+        q["my_voted"] = q["id"] in voted
+
+
+def _attach_question_followup_stats(questions: list[dict[str, Any]]) -> None:
+    if not questions:
+        return
+    qids = [q["id"] for q in questions]
+    placeholders = ",".join("?" for _ in qids)
+    rows = execute_query(
+        f"SELECT question_id, COUNT(*) FROM interaction_question_followups "
+        f"WHERE question_id IN ({placeholders}) GROUP BY question_id",
+        tuple(qids),
+    )
+    counts = {r[0]: int(r[1] or 0) for r in rows}
+    for q in questions:
+        q["followup_count"] = counts.get(q["id"], 0)
+
+
+def _teacher_class_options(assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """教师端班级筛选选项：同一班级多学科只保留一条。"""
+    grade_wide = {a["grade_id"] for a in assignments if a.get("class_id") is None}
+    options = []
+    seen = set()
+    for a in assignments:
+        gid = a["grade_id"]
+        # 该年级有“整年级任教”时，只给一个整年级选项，避免下面再列具体班级造成误解
+        cid = None if gid in grade_wide else a.get("class_id")
+        key = (gid, cid)
+        if key in seen:
+            continue
+        seen.add(key)
+        options.append({
+            "grade_id": gid,
+            "class_id": cid,
+            "grade_name": a.get("grade_name") or "",
+            "class_name": "" if cid is None else (a.get("class_display_name") or a.get("class_name") or ""),
+        })
+    return options
+
+
+def _get_student_scope(username: str) -> tuple[int | None, int | None]:
+    """读取学生当前年级/班级；缺任何一项都返回 None，调用方必须按“仅本人”处理。"""
+    rows = execute_query_dict(
+        "SELECT grade_id, class_id FROM users WHERE username = ? AND role = 2",
+        (username,),
+    )
+    if not rows:
+        return None, None
+    return rows[0].get("grade_id"), rows[0].get("class_id")
+
+
+def _question_scope(question_id: int) -> tuple[str, int | None, int | None] | None:
+    """返回 (提问者, 提问时 grade_id, 提问时 class_id)。"""
+    rows = execute_query(
+        "SELECT student_username, grade_id, class_id FROM interaction_questions WHERE id = ?",
+        (question_id,),
+    )
+    if not rows:
+        return None
+    return rows[0][0], rows[0][1], rows[0][2]
+
+
+def _scope_allows_user(scope: tuple[str, int | None, int | None], user: dict[str, Any]) -> bool:
+    """按“提问时班级快照”判断可见性；旧数据缺快照时老师回退到当前学籍。"""
+    asker, q_grade, q_class = scope
+    role = user.get("role", 2)
+    if role == 0:
+        return True
+    if role == 1:
+        if q_grade and q_class:
+            from backend.permission_service import can_access_class
+            return can_access_class(user["username"], q_grade, q_class)
+        from backend.permission_service import check_teacher_access_to_student
+        return check_teacher_access_to_student(user["username"], asker)
+    if asker == user["username"]:
+        return True
+    if not q_grade or not q_class:
+        return False
+    grade, cls = _get_student_scope(user["username"])
+    return bool(grade and cls and grade == q_grade and cls == q_class)
+
+
+def _can_view_question(question_id: int, user: dict[str, Any]) -> bool:
+    """列表/详情/回答共用的可见性口径：管理员全部，教师任教范围，学生同班或本人。"""
+    scope = _question_scope(question_id)
+    return bool(scope and _scope_allows_user(scope, user))
+
+
+def _can_manage_question(question_id: int, user: dict[str, Any]) -> bool:
+    """编辑/删除等写操作：学生只能动自己的，教师只能动任教范围内的。"""
+    scope = _question_scope(question_id)
+    if not scope:
+        return False
+    asker = scope[0]
+    role = user.get("role", 2)
+    if role == 0:
+        return True
+    if role == 1:
+        return _scope_allows_user(scope, user)
+    return asker == user["username"]
 
 
 # ── 课堂提问 ──
@@ -1924,41 +2270,78 @@ def _ai_content_review(content: str, username: str, role: str = "question") -> t
 async def ask_question(req: QuestionCreate, request: Request):
     """学生在课堂上提问"""
     user = get_current_user(request)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # ── 每日提问上限检查 ──
     role = user.get("role", 2)
-    if role == 2:
-        today_start = now[:10] + " 00:00:00"
-        today_count = execute_query(
-            "SELECT COUNT(*) FROM interaction_questions WHERE student_username = ? AND created_at >= ?",
-            (user["username"], today_start),
-        )
-        if today_count and today_count[0][0] >= 5:
-            raise HTTPException(
-                status_code=400,
-                detail="⚠️ 每日最多提 5 个问题，已达到今日上限。"
-            )
+    username = user["username"]
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="提问内容不能为空")
+    if len(content) > 500:
+        raise HTTPException(status_code=400, detail="问题最多 500 字")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    request_id = (req.client_request_id or "").strip() or None
 
-    # ── AI 内容审核 ──
-    safe, reason = _ai_content_review(req.content, user["username"], "question")
+    # 1) 幂等：同一 client_request_id 直接返回已有问题（双击/网络重试）
+    existing = _find_question_by_request_id(username, request_id)
+    if existing:
+        logger.info(f"提问幂等命中: user={username} request_id={request_id} qid={existing['id']}")
+        return _duplicate_question_response(existing, role=role, username=username)
+
+    # 2) 短时内容去重：同一学生 2 分钟内相同内容只入库一次
+    content_hash = _question_content_hash(content)
+    cutoff = (datetime.now() - timedelta(seconds=_QUESTION_DEDUP_WINDOW_SECONDS)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    existing = _find_recent_duplicate(username, content_hash, cutoff)
+    if existing:
+        logger.info(f"提问内容去重命中: user={username} qid={existing['id']} content={clip(content, 30)}")
+        return _duplicate_question_response(existing, role=role, username=username)
+
+    # 3) 每日提问上限检查（放在幂等之后：重试不会误报“次数已用完”）
+    if role == 2 and _today_question_count(username) >= _DAILY_QUESTION_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"⚠️ 每日最多提 {_DAILY_QUESTION_LIMIT} 个问题，已达到今日上限。"
+        )
+
+    # 4) AI 内容审核（异步执行，不阻塞事件循环）
+    safe, reason = await _ai_content_review_async(content, username, "question")
     if not safe:
-        logger.info(f"学生 {user['username']} 提问内容不合规已拦截: {reason}")
+        logger.info(f"学生 {username} 提问内容不合规已拦截: {reason}")
         raise HTTPException(
             status_code=400,
             detail=f"⚠️ 内容审核未通过：{reason}。请修改后重新提交。"
         )
 
-    qid = execute_insert_update(
-        """INSERT INTO interaction_questions (student_username, content, is_anonymous, status, created_at)
-           VALUES (?, ?, ?, 'pending', ?)""",
-        (user["username"], req.content, 1 if req.is_anonymous else 0, now),
-    )
+    dedup_bucket = int(time.time() // _QUESTION_DEDUP_WINDOW_SECONDS)
+    grade_id, class_id = _get_student_scope(username)
+    try:
+        qid = execute_insert_update(
+            """INSERT INTO interaction_questions
+               (student_username, content, is_anonymous, status, created_at,
+                client_request_id, content_hash, dedup_bucket, grade_id, class_id,
+                subject, knowledge_point)
+               VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (username, content, 1 if req.is_anonymous else 0, now,
+             request_id, content_hash, dedup_bucket, grade_id, class_id,
+             (req.subject or "").strip(), (req.knowledge_point or "").strip()),
+        )
+    except sqlite3.IntegrityError:
+        # 并发双击：唯一索引兜底，返回已经入库的那一条
+        existing = (
+            _find_question_by_request_id(username, request_id)
+            or _find_recent_duplicate(username, content_hash, cutoff)
+        )
+        if existing:
+            logger.info(f"提问并发去重命中: user={username} qid={existing['id']}")
+            return _duplicate_question_response(existing, role=role, username=username)
+        raise
+
+    asyncio.create_task(_broadcast_question_event(grade_id, class_id, "question_created", qid))
 
     # ── 积分奖励 ──
     try:
         from backend.reward_engine import award_participation
-        award_participation(user["username"], "question", str(qid), clip(req.content, 30))
+        award_participation(username, "question", str(qid), clip(content, 30))
     except Exception:
         pass
 
@@ -1966,12 +2349,11 @@ async def ask_question(req: QuestionCreate, request: Request):
     async def _notify_question():
         try:
             from backend.api.notification_router import notify_users
-            from backend.permission_service import get_teacher_assignments
             from backend.database import execute_query_dict as db_dict
             # 查询学生所在年级的 grade_id
             student = db_dict(
                 "SELECT grade_id, class_id, grade, class FROM users WHERE username=?",
-                (user["username"],),
+                (username,),
             )
             if student and student[0].get("grade_id"):
                 s = student[0]
@@ -1996,8 +2378,8 @@ async def ask_question(req: QuestionCreate, request: Request):
                 if teacher_usernames:
                     notify_users(
                         teacher_usernames, "info",
-                        f"新课堂提问",
-                        f"学生提出了新问题：{clip(req.content)}",
+                        "新课堂提问",
+                        f"学生提出了新问题：{clip(content)}",
                         "/interaction",
                         source_type="question",
                         source_id=str(qid),
@@ -2006,23 +2388,28 @@ async def ask_question(req: QuestionCreate, request: Request):
             logger.warning(f"发送提问通知失败: {e}")
     asyncio.create_task(_notify_question())
 
+    rows = execute_query_dict(
+        f"SELECT {_QUESTION_COLUMNS} FROM interaction_questions WHERE id = ?", (qid,)
+    )
+    question = (
+        _question_payload(rows[0], role=role, username=username)
+        if rows else {
+            "id": qid, "content": content, "is_anonymous": bool(req.is_anonymous),
+            "status": "pending", "answer": "", "created_at": now, "answered_at": "",
+            "answered_by": "", "student_answer_count": 0, "approved_answer_count": 0,
+            "pending_answer_count": 0, "subject": (req.subject or "").strip(),
+            "knowledge_point": (req.knowledge_point or "").strip(),
+            "is_pinned": False, "is_featured": False, "is_resolved": False,
+            "resolved_at": "", "resolved_by": "",
+            "vote_count": 0, "my_voted": False, "followup_count": 0,
+            "my_answer_status": None, "is_own": True,
+        }
+    )
     return {
         "message": "提问成功",
+        "duplicate": False,
         "question_id": qid,
-        "question": {
-            "id": qid,
-            "content": req.content,
-            "is_anonymous": bool(req.is_anonymous),
-            "status": "pending",
-            "answer": "",
-            "created_at": now,
-            "answered_at": "",
-            "answered_by": "",
-            "student_answer_count": 0,
-            "approved_answer_count": 0,
-            "my_answer_status": None,
-            "is_own": True,
-        }
+        "question": question,
     }
 
 
@@ -2030,158 +2417,444 @@ async def ask_question(req: QuestionCreate, request: Request):
 async def list_questions(
     request: Request,
     status: str = Query("", description="筛选状态"),
+    mine: bool = Query(False, description="学生只看自己的提问"),
+    grade_id: int | None = Query(None, description="按年级筛选（教师/管理员）"),
+    class_id: int | None = Query(None, description="按班级筛选（教师/管理员）"),
+    subject: str = Query("", description="按学科筛选"),
+    keyword: str = Query("", description="按提问内容搜索"),
+    answer_pending: bool = Query(False, description="只看有待审批学生回答的提问"),
+    unresolved: bool = Query(False, description="只看未解决"),
+    time_range: str = Query("", description="7d / 30d / 180d"),
+    sort: str = Query("newest", description="newest / oldest / pending_first / hot"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
 ):
-    """获取课堂提问（教师看自己班级学生的提问，学生看所有）"""
+    """获取课堂提问（学生看同班，教师看任教班级，管理员看全部）"""
     user = get_current_user(request)
     role = user.get("role", 2)
     username = user["username"]
     offset = (page - 1) * page_size
 
+    conditions: list[str] = []
+    params: list[Any] = []
+    teacher_assignments: list[dict[str, Any]] = []
+
     if role == 2:
-        # 学生：只看自己班级同学的提问
-        student = execute_query_dict(
-            "SELECT grade_id, class_id FROM users WHERE username=?", (username,)
-        )
-        conditions = []
-        params: list[Any] = []
-        if student and student[0].get("grade_id"):
-            s = student[0]
-            conditions.append("u.grade_id = ?")
-            params.append(s["grade_id"])
-            if s.get("class_id"):
-                conditions.append("u.class_id = ?")
-                params.append(s["class_id"])
-        where = " AND ".join(conditions) if conditions else "1=1"
-        rows = execute_query(
-            f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at, q.answered_by
-                FROM interaction_questions q
-                JOIN users u ON q.student_username = u.username AND u.role = 2
-                WHERE {where}
-                ORDER BY q.created_at DESC LIMIT ? OFFSET ?""",
-            tuple(params + [page_size, offset]),
-        )
-        # 获取总数
-        count_rows = execute_query(
-            f"""SELECT COUNT(*) FROM interaction_questions q
-                JOIN users u ON q.student_username = u.username AND u.role = 2
-                WHERE {where}""",
-            tuple(params),
-        )
-        total = count_rows[0][0] if count_rows else 0
+        grade, cls = _get_student_scope(username)
+        if grade and cls:
+            # 班级快照 + 本人：转班后仍能看到自己以前的提问
+            conditions.append("(q.grade_id = ? AND q.class_id = ? OR q.student_username = ?)")
+            params.extend([grade, cls, username])
+        else:
+            # 学生档案缺年级/班级时绝不能回落到全校：只展示自己的提问
+            conditions.append("q.student_username = ?")
+            params.append(username)
+        if mine:
+            conditions.append("q.student_username = ?")
+            params.append(username)
     elif role == 1:
-        # 教师：通过 teacher_assignments 精确匹配任教班级学生的提问
         from backend.permission_service import get_teacher_assignments
-        assignments = get_teacher_assignments(username)
-        if not assignments:
-            return {"questions": [], "total": 0, "page": page, "page_size": page_size}
-
-        # 用 grade_id/class_id 直接匹配学生
-        stu_conditions = []
-        stu_params: list[Any] = []
-        for a in assignments:
-            gid = a["grade_id"]
-            cid = a.get("class_id")
-            if cid is None:
-                stu_conditions.append("(u.grade_id = ?)")
-                stu_params.append(gid)
+        teacher_assignments = get_teacher_assignments(username)
+        if not teacher_assignments:
+            return {
+                "questions": [], "total": 0, "page": page, "page_size": page_size,
+                "teacher_classes": [],
+            }
+        scoped = []
+        for a in teacher_assignments:
+            if grade_id is not None and a["grade_id"] != grade_id:
+                continue
+            if class_id is not None:
+                a_cls = a.get("class_id")
+                # 年级整包任教的老师也覆盖该年级下的任意班级
+                if a_cls is not None and a_cls != class_id:
+                    continue
+            scoped.append(a)
+        if not scoped:
+            return {
+                "questions": [], "total": 0, "page": page, "page_size": page_size,
+                "teacher_classes": _teacher_class_options(teacher_assignments),
+            }
+        seen_scope = set()
+        scope_parts = []
+        for a in scoped:
+            key = (a["grade_id"], a.get("class_id"))
+            if key in seen_scope:
+                continue
+            seen_scope.add(key)
+            if a.get("class_id"):
+                scope_parts.append("(q.grade_id = ? AND q.class_id = ?)")
+                params.extend([a["grade_id"], a["class_id"]])
             else:
-                stu_conditions.append("(u.grade_id = ? AND u.class_id = ?)")
-                stu_params.extend([gid, cid])
-        if not stu_conditions:
-            return {"questions": [], "total": 0, "page": page, "page_size": page_size}
-
-        stu_where = " OR ".join(stu_conditions)
-        if status:
-            stu_where = f"({stu_where}) AND q.status = ?"
-            stu_params.append(status)
-
-        rows = execute_query(
-            f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at, q.answered_by
-                FROM interaction_questions q
-                JOIN users u ON q.student_username = u.username AND u.role = 2
-                WHERE {stu_where}
-                ORDER BY q.created_at DESC LIMIT ? OFFSET ?""",
-            tuple(stu_params + [page_size, offset]),
-        )
-        count_rows = execute_query(
-            f"""SELECT COUNT(*) FROM interaction_questions q
-                JOIN users u ON q.student_username = u.username AND u.role = 2
-                WHERE {stu_where}""",
-            tuple(stu_params),
-        )
-        total = count_rows[0][0] if count_rows else 0
+                scope_parts.append("(q.grade_id = ?)")
+                params.append(a["grade_id"])
+        conditions.append("(" + " OR ".join(scope_parts) + ")")
     else:
-        # 管理员：看全部
-        conditions = []
-        params: list[Any] = []
-        if status:
-            conditions.append("status = ?")
-            params.append(status)
-        where = " AND ".join(conditions) if conditions else "1=1"
-        rows = execute_query(
-            f"""SELECT id, student_username, content, is_anonymous, status, answer, created_at, answered_at, answered_by
-                FROM interaction_questions WHERE {where}
-                ORDER BY created_at DESC LIMIT ? OFFSET ?""",
-            tuple(params + [page_size, offset]),
+        if grade_id is not None:
+            conditions.append("q.grade_id = ?")
+            params.append(grade_id)
+        if class_id is not None:
+            conditions.append("q.class_id = ?")
+            params.append(class_id)
+
+    if status:
+        conditions.append("q.status = ?")
+        params.append(status)
+
+    keyword = (keyword or "").strip()
+    if keyword:
+        like = f"%{keyword}%"
+        conditions.append("(q.content LIKE ? OR q.subject LIKE ? OR q.knowledge_point LIKE ?)")
+        params.extend([like, like, like])
+
+    subject = (subject or "").strip()
+    if subject:
+        conditions.append("q.subject = ?")
+        params.append(subject)
+
+    if unresolved:
+        conditions.append("COALESCE(q.is_resolved, 0) = 0")
+
+    if time_range in ("7d", "30d", "180d"):
+        days = {"7d": 7, "30d": 30, "180d": 180}[time_range]
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        conditions.append("q.created_at >= ?")
+        params.append(cutoff)
+
+    if answer_pending:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM interaction_question_answers a "
+            "WHERE a.question_id = q.id AND a.status = 'pending_approval')"
         )
-        # 获取总数
-        count_rows = execute_query(
-            f"""SELECT COUNT(*) FROM interaction_questions WHERE {where}""",
-            tuple(params),
-        )
-        total = count_rows[0][0] if count_rows else 0
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    order = ("COALESCE(q.is_pinned, 0) DESC, COALESCE(q.is_featured, 0) DESC, "
+             "q.created_at DESC")
+    if sort == "oldest":
+        order = ("COALESCE(q.is_pinned, 0) DESC, COALESCE(q.is_featured, 0) DESC, "
+                 "q.created_at ASC")
+    elif sort == "pending_first":
+        order = ("COALESCE(q.is_pinned, 0) DESC, COALESCE(q.is_featured, 0) DESC, "
+                 "CASE WHEN q.status = 'pending' THEN 0 ELSE 1 END, q.created_at DESC")
+    elif sort == "hot":
+        order = ("COALESCE(q.is_pinned, 0) DESC, COALESCE(q.is_featured, 0) DESC, "
+                 "(SELECT COUNT(*) FROM interaction_question_votes v "
+                 "WHERE v.question_id = q.id) DESC, q.created_at DESC")
+
+    rows = execute_query_dict(
+        f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status,
+                   q.answer, q.created_at, q.answered_at, q.answered_by,
+                   q.grade_id, q.class_id, q.subject, q.knowledge_point,
+                   q.is_pinned, q.is_featured, q.is_resolved, q.resolved_at, q.resolved_by
+            FROM interaction_questions q
+            WHERE {where}
+            ORDER BY {order} LIMIT ? OFFSET ?""",
+        tuple(params + [page_size, offset]),
+    )
+    count_rows = execute_query(
+        f"SELECT COUNT(*) FROM interaction_questions q WHERE {where}",
+        tuple(params),
+    )
+    total = count_rows[0][0] if count_rows else 0
 
     questions = []
     for r in rows:
         q = {
-            "id": r[0],
-            "content": r[2],
-            "is_anonymous": bool(r[3]),
-            "status": r[4],
-            "answer": r[5] or "",
-            "created_at": r[6],
-            "answered_at": r[7] or "",
-            "answered_by": r[8] or "",
+            "id": r["id"],
+            "content": r["content"],
+            "is_anonymous": bool(r["is_anonymous"]),
+            "status": r["status"],
+            "answer": r["answer"] or "",
+            "created_at": r["created_at"],
+            "answered_at": r["answered_at"] or "",
+            "answered_by": r["answered_by"] or "",
+            "grade_id": r.get("grade_id"),
+            "class_id": r.get("class_id"),
+            "subject": r.get("subject") or "",
+            "knowledge_point": r.get("knowledge_point") or "",
+            "is_pinned": bool(r.get("is_pinned")),
+            "is_featured": bool(r.get("is_featured")),
+            "is_resolved": bool(r.get("is_resolved")),
+            "resolved_at": r.get("resolved_at") or "",
+            "resolved_by": r.get("resolved_by") or "",
+            "vote_count": 0,
+            "my_voted": False,
+            "followup_count": 0,
         }
         if role != 2:
-            q["student_username"] = r[1] if not r[3] else "(匿名)"
+            # 匿名只对同学隐藏；老师仍能看到提问者，便于课后跟进
+            q["student_username"] = r["student_username"]
         else:
-            q["is_own"] = (r[1] == username)
-
-        # ── 附加多回答统计 ──
-        qid = r[0]
-        # 学生回答总数
-        cnt = execute_query(
-            "SELECT COUNT(*) FROM interaction_question_answers WHERE question_id = ?",
-            (qid,),
-        )
-        q["student_answer_count"] = cnt[0][0] if cnt else 0
-
-        # 已通过的回答数
-        approved = execute_query(
-            "SELECT COUNT(*) FROM interaction_question_answers WHERE question_id = ? AND status = 'approved'",
-            (qid,),
-        )
-        q["approved_answer_count"] = approved[0][0] if approved else 0
-
-        # 当前登录学生的回答状态
-        q["my_answer_status"] = None
-        if role == 2:
-            my_ans = execute_query(
-                "SELECT status FROM interaction_question_answers WHERE question_id = ? AND student_username = ?",
-                (qid, username),
-            )
-            if my_ans:
-                q["my_answer_status"] = my_ans[0][0]
-
+            q["is_own"] = (r["student_username"] == username)
+            if not r["is_anonymous"]:
+                q["student_username"] = r["student_username"]
         questions.append(q)
+
+    _attach_question_answer_stats(questions, role=role, username=username)
+    _attach_question_votes(questions, role=role, username=username)
+    _attach_question_followup_stats(questions)
 
     # 提问管理: 补上学号对应的姓名/年级/班级
     from backend.permission_service import attach_student_info
     attach_student_info(questions, key="student_username", prefix="student_")
-    return {"questions": questions, "total": total}
+
+    response: dict[str, Any] = {
+        "questions": questions, "total": total, "page": page, "page_size": page_size,
+    }
+    if role == 2:
+        used = _today_question_count(username)
+        response["quota"] = {
+            "limit": _DAILY_QUESTION_LIMIT,
+            "used": used,
+            "remaining": max(0, _DAILY_QUESTION_LIMIT - used),
+        }
+    elif role == 1:
+        response["teacher_classes"] = _teacher_class_options(teacher_assignments)
+    return response
+
+
+@router.post("/questions/{question_id}/vote", summary="我也想问（学生点赞/取消）")
+async def toggle_question_vote(question_id: int, request: Request):
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    username = user["username"]
+    if role != 2:
+        raise HTTPException(status_code=403, detail="仅学生可以点赞提问")
+    if not _can_view_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权查看该提问")
+    scope = _question_scope(question_id)
+    if not scope:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    if scope[0] == username:
+        raise HTTPException(status_code=400, detail="不能给自己的提问点赞")
+
+    existing = execute_query(
+        "SELECT id FROM interaction_question_votes WHERE question_id = ? AND student_username = ?",
+        (question_id, username),
+    )
+    if existing:
+        execute_insert_update(
+            "DELETE FROM interaction_question_votes WHERE question_id = ? AND student_username = ?",
+            (question_id, username),
+        )
+        voted = False
+    else:
+        try:
+            execute_insert_update(
+                "INSERT INTO interaction_question_votes (question_id, student_username, created_at) "
+                "VALUES (?, ?, ?)",
+                (question_id, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+        except sqlite3.IntegrityError:
+            pass  # 并发双击已经投上，按已投处理
+        voted = True
+    rows = execute_query(
+        "SELECT COUNT(*) FROM interaction_question_votes WHERE question_id = ?",
+        (question_id,),
+    )
+    asyncio.create_task(
+        _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+    )
+    return {"voted": voted, "vote_count": int(rows[0][0] or 0) if rows else 0}
+
+
+@router.put("/questions/{question_id}/pin", summary="置顶/取消置顶提问")
+async def pin_question(question_id: int, req: QuestionPin, request: Request):
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可置顶")
+    scope = _question_scope(question_id)
+    if not scope:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    if not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权操作该提问")
+    execute_insert_update(
+        "UPDATE interaction_questions SET is_pinned = ? WHERE id = ?",
+        (1 if req.pinned else 0, question_id),
+    )
+    asyncio.create_task(
+        _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+    )
+    return {"is_pinned": bool(req.pinned)}
+
+
+@router.put("/questions/{question_id}/feature", summary="设为精华/取消精华")
+async def feature_question(question_id: int, req: QuestionFeature, request: Request):
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可设精华")
+    scope = _question_scope(question_id)
+    if not scope:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    if not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权操作该提问")
+    execute_insert_update(
+        "UPDATE interaction_questions SET is_featured = ? WHERE id = ?",
+        (1 if req.featured else 0, question_id),
+    )
+    asyncio.create_task(
+        _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+    )
+    return {"is_featured": bool(req.featured)}
+
+
+@router.put("/questions/{question_id}/resolve", summary="标记已解决/未解决")
+async def resolve_question(question_id: int, req: QuestionResolve, request: Request):
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    username = user["username"]
+    scope = _question_scope(question_id)
+    if not scope:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    if role == 2 and scope[0] != username:
+        raise HTTPException(status_code=403, detail="只有提问者可以标记解决")
+    if role == 1 and not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权操作该提问")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if req.resolved:
+        execute_insert_update(
+            "UPDATE interaction_questions SET is_resolved = 1, resolved_at = ?, resolved_by = ? "
+            "WHERE id = ?",
+            (now, username, question_id),
+        )
+    else:
+        execute_insert_update(
+            "UPDATE interaction_questions SET is_resolved = 0, resolved_at = '', resolved_by = '' "
+            "WHERE id = ?",
+            (question_id,),
+        )
+    asyncio.create_task(
+        _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+    )
+    return {"is_resolved": bool(req.resolved)}
+
+
+@router.get("/questions/{question_id}/followups", summary="获取追问列表")
+async def list_question_followups(question_id: int, request: Request):
+    user = get_current_user(request)
+    if not _can_view_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权查看该提问")
+    rows = execute_query_dict(
+        "SELECT id, username, content, created_at FROM interaction_question_followups "
+        "WHERE question_id = ? ORDER BY created_at ASC",
+        (question_id,),
+    )
+    from backend.permission_service import attach_student_info
+    attach_student_info(rows, key="username", prefix="student_")
+    return {"followups": rows}
+
+
+@router.post("/questions/{question_id}/followups", summary="新增追问")
+async def add_question_followup(
+    question_id: int, req: QuestionFollowupCreate, request: Request
+):
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    username = user["username"]
+    scope = _question_scope(question_id)
+    if not scope:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    if role == 2 and scope[0] != username:
+        raise HTTPException(status_code=403, detail="只有提问者可以追问")
+    if role == 1 and not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权追问该提问")
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="追问内容不能为空")
+    safe, reason = await _ai_content_review_async(content, username, "answer")
+    if not safe:
+        raise HTTPException(
+            status_code=400,
+            detail=f"⚠️ 追问审核未通过：{reason}。请修改后重新提交。",
+        )
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fid = execute_insert_update(
+        "INSERT INTO interaction_question_followups (question_id, username, content, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (question_id, username, content, now),
+    )
+    if username != scope[0]:
+        try:
+            from backend.api.notification_router import create_notification
+            create_notification(
+                scope[0], "info", "你的提问有新追问", clip(content),
+                "/interaction", source_type="question", source_id=str(question_id),
+            )
+        except Exception as e:
+            logger.warning(f"发送追问通知失败: {e}")
+    asyncio.create_task(
+        _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+    )
+    return {"id": fid, "message": "追问已发送"}
+
+
+def _question_rooms(grade_id: int | None, class_id: int | None) -> list[str]:
+    rooms = [ADMIN_ROOM]
+    if grade_id and class_id:
+        rooms.append(class_room(int(grade_id), int(class_id)))
+    return rooms
+
+
+async def _broadcast_question_event(
+    grade_id: int | None, class_id: int | None, event: str, question_id: int
+) -> None:
+    try:
+        await question_ws.broadcast(
+            _question_rooms(grade_id, class_id),
+            {"type": event, "question_id": question_id},
+        )
+    except Exception as e:
+        logger.debug(f"[提问WS] 广播失败: {e}")
+
+
+@router.websocket("/questions/ws")
+async def questions_ws(websocket: WebSocket, token: str = ""):
+    """课堂提问实时推送。客户端带 token 连接，收到 question_* 事件后刷新列表。"""
+    from backend.auth import authenticate_payload
+
+    payload = authenticate_payload(token or websocket.query_params.get("token", ""))
+    if not payload or not payload.get("username"):
+        await websocket.close(code=4401, reason="未认证")
+        return
+    username = payload["username"]
+    role = payload.get("role", 2)
+    rooms: list[str] = []
+    if role == 0:
+        rooms = [ADMIN_ROOM]
+    elif role == 1:
+        from backend.permission_service import get_teacher_assignments
+        seen = set()
+        for a in get_teacher_assignments(username):
+            gid = a["grade_id"]
+            cid = a.get("class_id")
+            if cid:
+                key = (gid, cid)
+                if key not in seen:
+                    rooms.append(class_room(gid, cid))
+                    seen.add(key)
+            else:
+                # 整年级任教：订阅该年级所有班级
+                for row in execute_query("SELECT id FROM classes WHERE grade_id = ?", (gid,)):
+                    key = (gid, row[0])
+                    if key not in seen:
+                        rooms.append(class_room(gid, row[0]))
+                        seen.add(key)
+        if not rooms:
+            rooms = [f"question:teacher:{username}"]
+    else:
+        gid, cid = _get_student_scope(username)
+        rooms = [class_room(gid, cid)] if gid and cid else [f"question:user:{username}"]
+
+    await question_ws.connect(rooms, websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        question_ws.disconnect(rooms, websocket)
+    except Exception:
+        question_ws.disconnect(rooms, websocket)
 
 
 # ── 多学生回答：每个学生限答一次，教师按回答审批 ──
@@ -2198,7 +2871,8 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
 
     # 查询提问信息
     question_rows = execute_query(
-        "SELECT student_username, content, status, answer, answered_by FROM interaction_questions WHERE id = ?",
+        "SELECT student_username, content, status, answer, answered_by, grade_id, class_id "
+        "FROM interaction_questions WHERE id = ?",
         (question_id,),
     )
     if not question_rows:
@@ -2208,6 +2882,8 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
     q_status = question_rows[0][2]
     q_answer = question_rows[0][3] or ""
     q_answered_by = question_rows[0][4] or ""
+    q_grade_id = question_rows[0][5]
+    q_class_id = question_rows[0][6]
 
     # 学生：不能回答已标记为已答的问题（教师已答或已审批通过）
     if role == 2 and q_status == "answered":
@@ -2225,18 +2901,12 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         if username == asker_username:
             raise HTTPException(status_code=403, detail="不能回答自己的提问")
 
-        # 班级验证（用 grade_id/class_id 精确匹配）
-        from backend.database import execute_query_dict as db_dict
-        me = db_dict("SELECT grade_id, class_id FROM users WHERE username=?", (username,))
-        asker = db_dict("SELECT grade_id, class_id FROM users WHERE username=?", (asker_username,))
-        grade_ok = me and asker and me[0].get("grade_id") and me[0]["grade_id"] == asker[0]["grade_id"]
-        class_ok = (not me[0].get("class_id") or not asker[0].get("class_id")
-                    or me[0]["class_id"] == asker[0]["class_id"])
-        if not grade_ok or not class_ok:
+        # 班级验证：按提问时班级快照判断（转班后仍由原班同学回答）
+        if not _can_view_question(question_id, user):
             raise HTTPException(status_code=403, detail="只能回答同班同学的提问")
 
         # ── AI 内容审核 ──
-        safe, reason = _ai_content_review(req.answer, username, "answer")
+        safe, reason = await _ai_content_review_async(req.answer, username, "answer")
         if not safe:
             logger.info(f"学生 {username} 回答内容不合规已拦截: {reason}")
             raise HTTPException(
@@ -2275,8 +2945,17 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         # ── 通知教师审批（通过 teacher_assignments 精确匹配）──
         try:
             from backend.api.notification_router import notify_users
+            from backend.database import execute_query_dict as db_dict
             from backend.permission_service import get_teachers_for_student
-            teachers = get_teachers_for_student(asker_username)
+            if q_grade_id and q_class_id:
+                rows = db_dict(
+                    """SELECT DISTINCT teacher_username FROM teacher_assignments
+                       WHERE grade_id=? AND (class_id=? OR class_id IS NULL)""",
+                    (q_grade_id, q_class_id),
+                )
+                teachers = [r["teacher_username"] for r in rows]
+            else:
+                teachers = get_teachers_for_student(asker_username)
             if teachers:
                 notify_users(teachers, "info",
                     "有学生回答了提问，需要审批",
@@ -2287,13 +2966,14 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         except Exception as e:
             logger.warning(f"发送审批通知失败: {e}")
 
+        asyncio.create_task(
+            _broadcast_question_event(q_grade_id, q_class_id, "question_updated", question_id)
+        )
         return {"message": "回答已提交，等待教师审批"}
 
     # ── 教师/管理员回答：直接写入主表 ──
-    if role == 1:
-        from backend.permission_service import check_teacher_access_to_student
-        if not check_teacher_access_to_student(username, asker_username):
-            raise HTTPException(status_code=403, detail="无权回答非本班学生的提问")
+    if role == 1 and not _can_view_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权回答非本班学生的提问")
 
     execute_insert_update(
         """UPDATE interaction_questions SET answer = ?, status = 'answered',
@@ -2312,6 +2992,9 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
     except Exception as e:
         logger.warning(f"发送回答通知失败: {e}")
 
+    asyncio.create_task(
+        _broadcast_question_event(q_grade_id, q_class_id, "question_updated", question_id)
+    )
     return {"message": "回答成功"}
 
 
@@ -2328,6 +3011,8 @@ async def list_question_answers(question_id: int, request: Request):
     q = execute_query("SELECT id FROM interaction_questions WHERE id = ?", (question_id,))
     if not q:
         raise HTTPException(status_code=404, detail="提问不存在")
+    if not _can_view_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权查看该提问的回答")
 
     if role == 2:
         # 学生：看所有已通过的 + 自己的（含待审批/已拒绝）
@@ -2391,14 +3076,8 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
     asker_username = answer_row[0][4]
 
     # 教师：验证该提问来自自己班级
-    if role == 1:
-        from backend.permission_service import check_teacher_access_to_student
-        # 查出提问者
-        q_owner = execute_query(
-            "SELECT student_username FROM interaction_questions WHERE id=?", (question_id,)
-        )
-        if not q_owner or not check_teacher_access_to_student(user["username"], q_owner[0][0]):
-            raise HTTPException(status_code=403, detail="无权审批非本班学生的提问")
+    if role == 1 and not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权审批该提问")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_insert_update(
@@ -2447,6 +3126,11 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
     except Exception as e:
         logger.warning(f"发送审批通知失败: {e}")
 
+    scope = _question_scope(question_id)
+    if scope:
+        asyncio.create_task(
+            _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+        )
     return {"message": "审批通过"}
 
 
@@ -2470,13 +3154,8 @@ async def reject_student_answer(question_id: int, answer_id: int, request: Reque
     answer_username = answer_row[0][1]
     question_content = answer_row[0][2]
 
-    if role == 1:
-        from backend.permission_service import check_teacher_access_to_student
-        q_owner = execute_query(
-            "SELECT student_username FROM interaction_questions WHERE id=?", (question_id,)
-        )
-        if not q_owner or not check_teacher_access_to_student(user["username"], q_owner[0][0]):
-            raise HTTPException(status_code=403, detail="无权审批非本班学生的提问")
+    if role == 1 and not _can_manage_question(question_id, user):
+        raise HTTPException(status_code=403, detail="无权审批该提问")
 
     execute_insert_update(
         "UPDATE interaction_question_answers SET status = 'rejected' WHERE id = ?",
@@ -2495,6 +3174,11 @@ async def reject_student_answer(question_id: int, answer_id: int, request: Reque
     except Exception as e:
         logger.warning(f"发送拒绝通知失败: {e}")
 
+    scope = _question_scope(question_id)
+    if scope:
+        asyncio.create_task(
+            _broadcast_question_event(scope[1], scope[2], "question_updated", question_id)
+        )
     return {"message": "已拒绝"}
 
 

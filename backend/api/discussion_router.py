@@ -249,9 +249,14 @@ def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
 
 
 def _call_review_sync(prompt: str, api_key: str) -> str:
-    """内容审核专用同步调用"""
+    """内容审核专用同步调用。
+
+    分类任务不需要思考链：旧调用默认 thinking 会为一句“safe: true”产出
+    300+ reasoning tokens（实测单次约 6 秒）。关闭后 1 秒级返回，
+    课堂提问/回答/讨论发言都受益。
+    """
     from backend.api.ai_service import call_ai_sync_direct
-    return call_ai_sync_direct(prompt, api_key)
+    return call_ai_sync_direct(prompt, api_key, enable_thinking=False)
 
 
 # ── 辅助函数 ──
