@@ -3,7 +3,7 @@ import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col,
   Divider, Empty, Tabs, Spin, Statistic, Checkbox, Alert,
-  Progress, Radio, Segmented,
+  Progress, Radio, Segmented, Pagination,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined, SafetyCertificateOutlined,
@@ -35,11 +35,11 @@ import KnowledgePointSelect from '../components/KnowledgePointSelect'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import { reportLoadError } from '../utils/loadError'
-import MobileCardTable from '../components/MobileCardTable'
-import { useIsMobile } from '../hooks/useIsMobile'
+import { RowList } from '../components/RowList'
 import { toPercent, percentColor, percentStatus } from '../utils/score'
 
 const { TextArea } = Input
+const { Text } = Typography
 const { Option } = Select
 
 const STATUS_COLORS: Record<string, string> = {
@@ -52,8 +52,6 @@ const STATUS_COLORS: Record<string, string> = {
 let subjectOptions: string[] = []
 
 const ExamPage: React.FC = () => {
-  // 窄屏：列表类表格改卡片渲染（复用同一套 columns，桌面仍为 Table）
-  const isMobile = useIsMobile()
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
@@ -867,94 +865,46 @@ const ExamPage: React.FC = () => {
     window.open(url, '_blank')
   }
 
-  // ── 表格列（教师/管理员视图） ──
-  const teacherColumns = [
-    {
-      title: t('examTitle'),
-      dataIndex: 'title',
-      key: 'title',
-      ellipsis: { showTitle: false },
-      render: (text: string, record: ExamInfo) => (
-        <Tooltip title={text} placement="topLeft">
-          <Space>
-            <span style={{ fontWeight: record.status === 'published' ? 500 : 'normal' }}>{text}</span>
-            <Tag color={STATUS_COLORS[record.status]}>{STATUS_LABELS[record.status]}</Tag>
-          </Space>
-        </Tooltip>
-      ),
-    },
-    {
-      title: t('subject'),
-      dataIndex: 'subject',
-      key: 'subject',
-      width: 100,
-    },
-    {
-      // 与其它活动列表同口径: 目标范围(年级/班级)
-      title: t('gradeClass'),
-      key: 'grade_class',
-      width: 160,
-      render: (_: unknown, r: ExamInfo) => (
-        <ScopeTag scope={r.target_scope} grade={r.target_grade}
-          classes={r.target_class} users={r.target_users} />
-      ),
-    },
-    {
-      title: t('exDuration'),
-      dataIndex: 'duration',
-      key: 'duration',
-      width: 80,
-      render: (v: number) => `${v}${t('minutes')}`,
-    },
-    {
-      title: t('totalScore'),
-      dataIndex: 'total_score',
-      key: 'total_score',
-      width: 60,
-    },
-    {
-      title: t('questionCount'),
-      dataIndex: 'question_count',
-      key: 'question_count',
-      width: 70,
-    },
-    {
-      // 让「13 份答卷」在列表里能逐场对上，而不是只看到一个总数
-      title: t('exPendingCol'),
-      key: 'pending_grading',
-      width: 86,
-      render: (_: unknown, r: ExamInfo & { pending_grading?: number }) => {
-        const n = r.pending_grading ?? 0
-        return n > 0
-          ? (
-            <Tooltip title={t('exPendingTip', { count: n })}>
-              <Tag color="orange" style={{ marginInlineEnd: 0 }}>{t('exPendingN', { count: n })}</Tag>
-            </Tooltip>
-          )
-          : <Typography.Text type="secondary" style={{ fontSize: 12 }}>-</Typography.Text>
-      },
-    },
-    {
-      // 创建者+创建时间双行显示, 少占一列宽度
-      title: t('creator'),
-      dataIndex: 'creator_name',
-      key: 'creator_name',
-      width: 110,
-      render: (name: string, record: ExamInfo) => (
-        <div>
-          <div>{record.creator_username || name || '-'}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{record.created_at ? record.created_at.slice(0, 16) : '-'}</div>
-        </div>
-      ),
-    },
-    {
-      title: t('actions'),
-      key: 'action',
-      width: 320,
-      render: (_: any, record: ExamInfo) => {
-        const canEdit = isAdmin || record.creator_username === user?.username
-        return (
-          <Space size="small" wrap>
+  // ── 卡片列表（与随堂测验/抢答/同步练习/活动监控/白板同款） ──
+  // 考试列表原来是 9 列表格（标题+状态/学科/范围/时长/总分/题数/待批改/创建者/6 个操作），
+  // 宽度不够就得横向滚动；卡片不挑列宽，操作图标一定在同一行。
+  // 教师卡片同时把原来藏在「展开行」里的简介直接摊出来（不再需要先展开才能看到）。
+  const renderExamCardTeacher = (record: ExamInfo) => {
+    const canEdit = isAdmin || record.creator_username === user?.username
+    const pending = (record as ExamInfo & { pending_grading?: number }).pending_grading ?? 0
+    return (
+      <Card size="small" style={{ marginBottom: 8 }}>
+        <div className="page-header-flex stack-row"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Space size={8} align="center" wrap>
+              <Text strong={record.status === 'published'}>{record.title}</Text>
+              <Tag color={STATUS_COLORS[record.status]}>{STATUS_LABELS[record.status]}</Tag>
+              {pending > 0 && (
+                <Tooltip title={t('exPendingTip', { count: pending })}>
+                  <Tag color="orange">{t('exPendingN', { count: pending })}</Tag>
+                </Tooltip>
+              )}
+            </Space>
+            <div style={{ marginTop: 4 }}>
+              <Tag>{t('subject')}：{record.subject || '-'}</Tag>
+              <ScopeTag scope={record.target_scope} grade={record.target_grade}
+                classes={record.target_class} users={record.target_users} />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('exDuration')} {record.duration}{t('minutes')}
+                {' · '}{t('questionCount')} {record.question_count ?? 0}
+                {' · '}{t('totalScore')} {record.total_score}{t('scoreUnit')}
+                {' · '}{record.creator_username || record.creator_name || '-'}
+                {' · '}{record.created_at ? record.created_at.slice(0, 16) : '-'}
+              </Text>
+            </div>
+            {record.description && (
+              <div style={{ marginTop: 4 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{record.description}</Text>
+              </div>
+            )}
+          </div>
+          <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
             {record.status === 'draft' && canEdit && (
               <>
                 <Tooltip title={t('editExam')}>
@@ -1034,157 +984,116 @@ const ExamPage: React.FC = () => {
                 iconOnly stopPropagation onSuccess={loadExams} />
             )}
           </Space>
-        )
-      },
-    },
-  ]
+        </div>
+      </Card>
+    )
+  }
 
-  // ── 表格列（学生视图） ──
-  const studentColumns = [
-    {
-      title: t('examTitle'),
-      dataIndex: 'title',
-      key: 'title',
-      ellipsis: true,
-      render: (text: string, record: ExamInfo) => (
-        <Space>
-          <span>{text}</span>
-          {record.status === 'ended' && <Tag color="red">{t('ended')}</Tag>}
-        </Space>
-      ),
-    },
-    {
-      title: t('subject'),
-      dataIndex: 'subject',
-      key: 'subject',
-      width: 90,
-    },
-    {
-      title: t('publisher'),
-      dataIndex: 'creator_name',
-      key: 'creator_name',
-      width: 90,
-      render: (name: string, record: ExamInfo) => <Tag color="blue">{record.creator_username || name || '-'}</Tag>,
-    },
-    {
-      title: t('exDuration'),
-      dataIndex: 'duration',
-      key: 'duration',
-      width: 80,
-      render: (v: number) => `${v}${t('minutes')}`,
-    },
-    {
-      title: t('totalScore'),
-      dataIndex: 'total_score',
-      key: 'total_score',
-      width: 60,
-    },
-    {
-      title: t('questionCount'),
-      dataIndex: 'question_count',
-      key: 'question_count',
-      width: 70,
-    },
-    // 截止时间列只在真有考试设了截止时间时出现：空列白占 150px，
-    // 会把「考试名称」挤成「南京零…」（数据到位就没这个问题）
-    ...(exams.some(e => !!e.end_time) ? [{
-      title: t('exDeadline'),
-      // 这个 dataIndex 不能省：没有它 antd 会把整个 record 当值传进来，
-      // 单元格就会渲染成 [object Object]（用户实测截图）
-      dataIndex: 'end_time',
-      key: 'end_time',
-      width: 150,
-      render: (v: string | null) => {
-        if (!v || typeof v !== 'string') return <Typography.Text type="secondary">-</Typography.Text>
-        // 已过截止时间标红，便于一眼看出这场已经考不了
-        const overdue = new Date(String(v).replace(' ', 'T')) < new Date()
-        return <Tag color={overdue ? 'red' : 'default'}>{String(v).slice(0, 16)}</Tag>
-      },
-    }] : []),
-    {
-      title: t('myStatus'),
-      key: 'my_status',
-      width: 140,
-      render: (_: any, record: ExamInfo) => {
-        const attempt = record.my_attempt
-        // 没答题的学生原先这里显示的是 t('status')，字面就是「状态」两个字，
-        // 列名却叫「我的状态」—— 学生根本看不出自己是"还没考"
-        if (!attempt) return <Tag>{t('exNotAttempted')}</Tag>
-        // 刚交卷、主观题还在后台判分：后端把 grading 归一成 in_progress，
-        // 这里靠 grading 位区分，否则刚交的卷子会显示成「进行中」
-        if ((attempt as any).grading) {
-          return (
-            <Space size={4}>
-              <Tag color="processing">{t('exMySubmitted')}</Tag>
-              <Tag color="blue">{t('exGradingPending')}</Tag>
+  // ── 卡片（学生视图）──
+  const renderExamCardStudent = (record: ExamInfo) => {
+    const attempt: any = record.my_attempt
+    const ended = record.status === 'ended'
+    const grading = !!attempt?.grading
+    // 卡片整块可点：未交卷 → 去答题；已交卷/已结束 → 看详情；判分中不给入口
+    const onCardClick = () => {
+      if (grading) return
+      if (ended || (attempt && attempt.status === 'submitted')) {
+        if (attempt) handleViewMyDetail(attempt)
+        return
+      }
+      handleTakeExam(record.id)
+    }
+    const overdue = record.end_time && new Date(String(record.end_time).replace(' ', 'T')) < new Date()
+    return (
+      <Card size="small" hoverable={!grading} style={{ marginBottom: 8, cursor: grading ? 'default' : 'pointer' }}
+        onClick={onCardClick}>
+        <div className="page-header-flex stack-row"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Space size={8} align="center" wrap>
+              <Text strong>{record.title}</Text>
+              {ended && <Tag color="red">{t('ended')}</Tag>}
+              {attempt?.status === 'in_progress' && <Tag color="processing">{t('inProgress')}</Tag>}
             </Space>
-          )
-        }
-        if (attempt.status === 'in_progress') return <Tag color="processing">{t('inProgress')}</Tag>
-        if (attempt.status === 'submitted') {
-          // 与练习/测验/成绩弹窗同口径：一律折算百分制（总分不一定是 100）
-          const pct = toPercent(attempt.score, attempt.total_score || record.total_score)
-          const passed = pct >= toPercent(record.pass_score || 60, record.total_score || 100)
-          return (
-            // nowrap：分数被从中间拆成「60/10 / 0」比列宽本身更难看（用户实测截图）
-            <Space size={4}>
-              <Typography.Text strong color={percentStatus(pct)} style={{ whiteSpace: 'nowrap' }}>
-                {pct}/100
-              </Typography.Text>
-              {passed
-                ? <Tag color="green" style={{ marginInlineEnd: 0 }}>{t('pass')}</Tag>
-                : <Tag color="red" style={{ marginInlineEnd: 0 }}>{t('fail')}</Tag>}
-            </Space>
-          )
-        }
-        return <Tag>{attempt.status}</Tag>
-      },
-    },
-    {
-      title: t('actions'),
-      key: 'action',
-      width: 130,
-      render: (_: any, record: ExamInfo) => {
-        const attempt = record.my_attempt
-
-        if (record.status === 'ended') {
-          return (
-            <Space>
-              {attempt ? (
-                <Button size="small" icon={<BarChartOutlined />}
-                  onClick={() => handleViewMyDetail(attempt)}>{t('reviewExam')}</Button>
+            <div style={{ marginTop: 4 }}>
+              <Tag>{t('subject')}：{record.subject || '-'}</Tag>
+              <Tag color="blue">{record.creator_username || record.creator_name || '-'}</Tag>
+              {/* 截止时间只在真设了时才出现（同旧列的取舍） */}
+              {record.end_time && (
+                <Tag color={overdue ? 'red' : 'default'}>{t('exDeadline')}：{String(record.end_time).slice(0, 16)}</Tag>
+              )}
+              {/* 我的状态：未参加 / 已交卷 / 判分中 / 得分 */}
+              {!attempt ? (
+                <Tag>{t('exNotAttempted')}</Tag>
+              ) : grading ? (
+                <>
+                  <Tag color="processing">{t('exMySubmitted')}</Tag>
+                  <Tag color="blue">{t('exGradingPending')}</Tag>
+                </>
+              ) : attempt.status === 'submitted' ? (
+                (() => {
+                  const pct = toPercent(attempt.score, attempt.total_score || record.total_score)
+                  const passed = pct >= toPercent(record.pass_score || 60, record.total_score || 100)
+                  return (
+                    <>
+                      <Typography.Text strong color={percentStatus(pct)} style={{ whiteSpace: 'nowrap' }}>
+                        {pct}/100
+                      </Typography.Text>
+                      {passed
+                        ? <Tag color="green">{t('pass')}</Tag>
+                        : <Tag color="red">{t('fail')}</Tag>}
+                    </>
+                  )
+                })()
+              ) : null}
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('exDuration')} {record.duration}{t('minutes')}
+                {' · '}{t('questionCount')} {record.question_count ?? 0}
+                {' · '}{t('totalScore')} {record.total_score}{t('scoreUnit')}
+              </Text>
+            </div>
+          </div>
+          <span onClick={(e) => e.stopPropagation()}>
+            <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+              {grading ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('exGradingPending')}</Text>
+              ) : ended ? (
+                attempt ? (
+                  <Tooltip title={t('reviewExam')}>
+                    <Button size="small" icon={<BarChartOutlined />}
+                      onClick={() => handleViewMyDetail(attempt)} />
+                  </Tooltip>
+                ) : (
+                  <Tag>{t('ended')}</Tag>
+                )
+              ) : attempt?.status === 'submitted' ? (
+                <>
+                  <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                    onClick={() => handleTakeExam(record.id)}>
+                    {t('retake')}
+                  </Button>
+                  <Tooltip title={t('reviewExam')}>
+                    <Button size="small" icon={<BarChartOutlined />}
+                      onClick={() => handleViewMyDetail(attempt)} />
+                  </Tooltip>
+                </>
+              ) : attempt?.status === 'in_progress' ? (
+                <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                  onClick={() => handleTakeExam(record.id)}>
+                  {t('continueExam')}
+                </Button>
               ) : (
-                <Tag>{t('ended')}</Tag>
+                <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                  onClick={() => handleTakeExam(record.id)}>
+                  {t('startExam')}
+                </Button>
               )}
             </Space>
-          )
-        }
-
-        // 判分中的答卷不该给任何答题按钮：后端把它归一成 in_progress，
-        // 原先会显示「继续考试」，点进去等于把交过的卷子再打开一次
-        if ((attempt as any)?.grading) {
-          return <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('exGradingPending')}</Typography.Text>
-        }
-
-        return (
-          <Space>
-            {!attempt || attempt.status === 'submitted' ? (
-              <Button type="primary" size="small"
-                icon={<PlayCircleOutlined />}
-                onClick={() => handleTakeExam(record.id)}>
-                {attempt ? t('retake') : t('startExam')}
-              </Button>
-            ) : attempt.status === 'in_progress' ? (
-              <Button type="primary" size="small"
-                onClick={() => handleTakeExam(record.id)}>
-                {t('continueExam')}
-              </Button>
-            ) : null}
-          </Space>
-        )
-      },
-    },
-  ]
+          </span>
+        </div>
+      </Card>
+    )
+  }
 
   // ── 创建表单初始值 ──
   const createInitialValues = {
@@ -1297,23 +1206,23 @@ const ExamPage: React.FC = () => {
               key: 'exams',
               label: <Space><FileAddOutlined />{t('examList')}</Space>,
               children: (
-                isMobile ? (
-                  <MobileCardTable
-                    dataSource={exams} columns={studentColumns} rowKey="id" loading={loading}
-                    pagination={{ current: page, pageSize, total, onChange: (p) => setPage(p) }}
-                    emptyText={<Empty description={t('noExams')} />}
-                  />
+                loading && exams.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+                ) : exams.length === 0 ? (
+                  <Empty description={t('noExams')} />
                 ) : (
-                <Table dataSource={exams} columns={studentColumns} rowKey="id"
-                  loading={loading} size="small"
-                  pagination={{
-                    current: page, pageSize, total,
-                    showSizeChanger: true,
-                    showTotal: (total) => t('totalExams', { count: total }),
-                    onChange: (p, ps) => { setPage(p); setPageSize(ps) },
-                  }}
-                  locale={{ emptyText: <Empty description={t('noExams')} /> }}
-                />
+                  <>
+                    <RowList items={exams} split={false} renderItem={renderExamCardStudent} />
+                    <div style={{ marginTop: 12, textAlign: 'center' }}>
+                      <Pagination
+                        current={page} pageSize={pageSize} total={total}
+                        showSizeChanger showTotal={(total) => t('totalExams', { count: total })}
+                        pageSizeOptions={['10', '20', '50']}
+                        onChange={(p, ps) => { setPage(p); setPageSize(ps) }}
+                        size="small"
+                      />
+                    </div>
+                  </>
                 )
               ),
             },
@@ -1377,29 +1286,24 @@ const ExamPage: React.FC = () => {
 
         {/* ── 教师/管理员：考试列表 ── */}
         {!isStudent && (
-          <Table dataSource={exams} columns={teacherColumns} rowKey="id"
-            loading={loading} size="small"
-            scroll={{ x: 1100 }}
-            pagination={{
-              current: page, pageSize, total,
-              showSizeChanger: true,
-              showTotal: (total) => t('totalExams', { count: total }),
-              onChange: (p, ps) => { setPage(p); setPageSize(ps) },
-            }}
-            locale={{ emptyText: <Empty description={t('noExams')} /> }}
-            expandable={{
-              expandedRowRender: (record) => (
-                <div style={{ padding: '8px 0', maxWidth: 800 }}>
-                  <Typography.Text style={{ fontSize: 14 }}>{record.description || t('noDescription')}</Typography.Text>
-                  <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-tertiary)' }}>
-                    {t('creatorColon')}{record.creator_username || record.creator_name} |
-                    {t('durationColon')}{record.duration}{t('minutes')} |
-                    {t('passingScoreColon')}{record.pass_score}{t('scoreUnit')}
-                  </div>
-                </div>
-              ),
-            }}
-          />
+          loading && exams.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+          ) : exams.length === 0 ? (
+            <Empty description={t('noExams')} />
+          ) : (
+            <>
+              <RowList items={exams} split={false} renderItem={renderExamCardTeacher} />
+              <div style={{ marginTop: 12, textAlign: 'center' }}>
+                <Pagination
+                  current={page} pageSize={pageSize} total={total}
+                  showSizeChanger showTotal={(total) => t('totalExams', { count: total })}
+                  pageSizeOptions={['10', '20', '50']}
+                  onChange={(p, ps) => { setPage(p); setPageSize(ps) }}
+                  size="small"
+                />
+              </div>
+            </>
+          )
         )}
       </Space>
 

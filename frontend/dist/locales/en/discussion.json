@@ -1,4 +1,5 @@
 {
+  "wbTotalRooms": "Total {{total}} whiteboards",
   "groupIndexName": "Group {{index}}",
   "title": "Discussion",
   "createDiscussion": "Create Discussion",

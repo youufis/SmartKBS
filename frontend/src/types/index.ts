@@ -476,6 +476,12 @@ export interface WhiteboardRoom {
   max_pages: number
   status: string
   student_count: number
+  // 活动目标范围（与考试/测验/投票同一套）：接口一直有返回，只是类型里漏了，
+  // 于是列表只能靠 `any` 读，换成卡片（强类型 record）才暴露出来
+  target_scope?: string
+  target_grade?: string
+  target_class?: string
+  target_users?: string
   created_at: string
   ended_at: string | null
 }

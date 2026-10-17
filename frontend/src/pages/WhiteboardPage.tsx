@@ -3,10 +3,9 @@
  */
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Card, Button, Space, Typography, Table, Tag, Modal, Input, Select,
-  message, Popconfirm, Tooltip, Tabs, Radio, Row, Col,
+  Card, Button, Space, Typography, Tag, Modal, Input, Select, Pagination,
+  message, Popconfirm, Tooltip, Radio, Empty, Spin,
 } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
 import {
   PlusOutlined, CopyOutlined, PlayCircleOutlined,
   StopOutlined, DeleteOutlined, ReloadOutlined,
@@ -18,6 +17,7 @@ import { useAuthStore } from '../stores/authStore'
 import * as whiteboardApi from '../api/whiteboard'
 import type { WhiteboardRoom, WhiteboardMode } from '../types'
 import ScopeTag from '../components/ScopeTag'
+import { RowList } from '../components/RowList'
 import ActivityScopeSelector, { type ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Title, Text } = Typography
@@ -32,6 +32,9 @@ const WhiteboardPage: React.FC = () => {
 
   const [rooms, setRooms] = useState<WhiteboardRoom[]>([])
   const [loading, setLoading] = useState(false)
+  // 卡片列表自己管分页（原来是 Table 内置分页）
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [createOpen, setCreateOpen] = useState(false)
   const [joinOpen, setJoinOpen] = useState(false)
 
@@ -191,96 +194,84 @@ const WhiteboardPage: React.FC = () => {
     self_study: { color: 'purple', label: t('selfStudy') },
   }
 
-  const columns: ColumnsType<WhiteboardRoom> = [
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
-    { title: t('roomCode'), dataIndex: 'room_code', key: 'room_code', width: 120,
-      render: (code: string) => (
-        <Space>
-          <Tag color="blue" style={{ fontFamily: 'monospace' }}>{code}</Tag>
-          <Tooltip title={t('copyRoomCode')}>
-            <Button
-              type="text"
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => {
-                navigator.clipboard.writeText(code)
-                message.success(t('roomCodeCopied'))
-              }}
-            />
-          </Tooltip>
-        </Space>
-      ),
-    },
-    // 列头用「白板标题」，不能用 discussion 命名空间的 title（那是"分组讨论"）
-    { title: t('whiteboardTitle'), dataIndex: 'title', key: 'title' },
-    { title: t('creator'), dataIndex: 'creator_username', key: 'creator_username', width: 100,
-      render: (n: string) => n || '-',
-    },
-    { title: t('gradeClass'), key: 'scope', width: 170,
-      render: (_: any, r: any) => (
-        r.target_scope
-          ? <ScopeTag scope={r.target_scope} grade={r.target_grade} classes={r.target_class} users={r.target_users} />
-          : <ScopeTag variant="text" grade={r.grade} classes={String(r.class_name ?? '')} />
-      ),
-    },
-    { title: t('mode'), dataIndex: 'mode', key: 'mode', width: 80,
-      render: (m: string) => (
-        <Tag color={modeLabels[m]?.color}>{modeLabels[m]?.label || m}</Tag>
-      ),
-    },
-    { title: t('status'), dataIndex: 'status', key: 'status', width: 80,
-      render: (s: string) => (
-        <Tag color={s === 'active' ? 'green' : 'default'}>
-          {s === 'active' ? t('active') : t('ended')}
-        </Tag>
-      ),
-    },
-    { title: t('participantCount'), dataIndex: 'student_count', key: 'student_count', width: 80 },
-    { title: t('createdAt'), dataIndex: 'created_at', key: 'created_at', width: 160,
-      render: (t: string) => t?.replace('T', ' ').substring(0, 19) || '-',
-    },
-    {
-      title: t('actions'), key: 'actions', width: 120,
-      render: (_, record) => (
-        <Space>
-          <Tooltip title={record.status === 'active' ? t('wpEnterRoom') : t('wpReviewRoom')}>
-            <Button
-              size="small"
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={() => navigate(`/whiteboard-room/${record.id}`)}
-            />
-          </Tooltip>
-          {isTeacher && record.status !== 'active' && (
-            <Popconfirm title={t('wbReopenConfirm')} onConfirm={() => handleReopen(record.id)}>
-              <Tooltip title={t('wpReopenRoom')}>
-                <Button size="small" icon={<UnlockOutlined />} />
+  // 卡片列表（与随堂测验/抢答/同步练习/活动监控/考试中心同款）：
+  // 这张表 10 列（ID + 房间码 + 标题 + 创建者 + 范围 + 模式 + 状态 + 人数 + 时间 + 5 个操作），
+  // 窄窗必然横向滚动、操作被挤到第二行；卡片不挑列宽，操作图标一定在同一行。
+  const fmtRoomTime = (v?: string) => (v ? String(v).replace('T', ' ').substring(0, 19) : '-')
+
+  const renderRoomCard = (record: WhiteboardRoom) => {
+    const inRoom = record.status === 'active'
+    const meta = modeLabels[record.mode]
+    return (
+      <Card size="small" hoverable style={{ marginBottom: 8, cursor: 'pointer' }}
+        onClick={() => navigate(`/whiteboard-room/${record.id}`)}>
+        <div className="page-header-flex stack-row"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Space size={8} align="center" wrap>
+              <Text strong>{record.title || t('whiteboardTitle')}</Text>
+              <Tag color={inRoom ? 'green' : 'default'}>{inRoom ? t('active') : t('ended')}</Tag>
+              <Tag color={meta?.color}>{meta?.label || record.mode}</Tag>
+            </Space>
+            <div style={{ marginTop: 4 }}>
+              <Tag color="blue" style={{ fontFamily: 'monospace' }}>{record.room_code}</Tag>
+              {/* 复制房间码：行上直接点，不必先点进房间再找 */}
+              <Tooltip title={t('copyRoomCode')}>
+                <Button type="text" size="small" icon={<CopyOutlined />}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    navigator.clipboard.writeText(record.room_code)
+                    message.success(t('roomCodeCopied'))
+                  }} />
               </Tooltip>
-            </Popconfirm>
-          )}
-          {isTeacher && record.status === 'active' && (
-            <Popconfirm title={t('wpConfirmEnd')} onConfirm={() => handleEnd(record.id)}>
-              <Tooltip title={t('wpEndRoom')}>
-                <Button size="small" danger icon={<StopOutlined />} />
+              <Tag>{t('creator')}：{record.creator_username || '-'}</Tag>
+              {record.target_scope
+                ? <ScopeTag scope={record.target_scope} grade={record.target_grade}
+                    classes={record.target_class} users={record.target_users} />
+                : <ScopeTag variant="text" grade={record.grade} classes={String(record.class_name ?? '')} />}
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('participantCount')} {record.student_count ?? 0}{' · '}{fmtRoomTime(record.created_at)}
+              </Text>
+            </div>
+          </div>
+          <span onClick={(e) => e.stopPropagation()}>
+            <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+              <Tooltip title={inRoom ? t('wpEnterRoom') : t('wpReviewRoom')}>
+                <Button size="small" type="primary" icon={<PlayCircleOutlined />}
+                  onClick={() => navigate(`/whiteboard-room/${record.id}`)} />
               </Tooltip>
-            </Popconfirm>
-          )}
-          {isTeacher && (
-            <Tooltip title={t('wpEdit')}>
-              <Button size="small" icon={<EditOutlined />} onClick={() => handleEditOpen(record)} />
-            </Tooltip>
-          )}
-          {isTeacher && (
-            <Popconfirm title={t('wpConfirmDel')} onConfirm={() => handleDelete(record.id)}>
-              <Tooltip title={t('wpDelRoom')}>
-                <Button size="small" danger icon={<DeleteOutlined />} />
-              </Tooltip>
-            </Popconfirm>
-          )}
-        </Space>
-      ),
-    },
-  ]
+              {isTeacher && !inRoom && (
+                <Popconfirm title={t('wbReopenConfirm')} onConfirm={() => handleReopen(record.id)}>
+                  <Tooltip title={t('wpReopenRoom')}>
+                    <Button size="small" icon={<UnlockOutlined />} />
+                  </Tooltip>
+                </Popconfirm>
+              )}
+              {isTeacher && inRoom && (
+                <Popconfirm title={t('wpConfirmEnd')} onConfirm={() => handleEnd(record.id)}>
+                  <Tooltip title={t('wpEndRoom')}>
+                    <Button size="small" danger icon={<StopOutlined />} />
+                  </Tooltip>
+                </Popconfirm>
+              )}
+              {isTeacher && (
+                <Tooltip title={t('wpEdit')}>
+                  <Button size="small" icon={<EditOutlined />} onClick={() => handleEditOpen(record)} />
+                </Tooltip>
+              )}
+              {isTeacher && (
+                <Popconfirm title={t('wpConfirmDel')} onConfirm={() => handleDelete(record.id)}>
+                  <Tooltip title={t('wpDelRoom')}>
+                    <Button size="small" danger icon={<DeleteOutlined />} />
+                  </Tooltip>
+                </Popconfirm>
+              )}
+            </Space>
+          </span>
+        </div>
+      </Card>
+    )
+  }
 
   return (
     <Card style={{ borderRadius: 8 }}>
@@ -303,14 +294,25 @@ const WhiteboardPage: React.FC = () => {
         </Space>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={rooms}
-        rowKey="id"
-        loading={loading}
-        pagination={{ pageSize: 20 }}
-        locale={{ emptyText: isStudent ? t('noWhiteboardsStudent') : t('noWhiteboards') }}
-      />
+      {loading && rooms.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+      ) : rooms.length === 0 ? (
+        <Empty description={isStudent ? t('noWhiteboardsStudent') : t('noWhiteboards')} />
+      ) : (
+        <>
+          <RowList items={rooms.slice((page - 1) * pageSize, page * pageSize)}
+            split={false} renderItem={renderRoomCard} />
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Pagination
+              current={page} pageSize={pageSize} total={rooms.length}
+              showSizeChanger showTotal={(total) => t('wbTotalRooms', { total })}
+              pageSizeOptions={['10', '20', '50']}
+              onChange={(p, ps) => { setPage(p); setPageSize(ps) }}
+              size="small"
+            />
+          </div>
+        </>
+      )}
 
       {/* ── 创建房间弹窗 ── */}
       <Modal maskClosable={false}
