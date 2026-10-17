@@ -6,7 +6,7 @@ import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Table, Select, Space, Typography, message, Row, Col,
-  Statistic, Tag, Spin, Empty, Button,
+  Statistic, Tag, Spin, Empty, Button, Modal, Input,
 } from 'antd'
 import {
   EyeOutlined, ReloadOutlined, TeamOutlined,
@@ -50,6 +50,10 @@ const ResourceViewStatsPage: React.FC = () => {
   const [viewDetail, setViewDetail] = useState<trackingApi.ResourceViewStudent[]>([])
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   const [detailTitle, setDetailTitle] = useState('')
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailSummary, setDetailSummary] = useState({ total: 0, total_views: 0 })
+  // 资源列表的本地搜索（原先只能靠翻页找某个资源）
+  const [resourceKeyword, setResourceKeyword] = useState('')
 
   // 知识点浏览明细
   const [kpViewData, setKpViewData] = useState<trackingApi.KpResourceView[]>([])
@@ -109,11 +113,18 @@ const ResourceViewStatsPage: React.FC = () => {
   const handleViewDetail = async (resourceType: string, resourceId: number, name: string) => {
     setDetailTitle(name)
     setDetailModalOpen(true)
+    setDetailLoading(true)
+    setViewDetail([])
+    setDetailSummary({ total: 0, total_views: 0 })
     try {
       const data = await trackingApi.getResourceViewStudents(resourceType, resourceId)
       setViewDetail(data.students)
-    } catch {
-      setViewDetail([])
+      setDetailSummary({ total: data.total, total_views: data.total_views ?? 0 })
+    } catch (err: any) {
+      // 旧写法静默吞掉错误，界面只会显示"暂无记录"，看不出是没数据还是没权限
+      message.error(err?.response?.data?.detail || t('activityMonitor.loadStatusFailed'))
+    } finally {
+      setDetailLoading(false)
     }
   }
 
@@ -191,6 +202,11 @@ const ResourceViewStatsPage: React.FC = () => {
     },
   ]
 
+  const kw = resourceKeyword.trim().toLowerCase()
+  const visibleResources = kw
+    ? resources.filter(r => `${r.resource_name || ''} ${r.owner || ''}`.toLowerCase().includes(kw))
+    : resources
+
   return (
     <div>
       <Title level={4} style={{ marginBottom: 16 }}>
@@ -198,18 +214,18 @@ const ResourceViewStatsPage: React.FC = () => {
       </Title>
 
       {/* 概览卡片 */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}>
+      <Row gutter={[16, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={24} sm={8}>
           <Card size="small">
             <Statistic title={t('activityMonitor.resourceViews.activeStudents')} value={overview.active_students} prefix={<TeamOutlined />} suffix={t('activityMonitor.stats.personSuffix')} />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Card size="small">
             <Statistic title={t('activityMonitor.resourceViews.totalViews')} value={overview.total_views} prefix={<EyeOutlined />} suffix={t('activityMonitor.resourceViews.viewSuffix')} />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Card size="small">
             <Statistic title={t('activityMonitor.resourceViews.viewedResources')} value={overview.viewed_resources} prefix={<FileOutlined />} suffix={t('activityMonitor.resourceViews.resourceSuffix')} />
           </Card>
@@ -283,15 +299,23 @@ const ResourceViewStatsPage: React.FC = () => {
       <Card
         size="small"
         title={t('activityMonitor.resourceViews.sharedResources')}
-        extra={<Button size="small" icon={<ReloadOutlined />} onClick={loadResourceStats} loading={loading}>{t('activityMonitor.refresh')}</Button>}
+        extra={
+          <Space>
+            <Input allowClear size="small" style={{ width: 220 }}
+              placeholder={t('activityMonitor.resourceViews.searchPh')}
+              value={resourceKeyword}
+              onChange={(e) => setResourceKeyword(e.target.value)} />
+            <Button size="small" icon={<ReloadOutlined />} onClick={loadResourceStats} loading={loading}>{t('activityMonitor.refresh')}</Button>
+          </Space>
+        }
       >
         {loading ? (
           <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
-        ) : resources.length === 0 ? (
+        ) : visibleResources.length === 0 ? (
           <Empty description={t('activityMonitor.resourceViews.empty')} />
         ) : (
           <Table
-            dataSource={resources}
+            dataSource={visibleResources}
             rowKey="id"
             size="small"
             columns={columns}
@@ -300,31 +324,47 @@ const ResourceViewStatsPage: React.FC = () => {
         )}
       </Card>
 
-      {/* 学生明细弹窗 */}
-      <Card
+      {/* 学生明细：宽弹窗（原来铺在页面最底部，点完还得往下滚） */}
+      <Modal
+        maskClosable={false}
+        open={detailModalOpen}
+        onCancel={() => setDetailModalOpen(false)}
+        footer={<Button onClick={() => setDetailModalOpen(false)}>{t('activityMonitor.close')}</Button>}
+        width="min(980px, 94vw)"
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
         title={t('activityMonitor.resourceViews.detailTitle', { name: detailTitle })}
-        style={{ marginTop: 16, display: detailModalOpen ? 'block' : 'none' }}
-        extra={<a onClick={() => setDetailModalOpen(false)}>{t('activityMonitor.close')}</a>}
       >
-        {viewDetail.length === 0 ? (
-          <Text type="secondary">{t('activityMonitor.resourceViews.noRecords')}</Text>
+        {detailLoading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}><Spin /></div>
+        ) : viewDetail.length === 0 ? (
+          <Empty description={t('activityMonitor.resourceViews.noRecords')} />
         ) : (
-          <Table
-            dataSource={viewDetail}
-            rowKey="student_username"
-            size="small"
-            pagination={{ pageSize: 10 }}
-            columns={[
-              { title: t('activityMonitor.resourceViews.columns.student'), dataIndex: 'student_name', width: 120 },
-              { title: t('activityMonitor.resourceViews.columns.username'), dataIndex: 'student_username', width: 120 },
-              { title: t('activityMonitor.columns.grade'), dataIndex: 'student_grade', width: 90, render: (v: string) => v || '-' },
-              { title: t('activityMonitor.columns.class'), dataIndex: 'student_class_name', width: 110, render: (v: string) => v || '-' },
-              { title: t('activityMonitor.resourceViews.columns.viewCount'), dataIndex: 'view_count', width: 90 },
-              { title: t('activityMonitor.resourceViews.columns.lastView'), dataIndex: 'last_viewed', width: 180 },
-            ]}
-          />
+          <>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+              {t('activityMonitor.resourceViews.detailSummary', {
+                students: detailSummary.total, views: detailSummary.total_views,
+              })}
+            </Text>
+            <Table
+              dataSource={viewDetail}
+              rowKey="student_username"
+              size="small"
+              pagination={{
+                pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'],
+                showTotal: (total) => t('activityMonitor.pagination.totalStudents', { count: total }),
+              }}
+              columns={[
+                { title: t('activityMonitor.resourceViews.columns.student'), dataIndex: 'student_name', width: 120 },
+                { title: t('activityMonitor.resourceViews.columns.username'), dataIndex: 'student_username', width: 120 },
+                { title: t('activityMonitor.columns.grade'), dataIndex: 'student_grade', width: 90, render: (v: string) => v || '-' },
+                { title: t('activityMonitor.columns.class'), dataIndex: 'student_class_name', width: 110, render: (v: string) => v || '-' },
+                { title: t('activityMonitor.resourceViews.columns.viewCount'), dataIndex: 'view_count', width: 90 },
+                { title: t('activityMonitor.resourceViews.columns.lastView'), dataIndex: 'last_viewed', width: 180 },
+              ]}
+            />
+          </>
         )}
-      </Card>
+      </Modal>
     </div>
   )
 }

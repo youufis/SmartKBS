@@ -213,6 +213,8 @@
       "viewStudents": "View Students",
       "pagination": "Total {{count}} resources",
       "detailTitle": "👁️ Students who viewed \"{{name}}\"",
+        "searchPh": "Search resource or owner",
+        "detailSummary": "{{students}} students · {{views}} views in total",
       "noRecords": "No view records",
       "fileType": "File",
       "columns": {

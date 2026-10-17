@@ -58,7 +58,13 @@ export async function getResourceViewStats(
 export async function getResourceViewStudents(
   resourceType: string,
   resourceId: number,
-): Promise<{ students: ResourceViewStudent[]; total: number }> {
+): Promise<{
+  students: ResourceViewStudent[];
+  total: number;
+  /** 这些学生的累计浏览次数（教师视角只统计本人任教班级） */
+  total_views?: number;
+  resource_name?: string;
+}> {
   const { data } = await apiClient.get('/api/tracking/resource-view-students', {
     params: { resource_type: resourceType, resource_id: resourceId },
   });

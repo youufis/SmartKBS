@@ -213,6 +213,8 @@
       "viewStudents": "查看学生",
       "pagination": "共 {{count}} 个资源",
       "detailTitle": "👁️ 查看「{{name}}」的学生",
+        "searchPh": "搜索资源名称 / 共享者",
+        "detailSummary": "共 {{students}} 名学生浏览 · 累计 {{views}} 次",
       "noRecords": "暂无学生查看记录",
       "fileType": "文件",
       "columns": {

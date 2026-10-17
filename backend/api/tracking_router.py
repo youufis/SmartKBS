@@ -376,11 +376,26 @@ async def get_resource_view_students(
     resource_type: str = Query(...),
     resource_id: int = Query(...),
 ):
-    """获取查看过指定资源的学生列表"""
+    """获取查看过指定资源的学生列表。
+
+    权限（与活动监控一致）：教师只能看**自己共享**的资源，且只统计**本人任教班级**的
+    学生；管理员不限。旧实现只校验了"是教师"，任何老师传任意 (type,id) 都能列出
+    全校看过该资源的学生，属于越权读取。
+    """
     user = get_current_user(request)
     role = user.get("role", 2)
+    username = user.get("username", "")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
+
+    share = execute_query_dict(
+        "SELECT owner_username, file_name FROM shared_resources WHERE id=? AND resource_type=?",
+        (resource_id, resource_type),
+    )
+    if not share:
+        raise HTTPException(status_code=404, detail="资源不存在")
+    if role != 0 and (share[0].get("owner_username") or "") != username:
+        raise HTTPException(status_code=403, detail="只能查看自己共享的资源")
 
     rows = execute_query_dict(
         """SELECT rvl.student_username, u.name as student_name,
@@ -393,11 +408,22 @@ async def get_resource_view_students(
         (resource_type, resource_id),
     )
 
+    # 教师只看本人任教班级的学生，管理员看全部
+    if role != 0:
+        from backend.permission_service import get_students_in_scope
+        in_scope = {s["username"] for s in get_students_in_scope(username)}
+        rows = [r for r in rows if r.get("student_username") in in_scope]
+
     # 学生明细补年级班级(原本只有学号+姓名)
     from backend.permission_service import attach_student_info
     attach_student_info(rows, key="student_username", prefix="student_")
 
-    return {"students": rows, "total": len(rows)}
+    return {
+        "students": rows,
+        "total": len(rows),
+        "total_views": sum(int(r.get("view_count") or 0) for r in rows),
+        "resource_name": share[0].get("file_name") or "",
+    }
 
 
 # ═══════════════════════════════════════════════════════════
