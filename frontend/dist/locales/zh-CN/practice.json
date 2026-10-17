@@ -4,6 +4,7 @@
   "publishNow": "保存并发布",
   "renameTitle": "修改练习名称",
   "renamedOk": "名称已更新",
+  "createdAt": "创建时间",
   "publishAction": "发布",
   "reopenAction": "重新开启",
   "endAction": "结束",

@@ -642,6 +642,9 @@ const StudentView: React.FC = () => {
                         <div><Text type="secondary">{t('publisher')}：{s.creator_username || s.creator_name} · {s.question_count} {t('questionCount')}
                           {s.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}
                         </Text></div>
+                        <div><Text type="secondary" style={{ fontSize: 12 }}>
+                          {t('createdAt')} {String(s.created_at || '').slice(0, 16) || '-'}
+                        </Text></div>
                         {/* 明确给一个入口：原先整卡可点，但没有任何按钮，学生看不出能点 */}
                         <div style={{ marginTop: 8 }}>
                           <Button size="small" type="primary" ghost
@@ -1095,6 +1098,8 @@ const TeacherView: React.FC = () => {
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           {t('questionCountTitle')} {r.question_count} · {t('totalScoreTitle')} {r.total_score}
                           {' · '}{t('submitted')} {r.submitted_count}/{r.student_count}
+                          {/* 创建时间：与抢答/白板/测验的卡片同口径，方便按时间找最近布置的那份 */}
+                          {' · '}{t('createdAt')} {String(r.created_at || '').slice(0, 16) || '-'}
                         </Text>
                       </div>
                     </div>
