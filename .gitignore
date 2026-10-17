@@ -87,6 +87,8 @@ desktop/
 youufis/
 Temp/
 question_media/
+# 白板运行时上传的素材（随用户使用增长，不入库）
+whiteboard_assets/
 
 # ── 开发期验证产物（活动重置功能调试用） ──
 .playwright-mcp/
