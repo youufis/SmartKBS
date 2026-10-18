@@ -14,7 +14,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
 from starlette.concurrency import run_in_threadpool
@@ -41,6 +41,11 @@ TEACHER_REFRESH_LIMIT = 10         # DC1: 教师/管理员每日刷新上限(旧
 REFILL_MIN_INTERVAL = 600          # DC5: 知识池补充的最小间隔(秒), 防止并发重复烧 AI
 REFRESH_CARD_KEEP_DAYS = 7         # DC7: 刷新专属卡片保留天数
 POINTS_PER_VIEW = 1
+_ADMIN_CARD_COLUMNS = (
+    "id, emoji, category, title, summary, detail, source, fun_level, "
+    "related_subject, tags, grade_level, pool_status, view_count, "
+    "favorite_count, created_at, updated_at, updated_by"
+)
 
 
 # ── 请求/响应模型 ──
@@ -51,6 +56,25 @@ class FavoriteRequest(BaseModel):
 
 class ViewRequest(BaseModel):
     card_id: int
+
+
+class DiscoveryCardUpdate(BaseModel):
+    emoji: str | None = None
+    category: str | None = None
+    title: str | None = None
+    summary: str | None = None
+    detail: str | None = None
+    source: str | None = None
+    fun_level: int | None = None
+    related_subject: str | None = None
+    tags: list[str] | None = None
+    grade_level: str | None = None
+    pool_status: str | None = None
+
+
+class DiscoveryBulkRequest(BaseModel):
+    ids: list[int]
+    action: str  # disable / enable / delete
 
 
 # ── 辅助函数 ──
@@ -85,6 +109,35 @@ def _today() -> str:
 def _get_dashscope_api_key() -> str:
     key, _ = get_api_keys("")
     return key
+
+
+def _require_admin(user: dict[str, Any]) -> None:
+    if user.get("role") != 0:
+        raise HTTPException(403, "仅管理员可执行该操作")
+
+
+def _require_manager(user: dict[str, Any]) -> None:
+    if user.get("role") not in (0, 1):
+        raise HTTPException(403, "仅教师和管理员可执行该操作")
+
+
+def _admin_card_row(r) -> dict:
+    """管理员列表行：比学生卡片多出状态、年级、浏览/收藏与时间。"""
+    try:
+        tags = json.loads(r[9] or "[]")
+    except Exception:
+        tags = []
+    return {
+        "id": r[0], "emoji": r[1] or "", "category": r[2] or "",
+        "title": r[3] or "", "summary": r[4] or "", "detail": r[5] or "",
+        "source": r[6] or "", "fun_level": int(r[7] or 3),
+        "related_subject": r[8] or "", "tags": tags,
+        "grade_level": r[10] or "all", "pool_status": r[11] or "active",
+        "view_count": int(r[12] or 0), "favorite_count": int(r[13] or 0),
+        "created_at": r[14] or "", "updated_at": r[15] or "",
+        "updated_by": r[16] or "",
+    }
+
 
 def _row_to_card(r) -> dict:
     """将数据库行转为卡片字典"""
@@ -282,7 +335,7 @@ class DiscoveryService:
         5. 标记已看，返回
         """
         # 第1步：查出可看卡片
-        available = DiscoveryService._get_available_cards(username)
+        available = DiscoveryService._get_available_cards(username, grade)
 
         # 第2步：不足时触发补充(DC2: 传入可用余量, 由节流锁决定是否真的补充)
         if len(available) < DAILY_CARD_COUNT:
@@ -313,9 +366,12 @@ class DiscoveryService:
         return {row[0] for row in rows}
 
     @staticmethod
-    def _get_available_cards(username: str) -> list[dict]:
-        """查出该学生可看的卡片（排除7天内看过的）"""
+    def _get_available_cards(username: str, grade: str = "") -> list[dict]:
+        """查出该学生可看的卡片（排除7天内看过的，并按年级定向过滤）"""
         excluded = DiscoveryService._get_excluded_card_ids(username)
+        grade = _norm_grade_hint(grade)
+        grade_sql = " AND (grade_level='' OR grade_level='all' OR grade_level=?)" if grade else ""
+        grade_params = [grade] if grade else []
 
         if excluded:
             placeholders = ",".join("?" for _ in excluded)
@@ -324,21 +380,27 @@ class DiscoveryService:
                 f"source, fun_level, related_subject, tags "
                 f"FROM discovery_pool WHERE pool_status='active' "
                 f"AND id NOT IN ({placeholders}) "
+                f"{grade_sql} "
                 f"ORDER BY view_count ASC, RANDOM()",
-                tuple(excluded)
+                tuple(list(excluded) + grade_params)
             )
         else:
             rows = execute_query(
                 "SELECT id, emoji, category, title, summary, detail, "
                 "source, fun_level, related_subject, tags "
                 "FROM discovery_pool WHERE pool_status='active' "
-                "ORDER BY view_count ASC, RANDOM()"
+                f"{grade_sql} "
+                "ORDER BY view_count ASC, RANDOM()",
+                tuple(grade_params)
             )
         return [_row_to_card(r) for r in rows]
 
     @staticmethod
     def _get_fallback_with_shorter_window(username: str, grade: str) -> list[dict]:
         """兜底：7天窗口全看过 → 缩到3天 → 再不够就彻底放开"""
+        grade = _norm_grade_hint(grade)
+        grade_sql = " AND (grade_level='' OR grade_level='all' OR grade_level=?)" if grade else ""
+        grade_params = [grade] if grade else []
         # 尝试3天窗口
         cutoff = (datetime.now() - timedelta(days=3)).isoformat()
         rows = execute_query(
@@ -355,16 +417,18 @@ class DiscoveryService:
                 f"source, fun_level, related_subject, tags "
                 f"FROM discovery_pool WHERE pool_status='active' "
                 f"AND id NOT IN ({placeholders}) "
+                f"{grade_sql} "
                 f"ORDER BY RANDOM() LIMIT ?",
-                tuple(list(recent_ids) + [DAILY_CARD_COUNT])
+                tuple(list(recent_ids) + grade_params + [DAILY_CARD_COUNT])
             )
         else:
             rows = execute_query(
                 "SELECT id, emoji, category, title, summary, detail, "
                 "source, fun_level, related_subject, tags "
                 "FROM discovery_pool WHERE pool_status='active' "
+                f"{grade_sql} "
                 "ORDER BY RANDOM() LIMIT ?",
-                (DAILY_CARD_COUNT,)
+                tuple(grade_params + [DAILY_CARD_COUNT])
             )
         cards = [_row_to_card(r) for r in rows]
         if len(cards) >= DAILY_CARD_COUNT:
@@ -376,8 +440,9 @@ class DiscoveryService:
             "SELECT id, emoji, category, title, summary, detail, "
             "source, fun_level, related_subject, tags "
             "FROM discovery_pool WHERE pool_status='active' "
+            f"{grade_sql} "
             "ORDER BY view_count ASC, RANDOM() LIMIT ?",
-            (DAILY_CARD_COUNT,)
+            tuple(grade_params + [DAILY_CARD_COUNT])
         )
         cards = [_row_to_card(r) for r in rows]
         if len(cards) >= DAILY_CARD_COUNT:
@@ -389,8 +454,9 @@ class DiscoveryService:
             "SELECT id, emoji, category, title, summary, detail, "
             "source, fun_level, related_subject, tags "
             "FROM discovery_pool WHERE pool_status='active' "
+            f"{grade_sql} "
             "ORDER BY RANDOM() LIMIT ?",
-            (DAILY_CARD_COUNT,)
+            tuple(grade_params + [DAILY_CARD_COUNT])
         )
         return [_row_to_card(r) for r in rows]
 
@@ -913,3 +979,187 @@ async def refill_pool(request: Request):
     spawn_bg(DiscoveryService._refill_pool_sync, _norm_grade_hint(user.get("grade", "")),
              name="discovery_pool_refill")
     return {"success": True, "message": "知识池补充已触发，请稍后查看"}
+
+
+@router.get("/discovery/admin/cards")
+async def admin_list_cards(
+    request: Request,
+    keyword: str = Query(""),
+    category: str = Query(""),
+    grade_level: str = Query(""),
+    status: str = Query(""),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """管理员：分页查看知识池卡片（含已下架）。"""
+    user = get_current_user(request)
+    _require_manager(user)
+    conditions = []
+    params: list[Any] = []
+    kw = (keyword or "").strip()
+    if kw:
+        like = f"%{kw}%"
+        conditions.append(
+            "(title LIKE ? OR summary LIKE ? OR detail LIKE ? OR source LIKE ? OR category LIKE ?)"
+        )
+        params.extend([like] * 5)
+    if category:
+        conditions.append("category = ?")
+        params.append(category)
+    if grade_level:
+        conditions.append("grade_level = ?")
+        params.append(grade_level)
+    if status in ("active", "disabled"):
+        conditions.append("pool_status = ?")
+        params.append(status)
+    where = " AND ".join(conditions) if conditions else "1=1"
+    rows = execute_query(
+        f"SELECT {_ADMIN_CARD_COLUMNS} FROM discovery_pool "
+        f"WHERE {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        tuple(params + [page_size, (page - 1) * page_size]),
+    )
+    total_row = execute_query(
+        f"SELECT COUNT(*) FROM discovery_pool WHERE {where}", tuple(params)
+    )
+    return {
+        "cards": [_admin_card_row(r) for r in rows],
+        "total": int(total_row[0][0] or 0) if total_row else 0,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.patch("/discovery/admin/cards/{card_id}")
+async def admin_update_card(card_id: int, req: DiscoveryCardUpdate, request: Request):
+    """管理员：编辑知识池卡片。"""
+    user = get_current_user(request)
+    _require_manager(user)
+    if not execute_query("SELECT id FROM discovery_pool WHERE id=?", (card_id,)):
+        raise HTTPException(404, "卡片不存在")
+    updates: list[str] = []
+    params: list[Any] = []
+    simple = {
+        "emoji": req.emoji, "category": req.category, "title": req.title,
+        "summary": req.summary, "detail": req.detail, "source": req.source,
+        "related_subject": req.related_subject, "grade_level": req.grade_level,
+    }
+    for field, value in simple.items():
+        if value is None:
+            continue
+        value = str(value).strip()
+        if field in ("category", "title", "summary", "detail") and not value:
+            raise HTTPException(400, f"{field} 不能为空")
+        updates.append(f"{field} = ?")
+        params.append(value)
+    if req.fun_level is not None:
+        updates.append("fun_level = ?")
+        params.append(max(1, min(5, int(req.fun_level))))
+    if req.tags is not None:
+        updates.append("tags = ?")
+        params.append(json.dumps([str(x).strip() for x in req.tags if str(x).strip()][:20], ensure_ascii=False))
+    if req.pool_status is not None:
+        if req.pool_status not in ("active", "disabled"):
+            raise HTTPException(400, "pool_status 只能是 active / disabled")
+        updates.append("pool_status = ?")
+        params.append(req.pool_status)
+    if updates:
+        updates.extend(["updated_at = ?", "updated_by = ?"])
+        params.extend([_now(), user["username"], card_id])
+        try:
+            execute_insert_update(
+                f"UPDATE discovery_pool SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+        except Exception as e:
+            if "UNIQUE" in str(e):
+                raise HTTPException(409, "标题+详情与已有卡片重复")
+            raise
+    rows = execute_query(
+        f"SELECT {_ADMIN_CARD_COLUMNS} FROM discovery_pool WHERE id=?", (card_id,)
+    )
+    return {"card": _admin_card_row(rows[0]) if rows else None}
+
+
+@router.post("/discovery/admin/cards/bulk")
+async def admin_bulk_cards(req: DiscoveryBulkRequest, request: Request):
+    """管理员：批量下架 / 恢复 / 彻底删除知识池卡片。"""
+    user = get_current_user(request)
+    if req.action == "delete":
+        _require_admin(user)
+    else:
+        _require_manager(user)
+    ids = list(dict.fromkeys(int(x) for x in req.ids if int(x) > 0))[:200]
+    if not ids:
+        raise HTTPException(400, "请选择至少一条卡片")
+    action = req.action
+    if action not in ("disable", "enable", "delete"):
+        raise HTTPException(400, "action 只能是 disable / enable / delete")
+    placeholders = ",".join("?" for _ in ids)
+    affected = 0
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if action in ("disable", "enable"):
+            cur.execute(
+                f"UPDATE discovery_pool SET pool_status=?, updated_at=?, updated_by=? "
+                f"WHERE id IN ({placeholders})",
+                tuple([("disabled" if action == "disable" else "active"), _now(),
+                       user["username"]] + ids),
+            )
+            affected = cur.rowcount
+        else:
+            cur.execute(
+                f"DELETE FROM discovery_viewed WHERE pool_card_id IN ({placeholders})", tuple(ids)
+            )
+            cur.execute(
+                f"DELETE FROM discovery_view_log WHERE pool_card_id IN ({placeholders})", tuple(ids)
+            )
+            cur.execute(
+                f"DELETE FROM discovery_favorites WHERE pool_card_id IN ({placeholders})", tuple(ids)
+            )
+            for card_id in ids:
+                cur.execute(
+                    "DELETE FROM discovery_refresh_cards WHERE card_data LIKE ? OR card_data LIKE ?",
+                    (f'%"id": {card_id}%', f'%"id":{card_id}%'),
+                )
+            cur.execute(
+                f"DELETE FROM discovery_pool WHERE id IN ({placeholders})", tuple(ids)
+            )
+            affected = cur.rowcount
+        conn.commit()
+    logger.info(f"[每日精选管理] admin={user['username']} action={action} ids={ids} affected={affected}")
+    return {"success": True, "action": action, "affected": affected}
+
+
+@router.get("/discovery/admin/health")
+async def admin_discovery_health(request: Request):
+    """管理员：知识池健康度。"""
+    user = get_current_user(request)
+    _require_manager(user)
+    total_active = execute_query(
+        "SELECT COUNT(*) FROM discovery_pool WHERE pool_status='active'"
+    )
+    total_disabled = execute_query(
+        "SELECT COUNT(*) FROM discovery_pool WHERE pool_status<>'active'"
+    )
+    categories = execute_query(
+        "SELECT category, COUNT(*) FROM discovery_pool WHERE pool_status='active' "
+        "GROUP BY category ORDER BY COUNT(*) DESC"
+    )
+    grades = execute_query(
+        "SELECT grade_level, COUNT(*) FROM discovery_pool WHERE pool_status='active' "
+        "GROUP BY grade_level ORDER BY COUNT(*) DESC"
+    )
+    last_refill = _refill_gate.get("last", 0)
+    return {
+        "total_active": int(total_active[0][0] or 0) if total_active else 0,
+        "total_disabled": int(total_disabled[0][0] or 0) if total_disabled else 0,
+        "categories": {r[0] or "未分类": int(r[1] or 0) for r in categories},
+        "grades": {r[0] or "all": int(r[1] or 0) for r in grades},
+        "last_refill_at": (
+            datetime.fromtimestamp(last_refill).strftime("%Y-%m-%d %H:%M:%S")
+            if last_refill else ""
+        ),
+        "refill_min_interval_seconds": REFILL_MIN_INTERVAL,
+        "refill_threshold": POOL_REFILL_THRESHOLD,
+        "daily_card_count": DAILY_CARD_COUNT,
+    }

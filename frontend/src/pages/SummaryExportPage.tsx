@@ -21,6 +21,7 @@ import {
   type ActivityAggRow, type ClassAggRow, type StudentAggRow, type StudentLite,
   type SummaryMeta, type SummaryPreview, type SummaryRecord, type SummaryTypeMeta,
 } from '../api/summaryExport'
+import apiClient from '../api/client'
 import MobileCardTable from '../components/MobileCardTable'
 import ScopeTag from '../components/ScopeTag'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -37,6 +38,18 @@ const numOr = (v: number | null | undefined): React.ReactNode =>
 
 const rateOr = (v: number | null | undefined): React.ReactNode =>
   v === null || v === undefined ? '-' : `${v}%`
+
+async function blobError(e: any): Promise<string> {
+  const data = e?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      const parsed = JSON.parse(text)
+      if (parsed?.detail) return String(parsed.detail)
+    } catch { /* 非 JSON 错误体 */ }
+  }
+  return e?.response?.data?.detail || e?.message || '导出失败'
+}
 
 const SummaryExportPage: React.FC = () => {
   const { t } = useTranslation('summary')
@@ -61,6 +74,7 @@ const SummaryExportPage: React.FC = () => {
 
   const [data, setData] = useState<SummaryPreview | null>(null)
   const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState<'excel' | 'csv' | null>(null)
   const [activeTab, setActiveTab] = useState('records')
   const [mPage, setMPage] = useState(1)
 
@@ -128,6 +142,13 @@ const SummaryExportPage: React.FC = () => {
     teacher,
   }), [grade, cls, students, types, range, teacher])
 
+  const filterKey = useMemo(() => JSON.stringify(currentFilters), [currentFilters])
+
+  // 筛选一变，旧预览立即失效，避免"看到 A 班、导出 B 班"
+  useEffect(() => {
+    setData(null)
+  }, [filterKey])
+
   const doPreview = async () => {
     setLoading(true)
     try {
@@ -140,8 +161,29 @@ const SummaryExportPage: React.FC = () => {
     }
   }
 
-  const openDownload = (kind: 'excel' | 'csv', sheet?: CsvSheetKey) => {
-    window.open(summaryDownloadUrl(kind, currentFilters, sheet), '_blank')
+  const openDownload = async (kind: 'excel' | 'csv', sheet?: CsvSheetKey) => {
+    if (!data) return
+    setExporting(kind)
+    try {
+      const res = await apiClient.get(summaryDownloadUrl(kind, currentFilters, sheet), {
+        responseType: 'blob',
+        timeout: 300000,
+      })
+      const dispo = String(res.headers['content-disposition'] || '')
+      const match = /filename\*=UTF-8''([^;]+)/i.exec(dispo)
+      const fallback = kind === 'excel' ? '学生活动汇总.xlsx' : '学生活动汇总.csv'
+      const filename = match ? decodeURIComponent(match[1]) : fallback
+      const href = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = href
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(href)
+    } catch (e: any) {
+      message.error(await blobError(e))
+    } finally {
+      setExporting(null)
+    }
   }
 
   const typeList: SummaryTypeMeta[] = meta?.activity_types || []
@@ -360,13 +402,14 @@ const SummaryExportPage: React.FC = () => {
             {t('summaryExport.query')}
           </Button>
           <Button
-            icon={<FileExcelOutlined />} disabled={!data}
-            onClick={() => openDownload('excel')}
+            icon={<FileExcelOutlined />} disabled={!data || !!exporting}
+            loading={exporting === 'excel'}
+            onClick={() => void openDownload('excel')}
           >
             {t('summaryExport.excel')}
           </Button>
           <Dropdown
-            disabled={!data}
+            disabled={!data || !!exporting}
             menu={{
               items: [
                 { key: 'records', label: t('summaryExport.csvSheets.records') },
@@ -374,10 +417,12 @@ const SummaryExportPage: React.FC = () => {
                 { key: 'activity', label: t('summaryExport.csvSheets.activity') },
                 { key: 'class', label: t('summaryExport.csvSheets.class') },
               ],
-              onClick: ({ key }) => openDownload('csv', key as CsvSheetKey),
+              onClick: ({ key }) => void openDownload('csv', key as CsvSheetKey),
             }}
           >
-            <Button icon={<FileTextOutlined />}>{t('summaryExport.csv')} <DownloadOutlined /></Button>
+            <Button icon={<FileTextOutlined />} loading={exporting === 'csv'} disabled={!data || !!exporting}>
+              {t('summaryExport.csv')} <DownloadOutlined />
+            </Button>
           </Dropdown>
         </Space>
       </Card>

@@ -977,6 +977,19 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_dm_username ON discussion_members(username)")
             except sqlite3.OperationalError:
                 pass
+            # 发言幂等键：网络超时重试时不产生重复消息
+            try:
+                c.execute("ALTER TABLE discussion_messages ADD COLUMN client_request_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_dmsg_client_request "
+                    "ON discussion_messages(group_id, client_request_id) "
+                    "WHERE client_request_id IS NOT NULL AND client_request_id != ''"
+                )
+            except sqlite3.OperationalError:
+                pass
 
             # ── 讨论报告表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS discussion_reports (
@@ -1949,6 +1962,8 @@ def init_db():
                 view_count INTEGER DEFAULT 0,
                 favorite_count INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
+                updated_at TEXT DEFAULT '',
+                updated_by TEXT DEFAULT '',
                 UNIQUE(title, detail)
             )""")
             for idx in [
@@ -1957,6 +1972,14 @@ def init_db():
             ]:
                 try: c.execute(idx)
                 except sqlite3.OperationalError: pass
+            for _ddl in (
+                "ALTER TABLE discovery_pool ADD COLUMN updated_at TEXT DEFAULT ''",
+                "ALTER TABLE discovery_pool ADD COLUMN updated_by TEXT DEFAULT ''",
+            ):
+                try:
+                    c.execute(_ddl)
+                except sqlite3.OperationalError:
+                    pass
 
             # 2. 学生看过哪些卡片 + 何时看的（7天窗口排除用）
             c.execute("""CREATE TABLE IF NOT EXISTS discovery_viewed (
@@ -2049,7 +2072,12 @@ def init_db():
                 fetched_at TEXT NOT NULL,
                 fetch_batch_id TEXT DEFAULT '',
                 is_ai_summarized INTEGER DEFAULT 0,
-                ai_view_count INTEGER DEFAULT 0
+                ai_view_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                hidden_at TEXT DEFAULT '',
+                hidden_by TEXT DEFAULT '',
+                admin_note TEXT DEFAULT '',
+                updated_at TEXT DEFAULT ''
             )""")
             for idx in [
                 "CREATE INDEX IF NOT EXISTS idx_news_category ON news_articles(category)",
@@ -2058,6 +2086,23 @@ def init_db():
             ]:
                 try: c.execute(idx)
                 except sqlite3.OperationalError: pass
+            for _ddl in (
+                "ALTER TABLE news_articles ADD COLUMN status TEXT DEFAULT 'active'",
+                "ALTER TABLE news_articles ADD COLUMN hidden_at TEXT DEFAULT ''",
+                "ALTER TABLE news_articles ADD COLUMN hidden_by TEXT DEFAULT ''",
+                "ALTER TABLE news_articles ADD COLUMN admin_note TEXT DEFAULT ''",
+                "ALTER TABLE news_articles ADD COLUMN updated_at TEXT DEFAULT ''",
+            ):
+                try:
+                    c.execute(_ddl)
+                except sqlite3.OperationalError:
+                    pass
+            try:
+                c.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_news_status ON news_articles(status, fetched_at)"
+                )
+            except sqlite3.OperationalError:
+                pass
 
             # 2. 学生浏览记录
             c.execute("""CREATE TABLE IF NOT EXISTS news_view_log (

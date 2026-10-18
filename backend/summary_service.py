@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -39,6 +40,7 @@ from backend.permission_service import (
     get_teacher_assignments,
     _resolve_class_id_flexible,
 )
+from backend.grading_state import attempt_needs_grading
 
 # ── 活动类型注册表 ─────────────────────────────────────────────
 # kind: score=计分类(参与均分/及格率) / participation=参与类(只统计次数)
@@ -141,7 +143,14 @@ class SummaryContext:
         self.eff_teacher = (teacher or "").strip() if self.is_admin else self.username
 
         # ── 活动类型 ──
-        req_types = [t for t in (types or []) if t in SUMMARY_TYPES]
+        raw_types = [str(t).strip() for t in (types or []) if str(t).strip()]
+        req_types = list(dict.fromkeys(t for t in raw_types if t in SUMMARY_TYPES))
+        if raw_types and not req_types:
+            raise HTTPException(status_code=400, detail="活动类型无效，请重新选择")
+        if req_types and len(req_types) != len(set(raw_types)):
+            invalid = [t for t in raw_types if t not in SUMMARY_TYPES]
+            if invalid:
+                raise HTTPException(status_code=400, detail="活动类型无效: " + ", ".join(invalid[:5]))
         self.types = req_types or list(SUMMARY_TYPES.keys())
 
         # ── 时间窗 (按日, 含首含尾; 空串=不限) ──
@@ -151,6 +160,13 @@ class SummaryContext:
             raise HTTPException(status_code=400, detail=f"start 日期格式不正确: {start}")
         if end and not self.end:
             raise HTTPException(status_code=400, detail=f"end 日期格式不正确: {end}")
+        if self.start and self.end and self.start > self.end:
+            raise HTTPException(status_code=400, detail="结束日期不能早于开始日期")
+        self._start_ts = f"{self.start} 00:00:00" if self.start else ""
+        self._end_ts = (
+            (datetime.strptime(self.end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+            if self.end else ""
+        )
 
         # ── 年级/班级解析 ──
         grade_id: Optional[int] = None
@@ -204,7 +220,7 @@ class SummaryContext:
             return True
         d = _date_of(ts)
         if not d:
-            return True  # 无时间戳的记录不因时间筛选丢失
+            return False  # 设了时间窗却无时间戳：不能冒充窗口内数据
         if self.start and d < self.start:
             return False
         if self.end and d > self.end:
@@ -262,6 +278,19 @@ def _creator_where(ctx: SummaryContext, alias: str = "creator_username") -> tupl
     return "", []
 
 
+def _window_clause(ctx: SummaryContext, column: str) -> tuple[str, list]:
+    """时间窗下推 SQL：含首含尾（结束日按次日 00:00 左闭右开）。"""
+    conds: list[str] = []
+    params: list[Any] = []
+    if ctx._start_ts:
+        conds.append(f"{column} >= ?")
+        params.append(ctx._start_ts)
+    if ctx._end_ts:
+        conds.append(f"{column} < ?")
+        params.append(ctx._end_ts)
+    return (" AND " + " AND ".join(conds)) if conds else "", params
+
+
 def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
     """按类型采集活动清单, 返回 {type_key: [activity, ...]}"""
     acts: dict[str, list[dict[str, Any]]] = {}
@@ -269,7 +298,10 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
 
     if "exam" in t:
         cw, cp = _creator_where(ctx)
-        where = f"WHERE {cw}" if cw else ""
+        conds = ["COALESCE(status,'') IN ('published','ended')"]
+        if cw:
+            conds.insert(0, cw)
+        where = "WHERE " + " AND ".join(conds)
         acts["exam"] = q_execute_query(
             f"""SELECT id, title, creator_username, status, total_score, pass_score,
                        IFNULL(target_scope,'') AS target_scope, IFNULL(target_grade,'') AS target_grade,
@@ -323,7 +355,10 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
 
     if "poll" in t:
         cw, cp = _creator_where(ctx)
-        where = f"WHERE {cw}" if cw else ""
+        conds = ["COALESCE(status,'active') != 'draft'"]
+        if cw:
+            conds.insert(0, cw)
+        where = "WHERE " + " AND ".join(conds)
         acts["poll"] = execute_query_dict(
             f"""SELECT id, question AS title, creator_username, status,
                        0 AS total_score, 0 AS pass_score,
@@ -335,7 +370,10 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
 
     if "task" in t:
         cw, cp = _creator_where(ctx)
-        where = f"WHERE {cw}" if cw else ""
+        conds = ["COALESCE(status,'active') != 'draft'"]
+        if cw:
+            conds.insert(0, cw)
+        where = "WHERE " + " AND ".join(conds)
         acts["task"] = execute_query_dict(
             f"""SELECT id, name AS title, creator_username, status,
                        100 AS total_score, 60 AS pass_score,
@@ -347,7 +385,10 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
 
     if "quick_quiz" in t:
         cw, cp = _creator_where(ctx)
-        where = f"WHERE {cw}" if cw else ""
+        conds = ["COALESCE(status,'') != 'draft'"]
+        if cw:
+            conds.insert(0, cw)
+        where = "WHERE " + " AND ".join(conds)
         acts["quick_quiz"] = execute_query_dict(
             f"""SELECT id, title, creator_username, status,
                        100 AS total_score, 60 AS pass_score,
@@ -359,7 +400,10 @@ def _list_activities(ctx: SummaryContext) -> dict[str, list[dict[str, Any]]]:
 
     if "discussion" in t:
         cw, cp = _creator_where(ctx)
-        where = f"WHERE {cw}" if cw else ""
+        conds = ["COALESCE(status,'') != 'draft'"]
+        if cw:
+            conds.insert(0, cw)
+        where = "WHERE " + " AND ".join(conds)
         acts["discussion"] = execute_query_dict(
             f"""SELECT id, title, creator_username, status,
                        0 AS total_score, 0 AS pass_score,
@@ -493,28 +537,51 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 1. 考试 ──
     if "exam" in t and acts.get("exam"):
         amap = {a["id"]: a for a in acts["exam"]}
+        win, wp = _window_clause(ctx, "submitted_at")
         rows = _query_in(list(amap), lambda marks, params: q_execute_query(
             f"""SELECT exam_id, student_username, score, total_score, submitted_at, status,
                        COALESCE(teacher_score, -1) AS teacher_score,
-                       COALESCE(teacher_reviewed, 0) AS teacher_reviewed
+                       COALESCE(teacher_reviewed, 0) AS teacher_reviewed,
+                       COALESCE(ai_pending, 0) AS ai_pending,
+                       COALESCE(grading_details, '') AS grading_details
                 FROM exam_attempts
-                WHERE status IN ('submitted','graded') AND exam_id IN ({marks})""",
-            params,
+                WHERE status IN ('submitted','graded') AND exam_id IN ({marks}){win}""",
+            params + tuple(wp),
         ))
+        # 同一学生同一考试允许多次作答：成绩取最高一次，避免重复计数/重复加权。
+        best_exam: dict[tuple[Any, str], dict[str, Any]] = {}
         for r in rows:
+            key = (r["exam_id"], str(r["student_username"]))
+            tscore = r.get("teacher_score")
+            final = tscore if (tscore is not None and float(tscore) >= 0) else (r.get("score") or 0)
+            previous = best_exam.get(key)
+            if previous is None:
+                best_exam[key] = {**r, "_final": final}
+                continue
+            prev_final = previous["_final"]
+            if float(final) > float(prev_final) or (
+                float(final) == float(prev_final)
+                and str(r.get("submitted_at") or "") > str(previous.get("submitted_at") or "")
+            ):
+                best_exam[key] = {**r, "_final": final}
+        for r in best_exam.values():
             stu = ctx.student_map.get(r["student_username"])
             if not stu or not ctx.in_window(r["submitted_at"]):
                 continue
             act = amap[r["exam_id"]]
-            tscore = r["teacher_score"]
-            final = tscore if (tscore is not None and tscore >= 0) else r["score"]
+            final = r["_final"]
             total = r["total_score"] or act.get("total_score") or 0
+            needs_grading = attempt_needs_grading(
+                r.get("ai_pending"), r.get("teacher_reviewed"), r.get("grading_details"),
+            )
             if r["teacher_reviewed"]:
                 status = "已批改(教师复核)"
-            elif str(r["status"]) == "graded":
-                status = "已批改"
-            else:
+            elif needs_grading:
                 status = "已提交/待批改"
+            else:
+                # exam_attempts.status 交卷后长期停在 submitted（全站按已交卷处理），
+                # 不能拿它当"待批改"；真正待批改由 ai_pending/grading_details 判定。
+                status = "已批改"
             records.append(_make_record(
                 ctx, type_key="exam", act=act, student=stu, score=final, total=total,
                 status=status, ts=r["submitted_at"],
@@ -523,11 +590,12 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 2. 随堂测验 ──
     if "quiz" in t and acts.get("quiz"):
         amap = {a["id"]: a for a in acts["quiz"]}
+        win, wp = _window_clause(ctx, "submitted_at")
         rows = _query_in(list(amap), lambda marks, params: execute_query_dict(
             f"""SELECT quiz_id, student_username, score, submitted_at,
                        COALESCE(ai_pending, 0) AS ai_pending
-                FROM interaction_quiz_answers WHERE quiz_id IN ({marks})""",
-            params,
+                FROM interaction_quiz_answers WHERE quiz_id IN ({marks}){win}""",
+            params + tuple(wp),
         ))
         for r in rows:
             stu = ctx.student_map.get(r["student_username"])
@@ -551,9 +619,11 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 3. 在线任务 (提交 + 评分) ──
     if "task" in t and acts.get("task"):
         amap = {a["id"]: a for a in acts["task"]}
+        win, wp = _window_clause(ctx, "submitted_at")
         subs = _query_in(list(amap), lambda marks, params: execute_query_dict(
-            f"SELECT task_id, student_username, submitted_at FROM task_submissions WHERE task_id IN ({marks})",
-            params,
+            f"SELECT task_id, student_username, submitted_at FROM task_submissions "
+            f"WHERE task_id IN ({marks}){win}",
+            params + tuple(wp),
         ))
         grades = _query_in(list(amap), lambda marks, params: execute_query_dict(
             f"SELECT task_id, student_username, ai_score FROM task_grades WHERE task_id IN ({marks})",
@@ -576,22 +646,30 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 4. 同步练习 ──
     if "practice" in t and acts.get("practice"):
         amap = {a["id"]: a for a in acts["practice"]}
+        win, wp = _window_clause(ctx, "submitted_at")
         rows = _query_in(list(amap), lambda marks, params: q_execute_query(
             f"""SELECT session_id, student_username, score, total_score, submitted_at,
                        COALESCE(teacher_score, -1) AS teacher_score,
                        COALESCE(teacher_reviewed, 0) AS teacher_reviewed,
                        COALESCE(ai_pending, 0) AS ai_pending
                 FROM practice_attempts
-                WHERE status='submitted' AND session_id IN ({marks})""",
-            params,
+                WHERE status='submitted' AND session_id IN ({marks}){win}""",
+            params + tuple(wp),
         ))
+        best_practice: dict[tuple[Any, str], dict[str, Any]] = {}
         for r in rows:
+            key = (r["session_id"], str(r["student_username"]))
+            tscore = r.get("teacher_score")
+            final = tscore if (tscore is not None and float(tscore) >= 0) else (r.get("score") or 0)
+            prev = best_practice.get(key)
+            if prev is None or float(final) > float(prev["_final"]):
+                best_practice[key] = {**r, "_final": final}
+        for r in best_practice.values():
             stu = ctx.student_map.get(r["student_username"])
             if not stu or not ctx.in_window(r["submitted_at"]):
                 continue
             act = amap[r["session_id"]]
-            tscore = r["teacher_score"]
-            final = tscore if (tscore is not None and tscore >= 0) else r["score"]
+            final = r["_final"]
             total = r["total_score"] or act.get("total_score") or 0
             if r["teacher_reviewed"]:
                 status = "已批改(教师复核)"
@@ -607,11 +685,12 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 5. 代码练习 (取最高分) ──
     if "code" in t and acts.get("code"):
         amap = {a["id"]: a for a in acts["code"]}
+        win, wp = _window_clause(ctx, "created_at")
         rows = _query_in(list(amap), lambda marks, params: q_execute_query(
             f"""SELECT problem_id, student_username, MAX(score) AS score, MAX(created_at) AS submitted_at
-                FROM code_submissions WHERE status='submitted' AND problem_id IN ({marks})
+                FROM code_submissions WHERE status='submitted' AND problem_id IN ({marks}){win}
                 GROUP BY problem_id, student_username""",
-            params,
+            params + tuple(wp),
         ))
         for r in rows:
             stu = ctx.student_map.get(r["student_username"])
@@ -625,12 +704,19 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 6. 课程练习 (按知识点成绩) ──
     if "course" in t and acts.get("course"):
         kp_map = {a["knowledge_point_id"]: a for a in acts["course"]}
+        win, wp = _window_clause(ctx, "submitted_at")
         rows = _query_in(list(kp_map), lambda marks, params: q_execute_query(
             f"""SELECT kp_id, student_username, accuracy, submitted_at
-                FROM ai_practice_results WHERE kp_id IN ({marks})""",
-            params,
+                FROM ai_practice_results WHERE kp_id IN ({marks}){win}""",
+            params + tuple(wp),
         ))
+        best_course: dict[tuple[Any, str], dict[str, Any]] = {}
         for r in rows:
+            key = (r["kp_id"], str(r["student_username"]))
+            prev = best_course.get(key)
+            if prev is None or float(r.get("accuracy") or 0) > float(prev.get("accuracy") or 0):
+                best_course[key] = r
+        for r in best_course.values():
             stu = ctx.student_map.get(r["student_username"])
             if not stu or not ctx.in_window(r["submitted_at"]):
                 continue
@@ -643,10 +729,11 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 7. 知识抢答 ──
     if "quick_quiz" in t and acts.get("quick_quiz"):
         amap = {a["id"]: a for a in acts["quick_quiz"]}
+        win, wp = _window_clause(ctx, "joined_at")
         rows = _query_in(list(amap), lambda marks, params: execute_query_dict(
             f"""SELECT room_id, student_username, total_score, joined_at
-                FROM quick_quiz_players WHERE room_id IN ({marks})""",
-            params,
+                FROM quick_quiz_players WHERE room_id IN ({marks}){win}""",
+            params + tuple(wp),
         ))
         for r in rows:
             stu = ctx.student_map.get(r["student_username"])
@@ -659,10 +746,11 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
 
     # ── 8. 知识闯关 (学生自助, 已通关记录, 口径=答题正确率) ──
     if "quest" in t:
+        win, wp = _window_clause(ctx, "completed_at")
         rows = _query_in(pop_u, lambda marks, params: execute_query_dict(
             f"""SELECT id, student_username, total_questions, correct_count, completed_at
-                FROM quest_records WHERE completed=1 AND student_username IN ({marks})""",
-            params,
+                FROM quest_records WHERE completed=1 AND student_username IN ({marks}){win}""",
+            params + tuple(wp),
         ))
         for r in rows:
             stu = ctx.student_map.get(r["student_username"])
@@ -679,11 +767,12 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 9. 快速投票 ──
     if "poll" in t and acts.get("poll"):
         amap = {a["id"]: a for a in acts["poll"]}
+        win, wp = _window_clause(ctx, "created_at")
         rows = _query_in(list(amap), lambda marks, params: execute_query_dict(
             f"""SELECT poll_id, student_username, MIN(created_at) AS voted_at
-                FROM interaction_poll_votes WHERE poll_id IN ({marks})
+                FROM interaction_poll_votes WHERE poll_id IN ({marks}){win}
                 GROUP BY poll_id, student_username""",
-            params,
+            params + tuple(wp),
         ))
         for r in rows:
             stu = ctx.student_map.get(r["student_username"])
@@ -697,14 +786,15 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
     # ── 10. 分组讨论 (加入小组即算参与) ──
     if "discussion" in t and acts.get("discussion"):
         amap = {a["id"]: a for a in acts["discussion"]}
+        win, wp = _window_clause(ctx, "dm.joined_at")
         rows = _query_in(list(amap), lambda marks, params: execute_query_dict(
             f"""SELECT dg.discussion_id AS discussion_id, dm.username AS student_username,
                        MIN(dm.joined_at) AS joined_at
                 FROM discussion_groups dg
                 JOIN discussion_members dm ON dm.group_id = dg.id
-                WHERE dg.discussion_id IN ({marks})
+                WHERE dg.discussion_id IN ({marks}){win}
                 GROUP BY dg.discussion_id, dm.username""",
-            params,
+            params + tuple(wp),
         ))
         for r in rows:
             stu = ctx.student_map.get(r["student_username"])
@@ -721,6 +811,10 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
         if ctx.eff_teacher:
             conds.append("teacher_username = ?")
             params.append(ctx.eff_teacher)
+        win, wp = _window_clause(ctx, "updated_at")
+        if win:
+            conds.append(win.removeprefix(" AND "))
+            params.extend(wp)
         where = f"WHERE {' AND '.join(conds)}" if conds else ""
         rows = execute_query_dict(
             f"""SELECT grade, class_name, student_name, SUM(score) AS points, MAX(updated_at) AS updated_at
@@ -728,13 +822,20 @@ def collect_records(ctx: SummaryContext, acts: dict[str, list[dict[str, Any]]]) 
                 GROUP BY grade, class_name, student_name""",
             tuple(params),
         )
-        name_index: dict[tuple[str, str], list[str]] = {}
+        def _cls_key(v: Any) -> str:
+            return re.sub(r"[^\d]", "", str(v or "")) or str(v or "")
+
+        name_index: dict[tuple[str, str, str], list[str]] = {}
         for s in ctx.population:
-            name_index.setdefault((_txt(s.get("grade")), _txt(s.get("name"))), []).append(s["username"])
+            name_index.setdefault(
+                (_txt(s.get("grade")), _cls_key(s.get("class")), _txt(s.get("name"))), []
+            ).append(s["username"])
         for r in rows:
             if not ctx.in_window(r.get("updated_at")):
                 continue
-            unames = name_index.get((r.get("grade") or "", r.get("student_name") or "")) or []
+            unames = name_index.get(
+                (r.get("grade") or "", _cls_key(r.get("class_name")), r.get("student_name") or ""), []
+            ) or []
             for uname in unames:
                 stu = ctx.student_map[uname]
                 records.append(_make_record(

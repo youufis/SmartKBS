@@ -48,6 +48,18 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
+            # 题库创建者归属审计：转移/归档留痕
+            c.execute("""CREATE TABLE IF NOT EXISTS question_bank_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                from_username TEXT DEFAULT '',
+                to_username TEXT DEFAULT '',
+                question_ids TEXT DEFAULT '',
+                affected_count INTEGER DEFAULT 0,
+                operator TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+
             # ── 多媒体/公式配图字段迁移 ──
             for col in ['svg_content', 'has_svg', 'media_placeholders', 'media_files']:
                 try:

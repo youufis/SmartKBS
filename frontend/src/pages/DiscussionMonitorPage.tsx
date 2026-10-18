@@ -6,7 +6,7 @@ import {
 import {
   TeamOutlined, MessageOutlined, FieldTimeOutlined,
   ArrowLeftOutlined, WarningOutlined, BulbOutlined,
-  ThunderboltOutlined, DownloadOutlined,
+  ThunderboltOutlined, DownloadOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -51,6 +51,8 @@ const DiscussionMonitorPage: React.FC = () => {
   const [summaryData, setSummaryData] = useState<any>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [generatingSummary, setGeneratingSummary] = useState(false)
+  const [exportingSummary, setExportingSummary] = useState(false)
+  const [nudging, setNudging] = useState(false)
   const [activeGroupId, setActiveGroupId] = useState<number | null>(null)
 
   const loadMonitor = async () => {
@@ -73,7 +75,11 @@ const DiscussionMonitorPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`, null, { timeout: 120000 })
       if (data.status === 'ok') {
-        setSummaryData(data)
+        // 兼容：新接口 content 是对象；旧接口 content 是字符串、parsed 在外层
+        const content = data?.content && typeof data.content === 'object'
+          ? data.content
+          : { parsed: data?.parsed || null, raw_content: typeof data?.content === 'string' ? data.content : '' }
+        setSummaryData({ ...data, content })
       } else {
         message.error(data.content || t('summaryGenerateFailed'))
         setSummaryData(null)
@@ -117,6 +123,24 @@ const DiscussionMonitorPage: React.FC = () => {
     }
   }, [discId])
 
+  const handleNudgeCold = async () => {
+    if (!discId) return
+    setNudging(true)
+    try {
+      const { data } = await apiClient.post(`/api/interaction/discussions/${discId}/auto-trigger`, null, { timeout: 120000 })
+      if (data.status === 'ok') {
+        message.success(data.triggered ? t('autoNudgeDone', { count: data.triggered }) : t('autoNudgeNone'))
+        void loadMonitor()
+      } else {
+        message.error(data.message || t('operationFailed'))
+      }
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('operationFailed'))
+    } finally {
+      setNudging(false)
+    }
+  }
+
   if (loading) return <Spin size="large" style={{ display: 'block', marginTop: 100 }} />
 
   if (!data) return <div style={{ textAlign: 'center', padding: 60 }}>{t('discussionNotFound')}</div>
@@ -133,6 +157,11 @@ const DiscussionMonitorPage: React.FC = () => {
           <Tag color={data.status === 'active' ? 'green' : 'red'}>
             {data.status === 'active' ? t('activeDiscussions') : t('endedDiscussions')}
           </Tag>
+          {data.status === 'active' && data.cold_groups > 0 && (
+            <Button size="small" icon={<RobotOutlined />} loading={nudging} onClick={handleNudgeCold}>
+              {t('autoNudge')}
+            </Button>
+          )}
         </Space>
 
         {/* 统计概览 */}
@@ -257,8 +286,26 @@ const DiscussionMonitorPage: React.FC = () => {
           <Button key="close" onClick={() => setSummaryModal(false)}>{t('close')}</Button>,
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!summaryData?.content}
-            onClick={() => {
-              window.open(`/api/interaction/groups/${activeGroupId}/summary/export`, '_blank')
+            loading={exportingSummary}
+            onClick={async () => {
+              if (!activeGroupId) return
+              setExportingSummary(true)
+              try {
+                const res = await apiClient.get(
+                  `/api/interaction/groups/${activeGroupId}/summary/export`,
+                  { responseType: 'blob', timeout: 180000 },
+                )
+                const href = URL.createObjectURL(res.data)
+                const a = document.createElement('a')
+                a.href = href
+                a.download = `讨论总结_${data?.groups.find(g => g.id === activeGroupId)?.name || activeGroupId}.docx`
+                a.click()
+                URL.revokeObjectURL(href)
+              } catch (e: any) {
+                message.error(e?.response?.data?.detail || t('exportFailed'))
+              } finally {
+                setExportingSummary(false)
+              }
             }}>
             {t('exportWord')}
           </Button>,

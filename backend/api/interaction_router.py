@@ -3306,6 +3306,9 @@ async def ai_class_summary(
     subject: str = Query("", description="学科（由前端传递）"),
     teacher_username: str = Query("", description="教师用户名"),
     time_range: str = Query("本堂课", description="时间范围"),
+    start: str = Query("", description="统计开始时间"),
+    end: str = Query("", description="统计结束时间"),
+    snapshot_only: bool = Query(False, description="只返回数据快照，不生成 AI 报告"),
 ):
     """AI 综合分析课堂互动数据，生成课堂总结"""
     user = get_current_user(request)
@@ -3315,7 +3318,6 @@ async def ai_class_summary(
 
     # R6: 课堂总结会聚合"该教师名下"的测验/投票/提问数据, 归属只能由管理员指定;
     # 教师传别人的用户名 -> 403(前端本来就只传自己), 并校验年级属于本人任教范围
-    query_teacher = teacher_username or user["username"]
     if role != 0:
         if teacher_username and teacher_username != user["username"]:
             raise HTTPException(status_code=403, detail="只能生成自己的课堂总结")
@@ -3323,115 +3325,54 @@ async def ai_class_summary(
         _gi = get_grade_by_name(grade)
         if _gi and not can_access_grade(user["username"], _gi["id"]):
             raise HTTPException(status_code=403, detail="无权查看该年级的课堂数据")
+    from backend.analytics_service import resolve_query_teacher
+    query_teacher = resolve_query_teacher(user, teacher_username)
 
-    # 构建班级名称
-    cls_display = cls
-    cls_name = f"{grade}{cls_display}班" if not cls.endswith("班") else f"{grade}{cls}"
-
-    # ── 1. 随堂测验数据 ──
-    quizzes = execute_query(
-        """SELECT q.id, q.title, q.questions,
-                  (SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = q.id) as answer_count
-           FROM interaction_quizzes q
-           WHERE q.creator_username = ? AND q.status = 'active'
-           ORDER BY q.created_at DESC LIMIT 5""",
-        (query_teacher,),
+    # 2026-10: 班级范围、时间窗、参与学生统一收敛到 analytics_service，
+    # 避免把其他班级/其他月份的测验、投票、提问混进"本堂课"总结。
+    from backend.analytics_service import build_class_activity_snapshot
+    snapshot = build_class_activity_snapshot(
+        user, query_teacher, grade, cls, start=start, end=end, subject=subject,
     )
-
-    quiz_data = ""
-    quiz_participants = set()
-    for q in quizzes:
-        questions = json.loads(q[2]) if isinstance(q[2], str) else q[2]
-        q_count = len(questions) if isinstance(questions, list) else 0
-        quiz_data += f"- 《{q[1]}》: {q_count}题, {q[3]}人参与\n"
-        # 获取参与学生
-        participants = execute_query(
-            "SELECT student_username FROM interaction_quiz_answers WHERE quiz_id = ?",
-            (q[0],),
-        )
-        for p in participants:
-            quiz_participants.add(p[0])
-
-    if not quiz_data:
-        quiz_data = "暂无随堂测验数据"
-
-    # ── 2. 投票数据 ──
-    polls = execute_query(
-        """SELECT p.id, p.question, p.options,
-                  (SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = p.id) as vote_count
-           FROM interaction_polls p
-           WHERE p.creator_username = ?
-           ORDER BY p.created_at DESC LIMIT 5""",
-        (query_teacher,),
-    )
-
-    poll_data = ""
-    poll_participants = set()
-    for p in polls:
-        options = json.loads(p[2]) if isinstance(p[2], str) else p[2]
-        opt_count = len(options) if isinstance(options, list) else 0
-        poll_data += f"- 「{p[1]}」: {opt_count}个选项, {p[3]}人投票\n"
-        voters = execute_query(
-            "SELECT student_username FROM interaction_poll_votes WHERE poll_id = ?",
-            (p[0],),
-        )
-        for v in voters:
-            poll_participants.add(v[0])
-
-    if not poll_data:
-        poll_data = "暂无投票数据"
-
-    # ── 3. 学生提问 ──
-    questions_data = execute_query(
-        """SELECT id, content, is_anonymous, status, created_at
-           FROM interaction_questions
-           ORDER BY created_at DESC LIMIT 10""",
-    )
-
-    question_data = ""
-    for q in questions_data:
-        status = "已回答" if q[3] == "answered" else "待回答"
-        question_data += f"- {q[1][:60]} ({status})\n"
-
-    if not question_data:
-        question_data = "暂无学生提问"
-
-    # ── 4. 分组讨论 ──
-    discussions = execute_query(
-        """SELECT d.id, d.title, d.status,
-                  (SELECT COUNT(*) FROM discussion_groups g
-                   INNER JOIN discussion_members m ON m.group_id = g.id
-                   WHERE g.discussion_id = d.id) as member_count,
-                  (SELECT COUNT(*) FROM discussion_groups g
-                   INNER JOIN discussion_messages m ON m.group_id = g.id
-                   WHERE g.discussion_id = d.id) as msg_count
-           FROM discussions d
-           WHERE d.creator_username = ?
-           ORDER BY d.created_at DESC LIMIT 5""",
-        (query_teacher,),
-    )
-
-    discussion_data = ""
-    for d in discussions:
-        discussion_data += f"- 《{d[1]}》: {d[3]}人参与, {d[4]}条消息 ({d[2]})\n"
-
-    if not discussion_data:
-        discussion_data = "暂无分组讨论数据"
-
-    # 计算总参与人数
-    all_participants = quiz_participants | poll_participants
-    student_count = len(all_participants)
+    stats = snapshot["data"]
+    student_count = stats["student_count"]
+    if not any(stats[k] for k in ("quiz_count", "poll_count", "question_count", "discussion_count")):
+        return {
+            "task_id": None,
+            "empty": True,
+            "message": "所选时间范围内暂无课堂活动数据，请调整统计范围后再试",
+            "data": stats,
+            "sources": [],
+            "window": snapshot["window"],
+        }
+    if snapshot_only:
+        return {
+            "task_id": None,
+            "snapshot_only": True,
+            "data": stats,
+            "sources": snapshot["sources"],
+            "window": snapshot["window"],
+        }
 
     from backend.api.ai_service import call_ai_async
     from backend.ai_task_manager import task_manager
 
     # 将参数复制到局部变量，避免闭包引用外层参数
     _subject = subject
-    _time_range = time_range
+    _time_range = snapshot["window"]["label"] or time_range
+    _quiz_data = snapshot["quiz_lines"]
+    _poll_data = snapshot["poll_lines"]
+    _question_data = snapshot["question_lines"]
+    _discussion_data = snapshot["discussion_lines"]
+    _scope_key = (
+        f"cs:{query_teacher}:{grade}:{cls}:{subject}:"
+        f"{snapshot['window']['start']}:{snapshot['window']['end']}"
+    )
 
     async def _do_summary() -> dict[str, Any]:
         from backend.prompts.class_summary import CLASS_SUMMARY_PROMPT
         from backend.api.chat_router import get_api_keys
+        from backend.ai_report_cache import save_report
 
         keys = get_api_keys(user["username"])
         api_key = keys[0] if keys and keys[0] else ""
@@ -3447,32 +3388,39 @@ async def ai_class_summary(
             subject=_safe(_subject),
             time_range=_safe(_time_range),
             student_count=_safe(student_count),
-            quiz_data=_safe(quiz_data),
-            poll_data=_safe(poll_data),
-            question_data=_safe(question_data),
-            discussion_data=_safe(discussion_data),
+            quiz_data=_safe(_quiz_data),
+            poll_data=_safe(_poll_data),
+            question_data=_safe(_question_data),
+            discussion_data=_safe(_discussion_data),
         )
         prompt = apply_skills(prompt, "quiz")
 
         summary = await call_ai_async(prompt, api_key, use_kb=False)
+        report_id = save_report(
+            "class_summary", _scope_key, summary, user["username"],
+            meta={**stats, "window_label": snapshot["window"]["label"]},
+        )
         return {
             "summary": summary,
-            "data": {
-                "quiz_count": len(quizzes),
-                "poll_count": len(polls),
-                "question_count": len(questions_data),
-                "discussion_count": len(discussions),
-                "student_count": student_count,
-            },
+            "data": stats,
+            "sources": snapshot["sources"],
+            "window": snapshot["window"],
+            "report_id": report_id,
         }
 
     task_id = await task_manager.create_task(
         description="AI 课堂总结",
         coro_factory=_do_summary,
-        dedupe_key=f"class-summary:{query_teacher}:{grade}:{cls}:{subject}:{time_range}",
+        dedupe_key=_scope_key,
         max_concurrent=4,
     )
-    return {"task_id": task_id, "message": "课堂总结已提交，请稍后查询结果"}
+    return {
+        "task_id": task_id,
+        "message": "课堂总结已提交，请稍后查询结果",
+        "data": stats,
+        "sources": snapshot["sources"],
+        "window": snapshot["window"],
+    }
 
 
 @router.get("/class-summary/export", summary="导出课堂总结为 Word 文档")
@@ -3482,9 +3430,13 @@ async def export_class_summary_docx(
     cls: str = Query("", description="班级"),
     subject: str = Query("", description="学科"),
     teacher_username: str = Query("", description="教师用户名"),
+    start: str = Query("", description="统计开始时间"),
+    end: str = Query("", description="统计结束时间"),
+    report_id: int | None = Query(None, description="页面生成的报告 ID"),
 ):
-    """导出 AI 课堂总结报告为 Word 文档"""
+    """导出课堂总结；只读已生成报告，不再重复调用模型。"""
     import io
+    import urllib.parse
     from docx import Document
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -3494,131 +3446,39 @@ async def export_class_summary_docx(
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
+    if role != 0 and teacher_username and teacher_username != user["username"]:
+        raise HTTPException(status_code=403, detail="只能导出自己的课堂总结")
 
-    # R6: 课堂总结会聚合"该教师名下"的测验/投票/提问数据, 归属只能由管理员指定;
-    # 教师传别人的用户名 -> 403(前端本来就只传自己), 并校验年级属于本人任教范围
-    query_teacher = teacher_username or user["username"]
-    if role != 0:
-        if teacher_username and teacher_username != user["username"]:
-            raise HTTPException(status_code=403, detail="只能生成自己的课堂总结")
-        from backend.permission_service import can_access_grade, get_grade_by_name
-        _gi = get_grade_by_name(grade)
-        if _gi and not can_access_grade(user["username"], _gi["id"]):
-            raise HTTPException(status_code=403, detail="无权查看该年级的课堂数据")
-    cls_display = cls
-    cls_name = f"{grade}{cls_display}班" if not cls.endswith("班") else f"{grade}{cls}"
-
-    # ── 收集数据（复用 class-summary 逻辑） ──
-    quizzes = execute_query(
-        """SELECT q.id, q.title, q.questions,
-                  (SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = q.id) as answer_count
-           FROM interaction_quizzes q
-           WHERE q.creator_username = ? AND q.status = 'active'
-           ORDER BY q.created_at DESC LIMIT 5""",
-        (query_teacher,),
+    from backend.analytics_service import (
+        assert_class_access,
+        class_display_name,
+        parse_window,
+        resolve_class_scope,
+        resolve_query_teacher,
     )
-    quiz_data = ""
-    quiz_participants = set()
-    for q in quizzes:
-        questions = json.loads(q[2]) if isinstance(q[2], str) else q[2]
-        q_count = len(questions) if isinstance(questions, list) else 0
-        quiz_data += f"- 《{q[1]}》: {q_count}题, {q[3]}人参与\n"
-        participants = execute_query(
-            "SELECT student_username FROM interaction_quiz_answers WHERE quiz_id = ?", (q[0],),
-        )
-        for p in participants:
-            quiz_participants.add(p[0])
-    if not quiz_data:
-        quiz_data = "暂无随堂测验数据"
-
-    polls = execute_query(
-        """SELECT p.id, p.question, p.options,
-                  (SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = p.id) as vote_count
-           FROM interaction_polls p
-           WHERE p.creator_username = ?
-           ORDER BY p.created_at DESC LIMIT 5""",
-        (query_teacher,),
+    query_teacher = resolve_query_teacher(user, teacher_username)
+    scope = resolve_class_scope(grade, cls)
+    assert_class_access(user, scope)
+    window = parse_window(start, end)
+    scope_key = (
+        f"cs:{query_teacher}:{grade}:{cls}:{subject}:"
+        f"{window['start']}:{window['end']}"
     )
-    poll_data = ""
-    poll_participants = set()
-    for p in polls:
-        options = json.loads(p[2]) if isinstance(p[2], str) else p[2]
-        opt_count = len(options) if isinstance(options, list) else 0
-        poll_data += f"- 「{p[1]}」: {opt_count}个选项, {p[3]}人投票\n"
-        voters = execute_query(
-            "SELECT student_username FROM interaction_poll_votes WHERE poll_id = ?", (p[0],),
-        )
-        for v in voters:
-            poll_participants.add(v[0])
-    if not poll_data:
-        poll_data = "暂无投票数据"
 
-    questions_data = execute_query(
-        """SELECT id, content, is_anonymous, status, created_at
-           FROM interaction_questions
-           ORDER BY created_at DESC LIMIT 10""",
-    )
-    question_data = ""
-    for q in questions_data:
-        status = "已回答" if q[3] == "answered" else "待回答"
-        question_data += f"- {q[1][:60]} ({status})\n"
-    if not question_data:
-        question_data = "暂无学生提问"
+    from backend.ai_report_cache import get_latest_report, get_report
+    if report_id:
+        report = get_report(report_id, user["username"], role, kind="class_summary")
+    else:
+        report = get_latest_report("class_summary", scope_key)
+    if not report:
+        raise HTTPException(status_code=409, detail="请先在页面生成课堂总结，再导出")
 
-    discussions = execute_query(
-        """SELECT d.id, d.title, d.status,
-                  (SELECT COUNT(*) FROM discussion_groups g
-                   INNER JOIN discussion_members m ON m.group_id = g.id
-                   WHERE g.discussion_id = d.id) as member_count,
-                  (SELECT COUNT(*) FROM discussion_groups g
-                   INNER JOIN discussion_messages m ON m.group_id = g.id
-                   WHERE g.discussion_id = d.id) as msg_count
-           FROM discussions d
-           WHERE d.creator_username = ?
-           ORDER BY d.created_at DESC LIMIT 5""",
-        (query_teacher,),
-    )
-    discussion_data = ""
-    for d in discussions:
-        discussion_data += f"- 《{d[1]}》: {d[3]}人参与, {d[4]}条消息 ({d[2]})\n"
-    if not discussion_data:
-        discussion_data = "暂无分组讨论数据"
+    content = report.get("content") or ""
+    meta = report.get("meta") or {}
+    cls_name = meta.get("class_display") or class_display_name(grade, cls)
+    student_count = meta.get("student_count", 0)
+    window_label = meta.get("window_label", "") or window["label"]
 
-    all_participants = quiz_participants | poll_participants
-    student_count = len(all_participants)
-
-    from backend.api.ai_service import call_ai_async
-    from backend.prompts.class_summary import CLASS_SUMMARY_PROMPT
-    from backend.api.chat_router import get_api_keys
-
-    keys = get_api_keys(user["username"])
-    api_key = keys[0] if keys and keys[0] else ""
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 API Key")
-
-    def _safe(s):
-        return str(s).replace('{', '{{').replace('}', '}}')
-
-    from backend.prompts import build_ai_role
-    ai_role = build_ai_role()
-    prompt = f"{ai_role}\n" + CLASS_SUMMARY_PROMPT.format(
-        subject=_safe(subject or ""),
-        time_range=_safe("本堂课"),
-        student_count=_safe(student_count),
-        quiz_data=_safe(quiz_data),
-        poll_data=_safe(poll_data),
-        question_data=_safe(question_data),
-        discussion_data=_safe(discussion_data),
-    )
-    prompt = apply_skills(prompt, "quiz")
-
-    try:
-        summary = await call_ai_async(prompt, api_key, use_kb=False)
-    except Exception as e:
-        logger.error(f"AI 课堂总结调用失败: {e}")
-        raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
-
-    # ── 生成 Word 文档 ──
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
@@ -3630,18 +3490,20 @@ async def export_class_summary_docx(
 
     info = doc.add_paragraph()
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = info.add_run(f"年级：{grade}  班级：{cls_display}  学科：{subject}  参与学生：{student_count}人")
+    run = info.add_run(
+        f"年级：{grade}  班级：{cls}  学科：{subject or '全部'}  "
+        f"参与学生：{student_count}人  统计范围：{window_label}"
+    )
     run.font.size = Pt(10)
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
     doc.add_paragraph()
-    # 写入统计数据
     doc.add_heading("课堂数据统计", level=2)
     stats_table_data = [
-        ("随堂测验", str(len(quizzes))),
-        ("投票活动", str(len(polls))),
-        ("学生提问", str(len(questions_data))),
-        ("分组讨论", str(len(discussions))),
+        ("随堂测验", str(meta.get("quiz_count", 0))),
+        ("投票活动", str(meta.get("poll_count", 0))),
+        ("学生提问", str(meta.get("question_count", 0))),
+        ("分组讨论", str(meta.get("discussion_count", 0))),
         ("参与学生", str(student_count)),
     ]
     table = doc.add_table(rows=len(stats_table_data), cols=2, style='Light Shading Accent 1')
@@ -3651,14 +3513,12 @@ async def export_class_summary_docx(
 
     doc.add_paragraph()
     doc.add_heading("AI 分析总结", level=2)
-    # 复用 markdown 转 docx 函数
-    _markdown_to_docx(doc, summary)
+    _markdown_to_docx(doc, content)
 
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
 
-    import urllib.parse
     safe_filename = urllib.parse.quote(f"课堂总结_{cls_name}.docx")
     return StreamingResponse(
         buf,

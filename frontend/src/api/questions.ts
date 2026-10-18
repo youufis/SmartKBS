@@ -42,11 +42,134 @@ export async function listQuestions(params?: {
   creator?: string;
   difficulty?: string;
   subject?: string;
+  knowledge_points?: string;
+  start_date?: string;
+  end_date?: string;
   page?: number;
   page_size?: number;
 }): Promise<QuestionListResponse> {
   const { data } = await apiClient.get('/api/questions', { params });
   return data;
+}
+
+export interface QuestionAnalyticsSummary {
+  total: number
+  type_count: number
+  knowledge_point_count: number
+  creator_count: number
+  with_knowledge_point: number
+  knowledge_point_coverage: number
+  with_explanation: number
+  with_media: number
+  media_coverage: number
+  ai_count: number
+  manual_count: number
+  non_teacher_created: number
+  invalid_subject: number
+}
+
+export interface QuestionAnalyticsCreator {
+  username: string
+  name: string
+  role: number
+  count: number
+  types: Record<string, number>
+  subjects: Record<string, number>
+  last_created_at: string
+}
+
+export interface QuestionAnalytics {
+  summary: QuestionAnalyticsSummary
+  by_type: { type: string; count: number; percent: number }[]
+  by_difficulty: { difficulty: string; count: number; percent: number }[]
+  by_subject: { subject: string; count: number; percent: number }[]
+  by_creator: QuestionAnalyticsCreator[]
+  knowledge_points: { name: string; count: number; percent: number }[]
+  knowledge_point_total: number
+  timeline: { date: string; count: number }[]
+  quality: {
+    no_knowledge_point: number
+    no_explanation: number
+    no_media: number
+    pending_media: number
+    no_answer: number
+    option_issues: number
+    duplicate_groups: number
+    duplicate_questions: number
+    non_teacher_created: number
+    invalid_subject: number
+  }
+  meta: {
+    subjects: string[]
+    creators: { username: string; name: string; role: number; count: number }[]
+    types: string[]
+    min_date: string
+    max_date: string
+  }
+}
+
+export async function getQuestionAnalytics(params?: {
+  subject?: string
+  type?: string
+  difficulty?: string
+  creator?: string
+  knowledge_points?: string
+  keyword?: string
+  start_date?: string
+  end_date?: string
+}): Promise<QuestionAnalytics> {
+  const { data } = await apiClient.get('/api/questions/analytics', { params })
+  return data
+}
+
+export async function getQuestionAnalyticsMeta(): Promise<QuestionAnalytics['meta']> {
+  const { data } = await apiClient.get('/api/questions/analytics/meta')
+  return data
+}
+
+export interface CreatorAuditCreator {
+  username: string
+  name: string
+  role: number
+  count: number
+}
+
+export interface CreatorAuditQuestion {
+  id: number
+  type: string
+  subject: string
+  status: string
+  created_at: string
+  question_text: string
+}
+
+export interface CreatorAuditResult {
+  creators: CreatorAuditCreator[]
+  anomalies: CreatorAuditCreator[]
+  targets: { username: string; name: string; role: number }[]
+  questions: CreatorAuditQuestion[]
+}
+
+export async function getQuestionCreatorAudit(creator = ''): Promise<CreatorAuditResult> {
+  const { data } = await apiClient.get('/api/questions/creator-audit', { params: creator ? { creator } : {} })
+  return data
+}
+
+export async function transferQuestionCreator(req: {
+  from_username: string
+  to_username: string
+  question_ids?: number[]
+}): Promise<{ success: boolean; transferred: number; target?: string }> {
+  const { data } = await apiClient.post('/api/questions/creator-audit/transfer', req)
+  return data
+}
+
+export async function archiveQuestionCreator(req: {
+  from_username: string
+  question_ids?: number[]
+}): Promise<{ success: boolean; archived: number }> {
+  const { data } = await apiClient.post('/api/questions/creator-audit/archive', req)
+  return data
 }
 
 export async function getQuestion(id: number): Promise<QuestionInfo> {

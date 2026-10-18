@@ -60,3 +60,34 @@ def get_grade_list() -> list[str]:
 def get_subject_list() -> list[str]:
     """获取课程列表（供前端下拉框使用）"""
     return get_subjects()
+
+
+def normalize_subject(subject: str) -> str | None:
+    """把学科写法归一为当前课程配置中的名称；不在课程中返回 None。
+
+    兼容历史别名（如 信息技术 → 信息科技），但不再允许物理/生物/空值等
+    非课程学科进入题库。
+    """
+    value = str(subject or "").strip()
+    if not value:
+        return None
+    subjects = get_subjects()
+    if value in subjects:
+        return value
+    try:
+        from backend.question_select import subject_family
+        fam = subject_family(value)
+        for candidate in subjects:
+            if subject_family(candidate) == fam:
+                return candidate
+    except Exception:
+        pass
+    return None
+
+
+def require_subject(subject: str) -> str:
+    """校验并归一学科；非法时抛 ValueError（调用方转成 400/任务错误）。"""
+    normalized = normalize_subject(subject)
+    if not normalized:
+        raise ValueError(f"学科必须是课程中的学科：{', '.join(get_subjects())}")
+    return normalized

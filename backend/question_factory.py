@@ -44,6 +44,7 @@ from backend.answer_norm import normalize_answer, option_keys
 from backend.logger import logger
 from backend.question_db import execute_query, get_connection
 from backend.question_media import media_columns_for_insert
+from backend.subject_config import get_default_subject, require_subject
 from backend.question_select import (
     family_members,
     find_duplicate_question,
@@ -354,6 +355,8 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
       stats       {requested, saved, duplicated, rejected, by_type, by_difficulty,
                    normalize_notes, dup_index_size}
     """
+    # 题库学科只允许当前课程配置中的学科；历史别名在这里统一归一。
+    subject = require_subject(subject or get_default_subject())
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not creator_name:
         creator_name = username

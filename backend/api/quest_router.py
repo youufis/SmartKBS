@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_query_dict, execute_insert_update, execute_query_one
-from backend.permission_service import get_teacher_classes, get_teacher_grades, parse_legacy_teacher_grade_class
+from backend.permission_service import get_teacher_classes, get_teacher_grades, check_teacher_access_to_student
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_sync_direct
 from backend.api.config_router import get_config_value
@@ -507,6 +507,10 @@ def _check_honor_badges(student_username: str, correct_count: int) -> list[dict[
                     pass
                 newly.append(badge)
     return newly
+
+
+class QuestBulkDeleteRequest(BaseModel):
+    ids: list[int]
 
 
 # ════════════════════════════════════════════
@@ -1279,30 +1283,14 @@ async def get_admin_quest_records(
     conditions = ["qr.student_username = u.username"]
     params: list[str] = []
 
-    # 非管理员：限制只能看自己班级的学生
-    if username != "root":
-        allowed_all: dict[str, list[str]] = {}
-        # 获取教师所有年级的班级权限
-        rows = execute_query("SELECT grade, class FROM users WHERE username=?", (username,))
-        if rows:
-            tg = (rows[0][0] or "").strip()
-            tc = str(rows[0][1] or "").strip()
-            allowed_all = parse_legacy_teacher_grade_class(tg, tc) if tg else {}
-
-        if allowed_all:
-            # 构建 (grade=G AND class IN (...)) OR ... 条件
-            or_parts = []
-            for g, classes in allowed_all.items():
-                if classes:
-                    placeholders = ",".join(["?" for _ in classes])
-                    or_parts.append(f"(u.grade=? AND u.class IN ({placeholders}))")
-                    params.append(g)
-                    params.extend(classes)
-                else:
-                    or_parts.append("(u.grade=? AND 1=1)")
-                    params.append(g)
-            if or_parts:
-                conditions.append(f"({' OR '.join(or_parts)})")
+    # 非管理员：按 teacher_assignments 统一口径限制到任教班级
+    if role != 0:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM teacher_assignments ta "
+            "WHERE ta.teacher_username=? AND ta.grade_id=u.grade_id "
+            "AND (ta.class_id IS NULL OR ta.class_id=u.class_id))"
+        )
+        params.append(username)
 
     if grade:
         conditions.append("u.grade=?")
@@ -1393,41 +1381,143 @@ async def get_admin_quest_records(
     }
 
 
+def _recompute_quest_badge_count(student_username: str) -> None:
+    """删除记录后按剩余成功记录重算徽章计数。"""
+    try:
+        row = execute_query_one(
+            "SELECT COUNT(*) AS cnt FROM quest_records "
+            "WHERE student_username=? AND completed=1 AND correct_count>=1",
+            (student_username,),
+        )
+        count = int(row["cnt"] or 0) if row else 0
+        existing = execute_query_one(
+            "SELECT id FROM quest_badge_counts WHERE student_username=?",
+            (student_username,),
+        )
+        if existing:
+            execute_insert_update(
+                "UPDATE quest_badge_counts SET total_success_count=?, updated_at=? "
+                "WHERE student_username=?",
+                (count, _now(), student_username),
+            )
+        elif count > 0:
+            execute_insert_update(
+                "INSERT INTO quest_badge_counts (student_username, total_success_count, updated_at) "
+                "VALUES (?, ?, ?)",
+                (student_username, count, _now()),
+            )
+    except Exception as e:
+        logger.warning(f"重算闯关徽章计数失败 user={student_username}: {e}")
+
+
+def _delete_quest_records(quest_ids: list[int]) -> tuple[int, set[str]]:
+    """统一清理闯关记录、作答明细、积分流水、通知与徽章计数。"""
+    ids = list(dict.fromkeys(int(x) for x in quest_ids if int(x) > 0))
+    if not ids:
+        return 0, set()
+    placeholders = ",".join("?" for _ in ids)
+    rows = execute_query_dict(
+        f"SELECT id, student_username FROM quest_records WHERE id IN ({placeholders})",
+        tuple(ids),
+    )
+    existing_ids = [int(r["id"]) for r in rows]
+    students = {str(r["student_username"]) for r in rows}
+    if not existing_ids:
+        return 0, set()
+
+    from backend.reward_engine import activity_reward_students, recompute_students
+    affected = activity_reward_students([("quest", qid) for qid in existing_ids])
+    str_ids = [str(qid) for qid in existing_ids]
+    in_ids = ",".join("?" for _ in str_ids)
+
+    from backend.database import get_connection
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"DELETE FROM quest_question_records WHERE quest_id IN ({placeholders})",
+            tuple(existing_ids),
+        )
+        cur.execute(
+            f"DELETE FROM activity_rewards WHERE activity_type='quest' AND activity_id IN ({in_ids})",
+            tuple(str_ids),
+        )
+        cur.execute(
+            f"DELETE FROM notifications WHERE source_type='quest' AND source_id IN ({in_ids})",
+            tuple(str_ids),
+        )
+        cur.execute(
+            f"DELETE FROM quest_records WHERE id IN ({placeholders})",
+            tuple(existing_ids),
+        )
+        conn.commit()
+
+    recompute_students(affected)
+    for student in students:
+        _recompute_quest_badge_count(student)
+    logger.info(
+        f"[闯关管理] 删除记录 {len(existing_ids)} 条 ids={existing_ids} "
+        f"影响学生={len(students)}"
+    )
+    return len(existing_ids), students
+
+
 @router.delete("/quest/admin/records/{quest_id}", summary="[教师] 删除闯关记录")
 async def delete_quest_record(quest_id: int, request: Request):
-    """教师/管理员删除指定的闯关记录及其题目"""
+    """教师/管理员删除指定的闯关记录及其题目（教师限任教班级）。"""
     user = get_current_user(request)
     role = user.get("role", 2)
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可删除")
 
-    # 检查记录是否存在
-    quest = execute_query_one(
-        "SELECT id FROM quest_records WHERE id=?", (quest_id,)
+    record = execute_query_one(
+        "SELECT id, student_username FROM quest_records WHERE id=?", (quest_id,)
     )
-    if not quest:
+    if not record:
         raise HTTPException(status_code=404, detail="闯关记录不存在")
+    if role == 1 and not check_teacher_access_to_student(
+        user["username"], record["student_username"]
+    ):
+        raise HTTPException(status_code=403, detail="无权删除非任教班级的闯关记录")
 
-    # 删除题目记录
-    execute_insert_update(
-        "DELETE FROM quest_question_records WHERE quest_id=?", (quest_id,)
-    )
-    # 清理关联数据
-    from backend.reward_engine import activity_reward_students, recompute_students
-    _affected = activity_reward_students([("quest", quest_id)])
-    execute_insert_update(
-        "DELETE FROM activity_rewards WHERE activity_type='quest' AND activity_id=?", (str(quest_id),)
-    )
-    execute_insert_update(
-        "DELETE FROM notifications WHERE source_type='quest' AND source_id=?", (str(quest_id),)
-    )
-    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
-    # 删除闯关记录
-    execute_insert_update(
-        "DELETE FROM quest_records WHERE id=?", (quest_id,)
-    )
-
+    _delete_quest_records([quest_id])
     return {"success": True, "message": f"闯关记录 #{quest_id} 已删除"}
+
+
+@router.post("/quest/admin/records/bulk-delete", summary="[教师] 批量删除闯关记录")
+async def bulk_delete_quest_records(req: QuestBulkDeleteRequest, request: Request):
+    """教师/管理员批量删除闯关记录；教师逐条校验任教范围。"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可删除")
+    ids = list(dict.fromkeys(int(x) for x in req.ids if int(x) > 0))[:200]
+    if not ids:
+        raise HTTPException(status_code=400, detail="请选择至少一条闯关记录")
+
+    placeholders = ",".join("?" for _ in ids)
+    rows = execute_query_dict(
+        f"SELECT id, student_username FROM quest_records WHERE id IN ({placeholders})",
+        tuple(ids),
+    )
+    found = {int(r["id"]): str(r["student_username"]) for r in rows}
+    allowed: list[int] = []
+    failed: list[dict[str, Any]] = []
+    for qid in ids:
+        student = found.get(qid)
+        if not student:
+            failed.append({"id": qid, "reason": "记录不存在"})
+            continue
+        if role == 1 and not check_teacher_access_to_student(user["username"], student):
+            failed.append({"id": qid, "reason": "不在任教班级"})
+            continue
+        allowed.append(qid)
+
+    deleted, _students = _delete_quest_records(allowed)
+    return {
+        "success": True,
+        "deleted": deleted,
+        "failed": failed,
+    }
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1547,7 +1637,9 @@ async def list_quest_bank(
 async def get_quest_bank_question(question_id: int, request: Request):
     """获取单道闯关题库题目详情"""
     user = get_current_user(request)
-    _ = user  # 仅验证登录
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看闯关题库")
 
     row = execute_query_one(
         "SELECT * FROM quest_question_bank WHERE id=?",
@@ -1649,30 +1741,70 @@ async def delete_quest_bank_question(question_id: int, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可删除")
 
-    # 带上 media_files：删除闯关题时要靠它精确清理"历史平铺目录"里的旧配图
-    row = execute_query_one(
-        "SELECT id, media_files FROM quest_question_bank WHERE id=?",
-        (question_id,),
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="题目不存在")
+    deleted, failed = _delete_quest_bank_questions([question_id])
+    if not deleted:
+        reason = failed[0]["reason"] if failed else "题目不存在"
+        raise HTTPException(status_code=404, detail=reason)
 
+    return {"success": True, "message": "删除成功"}
+
+
+def _delete_quest_bank_questions(question_ids: list[int]) -> tuple[int, list[dict[str, Any]]]:
+    """批量删除题库题目并清理各自配图，返回 (删除数, 失败明细)。"""
+    ids = list(dict.fromkeys(int(x) for x in question_ids if int(x) > 0))
+    if not ids:
+        return 0, []
+
+    placeholders = ",".join("?" for _ in ids)
+    rows = execute_query_dict(
+        f"SELECT id, media_files FROM quest_question_bank WHERE id IN ({placeholders})",
+        tuple(ids),
+    )
+    found = {int(r["id"]): r for r in rows}
+    failed: list[dict[str, Any]] = []
+    deletable: list[int] = []
+    for qid in ids:
+        if qid not in found:
+            failed.append({"id": qid, "reason": "题目不存在"})
+        else:
+            deletable.append(qid)
+
+    if not deletable:
+        return 0, failed
+
+    del_placeholders = ",".join("?" for _ in deletable)
     execute_insert_update(
-        "DELETE FROM quest_question_bank WHERE id=?",
-        (question_id,),
+        f"DELETE FROM quest_question_bank WHERE id IN ({del_placeholders})",
+        tuple(deletable),
     )
 
     # 清理配图：闯关自己的命名空间整目录删；历史平铺目录只删本题 manifest 记过的文件。
-    # 过去这里直接 rmtree(question_media/<quest_id>)，而 quest 与题库各自独立自增 id，
-    # 同号题库题的配图会被连带清空——这是必须堵掉的数据损坏路径。
-    try:
-        removed = cleanup_quest_media(question_id, row.get("media_files"))
-        if removed:
-            logger.info(f"闯关题 {question_id} 配图已清理: {removed} 项")
-    except Exception as e:
-        logger.warning(f"清理闯关题配图失败 (id={question_id}): {e}")
+    # 不能 rmtree(question_media/<id>)，闯关与题库各自独立自增 id，同号会误删他人配图。
+    for qid in deletable:
+        try:
+            removed = cleanup_quest_media(qid, found[qid].get("media_files"))
+            if removed:
+                logger.info(f"闯关题 {qid} 配图已清理: {removed} 项")
+        except Exception as e:
+            logger.warning(f"清理闯关题配图失败 (id={qid}): {e}")
 
-    return {"success": True, "message": "删除成功"}
+    logger.info(f"[闯关管理] 删除题库题目 {len(deletable)} 条 ids={deletable}")
+    return len(deletable), failed
+
+
+@router.post("/quest/admin/bank/bulk-delete", summary="[教师] 批量删除闯关题")
+async def bulk_delete_quest_bank_questions(req: QuestBulkDeleteRequest, request: Request):
+    """教师/管理员批量删除题库题目，逐条清理配图。"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可删除")
+    ids = list(dict.fromkeys(int(x) for x in req.ids if int(x) > 0))[:200]
+    if not ids:
+        raise HTTPException(status_code=400, detail="请选择至少一道题目")
+
+    deleted, failed = _delete_quest_bank_questions(ids)
+    return {"success": True, "deleted": deleted, "failed": failed}
 
 
 @router.post("/quest/admin/bank/ai-generate", summary="[教师] AI批量生题")

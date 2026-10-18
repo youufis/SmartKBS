@@ -1,5 +1,5 @@
 import { studentLabel } from '../utils/studentLabel'
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Card, Button, Space, Typography, Input, Tag, message,
   Spin, Empty, Tooltip, Modal, Rate, Collapse,
@@ -24,6 +24,17 @@ interface Message {
   content: string
   msg_type: string
   created_at: string
+  pending?: boolean
+}
+
+async function downloadWord(url: string, filename: string) {
+  const { data } = await apiClient.get(url, { responseType: 'blob', timeout: 180000 })
+  const href = URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(href)
 }
 
 const DiscussionRoomPage: React.FC = () => {
@@ -47,6 +58,10 @@ const DiscussionRoomPage: React.FC = () => {
   const [summaryData, setSummaryData] = useState<any>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [generatingSummary, setGeneratingSummary] = useState(false)
+  const [exportingSummary, setExportingSummary] = useState(false)
+  const [broadcastOpen, setBroadcastOpen] = useState(false)
+  const [broadcastText, setBroadcastText] = useState('')
+  const [broadcasting, setBroadcasting] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -78,8 +93,8 @@ const DiscussionRoomPage: React.FC = () => {
     loadInfo()
   }, [discussionId, groupId])
 
-  // 轮询用的最新消息 ID
-  const [lastPollId, setLastPollId] = useState(0)
+  // 最新消息 ID 用 ref 保存：消息更新不能触发 WebSocket effect 重建
+  const lastIdRef = useRef(0)
 
   // 加载历史消息（初始）
   const loadInitialMessages = useCallback(async () => {
@@ -89,48 +104,44 @@ const DiscussionRoomPage: React.FC = () => {
         `/api/interaction/groups/${groupId}/messages`,
         { params: { after_id: 0 } }
       )
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setMessages(data)
-        // 更新轮询 ID 为最新消息 ID
-        const maxId = Math.max(...data.map(m => m.id))
-        if (maxId > lastPollId) setLastPollId(maxId)
+        const maxId = data.reduce((m: number, x: any) => Math.max(m, Number(x.id) || 0), 0)
+        lastIdRef.current = Math.max(lastIdRef.current, maxId)
+        setTimeout(scrollToBottom, 50)
       }
     } catch {
       // 忽略
     } finally {
       setLoading(false)
     }
-  }, [groupId, lastPollId])
+  }, [groupId])
 
-  // 初始加载消息
+  // 切换小组必须先清空旧消息，避免新小组里短暂显示上一个小组的内容
   useEffect(() => {
-    loadInitialMessages().then(() => {
-      // 初始化轮询 ID 为当前最大消息 ID
-      setTimeout(scrollToBottom, 50)
-    })
+    setMessages([])
+    lastIdRef.current = 0
+    setLoading(true)
+    void loadInitialMessages()
   }, [loadInitialMessages])
 
-  // WebSocket 连接（替代轮询）
+  // WebSocket + 轮询兜底；依赖只保留 groupId
   useEffect(() => {
     if (!groupId) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    // 优先使用当前页面 host，若连接失败 WebSocket 会自动重连
-    // 如果通过 IIS 反向代理访问，需确保 IIS 配置了 WebSocket 转发
     const token = localStorage.getItem('smartkb_token') || ''
     const host = window.location.host
     const wsUrl = `${protocol}//${host}/api/interaction/ws/${groupId}?token=${encodeURIComponent(token)}`
     const aiAssistantName = t('aiAssistant')
     let reconnectTimer: ReturnType<typeof setTimeout>
-    // 服务端会以 4401/4403/4404 拒绝握手, 但浏览器只能看到 1006, 因此用重试次数上限兜底
     let reconnectAttempts = 0
     const MAX_RECONNECT = 5
-    let currentPollId = lastPollId
+    let pingTimer: ReturnType<typeof setInterval> | null = null
 
     const updatePollId = (newId: number) => {
-      if (newId > currentPollId) {
-        currentPollId = newId
-        setLastPollId(newId)
+      if (Number.isFinite(newId) && newId > lastIdRef.current) {
+        lastIdRef.current = newId
       }
     }
 
@@ -140,16 +151,18 @@ const DiscussionRoomPage: React.FC = () => {
         wsRef.current = ws
 
         ws.onopen = () => {
-          // 连接成功，重置重连计数
           reconnectAttempts = 0
+          if (pingTimer) clearInterval(pingTimer)
+          pingTimer = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+          }, 25000)
         }
 
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data)
             if (data.type === 'new_message') {
-              // 使用后端返回的真实消息 ID，确保与轮询数据 ID 一致，避免重复
-              const msgId = data.id || Date.now()
+              const msgId = Number(data.id) || Date.now()
               const newMsg: Message = {
                 id: msgId,
                 username: data.username || aiAssistantName,
@@ -157,10 +170,8 @@ const DiscussionRoomPage: React.FC = () => {
                 msg_type: data.msg_type || 'text',
                 created_at: data.created_at || new Date().toISOString(),
               }
-              // 同步更新轮询 ID，防止轮询再次拉取同一条消息
-              if (typeof msgId === 'number') updatePollId(msgId)
+              updatePollId(msgId)
               setMessages(prev => {
-                // 去重：避免与轮询带回的消息重复
                 if (prev.some(m => m.id === newMsg.id)) return prev
                 return [...prev, newMsg]
               })
@@ -173,9 +184,9 @@ const DiscussionRoomPage: React.FC = () => {
 
         ws.onclose = () => {
           wsRef.current = null
-          if (reconnectAttempts >= MAX_RECONNECT) return  // 交给轮询兜底
+          if (pingTimer) { clearInterval(pingTimer); pingTimer = null }
+          if (reconnectAttempts >= MAX_RECONNECT) return
           reconnectAttempts++
-          // 3 秒后重连
           reconnectTimer = setTimeout(connectWs, 3000)
         }
 
@@ -194,11 +205,10 @@ const DiscussionRoomPage: React.FC = () => {
       try {
         const { data } = await apiClient.get(
           `/api/interaction/groups/${groupId}/messages`,
-          { params: { after_id: currentPollId } }
+          { params: { after_id: lastIdRef.current } }
         )
         if (Array.isArray(data) && data.length > 0) {
           setMessages(prev => {
-            // 去重：避免与 WebSocket 推送的消息重复
             const existingIds = new Set(prev.map(m => m.id))
             const newMsgs = data.filter(m => !existingIds.has(m.id))
             if (newMsgs.length > 0) {
@@ -207,7 +217,7 @@ const DiscussionRoomPage: React.FC = () => {
             }
             return prev
           })
-          const maxId = Math.max(...data.map(m => m.id))
+          const maxId = data.reduce((m: number, x: any) => Math.max(m, Number(x.id) || 0), 0)
           updatePollId(maxId)
         }
       } catch {
@@ -217,30 +227,60 @@ const DiscussionRoomPage: React.FC = () => {
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (pingTimer) clearInterval(pingTimer)
       if (wsRef.current) {
         wsRef.current.close()
         wsRef.current = null
       }
       clearInterval(pollInterval)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupId, lastPollId])
+  }, [groupId, t])
 
   // 发送消息
   const handleSend = async () => {
     const content = input.trim()
-    if (!content || !groupId) return
+    if (!content || !groupId || sending) return
 
+    const clientId = (globalThis.crypto as any)?.randomUUID?.()
+      || `dm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+    const tempId = -Date.now()
+    const now = new Date()
+    const createdAt = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+    const optimistic: Message = {
+      id: tempId,
+      username: user?.username || '',
+      content,
+      msg_type: 'text',
+      created_at: createdAt,
+      pending: true,
+    }
+    setMessages(prev => [...prev, optimistic])
+    setInput('')
+    scrollToBottom()
     setSending(true)
     try {
-      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/messages`, { content })
-      setInput('')
-      // 用后端返回的真实 ID 更新轮询 ID，防止轮询再次拉取同一条消息
-      if (data?.id && typeof data.id === 'number' && data.id > lastPollId) {
-        setLastPollId(data.id)
+      const { data } = await apiClient.post(
+        `/api/interaction/groups/${groupId}/messages`,
+        { content, client_request_id: clientId },
+      )
+      const realId = Number(data?.id)
+      if (Number.isFinite(realId) && realId > 0) {
+        lastIdRef.current = Math.max(lastIdRef.current, realId)
+        setMessages(prev => {
+          const next = prev.map(m => (m.id === tempId ? { ...m, id: realId, pending: false } : m))
+          const seen = new Set<number>()
+          return next.filter(m => {
+            if (seen.has(m.id)) return false
+            seen.add(m.id)
+            return true
+          })
+        })
+      } else {
+        setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, pending: false } : m)))
       }
-      // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
     } catch (err: any) {
+      setMessages(prev => prev.filter(m => m.id !== tempId))
+      setInput(cur => cur || content)
       const detail = err?.response?.data?.detail
       message.error(detail || t('sendFailed'))
     } finally {
@@ -284,6 +324,7 @@ const DiscussionRoomPage: React.FC = () => {
       if (data.status === 'ok') {
         message.success(t('aiSummarySuccess'))
         setSummaryData(data)
+        setHasExistingSummary(true)
         setSummaryModal(true)
       } else {
         message.error(data.content || t('summaryGenerateFailed'))
@@ -314,6 +355,23 @@ const DiscussionRoomPage: React.FC = () => {
     }
   }
 
+  const handleBroadcast = async () => {
+    if (!discussionId || !broadcastText.trim()) return
+    setBroadcasting(true)
+    try {
+      await apiClient.post(`/api/interaction/discussions/${discussionId}/broadcast`, {
+        content: broadcastText.trim(),
+      })
+      message.success(t('broadcastSent'))
+      setBroadcastOpen(false)
+      setBroadcastText('')
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('broadcastFailed'))
+    } finally {
+      setBroadcasting(false)
+    }
+  }
+
   // 返回
   const handleBack = () => {
     if (discussionId) {
@@ -324,6 +382,14 @@ const DiscussionRoomPage: React.FC = () => {
   }
 
   const isTeacherInGroup = isTeacherOrAdmin
+
+  const memberNameMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const m of members) {
+      if (m?.username) map[String(m.username)] = String(m.name || m.username)
+    }
+    return map
+  }, [members])
 
   // 检查是否有总结
   const [hasExistingSummary, setHasExistingSummary] = useState(false)
@@ -384,17 +450,7 @@ const DiscussionRoomPage: React.FC = () => {
               <Button
                 size="small"
                 icon={<BellOutlined />}
-                onClick={async () => {
-                  const val = prompt(t('broadcast') + ':')
-                  if (val && val.trim()) {
-                    try {
-                      await apiClient.post(`/api/interaction/discussions/${discussionId}/broadcast`, { content: val.trim() })
-                      message.success(t('broadcastSent'))
-                    } catch {
-                      message.error(t('broadcastFailed'))
-                    }
-                  }
-                }}
+                onClick={() => setBroadcastOpen(true)}
               >
                 {t('broadcast')}
               </Button>
@@ -461,6 +517,7 @@ const DiscussionRoomPage: React.FC = () => {
               const isMe = msg.username === user?.username
               const isBroadcast = msg.msg_type === 'broadcast'
               const isSystem = msg.msg_type === 'system'
+              const displayName = memberNameMap[msg.username] || msg.username
 
               if (isBroadcast) {
                 return (
@@ -500,6 +557,7 @@ const DiscussionRoomPage: React.FC = () => {
                       boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
                       borderTopLeftRadius: isMe ? 12 : 4,
                       borderTopRightRadius: isMe ? 4 : 12,
+                    opacity: msg.pending ? 0.65 : 1,
                     }}
                   >
                     {!isMe && (
@@ -507,7 +565,7 @@ const DiscussionRoomPage: React.FC = () => {
                         {isAi ? (
                           <Tag icon={<RobotOutlined />} color="orange" style={{ fontSize: 11 }}>{t('aiAssistant')}</Tag>
                         ) : (
-                          <Text type="secondary" style={{ fontSize: 12 }}>{msg.username}</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{displayName}</Text>
                         )}
                       </div>
                     )}
@@ -529,7 +587,7 @@ const DiscussionRoomPage: React.FC = () => {
                         marginTop: 4,
                       }}
                     >
-                      {msg.created_at?.split(' ')[1]?.slice(0, 5) || ''}
+                      {msg.pending ? t('sending') : (msg.created_at?.split(' ')[1]?.slice(0, 5) || '')}
                     </div>
                   </div>
                 </div>
@@ -550,15 +608,17 @@ const DiscussionRoomPage: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`${t('inputPlaceholder')} (Enter ${t('send')}, Shift+Enter ${t('send')})`}
+            placeholder={`${t('inputPlaceholder')} (Enter ${t('send')}, Shift+Enter ${t('newline')})`}
             rows={2}
-            disabled={sending}
+            maxLength={1000}
+            showCount
           />
           <Button
             type="primary"
             icon={<SendOutlined />}
             onClick={handleSend}
             loading={sending}
+            disabled={!input.trim() || sending}
             style={{ height: 50 }}
           >
             {t('send')}
@@ -580,8 +640,20 @@ const DiscussionRoomPage: React.FC = () => {
           <Button key="close" onClick={() => setSummaryModal(false)}>{t('close')}</Button>,
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!summaryData?.content && !summaryData?.parsed}
-            onClick={() => {
-              window.open(`/api/interaction/groups/${groupId}/summary/export`, '_blank')
+            loading={exportingSummary}
+            onClick={async () => {
+              if (!groupId) return
+              setExportingSummary(true)
+              try {
+                await downloadWord(
+                  `/api/interaction/groups/${groupId}/summary/export`,
+                  `讨论总结_${groupInfo?.name || groupId}.docx`,
+                )
+              } catch (e: any) {
+                message.error(e?.response?.data?.detail || t('exportFailed'))
+              } finally {
+                setExportingSummary(false)
+              }
             }}>
             {t('exportWord')}
           </Button>,
@@ -708,6 +780,26 @@ const DiscussionRoomPage: React.FC = () => {
             )
           })()}
         </Spin>
+      </Modal>
+
+      <Modal
+        maskClosable={false}
+        title={t('broadcast')}
+        open={broadcastOpen}
+        onCancel={() => setBroadcastOpen(false)}
+        onOk={handleBroadcast}
+        confirmLoading={broadcasting}
+        okText={t('send')}
+        okButtonProps={{ disabled: !broadcastText.trim() }}
+      >
+        <TextArea
+          value={broadcastText}
+          onChange={(e) => setBroadcastText(e.target.value)}
+          rows={4}
+          maxLength={1000}
+          showCount
+          placeholder={t('broadcastPlaceholder')}
+        />
       </Modal>
     </div>
   )

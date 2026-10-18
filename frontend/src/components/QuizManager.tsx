@@ -36,6 +36,7 @@ interface QuizQuestion {
 interface QuizItem {
   id: number
   title: string
+  subject?: string
   creator_name?: string
   creator_username?: string
   questions: QuizQuestion[]
@@ -46,6 +47,7 @@ interface FlatQuestion extends QuizQuestion {
   _quizTitle: string
   _creatorName: string
   _key: string
+  _quizSubject: string
 }
 
 const QuizManager: React.FC = () => {
@@ -73,6 +75,7 @@ const QuizManager: React.FC = () => {
             _quizTitle: quiz.title,
             _creatorName: quiz.creator_username || quiz.creator_name || '',
             _key: `${quiz.id}_${idx}`,
+            _quizSubject: quiz.subject || '',
           })
         })
       }
@@ -101,6 +104,7 @@ const QuizManager: React.FC = () => {
     try {
       const payload: any = {
         type: q.type,
+        subject: q._quizSubject,
         question_text: q.question,
         correct_answer: q.answer,
         explanation: q.explanation || '',

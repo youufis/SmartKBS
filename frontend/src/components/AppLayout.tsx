@@ -125,10 +125,6 @@ function buildTeacherMenu(t: (k: string) => string) {
       { key: '/wrong-book', icon: <BookOutlined />, label: g('wrongBookManage') },
       { key: '/shared-center', icon: <FolderOutlined />, label: g('resourceCenter'), adminOrTeacherOnly: true },
     ]},
-    { type: 'group', icon: <StarOutlined />, label: g('explore'), key: 'explore', children: [
-      { key: '/daily-discovery', icon: <StarOutlined />, label: g('dailyDiscovery') },
-      { key: '/news-hub', icon: <GlobalOutlined />, label: g('newsHub') },
-    ]},
     { type: 'group', icon: <FileAddOutlined />, label: g('coding'), key: 'coding', children: [
       { key: '/code-practice', icon: <FileAddOutlined />, label: g('codePractice') },
     ]},
@@ -156,6 +152,8 @@ function buildTeacherMenu(t: (k: string) => string) {
     { type: 'group', icon: <SettingOutlined />, label: g('systemManagement'), key: 'admin', children: [
       { key: '/user-mgmt', icon: <TeamOutlined />, label: g('userManagement') },
       { key: '/announcements', icon: <BellOutlined />, label: g('announcementsManage') },
+      { key: '/daily-discovery-admin', icon: <StarOutlined />, label: g('dailyDiscoveryAdmin'), adminOrTeacherOnly: true },
+      { key: '/news-admin', icon: <GlobalOutlined />, label: g('newsAdmin'), adminOrTeacherOnly: true },
       { key: '/system-config', icon: <SettingOutlined />, label: g('systemConfig'), adminOnly: true },
       { key: '/notifications', icon: <BellOutlined />, label: g('notifications') },
       { key: '/about', icon: <InfoCircleOutlined />, label: g('about') },

@@ -5,6 +5,7 @@ AI 智能学情分析 API 路由
 import json
 import os
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
@@ -73,7 +74,9 @@ def _call_ai(prompt: str) -> str:  # type: ignore[misc]
 
 
 async def _call_ai_task(description: str, prompt: str, dedupe_key: str = "",
-                        max_concurrent: int | None = None) -> str:
+                        max_concurrent: int | None = None,
+                        cache_kind: str = "", cache_scope: str = "",
+                        created_by: str = "", cache_meta: dict | None = None) -> str:
     """提交 AI 分析后台任务，返回 task_id
 
     dedupe_key: 同一用户的同键任务在"进行中"或"刚完成 60s 内"直接复用既有 task_id,
@@ -95,10 +98,16 @@ async def _call_ai_task(description: str, prompt: str, dedupe_key: str = "",
 
     from backend.api.ai_service import call_ai_async
 
-    async def _do_analysis() -> dict[str, str]:
+    async def _do_analysis() -> dict[str, Any]:
         try:
             result = await call_ai_async(prompt, api_key, use_kb=False)
-            return {"result": result}
+            report_id = None
+            if cache_kind and cache_scope and result:
+                from backend.ai_report_cache import save_report
+                report_id = save_report(
+                    cache_kind, cache_scope, result, created_by or "", meta=cache_meta,
+                )
+            return {"result": result, "report_id": report_id}
         except Exception as e:
             logger.error(f"AI 学情分析调用失败: {e}")
             return {"error": f"AI 分析出错：{str(e)}"}
@@ -161,8 +170,9 @@ async def class_overview(
     grade: str = Query("", description="年级"),
     cls: str = Query("", description="班级"),
     teacher: str = Query("", description="教师用户名"),
+    snapshot_only: bool = Query(False, description="只返回数据快照，不生成 AI 报告"),
 ):
-    """AI 生成班级学情总览报告"""
+    """AI 生成班级学情总览报告（统计口径由 analytics_service 统一）"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -170,138 +180,63 @@ async def class_overview(
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
 
     query_teacher = teacher or username
+    if role == 1 and teacher and teacher != username:
+        raise HTTPException(status_code=403, detail="只能查看自己的班级学情")
 
-    # 教师只能查看自己班级的数据
-    if role == 1:
-        # 使用统一权限服务
-        grade_info = get_grade_by_name(grade)
-        if grade_info and not can_access_grade(username, grade_info["id"]):
-            raise HTTPException(status_code=403, detail="无权查看其他年级的数据")
+    from backend.analytics_service import build_class_snapshot
+    snapshot = build_class_snapshot(user, query_teacher, grade, cls)
+    scope = snapshot["scope"]
+    d = snapshot["data"]
+    if d["total_students"] == 0:
+        return {
+            "task_id": None,
+            "empty": True,
+            "message": "该班级暂无学生数据",
+            "data": d,
+            "sources": [],
+        }
+    if snapshot_only:
+        return {
+            "task_id": None,
+            "snapshot_only": True,
+            "data": d,
+            "sources": snapshot["sources"],
+        }
 
-    # 收集班级数据
-    class_num = _extract_class_num(cls)
-    grade_id = _resolve_grade_id(grade)
-    class_id = _resolve_class_id(grade, cls)
-
-    # 1. 学生人数（使用 FK 列）
-    if grade_id:
-        student_count = execute_query(
-            "SELECT COUNT(*) FROM users WHERE role=2 AND grade_id=? AND (class_id=? OR class_id IS NULL)",
-            (grade_id, class_id) if class_id else (grade_id,),
-        )
-    else:
-        student_count = execute_query(
-            "SELECT COUNT(*) FROM users WHERE role=2 AND grade=? AND (class=? OR class=?)",
-            (grade, class_num, f"{class_num}班"),
-        )
-    total_students = student_count[0][0] if student_count else 0
-    if total_students == 0:
-        return {"report": "暂无该班级的学生数据", "data": {}}
-
-    # 2/3. 积分与点名统计
-    # R3: scores / rollcall_history 的写入路径(rollcall_router._save_history、
-    # score_utils.save_teacher_scores)只写 grade/class_name 文本列, 从不填 grade_id/class_id,
-    # 旧实现却优先走 FK 分支 -> 命中率 100% 为 0 行, 班级学情总览的"积分/点名"两维恒为 0,
-    # 而导出 Word 走文本分支有数据, 两个入口口径相反。现统一按文本候选集匹配。
-    cls_variants = _class_name_variants(grade, cls) or [cls]
-    _ph = ",".join(["?"] * len(cls_variants))
-    score_stats = execute_query(
-        f"""SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
-                  COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-           FROM scores WHERE teacher_username=? AND grade=? AND class_name IN ({_ph})""",
-        (query_teacher, grade, *cls_variants),
-    )
-    rc_stats = execute_query(
-        f"""SELECT COUNT(*),
-                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-           FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name IN ({_ph})""",
-        (query_teacher, grade, *cls_variants),
-    )
-
-    # 4. 考试统计（该班级最近的考试）
-    exam_stats = q_execute_query(
-        """SELECT e.title, e.subject, COUNT(ea.id) as attempt_count,
-                  COALESCE(AVG(ea.score),0) as avg_score,
-                  e.pass_score, e.total_score
-           FROM exams e
-           LEFT JOIN exam_attempts ea ON ea.exam_id = e.id
-           WHERE e.status IN ('published', 'ended')
-           GROUP BY e.id
-           ORDER BY e.created_at DESC LIMIT 5""",
-    )
-
-    # 5. 任务完成率
-    task_stats = execute_query(
-        "SELECT COUNT(*) FROM tasks WHERE creator_username = ? AND status = 'active'",
-        (query_teacher,),
-    )
-    task_submissions = execute_query(
-        """SELECT COUNT(DISTINCT ts.student_username)
-           FROM task_submissions ts
-           JOIN tasks t ON ts.task_id = t.id
-           WHERE t.creator_username = ?""",
-        (query_teacher,),
-    )
-
-    # ── 构造 AI Prompt ──
-    sc = score_stats[0] if score_stats else (0, 0, 0, 0, 0)
-    rc = rc_stats[0] if rc_stats else (0, 0, 0)
-
-    data_summary = {
-        "grade": grade,
-        "class": cls,
-        "total_students": total_students,
-        "score_count": _safe_int(sc[0]),
-        "score_total": _safe_int(sc[1]),
-        "score_avg": round(_safe_float(sc[2]), 1),
-        "score_max": _safe_int(sc[3]),
-        "score_min": _safe_int(sc[4]),
-        "rollcall_total": _safe_int(rc[0]),
-        "rollcall_correct": _safe_int(rc[1]),
-        "rollcall_wrong": _safe_int(rc[2]),
-        "exams": [
-            {
-                "title": e['title'],
-                "subject": e['subject'],
-                "attempts": _safe_int(e['attempt_count']),
-                "avg_score": round(_safe_float(e['avg_score']), 1),
-                "pass_score": _safe_float(e['pass_score']),
-                "total_score": _safe_float(e['total_score']),
-            }
-            for e in exam_stats
-        ],
-        "active_tasks": _safe_int(task_stats[0][0] if task_stats else 0),
-        "submitted_students": _safe_int(task_submissions[0][0] if task_submissions else 0),
-    }
-
-    exam_lines = chr(10).join(
-        f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}"
-        for e in data_summary['exams']
-    )
     ai_role = build_ai_role(grade=grade)
     prompt = f"{ai_role}" + CLASS_ANALYSIS_PROMPT.format(
-        grade=grade, cls=cls, total_students=total_students,
-        score_count=data_summary['score_count'],
-        score_total=data_summary['score_total'],
-        score_avg=data_summary['score_avg'],
-        score_max=data_summary['score_max'],
-        rollcall_total=data_summary['rollcall_total'],
-        rollcall_correct=data_summary['rollcall_correct'],
-        rollcall_wrong=data_summary['rollcall_wrong'],
-        exam_lines=exam_lines,
-        active_tasks=data_summary['active_tasks'],
-        submitted_students=data_summary['submitted_students'],
+        grade=grade,
+        cls=scope["class_num"],
+        total_students=d["total_students"],
+        score_count=d["score_count"],
+        score_total=d["score_total"],
+        score_avg=d["score_avg"],
+        score_max=d["score_max"],
+        score_min=d["score_min"],
+        rollcall_total=d["rollcall_total"],
+        rollcall_correct=d["rollcall_correct"],
+        rollcall_wrong=d["rollcall_wrong"],
+        exam_lines=snapshot["exam_lines"],
+        active_tasks=d["active_tasks"],
+        submitted_students=d["submitted_students"],
     )
 
-    task_id = await _call_ai_task("班级学情分析", prompt,
-                                  dedupe_key=f"co:{query_teacher}:{grade}:{cls}",
-                                  max_concurrent=4)
+    scope_key = f"co:{query_teacher}:{grade}:{cls}"
+    task_id = await _call_ai_task(
+        "班级学情分析", prompt,
+        dedupe_key=scope_key,
+        max_concurrent=4,
+        cache_kind="class_overview",
+        cache_scope=scope_key,
+        created_by=username,
+        cache_meta={**d, "class_display": scope["display_name"]},
+    )
 
     return {
         "task_id": task_id,
         "message": "AI 分析已提交，请稍后查询结果",
-        "data": data_summary,
+        "data": d,
+        "sources": snapshot["sources"],
     }
 
 
@@ -313,6 +248,10 @@ async def student_analytics(target_username: str, request: Request):
 
     if role == 2 and user["username"] != target_username:
         raise HTTPException(status_code=403, detail="无权查看")
+    if role == 1:
+        from backend.permission_service import is_student_in_teacher_scope
+        if not is_student_in_teacher_scope(target_username, user["username"]):
+            raise HTTPException(status_code=403, detail="该学生不在您的任教范围内")
 
     # 获取学生信息
     user_rows = execute_query(
@@ -335,18 +274,24 @@ async def student_analytics(target_username: str, request: Request):
         (target_username,),
     )
 
-    # 积分
+    # 积分（同名可能跨班，按年级/班级候选名一起限定）
+    from backend.analytics_service import class_name_variants
+    variants = class_name_variants(student_grade, str(student_class or "")) or [str(student_class or "")]
+    vph = ",".join("?" for _ in variants)
     score_rows = execute_query(
-        "SELECT COALESCE(SUM(score),0) FROM scores WHERE student_name = ?",
-        (student_name,),
+        f"SELECT COALESCE(SUM(score),0) FROM scores "
+        f"WHERE student_name=? AND grade=? AND class_name IN ({vph})",
+        (student_name, student_grade, *variants),
     )
     total_score = score_rows[0][0] if score_rows else 0
 
     # 点名
     rc_rows = execute_query(
-        """SELECT COUNT(*), SUM(CASE WHEN result='1' THEN 1 ELSE 0 END)
-           FROM rollcall_history WHERE student_name = ?""",
-        (student_name,),
+        f"""SELECT COUNT(*), SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END)
+            FROM rollcall_history
+            WHERE student_name=? AND grade=? AND class_name IN ({vph})
+              AND result IN ('correct','incorrect')""",
+        (student_name, student_grade, *variants),
     )
     rc_total = rc_rows[0][0] if rc_rows else 0
     rc_correct = rc_rows[0][1] if rc_rows else 0
@@ -499,8 +444,14 @@ async def exam_analytics(exam_id: int, request: Request):
 3. ⚠️ **薄弱知识点**
 4. 💡 **教学改进建议"""
 
-    task_id = await _call_ai_task("考试分析报告", prompt,
-                                  dedupe_key=f"ea:{exam_id}", max_concurrent=4)
+    scope_key = f"ea:{exam_id}"
+    task_id = await _call_ai_task(
+        "考试分析报告", prompt,
+        dedupe_key=scope_key, max_concurrent=4,
+        cache_kind="exam_report", cache_scope=scope_key,
+        created_by=user["username"],
+        cache_meta={"exam_title": exam["title"], "subject": exam["subject"]},
+    )
 
     return {
         "task_id": task_id,
@@ -523,133 +474,74 @@ async def teaching_suggestions(
     cls: str = Query(...),
     teacher_username: str = Query(""),
 ):
-    """AI 生成具体可操作的教学建议"""
+    """AI 生成具体可操作的教学建议（与班级学情共用同一份快照）"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
-
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
 
-    # 确定查询的教师（管理员可指定，教师只能看自己）
     query_teacher = teacher_username if (role == 0 and teacher_username) else username
+    from backend.analytics_service import build_class_snapshot
+    snapshot = build_class_snapshot(user, query_teacher, grade, cls)
+    scope = snapshot["scope"]
+    d = snapshot["data"]
+    if d["total_students"] == 0:
+        return {
+            "task_id": None,
+            "empty": True,
+            "message": "该班级暂无学生数据",
+            "data": d,
+            "sources": [],
+        }
 
-    # 班级号格式处理：users.class 存数字(1)，下拉框传"高一1班"
-    class_num = _extract_class_num(cls)
-    cls_display = class_num
-    cls_name = f"{grade}{cls_display}班"
-
-    # ── 收集数据 ──
-    # 1. 学生人数（兼容 class="1" 和 class="1班"）
-    student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
-        (grade, cls_display, f"{cls_display}班"),
-    )
-    total_students = student_count[0][0] if student_count else 0
-    if total_students == 0:
-        return {"suggestions": "暂无该班级的数据", "data": {}}
-
-    # 2. 积分统计
-    score_stats = execute_query(
-        """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
-                  COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-           FROM scores WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls_name),
-    )
-
-    # 3. 点名统计
-    rc_stats = execute_query(
-        """SELECT COUNT(*),
-                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-           FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls_name),
-    )
-
-    # 4. 考试统计
-    exam_stats = q_execute_query(
-        """SELECT e.title, e.subject, COUNT(ea.id) as attempt_count,
-                  COALESCE(AVG(ea.score),0) as avg_score,
-                  e.pass_score, e.total_score
-           FROM exams e
-           LEFT JOIN exam_attempts ea ON ea.exam_id = e.id
-           WHERE e.creator_username = ? AND e.status IN ('published', 'ended')
-           GROUP BY e.id
-           ORDER BY e.created_at DESC LIMIT 5""",
-        (query_teacher,),
-    )
-
-    # 5. 任务统计
-    task_stats = execute_query(
-        "SELECT COUNT(*) FROM tasks WHERE creator_username = ? AND status = 'active'",
-        (query_teacher,),
-    )
-    task_submissions = execute_query(
-        """SELECT COUNT(DISTINCT ts.student_username)
-           FROM task_submissions ts
-           JOIN tasks t ON ts.task_id = t.id
-           WHERE t.creator_username = ?""",
-        (query_teacher,),
-    )
-
-    sc = score_stats[0] if score_stats else (0, 0, 0, 0, 0)
-    rc = rc_stats[0] if rc_stats else (0, 0, 0)
-    rc_total = _safe_int(rc[0])
-    rc_correct = _safe_int(rc[1])
-
-    exam_text = ""
-    for e in exam_stats:
-        exam_text += f"- 《{e['title']}》({e['subject']}): 参考{e['attempt_count']}人, 平均分{round(_safe_float(e['avg_score']),1)}/{e['total_score']}\n"
-    if not exam_text:
-        exam_text = "暂无考试数据"
-
-    active_tasks = _safe_int(task_stats[0][0] if task_stats else 0)
-    submitted = _safe_int(task_submissions[0][0] if task_submissions else 0)
-
-    # ── 构建 Prompt ──
-    from backend.prompts.analytics import TEACHING_SUGGESTIONS_PROMPT
     from backend.permission_service import get_teacher_subjects
-
     subjects = get_teacher_subjects(query_teacher)
     subject = subjects[0] if subjects else "通用"
 
     ai_role = build_ai_role(grade=grade)
     prompt = f"{ai_role}" + TEACHING_SUGGESTIONS_PROMPT.format(
         grade=grade,
-        cls=cls_display,
+        cls=scope["class_num"],
         subject=subject,
-        total_students=total_students,
-        score_count=_safe_int(sc[0]),
-        score_total=_safe_int(sc[1]),
-        score_avg=round(_safe_float(sc[2]), 1),
-        score_max=_safe_int(sc[3]),
-        score_min=_safe_int(sc[4]),
-        rollcall_total=rc_total,
-        rollcall_correct=rc_correct,
-        rollcall_wrong=rc_total - rc_correct,
-        rollcall_rate=round(rc_correct / max(rc_total, 1) * 100, 1),
-        exam_text=exam_text,
-        active_tasks=active_tasks,
-        submitted_students=submitted,
-        task_rate=round(submitted / max(total_students, 1) * 100, 1),
+        total_students=d["total_students"],
+        score_count=d["score_count"],
+        score_total=d["score_total"],
+        score_avg=d["score_avg"],
+        score_max=d["score_max"],
+        score_min=d["score_min"],
+        rollcall_total=d["rollcall_total"],
+        rollcall_correct=d["rollcall_correct"],
+        rollcall_wrong=d["rollcall_wrong"],
+        rollcall_rate=d["rollcall_rate"],
+        exam_text=snapshot["exam_lines"],
+        active_tasks=d["active_tasks"],
+        submitted_students=d["submitted_students"],
+        task_rate=d["task_rate"],
     )
 
-    task_id = await _call_ai_task("AI 教学建议", prompt,
-                                  dedupe_key=f"ts:{query_teacher}:{grade}:{cls_display}",
-                                  max_concurrent=4)
-
+    scope_key = f"ts:{query_teacher}:{grade}:{cls}"
+    task_id = await _call_ai_task(
+        "AI 教学建议", prompt,
+        dedupe_key=scope_key,
+        max_concurrent=4,
+        cache_kind="teaching_suggestions",
+        cache_scope=scope_key,
+        created_by=username,
+        cache_meta={**d, "class_display": scope["display_name"]},
+    )
     data_summary = {
-        "total_students": total_students,
-        "score_avg": round(_safe_float(sc[2]), 1),
-        "rollcall_rate": round(rc_correct / max(rc_total, 1) * 100, 1),
-        "exam_count": len(exam_stats),
-        "task_rate": round(submitted / max(total_students, 1) * 100, 1),
+        "total_students": d["total_students"],
+        "score_avg": d["score_avg"],
+        "rollcall_rate": d["rollcall_rate"],
+        "exam_count": d["exam_count"],
+        "task_rate": d["task_rate"],
     }
-
     return {
         "task_id": task_id,
         "message": "AI 分析已提交，请稍后查询结果",
         "data": data_summary,
+        "sources": snapshot["sources"],
     }
 
 
@@ -706,115 +598,36 @@ async def export_class_overview_docx(
     grade: str = Query(...),
     cls: str = Query(...),
     teacher: str = Query(""),
+    report_id: int | None = Query(None, description="页面生成的报告 ID"),
 ):
-    """导出 AI 班级学情分析报告为 Word 文档"""
+    """导出班级学情报告；只读已生成报告，不再重复调用模型。"""
     import io
+    import urllib.parse
     from docx import Document
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
 
     user = get_current_user(request)
-    username = user["username"]
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
 
-    # E1b: 与 /export/scores 同口径 —— 管理员可指定教师, 教师固定为自己
     from backend.api.export_router import _resolve_export_teacher
     query_teacher = _resolve_export_teacher(user, teacher)
-    class_num = _extract_class_num(cls)
-    cls_variants = _class_name_variants(grade, cls) or [cls]
-    _ph = ",".join(["?"] * len(cls_variants))
+    scope_key = f"co:{query_teacher}:{grade}:{cls}"
+    from backend.ai_report_cache import get_latest_report, get_report
+    if report_id:
+        report = get_report(report_id, user["username"], role, kind="class_overview")
+    else:
+        report = get_latest_report("class_overview", scope_key)
+    if not report:
+        raise HTTPException(status_code=409, detail="请先在页面生成班级学情报告，再导出")
 
-    student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
-        (grade, class_num, f"{class_num}班"),
-    )
-    total_students = student_count[0][0] if student_count else 0
-    if total_students == 0:
-        raise HTTPException(status_code=400, detail="暂无该班级的学生数据")
-
-    score_stats = execute_query(
-        f"""SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
-                  COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-           FROM scores WHERE teacher_username = ? AND grade = ? AND class_name IN ({_ph})""",
-        (query_teacher, grade, *cls_variants),
-    )
-    rc_stats = execute_query(
-        f"""SELECT COUNT(*),
-                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-           FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name IN ({_ph})""",
-        (query_teacher, grade, *cls_variants),
-    )
-    exam_stats = q_execute_query(
-        """SELECT e.title, e.subject, COUNT(ea.id) as attempt_count,
-                  COALESCE(AVG(ea.score),0) as avg_score, e.pass_score, e.total_score
-           FROM exams e
-           LEFT JOIN exam_attempts ea ON ea.exam_id = e.id
-           WHERE e.status IN ('published', 'ended')
-           GROUP BY e.id ORDER BY e.created_at DESC LIMIT 5""",
-    )
-    task_stats = execute_query(
-        "SELECT COUNT(*) FROM tasks WHERE creator_username = ? AND status = 'active'",
-        (query_teacher,),
-    )
-    task_submissions = execute_query(
-        """SELECT COUNT(DISTINCT ts.student_username)
-           FROM task_submissions ts JOIN tasks t ON ts.task_id = t.id
-           WHERE t.creator_username = ?""",
-        (query_teacher,),
-    )
-
-    sc = score_stats[0] if score_stats else (0, 0, 0, 0, 0)
-    rc = rc_stats[0] if rc_stats else (0, 0, 0)
-
-    data_summary = {
-        "total_students": total_students,
-        "score_count": _safe_int(sc[0]), "score_total": _safe_int(sc[1]),
-        "score_avg": round(_safe_float(sc[2]), 1),
-        "score_max": _safe_int(sc[3]), "score_min": _safe_int(sc[4]),
-        "rollcall_total": _safe_int(rc[0]), "rollcall_correct": _safe_int(rc[1]),
-        "rollcall_wrong": _safe_int(rc[2]),
-        "exams": [{"title": e['title'], "subject": e['subject'],
-                    "attempts": _safe_int(e['attempt_count']),
-                    "avg_score": round(_safe_float(e['avg_score']), 1),
-                    "total_score": _safe_float(e['total_score'])}
-                   for e in exam_stats],
-        "active_tasks": _safe_int(task_stats[0][0] if task_stats else 0),
-        "submitted_students": _safe_int(task_submissions[0][0] if task_submissions else 0),
-    }
-
-    exam_lines = chr(10).join(
-        f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}"
-        for e in data_summary['exams']
-    )
-    ai_role = build_ai_role(grade=grade)
-    prompt = f"{ai_role}" + CLASS_ANALYSIS_PROMPT.format(
-        grade=grade, cls=cls, total_students=total_students,
-        score_count=data_summary['score_count'],
-        score_total=data_summary['score_total'],
-        score_avg=data_summary['score_avg'],
-        score_max=data_summary['score_max'],
-        rollcall_total=data_summary['rollcall_total'],
-        rollcall_correct=data_summary['rollcall_correct'],
-        rollcall_wrong=data_summary['rollcall_wrong'],
-        exam_lines=exam_lines,
-        active_tasks=data_summary['active_tasks'],
-        submitted_students=data_summary['submitted_students'],
-    )
-
-    api_key = _get_dashscope_api_key()
-    if not api_key:
-        raise HTTPException(status_code=400, detail="AI 功能不可用：请配置 API Key")
-
-    from backend.api.ai_service import call_ai_async
-    try:
-        report_text = await call_ai_async(prompt, api_key, use_kb=False)
-    except Exception as e:
-        logger.error(f"AI 学情分析调用失败: {e}")
-        raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
+    content = report.get("content") or ""
+    meta = report.get("meta") or {}
+    cls_name = meta.get("class_display") or f"{grade}{cls}班"
+    total_students = meta.get("total_students", 0)
 
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
@@ -822,24 +635,21 @@ async def export_class_overview_docx(
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
-    title = doc.add_heading(f"{grade}{cls}班 学情分析报告", level=1)
+    title = doc.add_heading(f"{cls_name} 学情分析报告", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
     info = doc.add_paragraph()
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = info.add_run(f"年级：{grade}  班级：{cls}班  学生人数：{total_students}")
+    run = info.add_run(f"年级：{grade}  班级：{cls}  学生人数：{total_students}")
     run.font.size = Pt(10)
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
     doc.add_paragraph()
-    _markdown_to_docx(doc, report_text)
+    _markdown_to_docx(doc, content)
 
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-
-    import urllib.parse
-    safe_filename = urllib.parse.quote(f"学情分析_{grade}{cls}班.docx")
+    safe_filename = urllib.parse.quote(f"学情分析_{cls_name}.docx")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -853,119 +663,36 @@ async def export_teaching_suggestions_docx(
     grade: str = Query(...),
     cls: str = Query(...),
     teacher_username: str = Query(""),
+    report_id: int | None = Query(None, description="页面生成的报告 ID"),
 ):
-    """导出 AI 教学建议为 Word 文档"""
+    """导出 AI 教学建议；只读已生成报告，不再重复调用模型。"""
     import io
+    import urllib.parse
     from docx import Document
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
 
     user = get_current_user(request)
-    username = user["username"]
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
 
-    query_teacher = teacher_username if (role == 0 and teacher_username) else username
-    class_num = _extract_class_num(cls)
-    cls_name = f"{grade}{class_num}班"
+    from backend.api.export_router import _resolve_export_teacher
+    query_teacher = _resolve_export_teacher(user, teacher_username)
+    scope_key = f"ts:{query_teacher}:{grade}:{cls}"
+    from backend.ai_report_cache import get_latest_report, get_report
+    if report_id:
+        report = get_report(report_id, user["username"], role, kind="teaching_suggestions")
+    else:
+        report = get_latest_report("teaching_suggestions", scope_key)
+    if not report:
+        raise HTTPException(status_code=409, detail="请先在页面生成 AI 教学建议，再导出")
 
-    student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
-        (grade, class_num, f"{class_num}班"),
-    )
-    total_students = student_count[0][0] if student_count else 0
-    if total_students == 0:
-        raise HTTPException(status_code=400, detail="暂无该班级的数据")
-
-    score_stats = execute_query(
-        """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
-                  COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-           FROM scores WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls_name),
-    )
-    rc_stats = execute_query(
-        """SELECT COUNT(*),
-                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-           FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls_name),
-    )
-    exam_stats = q_execute_query(
-        """SELECT e.title, e.subject, COUNT(ea.id) as attempt_count,
-                  COALESCE(AVG(ea.score),0) as avg_score, e.total_score
-           FROM exams e LEFT JOIN exam_attempts ea ON ea.exam_id = e.id
-           WHERE e.status IN ('published', 'ended')
-           GROUP BY e.id ORDER BY e.created_at DESC LIMIT 5""",
-    )
-    task_stats = execute_query(
-        "SELECT COUNT(*) FROM tasks WHERE creator_username = ? AND status = 'active'",
-        (query_teacher,),
-    )
-    task_submissions = execute_query(
-        """SELECT COUNT(DISTINCT ts.student_username)
-           FROM task_submissions ts JOIN tasks t ON ts.task_id = t.id
-           WHERE t.creator_username = ?""",
-        (query_teacher,),
-    )
-
-    sc = score_stats[0] if score_stats else (0, 0, 0, 0, 0)
-    rc = rc_stats[0] if rc_stats else (0, 0, 0)
-    rc_total = _safe_int(rc[0])
-    rc_correct = _safe_int(rc[1])
-    active_tasks = _safe_int(task_stats[0][0] if task_stats else 0)
-    submitted = _safe_int(task_submissions[0][0] if task_submissions else 0)
-
-    exam_text = ""
-    for e in exam_stats:
-        exam_text += f"- 《{e['title']}》({e['subject']}): 参考{e['attempt_count']}人, 平均分{round(_safe_float(e['avg_score']), 1)}/{e['total_score']}\n"
-
-    ai_role = build_ai_role(grade=grade)
-    prompt = f"""{ai_role}请根据以下教学数据，为{grade}{class_num}班生成具体的教学建议。
-
-【班级概况】
-年级：{grade}
-班级：{class_num}班
-学生人数：{total_students}
-
-【课堂积分】
-有积分记录学生数：{_safe_int(sc[0])}
-总积分：{_safe_int(sc[1])}
-平均积分：{round(_safe_float(sc[2]), 1)}
-
-【点名情况】
-总点名次数：{rc_total}
-回答正确：{rc_correct}
-正确率：{round(rc_correct / max(rc_total, 1) * 100, 1)}%
-
-【考试情况】
-{exam_text}
-
-【任务情况】
-活跃任务数：{active_tasks}
-已提交学生数：{submitted}
-提交率：{round(submitted / max(total_students, 1) * 100, 1)}%
-
-请生成以下内容（Markdown 格式）：
-1. 🎯 **教学重点建议**
-2. 📝 **课堂互动建议**
-3. ⏰ **任务安排建议**
-4. 💪 **分层教学建议**
-5. 📊 **预期改进目标**
-
-请直接以建议内容开头，语气亲切专业。"""
-
-    api_key = _get_dashscope_api_key()
-    if not api_key:
-        raise HTTPException(status_code=400, detail="AI 功能不可用：请配置 API Key")
-
-    from backend.api.ai_service import call_ai_async
-    try:
-        suggestions_text = await call_ai_async(prompt, api_key, use_kb=False)
-    except Exception as e:
-        logger.error(f"AI 教学建议调用失败: {e}")
-        raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
+    content = report.get("content") or ""
+    meta = report.get("meta") or {}
+    cls_name = meta.get("class_display") or f"{grade}{cls}班"
+    total_students = meta.get("total_students", 0)
 
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
@@ -973,24 +700,21 @@ async def export_teaching_suggestions_docx(
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
-    title = doc.add_heading(f"{grade}{class_num}班 AI 教学建议", level=1)
+    title = doc.add_heading(f"{cls_name} AI 教学建议", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
     info = doc.add_paragraph()
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = info.add_run(f"年级：{grade}  班级：{class_num}班  学生人数：{total_students}")
+    run = info.add_run(f"年级：{grade}  班级：{cls}  学生人数：{total_students}")
     run.font.size = Pt(10)
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
     doc.add_paragraph()
-    _markdown_to_docx(doc, suggestions_text)
+    _markdown_to_docx(doc, content)
 
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-
-    import urllib.parse
-    safe_filename = urllib.parse.quote(f"教学建议_{grade}{class_num}班.docx")
+    safe_filename = urllib.parse.quote(f"教学建议_{cls_name}.docx")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1002,9 +726,11 @@ async def export_teaching_suggestions_docx(
 async def export_exam_report_docx(
     exam_id: int,
     request: Request,
+    report_id: int | None = Query(None, description="页面生成的报告 ID"),
 ):
-    """导出 AI 考试分析报告为 Word 文档"""
+    """导出考试分析报告；只读已生成报告，不再重复调用模型。"""
     import io
+    import urllib.parse
     from docx import Document
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1019,89 +745,19 @@ async def export_exam_report_docx(
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
     exam = exam[0]
-    # E2b: 考试分析报告含每题正确答案, 仅限创建者或管理员
     from backend.api.export_router import _assert_can_view_exam
     _assert_can_view_exam(user, dict(exam))
 
-    attempts = q_execute_query(
-        "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded') AND auto_graded = 1 AND answers IS NOT NULL AND answers != '' ORDER BY score DESC",
-        (exam_id,),
-    )
-    questions = q_execute_query(
-        """SELECT qb.id, qb.type, qb.question_text, qb.correct_answer, qb.difficulty, qb.knowledge_points, eq.score as question_score
-           FROM exam_questions eq JOIN question_bank qb ON eq.question_id = qb.id
-           WHERE eq.exam_id = ? ORDER BY eq.sort_order""",
-        (exam_id,),
-    )
+    scope_key = f"ea:{exam_id}"
+    from backend.ai_report_cache import get_latest_report, get_report
+    if report_id:
+        report = get_report(report_id, user["username"], role, kind="exam_report")
+    else:
+        report = get_latest_report("exam_report", scope_key)
+    if not report:
+        raise HTTPException(status_code=409, detail="请先在页面生成考试分析报告，再导出")
 
-    scores = [a['score'] for a in attempts]
-    total_count = len(scores)
-    avg_score = round(sum(scores) / max(total_count, 1), 1)
-    pass_count = sum(1 for s in scores if s >= exam['pass_score'])
-    max_score = max(scores) if scores else 0
-    min_score = min(scores) if scores else 0
-
-    q_accuracy = []
-    for q in questions:
-        correct = 0
-        for a in attempts:
-            if a.get('answers'):
-                try:
-                    answers = json.loads(a['answers']) if isinstance(a['answers'], str) else a['answers']
-                except (json.JSONDecodeError, TypeError):
-                    answers = {}
-            else:
-                answers = {}
-            q_key = str(q['id'])
-            ans_entry = answers.get(q_key, {})
-            if isinstance(ans_entry, dict):
-                if ans_entry.get('is_correct'):
-                    correct += 1
-            elif ans_entry == q['correct_answer']:
-                correct += 1
-        rate = round(correct / max(total_count, 1) * 100, 1)
-        q_accuracy.append({
-            "id": q['id'], "type": q['type'], "text": q['question_text'][:80],
-            "correct_rate": rate, "difficulty": q.get('difficulty', 'medium'),
-            "knowledge_points": q.get('knowledge_points', ''),
-        })
-
-    weak_points = [q for q in q_accuracy if q['correct_rate'] < 60]
-
-    ai_role = build_ai_role(subject=exam['subject'], grade=exam.get('grade', ''))
-    prompt = f"""{ai_role}请根据以下考试数据，生成专业的考试分析报告。
-
-考试名称：{exam['title']}
-科目：{exam['subject']}
-参考人数：{total_count}
-平均分：{avg_score}/{exam['total_score']}
-最高分：{max_score}
-最低分：{min_score}
-及格人数：{pass_count}/{total_count}（及格线{exam['pass_score']}分）
-
-各题正确率（正确率 < 60% 的为薄弱题）：
-{chr(10).join(f'- 第{i+1}题 ({q["type"]}, {q["difficulty"]}): 正确率{q["correct_rate"]}%' + (f' [知识点: {q["knowledge_points"]}]' if q['knowledge_points'] else '') for i, q in enumerate(q_accuracy))}
-
-薄弱知识点：
-{chr(10).join(('- ' + (q["knowledge_points"] or (f"第{q['id']}题"))) for q in weak_points) if weak_points else '无显著薄弱点'}
-
-请生成（Markdown 格式）：
-1. 📊 **总体情况**
-2. 📈 **分数分布分析**
-3. ⚠️ **薄弱知识点**
-4. 💡 **教学改进建议"""
-
-    api_key = _get_dashscope_api_key()
-    if not api_key:
-        raise HTTPException(status_code=400, detail="AI 功能不可用：请配置 API Key")
-
-    from backend.api.ai_service import call_ai_async
-    try:
-        report_text = await call_ai_async(prompt, api_key, use_kb=False)
-    except Exception as e:
-        logger.error(f"AI 考试分析调用失败: {e}")
-        raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
-
+    content = report.get("content") or ""
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
     style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
@@ -1110,25 +766,21 @@ async def export_exam_report_docx(
 
     title = doc.add_heading(f"考试分析报告 - {exam['title']}", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
     info = doc.add_paragraph()
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = info.add_run(f"科目：{exam['subject']}  参考人数：{total_count}  平均分：{avg_score}/{exam['total_score']}")
+    run = info.add_run(f"科目：{exam['subject']}  生成时间：{report.get('created_at', '')}")
     run.font.size = Pt(10)
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
     doc.add_paragraph()
-    _markdown_to_docx(doc, report_text)
+    _markdown_to_docx(doc, content)
 
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-
-    import urllib.parse
     safe_filename = urllib.parse.quote(f"考试分析_{exam['title']}.docx")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
     )
-

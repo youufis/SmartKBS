@@ -9,7 +9,7 @@ import {
   TeamOutlined, PlusOutlined, PlayCircleOutlined,
   StopOutlined, MessageOutlined, UserOutlined,
   FieldTimeOutlined, RobotOutlined, BulbOutlined,
-  ReloadOutlined, DeleteOutlined, EyeOutlined,
+  ReloadOutlined, DeleteOutlined, EyeOutlined, EditOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -56,6 +56,9 @@ const DiscussionPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
+  const [editLoading, setEditLoading] = useState(false)
   const [aiModal, setAiModal] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [detailModal, setDetailModal] = useState<any>(null)
@@ -64,9 +67,16 @@ const DiscussionPage: React.FC = () => {
   const [mPage, setMPage] = useState(1)
   const [activeTab, setActiveTab] = useState('all')
   const [createForm] = Form.useForm()
+  const [editForm] = Form.useForm()
   const [aiForm] = Form.useForm()
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
   const [discussionScope, setDiscussionScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes',
+    target_grade: '',
+    target_class: '',
+    target_users: '',
+  })
+  const [editScope, setEditScope] = useState<ActivityScopeValue>({
     target_scope: 'teacher_classes',
     target_grade: '',
     target_class: '',
@@ -122,6 +132,71 @@ const DiscussionPage: React.FC = () => {
       message.error(t('createFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     } finally {
       setCreateLoading(false)
+    }
+  }
+
+  // 编辑讨论
+  const handleEdit = async (disc: any) => {
+    try {
+      const { data } = await apiClient.get(`/api/interaction/discussions/${disc.id}`)
+      setEditing(data)
+      setEditScope({
+        target_scope: data.target_scope || 'teacher_classes',
+        target_grade: data.target_grade || data.grade || '',
+        target_class: data.target_class || data.classes || '',
+        target_users: data.target_users || '',
+      })
+      editForm.setFieldsValue({
+        title: data.title,
+        description: data.description,
+        subject: data.subject,
+        group_mode: data.group_mode || 'none',
+        group_count: data.group_count || 4,
+        members_per_group: data.members_per_group || 4,
+        ai_role: data.ai_role || 'mixed',
+        duration_minutes: data.duration_minutes || 30,
+        require_summary: !!data.require_summary,
+      })
+      setEditOpen(true)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('getDetailFail'))
+    }
+  }
+
+  const handleUpdate = async () => {
+    if (!editing) return
+    try {
+      const values = await editForm.validateFields()
+      setEditLoading(true)
+      const payload: any = {
+        title: values.title,
+        description: values.description,
+        subject: values.subject,
+        ai_role: values.ai_role,
+        duration_minutes: values.duration_minutes,
+        require_summary: !!values.require_summary,
+      }
+      if (editing.status === 'pending') {
+        Object.assign(payload, {
+          group_mode: values.group_mode,
+          group_count: values.group_mode === 'random' ? values.group_count : 0,
+          members_per_group: values.members_per_group || 4,
+          target_scope: editScope.target_scope,
+          target_grade: editScope.target_grade,
+          target_class: editScope.target_class,
+          target_users: editScope.target_users,
+        })
+      }
+      await apiClient.put(`/api/interaction/discussions/${editing.id}`, payload)
+      message.success(t('updateSuccess'))
+      setEditOpen(false)
+      setEditing(null)
+      loadDiscussions()
+    } catch (err: any) {
+      if (err?.errorFields) return
+      message.error(t('updateFailedWithReason', { reason: err?.response?.data?.detail || err?.message }))
+    } finally {
+      setEditLoading(false)
     }
   }
 
@@ -287,7 +362,7 @@ const DiscussionPage: React.FC = () => {
       <Form.Item label={t('targetScope')}>
         <ActivityScopeSelector value={discussionScope} onChange={setDiscussionScope} />
       </Form.Item>
-      <Form.Item name="require_summary" label={t('submitRequirement')} valuePropName="checked" initialValue={false}>
+      <Form.Item name="require_summary" label={t('submitRequirement')} initialValue={false}>
         <Select>
           <Select.Option value={false}>{t('noSubmit')}</Select.Option>
           <Select.Option value={true}>{t('groupSubmit')}</Select.Option>
@@ -338,6 +413,9 @@ const DiscussionPage: React.FC = () => {
           </Tooltip>
           {isTeacherOrAdmin ? (
             <>
+              <Tooltip title={t('editDiscussion')}>
+                <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(disc)} />
+              </Tooltip>
               <ResetActivityButton activityType="discussion" activityId={disc.id}
                 iconOnly stopPropagation onSuccess={loadDiscussions} />
               {disc.status === 'pending' && (
@@ -497,6 +575,7 @@ const DiscussionPage: React.FC = () => {
 
       {/* 创建讨论弹窗 */}
       <Modal
+        maskClosable={false}
         title={t('createDiscussionTitle')}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
@@ -506,6 +585,81 @@ const DiscussionPage: React.FC = () => {
         okText={t('createDisc')}
       >
         {renderCreateForm()}
+      </Modal>
+
+      {/* 编辑讨论弹窗 */}
+      <Modal
+        maskClosable={false}
+        title={t('editDiscussion')}
+        open={editOpen}
+        onCancel={() => { setEditOpen(false); setEditing(null) }}
+        onOk={handleUpdate}
+        confirmLoading={editLoading}
+        width={640}
+        okText={t('save')}
+      >
+        {editing && (
+          <Form form={editForm} layout="vertical" style={{ maxWidth: 600 }}>
+            <Form.Item name="title" label={t('discussionTopic')} rules={[{ required: true, message: t('discussionTopicRequired') }]}>
+              <Input placeholder={t('discussionTopicPlaceholder')} />
+            </Form.Item>
+            <Form.Item name="description" label={t('discussionDescription')}>
+              <TextArea rows={4} placeholder={t('discussionDescPlaceholder')} />
+            </Form.Item>
+            <Form.Item name="subject" label={t('subject')}>
+              <Select placeholder={t('selectSubject')} allowClear options={subjectOptions.map(s => ({ value: s, label: s }))} />
+            </Form.Item>
+            <Form.Item name="group_mode" label={t('groupMode')}
+              extra={editing.status !== 'pending' ? t('groupingLocked') : undefined}>
+              <Select disabled={editing.status !== 'pending'}>
+                <Select.Option value="none">{t('noGroupMode')}</Select.Option>
+                <Select.Option value="auto">{t('autoGroup')}</Select.Option>
+                <Select.Option value="random">{t('randomGroup')}</Select.Option>
+              </Select>
+            </Form.Item>
+            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.group_mode !== cur.group_mode}>
+              {({ getFieldValue }) => {
+                const mode = getFieldValue('group_mode')
+                if (mode === 'none') return null
+                return mode === 'auto' ? (
+                  <Form.Item name="members_per_group" label={t('membersPerGroup')}>
+                    <InputNumber min={2} max={10} style={{ width: '100%' }} disabled={editing.status !== 'pending'} />
+                  </Form.Item>
+                ) : (
+                  <Form.Item name="group_count" label={t('groupCount')}>
+                    <InputNumber min={1} max={50} style={{ width: '100%' }} disabled={editing.status !== 'pending'} />
+                  </Form.Item>
+                )
+              }}
+            </Form.Item>
+            <Form.Item name="ai_role" label={t('aiRole')}>
+              <Select>
+                <Select.Option value="observer">{t('aiRoleObserverFull')}</Select.Option>
+                <Select.Option value="guide">{t('aiRoleGuideFull')}</Select.Option>
+                <Select.Option value="proactive">{t('aiRoleProactiveFull')}</Select.Option>
+                <Select.Option value="judge">{t('aiRoleJudgeFull')}</Select.Option>
+                <Select.Option value="mixed">{t('aiRoleMixedFull')}</Select.Option>
+              </Select>
+            </Form.Item>
+            <Form.Item name="duration_minutes" label={t('durationMinutes')}>
+              <InputNumber min={1} max={120} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label={t('targetScope')} extra={editing.status !== 'pending' ? t('scopeLocked') : undefined}>
+              {editing.status === 'pending' ? (
+                <ActivityScopeSelector value={editScope} onChange={setEditScope} />
+              ) : (
+                <ScopeTag scope={editing.target_scope} grade={editing.target_grade}
+                  classes={editing.target_class} users={editing.target_users} />
+              )}
+            </Form.Item>
+            <Form.Item name="require_summary" label={t('submitRequirement')}>
+              <Select>
+                <Select.Option value={false}>{t('noSubmit')}</Select.Option>
+                <Select.Option value={true}>{t('groupSubmit')}</Select.Option>
+              </Select>
+            </Form.Item>
+          </Form>
+        )}
       </Modal>
 
       {/* 讨论详情弹窗（教师） */}

@@ -8,7 +8,7 @@ import os
 import io
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -44,12 +44,21 @@ from backend.question_media import (
     url_for,
 )
 from backend.svg_safety import extract_svg, is_usable_svg, sanitize_svg
+from backend.subject_config import get_default_subject, require_subject
 
 # 复用聊天模块的 API Key 获取函数
 from backend.api.chat_router import get_api_keys
 # 注：本模块不再注入技能 —— 出题要求纯 JSON、SVG 要求纯代码，技能段的"结构化输出"指令会破坏这两种格式
 
 router = APIRouter()
+
+
+def _question_subject(subject: str) -> str:
+    """题库学科只允许当前课程配置中的学科（兼容历史别名）。"""
+    try:
+        return require_subject(subject)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── 请求/响应模型 ──
@@ -75,12 +84,24 @@ class QuestionUpdate(BaseModel):
     subject: str | None = None       # Q8: 科目挂错应可修正
 
 
+class CreatorTransferRequest(BaseModel):
+    from_username: str
+    to_username: str
+    question_ids: list[int] | None = None
+
+
+class CreatorArchiveRequest(BaseModel):
+    from_username: str
+    question_ids: list[int] | None = None
+
+
 _VALID_SOURCES = {"manual", "ai", "quiz_import", "batch_import", "exam_import"}
 
 
 class ImportQuestion(BaseModel):
     """导入题目到题库请求"""
     type: str = "single"
+    subject: str = ""
     question_text: str
     options: str | list[Any] | dict[str, Any] | None = None
     correct_answer: str = ""
@@ -143,6 +164,7 @@ async def import_question(req: ImportQuestion, request: Request):
     # 校验 source 字段
     if req.source not in _VALID_SOURCES:
         raise HTTPException(status_code=400, detail=f"无效的 source 值: {req.source}，允许值: {', '.join(sorted(_VALID_SOURCES))}")
+    subject = _question_subject(req.subject or get_default_subject())
 
     # 获取用户姓名
     from backend.database import execute_query as user_query
@@ -170,13 +192,13 @@ async def import_question(req: ImportQuestion, request: Request):
     qid = execute_insert(
         """INSERT INTO question_bank
            (type, question_text, options, correct_answer, explanation,
-            knowledge_points, difficulty, creator_username, creator_name,
+            knowledge_points, subject, difficulty, creator_username, creator_name,
             source, status, created_at, updated_at,
             svg_content, has_svg, media_placeholders, media_files)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?,
                    ?, ?, ?, ?)""",
         (req.type, req.question_text, options_str, req.correct_answer,
-         req.explanation, req.knowledge_points, req.difficulty,
+         req.explanation, req.knowledge_points, subject, req.difficulty,
          username, creator_name, req.source, now, now,
          svg_content, has_svg, media_placeholders_str, media_files_str),
     )
@@ -426,6 +448,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    subject = _question_subject(req.subject)
 
     if not req.knowledge_points.strip():
         raise HTTPException(status_code=400, detail="请输入知识点")
@@ -444,14 +467,14 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
     # 构造 Prompt
     type_desc = QUESTION_TYPE_MAP.get(req.question_type, "单选题")
-    prompt = _build_generate_prompt(req.subject, req.knowledge_points, type_desc, req.count, req.difficulty, username)
+    prompt = _build_generate_prompt(subject, req.knowledge_points, type_desc, req.count, req.difficulty, username)
     # 注意：不注入技能 — 技能的结构化输出指令与纯 JSON 输出要求冲突
-    logger.info(f"开始调用AI生成试题: subject={req.subject}, type={req.question_type}, count={req.count}")
+    logger.info(f"开始调用AI生成试题: subject={subject}, type={req.question_type}, count={req.count}")
 
     # 调用 AI
     try:
         result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True,
-                                              kb_query=f"{req.subject} {req.knowledge_points}",
+                                              kb_query=f"{subject} {req.knowledge_points}",
                                               max_tokens=_estimate_generate_max_tokens(req.count))
     except HTTPException:
         raise
@@ -473,7 +496,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
     # 入库统一走 question_factory（与含配图版同一口径、同一实现，见其注释）
     outcome = question_factory.persist_questions(
         questions[:req.count],
-        subject=req.subject,
+        subject=subject,
         source="ai",
         username=username,
         creator_name=creator_name,
@@ -527,6 +550,7 @@ async def generate_questions_async(req: GenerateRequest, request: Request):
     username = user["username"]
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    _question_subject(req.subject)
     if not req.knowledge_points.strip():
         raise HTTPException(status_code=400, detail="请输入知识点")
     if req.count < 1 or req.count > 50:
@@ -710,6 +734,9 @@ async def list_questions(
     creator: str = Query(None, description="筛选创建者"),
     difficulty: str = Query(None, description="筛选难度"),
     subject: str = Query(None, description="筛选科目"),
+    knowledge_points: str = Query(None, description="筛选知识点（多个用逗号/顿号分隔）"),
+    start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
 ):
@@ -743,6 +770,28 @@ async def list_questions(
     if subject:
         conditions.append("q.subject = ?")
         params.append(subject)
+    if knowledge_points:
+        from backend.question_select import split_tags
+        kps = split_tags(knowledge_points)
+        if kps:
+            conditions.append(
+                "(" + " OR ".join("q.knowledge_points LIKE ? ESCAPE '!'" for _ in kps) + ")"
+            )
+            params.extend(f"%{_esc_like(kp)}%" for kp in kps)
+    if start_date:
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="开始日期格式应为 YYYY-MM-DD")
+        conditions.append("q.created_at >= ?")
+        params.append(f"{start_date} 00:00:00")
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="结束日期格式应为 YYYY-MM-DD")
+        conditions.append("q.created_at < ?")
+        params.append(end_dt.strftime("%Y-%m-%d 00:00:00"))
 
     where = " AND ".join(conditions)
 
@@ -782,6 +831,457 @@ async def list_questions(
         "page": page,
         "page_size": page_size,
     }
+
+
+def _question_analytics_meta() -> dict[str, Any]:
+    """题库统计页的筛选元数据（学科/创建者/题型/时间范围）。"""
+    from backend.question_select import subject_family
+    from backend.database import execute_query_dict as main_query_dict
+
+    subject_rows = execute_query(
+        "SELECT DISTINCT subject FROM question_bank WHERE status='active'"
+    )
+    subject_labels = []
+    for r in subject_rows:
+        raw = str((r or {}).get("subject") or "").strip()
+        if raw.isdigit():
+            raw = ""
+        fam = subject_family(raw)
+        label = "信息科技" if fam == "信息" else (fam or "未分类")
+        if label not in subject_labels:
+            subject_labels.append(label)
+
+    creator_rows = execute_query(
+        "SELECT creator_username, MAX(COALESCE(creator_name,'')) AS creator_name, COUNT(*) AS cnt "
+        "FROM question_bank WHERE status='active' GROUP BY creator_username"
+    )
+    usernames = [str(r.get("creator_username") or "") for r in creator_rows if r.get("creator_username")]
+    names: dict[str, str] = {}
+    roles: dict[str, int] = {}
+    if usernames:
+        ph = ",".join("?" for _ in usernames)
+        for u in main_query_dict(
+            f"SELECT username, COALESCE(NULLIF(name,''), username) AS display_name, role "
+            f"FROM users WHERE username IN ({ph})",
+            tuple(usernames),
+        ):
+            names[str(u["username"])] = str(u.get("display_name") or u["username"])
+            try:
+                roles[str(u["username"])] = int(u.get("role") or 0)
+            except (TypeError, ValueError):
+                roles[str(u["username"])] = 2
+    creators = [
+        {
+            "username": str(r.get("creator_username") or ""),
+            "name": names.get(str(r.get("creator_username") or ""))
+                    or str(r.get("creator_name") or r.get("creator_username") or ""),
+            "role": roles.get(str(r.get("creator_username") or ""), 2),
+            "count": int(r.get("cnt") or 0),
+        }
+        for r in creator_rows
+    ]
+    creators.sort(key=lambda x: (-x["count"], x["name"]))
+
+    type_rows = execute_query(
+        "SELECT DISTINCT type FROM question_bank WHERE status='active'"
+    )
+    date_row = execute_query_one(
+        "SELECT MIN(created_at) AS min_date, MAX(created_at) AS max_date "
+        "FROM question_bank WHERE status='active'"
+    ) or {}
+    return {
+        "subjects": sorted(subject_labels),
+        "creators": creators,
+        "types": sorted(str(r.get("type") or "") for r in type_rows if r.get("type")),
+        "min_date": str(date_row.get("min_date") or "")[:10],
+        "max_date": str(date_row.get("max_date") or "")[:10],
+    }
+
+
+@router.get("/analytics/meta", summary="题库统计筛选元数据")
+async def question_analytics_meta(request: Request):
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="学生无权访问题库统计")
+    return _question_analytics_meta()
+
+
+@router.get("/analytics", summary="题库统计分析")
+async def question_analytics(
+    request: Request,
+    subject: str = Query("", description="学科"),
+    type: str = Query("", description="题型"),
+    difficulty: str = Query("", description="难度"),
+    creator: str = Query("", description="创建者用户名"),
+    knowledge_points: str = Query("", description="知识点（多个用逗号/顿号分隔）"),
+    keyword: str = Query("", description="题干/知识点关键词"),
+    start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
+):
+    """题库结构统计：题型、难度、学科、知识点、创建者与质量检查。"""
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="学生无权访问题库统计")
+
+    from backend.question_select import family_members, split_tags, subject_family, norm as norm_question
+    from backend.subject_config import normalize_subject
+
+    conds = ["status='active'"]
+    params: list[Any] = []
+    if subject:
+        members = family_members(subject)
+        if members:
+            conds.append(f"subject IN ({','.join('?' for _ in members)})")
+            params.extend(members)
+        else:
+            conds.append("subject=?")
+            params.append(subject)
+    if type:
+        conds.append("type=?")
+        params.append(type)
+    if difficulty:
+        conds.append("difficulty=?")
+        params.append(difficulty)
+    if creator:
+        conds.append("creator_username=?")
+        params.append(creator)
+    if keyword:
+        kw = f"%{_esc_like(keyword)}%"
+        conds.append("(question_text LIKE ? ESCAPE '!' OR knowledge_points LIKE ? ESCAPE '!')")
+        params.extend([kw, kw])
+    if start_date:
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="开始日期格式应为 YYYY-MM-DD")
+        conds.append("created_at >= ?")
+        params.append(f"{start_date} 00:00:00")
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="结束日期格式应为 YYYY-MM-DD")
+        conds.append("created_at < ?")
+        params.append(end_dt.strftime("%Y-%m-%d 00:00:00"))
+
+    rows = execute_query(
+        "SELECT id, type, question_text, options, correct_answer, explanation, "
+        "knowledge_points, subject, difficulty, creator_username, creator_name, "
+        "source, has_svg, media_placeholders, media_files, created_at "
+        f"FROM question_bank WHERE {' AND '.join(conds)}",
+        tuple(params),
+    )
+
+    wanted_kps = {t.strip() for t in split_tags(knowledge_points) if t.strip()}
+    if wanted_kps:
+        rows = [
+            row for row in rows
+            if wanted_kps.intersection(set(split_tags(row.get("knowledge_points"))))
+        ]
+    total = len(rows)
+    type_counts: dict[str, int] = {}
+    difficulty_counts: dict[str, int] = {}
+    subject_counts: dict[str, int] = {}
+    creator_stats: dict[str, dict[str, Any]] = {}
+    kp_counts: dict[str, int] = {}
+    timeline_counts: dict[str, int] = {}
+    quality = {
+        "no_knowledge_point": 0, "no_explanation": 0, "no_media": 0,
+        "pending_media": 0, "no_answer": 0, "option_issues": 0,
+        "duplicate_groups": 0, "duplicate_questions": 0, "invalid_subject": 0,
+    }
+    with_kp = with_explanation = with_media = 0
+    ai_count = manual_count = 0
+    text_groups: dict[tuple[str, str, str], int] = {}
+
+    def _json_value(v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v) if v else None
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return v
+
+    for row in rows:
+        qtype = str(row.get("type") or "unknown")
+        type_counts[qtype] = type_counts.get(qtype, 0) + 1
+        diff = str(row.get("difficulty") or "unknown")
+        difficulty_counts[diff] = difficulty_counts.get(diff, 0) + 1
+
+        raw_subject = str(row.get("subject") or "").strip()
+        if raw_subject.isdigit():
+            raw_subject = ""
+        if not normalize_subject(raw_subject):
+            quality["invalid_subject"] += 1
+        fam = subject_family(raw_subject)
+        subject_label = "信息科技" if fam == "信息" else (fam or "未分类")
+        subject_counts[subject_label] = subject_counts.get(subject_label, 0) + 1
+
+        creator = str(row.get("creator_username") or "unknown")
+        cs = creator_stats.setdefault(creator, {
+            "username": creator,
+            "name": str(row.get("creator_name") or creator),
+            "count": 0, "types": {}, "subjects": {},
+            "last_created_at": "",
+        })
+        cs["count"] += 1
+        cs["types"][qtype] = cs["types"].get(qtype, 0) + 1
+        cs["subjects"][subject_label] = cs["subjects"].get(subject_label, 0) + 1
+        created = str(row.get("created_at") or "")
+        if created > cs["last_created_at"]:
+            cs["last_created_at"] = created
+
+        tags = {
+            t.strip() for t in split_tags(row.get("knowledge_points"))
+            if t.strip() and len(t.strip()) <= 50
+        }
+        if tags:
+            with_kp += 1
+            for tag in tags:
+                kp_counts[tag] = kp_counts.get(tag, 0) + 1
+        else:
+            quality["no_knowledge_point"] += 1
+
+        if str(row.get("explanation") or "").strip():
+            with_explanation += 1
+        else:
+            quality["no_explanation"] += 1
+        if not str(row.get("correct_answer") or "").strip():
+            quality["no_answer"] += 1
+
+        media = _json_value(row.get("media_files")) or []
+        placeholders = _json_value(row.get("media_placeholders")) or []
+        has_media = bool(int(row.get("has_svg") or 0)) or bool(media)
+        if has_media:
+            with_media += 1
+        else:
+            quality["no_media"] += 1
+            if placeholders:
+                quality["pending_media"] += 1
+
+        if qtype in ("single", "multiple", "true_false"):
+            options = _json_value(row.get("options"))
+            if not isinstance(options, (dict, list)) or len(options) < 2:
+                quality["option_issues"] += 1
+
+        source = str(row.get("source") or "")
+        if source == "ai":
+            ai_count += 1
+        elif source == "manual":
+            manual_count += 1
+
+        day = created[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", created) else "unknown"
+        timeline_counts[day] = timeline_counts.get(day, 0) + 1
+        norm_text = norm_question(row.get("question_text"))
+        if norm_text:
+            key = (qtype, norm_text, str(row.get("correct_answer") or ""))
+            text_groups[key] = text_groups.get(key, 0) + 1
+
+    duplicate_groups = [n for n in text_groups.values() if n > 1]
+    quality["duplicate_groups"] = len(duplicate_groups)
+    quality["duplicate_questions"] = sum(n - 1 for n in duplicate_groups)
+
+    def _pct(n: int) -> float:
+        return round(n / total * 100, 1) if total else 0.0
+
+    by_type = [
+        {"type": k, "count": v, "percent": _pct(v)}
+        for k, v in sorted(type_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    by_difficulty = [
+        {"difficulty": k, "count": v, "percent": _pct(v)}
+        for k, v in sorted(difficulty_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    by_subject = [
+        {"subject": k, "count": v, "percent": _pct(v)}
+        for k, v in sorted(subject_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    kp_sorted = sorted(kp_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    knowledge_points = [
+        {"name": k, "count": v, "percent": _pct(v)}
+        for k, v in kp_sorted[:300]
+    ]
+    by_creator = sorted(
+        creator_stats.values(),
+        key=lambda x: (-x["count"], x["name"], x["username"]),
+    )
+    timeline = [
+        {"date": k, "count": v}
+        for k, v in sorted(timeline_counts.items())
+    ]
+    meta = _question_analytics_meta()
+    name_by_user = {c["username"]: c["name"] for c in meta.get("creators", [])}
+    role_by_user = {c["username"]: int(c.get("role", 2)) for c in meta.get("creators", [])}
+    non_teacher_created = 0
+    for c in by_creator:
+        c["name"] = name_by_user.get(c["username"], c["name"])
+        c["role"] = role_by_user.get(c["username"], 2)
+        if c["role"] not in (0, 1):
+            non_teacher_created += int(c["count"] or 0)
+    quality["non_teacher_created"] = non_teacher_created
+
+    return {
+        "summary": {
+            "total": total,
+            "type_count": len(type_counts),
+            "knowledge_point_count": len(kp_counts),
+            "creator_count": len(creator_stats),
+            "with_knowledge_point": with_kp,
+            "knowledge_point_coverage": _pct(with_kp),
+            "with_explanation": with_explanation,
+            "with_media": with_media,
+            "media_coverage": _pct(with_media),
+            "ai_count": ai_count,
+            "manual_count": manual_count,
+            "non_teacher_created": non_teacher_created,
+            "invalid_subject": quality["invalid_subject"],
+        },
+        "by_type": by_type,
+        "by_difficulty": by_difficulty,
+        "by_subject": by_subject,
+        "by_creator": by_creator,
+        "knowledge_points": knowledge_points,
+        "knowledge_point_total": len(kp_counts),
+        "timeline": timeline,
+        "quality": quality,
+        "meta": meta,
+    }
+
+
+@router.get("/creator-audit", summary="题库创建者归属审计")
+async def question_creator_audit(
+    request: Request,
+    creator: str = Query("", description="查看指定创建者的题目"),
+):
+    """管理员查看创建者当前角色与异常归属；可按创建者展开题目。"""
+    user = get_current_user(request)
+    if user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="仅管理员可查看创建者审计")
+
+    from backend.database import execute_query_dict as main_query_dict
+    meta = _question_analytics_meta()
+    anomalies = [c for c in meta.get("creators", []) if int(c.get("role", 2)) not in (0, 1)]
+    targets = [
+        {"username": r["username"], "name": r["display_name"] or r["username"],
+         "role": int(r["role"] or 0)}
+        for r in main_query_dict(
+            "SELECT username, COALESCE(NULLIF(name,''), username) AS display_name, role "
+            "FROM users WHERE role IN (0,1) AND IFNULL(status,'active')='active' "
+            "ORDER BY role, username"
+        )
+    ]
+    questions = []
+    if creator:
+        questions = execute_query(
+            "SELECT id, type, subject, status, created_at, substr(question_text,1,120) AS question_text "
+            "FROM question_bank WHERE creator_username=? ORDER BY id DESC",
+            (creator,),
+        )
+    return {
+        "creators": meta.get("creators", []),
+        "anomalies": anomalies,
+        "targets": targets,
+        "questions": questions,
+    }
+
+
+def _assert_admin_operator(user: dict, action: str = "操作") -> None:
+    if user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail=f"仅管理员可{action}题库创建者归属")
+
+
+def _audit_question_scope(from_username: str, question_ids: list[int] | None) -> list[dict]:
+    conds = ["creator_username=?", "status='active'"]
+    params: list[Any] = [from_username]
+    if question_ids:
+        ids = list(dict.fromkeys(int(x) for x in question_ids if int(x) > 0))[:1000]
+        if not ids:
+            return []
+        conds.append(f"id IN ({','.join('?' for _ in ids)})")
+        params.extend(ids)
+    return execute_query(
+        "SELECT id FROM question_bank WHERE " + " AND ".join(conds),
+        tuple(params),
+    )
+
+
+@router.post("/creator-audit/transfer", summary="转移题库题目归属")
+async def transfer_question_creator(req: CreatorTransferRequest, request: Request):
+    """管理员把某创建者的有效题目转移给教师/管理员，并留痕。"""
+    user = get_current_user(request)
+    _assert_admin_operator(user, "转移")
+    from_username = req.from_username.strip()
+    to_username = req.to_username.strip()
+    if not from_username or not to_username:
+        raise HTTPException(status_code=400, detail="请指定原创建者和目标创建者")
+    if from_username == to_username:
+        raise HTTPException(status_code=400, detail="原创建者和目标创建者不能相同")
+
+    from backend.database import execute_query as main_query
+    target = main_query(
+        "SELECT name FROM users WHERE username=? AND role IN (0,1) "
+        "AND IFNULL(status,'active')='active'",
+        (to_username,),
+    )
+    if not target:
+        raise HTTPException(status_code=400, detail="目标创建者不是有效的教师或管理员")
+    target_name = str(target[0][0] or to_username)
+
+    rows = _audit_question_scope(from_username, req.question_ids)
+    ids = [int(r["id"]) for r in rows]
+    if not ids:
+        return {"success": True, "transferred": 0, "message": "没有需要转移的有效题目"}
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = ",".join("?" for _ in ids)
+    execute_update(
+        f"UPDATE question_bank SET creator_username=?, creator_name=?, updated_at=? "
+        f"WHERE id IN ({ph}) AND status='active'",
+        (to_username, target_name, now) + tuple(ids),
+    )
+    execute_insert(
+        "INSERT INTO question_bank_audit "
+        "(action, from_username, to_username, question_ids, affected_count, operator, created_at) "
+        "VALUES ('transfer', ?, ?, ?, ?, ?, ?)",
+        (from_username, to_username, ",".join(str(i) for i in ids), len(ids),
+         user.get("username", ""), now),
+    )
+    logger.info(
+        f"[题库审计] 管理员 {user.get('username')} 将 {from_username} 的 "
+        f"{len(ids)} 道题转移给 {to_username}"
+    )
+    return {"success": True, "transferred": len(ids), "target": to_username}
+
+
+@router.post("/creator-audit/archive", summary="归档异常创建者题目")
+async def archive_question_creator(req: CreatorArchiveRequest, request: Request):
+    """管理员归档某创建者的有效题目（逻辑删除，保留审计记录）。"""
+    user = get_current_user(request)
+    _assert_admin_operator(user, "归档")
+    from_username = req.from_username.strip()
+    if not from_username:
+        raise HTTPException(status_code=400, detail="请指定原创建者")
+    rows = _audit_question_scope(from_username, req.question_ids)
+    ids = [int(r["id"]) for r in rows]
+    if not ids:
+        return {"success": True, "archived": 0, "message": "没有需要归档的有效题目"}
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = ",".join("?" for _ in ids)
+    execute_update(
+        f"UPDATE question_bank SET status='deleted', updated_at=? "
+        f"WHERE id IN ({ph}) AND status='active'",
+        (now,) + tuple(ids),
+    )
+    execute_insert(
+        "INSERT INTO question_bank_audit "
+        "(action, from_username, to_username, question_ids, affected_count, operator, created_at) "
+        "VALUES ('archive', ?, '', ?, ?, ?, ?)",
+        (from_username, ",".join(str(i) for i in ids), len(ids),
+         user.get("username", ""), now),
+    )
+    logger.info(f"[题库审计] 管理员 {user.get('username')} 归档 {from_username} 的 {len(ids)} 道题")
+    return {"success": True, "archived": len(ids)}
 
 
 @router.get("/{question_id}")
@@ -836,6 +1336,8 @@ async def update_question(question_id: int, req: QuestionUpdate, request: Reques
         raise HTTPException(status_code=400, detail=f"未知题型: {req.type}")
     if "difficulty" in provided and req.difficulty not in ("easy", "medium", "hard"):
         raise HTTPException(status_code=400, detail=f"未知难度: {req.difficulty}")
+    if "subject" in provided:
+        req.subject = _question_subject(req.subject or "")
 
     def _options_to_str(val: Any) -> str:
         # Q8: 显式传 options=null/"" 表示清空选项(旧实现 if val is not None + 前端 if(optionsStr) 双重导致清不掉)
@@ -1386,6 +1888,7 @@ async def extract_questions_from_text(
 
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    subject = _question_subject(subject)
 
     # 提取文本内容
     content = ""
@@ -1663,6 +2166,7 @@ async def extract_questions_from_image(
 
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    subject = _question_subject(subject)
 
     # 验证图片格式
     filename_lower = (file.filename or "").lower()
@@ -1947,6 +2451,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    subject = _question_subject(req.subject)
     if not req.knowledge_points.strip():
         raise HTTPException(status_code=400, detail="请输入知识点")
     if req.count < 1 or req.count > 50:
@@ -1968,20 +2473,20 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
                  "essay": "作文", "subjective": "主观题"}.get(req.question_type, "单选题")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     prompt = render_question_prompt(QUESTION_GENERATE_WITH_MEDIA_PROMPT, 
-        subject=req.subject,
+        subject=subject,
         knowledge_points=req.knowledge_points,
         type_desc=type_desc,
         count=req.count,
         difficulty_desc=difficulty_desc,
     )
     # 注意：不注入技能 — 技能的结构化输出指令与纯 JSON 输出要求冲突
-    logger.info(f"开始调用AI生成多媒体试题: subject={req.subject}, type={req.question_type}")
+    logger.info(f"开始调用AI生成多媒体试题: subject={subject}, type={req.question_type}")
 
     try:
         # 含配图出题输出长、结构复杂：走 json_mode，由网关兜底 JSON 合法性
         # max_tokens 必须显式给（svg_code 整段内嵌），否则非流式请求会一路生成到读超时
         result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True,
-                                          kb_query=f"{req.subject} {req.knowledge_points}",
+                                          kb_query=f"{subject} {req.knowledge_points}",
                                           max_tokens=_estimate_generate_max_tokens(req.count, with_media=True))
     except HTTPException:
         raise
@@ -2005,7 +2510,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     # 无法解析，全部由那一层修好并有原文留档，这里不参与、也不许改口径。
     outcome = question_factory.persist_questions(
         questions[:req.count],
-        subject=req.subject,
+        subject=subject,
         source="ai",
         username=username,
         creator_name=creator_name,
@@ -2038,7 +2543,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
             try:
                 media_files = await generate_placeholders_batch(
                     placeholders=placeholders,
-                    subject=req.subject,
+                    subject=subject,
                     media_dir=media_dir,
                     qid=qid,
                     now=now,
@@ -2115,6 +2620,7 @@ async def generate_questions_with_media_async(req: GenerateWithMediaRequest, req
     username = user["username"]
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    _question_subject(req.subject)
     if not req.knowledge_points.strip():
         raise HTTPException(status_code=400, detail="请输入知识点")
 

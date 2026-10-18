@@ -59,6 +59,8 @@
   "quickQuizManage": "抢答管理",
   "discussionMonitor": "讨论监控",
   "studentQuestions": "课堂提问",
+  "dailyDiscoveryAdmin": "精选管理",
+  "newsAdmin": "新闻管理",
   "securitySettings": "安全设置",
   "logout": "退出登录",
   "onlineCount": "在线人数: {{count}}",

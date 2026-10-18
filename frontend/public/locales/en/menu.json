@@ -59,6 +59,8 @@
   "quickQuizManage": "Quick Quiz Management",
   "discussionMonitor": "Discussion Monitor",
   "studentQuestions": "Student Questions",
+  "dailyDiscoveryAdmin": "Discovery Admin",
+  "newsAdmin": "News Admin",
   "securitySettings": "Security Settings",
   "logout": "Logout",
   "onlineCount": "Online: {{count}}",

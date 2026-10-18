@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_insert_update, execute_query_dict
@@ -19,6 +19,9 @@ from backend.permission_service import (
     check_activity_visibility,
     is_student_in_teacher_scope,
     parse_legacy_teacher_grade_class,
+    get_students_in_scope,
+    get_grade_by_name,
+    _resolve_class_id_flexible,
 )
 from backend.logger import logger
 from backend.ws_manager import manager as ws_manager
@@ -206,6 +209,20 @@ def _record_discussion_rejection(username: str, content: str):
         logger.warning(f"用户 {username} 触发审核频率限制，封禁 {_DT_BLOCK_SECONDS} 秒")
 
 
+_discussion_send_times: dict[str, list[float]] = {}
+
+
+def _check_send_frequency(username: str) -> tuple[bool, str]:
+    """普通发言频率限制：10 秒内最多 20 条，避免刷屏拖垮审核队列。"""
+    now = _dt_time.time()
+    times = [t for t in _discussion_send_times.get(username, []) if now - t < 10]
+    if len(times) >= 20:
+        return False, "发言过于频繁，请稍后再试"
+    times.append(now)
+    _discussion_send_times[username] = times
+    return True, ""
+
+
 def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
     """调用 AI 审核讨论发言是否合规，含重复提交和频率限制，返回 (是否通过, 原因)"""
     # 先检查频率限制和重复提交
@@ -233,9 +250,9 @@ def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
         from backend.api.ai_service import _ai_thread_pool
         future = _ai_thread_pool.submit(_call_review_sync, prompt, api_key)
         try:
-            result = future.result(timeout=15)
+            result = future.result(timeout=5)
         except concurrent.futures.TimeoutError:
-            logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
+            logger.warning(f"AI 内容审核超时（5秒），已放行: user={username}")
             return True, ""
         from backend import ai_json
         jm = re.search(r'\{[^}]+\}', result)
@@ -268,46 +285,54 @@ def _now() -> str:
 # ── 请求/响应模型 ──
 
 class DiscussionCreate(BaseModel):
-    title: str
-    description: str = ""
-    subject: str = ""
+    title: str = Field(..., min_length=1, max_length=120)
+    description: str = Field("", max_length=5000)
+    subject: str = Field("", max_length=50)
     group_mode: str = "none"       # auto / manual / random / none
-    group_count: int = 0
-    members_per_group: int = 4
+    group_count: int = Field(0, ge=0, le=50)
+    members_per_group: int = Field(4, ge=2, le=10)
     ai_role: str = "mixed"         # observer / guide / proactive / judge / mixed
-    duration_minutes: int = 30
-    grade: str = ""
-    classes: str = ""
+    duration_minutes: int = Field(30, ge=1, le=120)
+    grade: str = Field("", max_length=50)
+    classes: str = Field("", max_length=200)
     require_summary: bool = False
-    target_scope: str = "teacher_classes"
-    target_grade: str = ""
-    target_class: str = ""
-    target_users: str = ""
+    target_scope: str = Field("teacher_classes", max_length=20)
+    target_grade: str = Field("", max_length=100)
+    target_class: str = Field("", max_length=200)
+    target_users: str = Field("", max_length=5000)
 
 
 class DiscussionUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    subject: str | None = None
-    duration_minutes: int | None = None
+    title: str | None = Field(None, min_length=1, max_length=120)
+    description: str | None = Field(None, max_length=5000)
+    subject: str | None = Field(None, max_length=50)
+    group_mode: str | None = None
+    group_count: int | None = Field(None, ge=0, le=50)
+    members_per_group: int | None = Field(None, ge=2, le=10)
+    duration_minutes: int | None = Field(None, ge=1, le=120)
     ai_role: str | None = None
     require_summary: bool | None = None
+    target_scope: str | None = Field(None, max_length=20)
+    target_grade: str | None = Field(None, max_length=100)
+    target_class: str | None = Field(None, max_length=200)
+    target_users: str | None = Field(None, max_length=5000)
 
 
 class MessageSend(BaseModel):
-    content: str
+    content: str = Field(..., min_length=1, max_length=1000)
+    client_request_id: str = Field("", max_length=80)
 
 
 class BroadcastMessage(BaseModel):
-    content: str
+    content: str = Field(..., min_length=1, max_length=1000)
 
 
 class AiGenerateDiscussion(BaseModel):
-    topic: str
-    subject: str = ""  # 由前端传递
-    group_mode: str = "none"
-    ai_role: str = "mixed"
-    duration_minutes: int = 30
+    topic: str = Field(..., min_length=1, max_length=200)
+    subject: str = Field("", max_length=50)  # 由前端传递
+    group_mode: str = Field("none", max_length=20)
+    ai_role: str = Field("mixed", max_length=20)
+    duration_minutes: int = Field(30, ge=1, le=120)
 
 
 # ── 创建讨论 ──
@@ -319,12 +344,20 @@ async def create_discussion(req: DiscussionCreate, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可创建讨论")
 
-    if not req.title.strip():
+    title = req.title.strip()
+    if not title:
         raise HTTPException(status_code=400, detail="请输入讨论标题")
+    if req.group_mode not in ("none", "auto", "random"):
+        raise HTTPException(status_code=400, detail="分组模式无效")
     if req.duration_minutes < 1 or req.duration_minutes > 120:
         raise HTTPException(status_code=400, detail="讨论时长范围为 1-120 分钟")
     if req.group_count < 0 or req.members_per_group < 1:
         raise HTTPException(status_code=400, detail="分组参数无效")
+    from backend.api.notification_router import validate_activity_scope
+    validate_activity_scope(
+        user, req.target_scope, req.target_grade, req.target_class,
+        req.target_users, what="分组讨论",
+    )
 
     now = _now()
     disc_id = execute_insert_update(
@@ -336,14 +369,14 @@ async def create_discussion(req: DiscussionCreate, request: Request):
             created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?,
                    ?, ?, ?, ?, ?, ?)""",
-        (user["username"], req.title, req.description, req.subject,
+        (user["username"], title, req.description, req.subject,
          req.group_mode, req.group_count, req.members_per_group,
          req.ai_role, req.duration_minutes,
          req.grade, req.classes, 1 if req.require_summary else 0,
          req.target_scope, req.target_grade, req.target_class, req.target_users,
          now, now),
     )
-    logger.info(f"教师 {user['username']} 创建讨论: {req.title}")
+    logger.info(f"教师 {user['username']} 创建讨论: {title}")
     return {"status": "ok", "discussion_id": disc_id}
 
 
@@ -584,22 +617,57 @@ async def update_discussion(disc_id: int, req: DiscussionUpdate, request: Reques
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可编辑讨论")
 
-    rows = execute_query("SELECT creator_username FROM discussions WHERE id=?", (disc_id,))
+    rows = execute_query("SELECT creator_username, status FROM discussions WHERE id=?", (disc_id,))
     if not rows:
         raise HTTPException(status_code=404, detail="讨论不存在")
     if rows[0][0] != user["username"] and role != 0:
         raise HTTPException(status_code=403, detail="只能编辑自己的讨论")
+    status = rows[0][1]
 
     updates = []
     params = []
     for field in ["title", "description", "subject", "duration_minutes", "ai_role"]:
-        val = getattr(req, field, None)
+        val = getattr(req, field)
         if val is not None:
+            if isinstance(val, str):
+                val = val.strip()
             updates.append(f"{field}=?")
             params.append(val)
     if req.require_summary is not None:
         updates.append("require_summary=?")
         params.append(1 if req.require_summary else 0)
+
+    structural_fields = {
+        "group_mode": req.group_mode,
+        "group_count": req.group_count,
+        "members_per_group": req.members_per_group,
+        "target_scope": req.target_scope,
+        "target_grade": req.target_grade,
+        "target_class": req.target_class,
+        "target_users": req.target_users,
+    }
+    changing_structure = any(v is not None for v in structural_fields.values())
+    if changing_structure and status != "pending":
+        raise HTTPException(status_code=400, detail="讨论已开始，不能再修改分组方式或目标范围")
+    if req.group_mode is not None and req.group_mode not in ("none", "auto", "random"):
+        raise HTTPException(status_code=400, detail="分组模式无效")
+    if changing_structure:
+        from backend.api.notification_router import validate_activity_scope
+        current = _disc_dict(disc_id) or {}
+        validate_activity_scope(
+            user,
+            req.target_scope if req.target_scope is not None else (current.get("target_scope") or "teacher_classes"),
+            req.target_grade if req.target_grade is not None else (current.get("target_grade") or ""),
+            req.target_class if req.target_class is not None else (current.get("target_class") or ""),
+            req.target_users if req.target_users is not None else (current.get("target_users") or ""),
+            what="分组讨论",
+        )
+    for field in ("group_mode", "group_count", "members_per_group",
+                  "target_scope", "target_grade", "target_class", "target_users"):
+        val = structural_fields[field]
+        if val is not None:
+            updates.append(f"{field}=?")
+            params.append(val)
 
     if updates:
         updates.append("updated_at=?")
@@ -614,6 +682,63 @@ async def update_discussion(disc_id: int, req: DiscussionUpdate, request: Reques
 
 
 # ── 开始讨论（自动分组）──
+
+def _expected_students_for_discussion(disc: dict) -> list[dict]:
+    """讨论目标范围内的在籍学生（开始讨论时一次性分组用）。"""
+    scope = str(disc.get("target_scope") or "teacher_classes").strip()
+    target_grade = str(disc.get("target_grade") or disc.get("grade") or "").strip()
+    target_class = str(disc.get("target_class") or disc.get("classes") or "").strip()
+    target_users = [x.strip() for x in str(disc.get("target_users") or "").split(",") if x.strip()]
+    if scope == "teacher_classes" and target_grade:
+        scope = "class" if target_class else "grade"
+
+    if scope in ("all", "school"):
+        return execute_query_dict(
+            "SELECT username, name, grade, class FROM users "
+            "WHERE role=2 AND IFNULL(status,'active')='active'"
+        )
+    if scope == "individual":
+        if not target_users:
+            return []
+        marks = ",".join("?" for _ in target_users)
+        return execute_query_dict(
+            f"SELECT username, name, grade, class FROM users "
+            f"WHERE role=2 AND IFNULL(status,'active')='active' AND username IN ({marks})",
+            tuple(target_users),
+        )
+    if scope in ("grade", "class"):
+        grades = [x.strip() for x in target_grade.replace("，", ",").split(",") if x.strip()]
+        classes = [x.strip() for x in target_class.replace("，", ",").split(",") if x.strip()]
+        grade_infos = [g for g in (get_grade_by_name(name) for name in grades) if g]
+        conds = ["role=2", "IFNULL(status,'active')='active'"]
+        params: list[Any] = []
+        if grade_infos:
+            gids = [int(g["id"]) for g in grade_infos]
+            conds.append(f"grade_id IN ({','.join('?' for _ in gids)})")
+            params.extend(gids)
+            class_ids = [
+                cid for gid in gids for name in classes
+                for cid in [_resolve_class_id_flexible(gid, name)] if cid
+            ]
+            if class_ids:
+                conds.append(f"class_id IN ({','.join('?' for _ in class_ids)})")
+                params.extend(class_ids)
+            elif classes:
+                conds.append(f"class IN ({','.join('?' for _ in classes)})")
+                params.extend(classes)
+        else:
+            if grades:
+                conds.append(f"grade IN ({','.join('?' for _ in grades)})")
+                params.extend(grades)
+            if classes:
+                conds.append(f"class IN ({','.join('?' for _ in classes)})")
+                params.extend(classes)
+        return execute_query_dict(
+            f"SELECT username, name, grade, class FROM users WHERE {' AND '.join(conds)}",
+            tuple(params),
+        )
+    return get_students_in_scope(str(disc.get("creator_username") or ""))
+
 
 @router.post("/discussions/{disc_id}/start", summary="开始讨论")
 async def start_discussion(disc_id: int, request: Request):
@@ -633,19 +758,25 @@ async def start_discussion(disc_id: int, request: Request):
     if disc["status"] != "pending":
         raise HTTPException(status_code=400, detail="讨论已开始或已结束")
 
-    # 计算分组数量
+    # 计算分组数量：按真实目标学生数分组，而不是“每组人数 × 2”
     group_mode = disc["group_mode"]
-    group_count = disc["group_count"]
-    members_per_group = disc["members_per_group"]
+    group_count = int(disc["group_count"] or 0)
+    members_per_group = max(2, int(disc["members_per_group"] or 4))
+    students = _expected_students_for_discussion(disc)
+    usernames = [str(s["username"]) for s in students if s.get("username")]
+    if not usernames:
+        raise HTTPException(status_code=400, detail="目标范围内没有可参与的学生，请先调整讨论范围")
 
     if group_mode == "none":
-        # 不分组模式：只创建 1 个自由讨论区
         group_count = 1
-    elif group_count <= 0 and members_per_group > 0:
-        # 根据 members_per_group 估算组数（后续自动分配）
-        group_count = members_per_group * 2  # 默认按每组人数*2 估算组数
-    elif group_count <= 0:
-        group_count = 4  # 默认 4 组
+    elif group_mode == "auto":
+        group_count = max(1, (len(usernames) + members_per_group - 1) // members_per_group)
+    else:  # random：优先使用教师指定组数，未指定则按每组人数估算
+        if group_count <= 0:
+            group_count = max(1, (len(usernames) + members_per_group - 1) // members_per_group)
+        group_count = min(max(1, group_count), len(usernames))
+        random.shuffle(usernames)
+    group_count = min(max(1, group_count), max(1, len(usernames)))
 
     # 删除旧的临时分组（如果有）
     old_groups = execute_query("SELECT id FROM discussion_groups WHERE discussion_id=?", (disc_id,))
@@ -653,13 +784,22 @@ async def start_discussion(disc_id: int, request: Request):
         execute_insert_update("DELETE FROM discussion_members WHERE group_id=?", (og[0],))
     execute_insert_update("DELETE FROM discussion_groups WHERE discussion_id=?", (disc_id,))
 
-    # 创建空分组，学生后续加入时会自动分配到人数最少的组
+    # 创建分组并一次性分配成员：避免空组、抢组和学生漏加入
     now = _now()
+    group_ids: list[int] = []
     for idx in range(group_count):
         group_name = "自由讨论区" if group_mode == "none" else f"第{idx + 1}组"
         gid = execute_insert_update(
             "INSERT INTO discussion_groups (discussion_id, group_index, name) VALUES (?, ?, ?)",
             (disc_id, idx + 1, group_name),
+        )
+        group_ids.append(gid)
+    for idx, uname in enumerate(usernames):
+        gid = group_ids[0] if group_mode == "none" else group_ids[idx % group_count]
+        execute_insert_update(
+            "INSERT OR IGNORE INTO discussion_members (group_id, username, role, joined_at) "
+            "VALUES (?, ?, 'member', ?)",
+            (gid, uname, now),
         )
 
     # 更新状态
@@ -683,16 +823,31 @@ async def end_discussion(disc_id: int, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可结束讨论")
 
-    rows = execute_query("SELECT creator_username FROM discussions WHERE id=?", (disc_id,))
+    rows = execute_query("SELECT creator_username, status FROM discussions WHERE id=?", (disc_id,))
     if not rows:
         raise HTTPException(status_code=404, detail="讨论不存在")
     if role == 1 and rows[0][0] != user["username"]:
         raise HTTPException(status_code=403, detail="只能管理自己的讨论")
+    if rows[0][1] != "active":
+        raise HTTPException(status_code=400, detail="仅进行中的讨论可以结束")
 
     execute_insert_update(
         "UPDATE discussions SET status='ended', updated_at=? WHERE id=?",
         (_now(), disc_id),
     )
+    # 给每个小组落一条系统消息并实时通知，避免学生端停在旧状态
+    now = _now()
+    groups = execute_query("SELECT id FROM discussion_groups WHERE discussion_id=?", (disc_id,))
+    for g in groups:
+        msg_id = execute_insert_update(
+            "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) "
+            "VALUES (?, NULL, '讨论已结束', 'system', ?)",
+            (g[0], now),
+        )
+        asyncio.create_task(ws_manager.broadcast(g[0], {
+            "type": "new_message", "id": msg_id, "username": None,
+            "content": "讨论已结束", "msg_type": "system", "created_at": now,
+        }))
     logger.info(f"教师 {user['username']} 结束了讨论 #{disc_id}")
 
     # 自动生成报告
@@ -703,6 +858,34 @@ async def end_discussion(disc_id: int, request: Request):
         logger.warning(f"自动生成报告失败: {e}")
 
     return {"status": "ok", "message": "讨论已结束，报告生成中"}
+
+
+def _save_discussion_report(disc_id: int, group_id: int | None,
+                            content: str, generated_at: str) -> None:
+    """同一讨论/小组只保留最新一版报告，避免重复点击堆积历史行。"""
+    if group_id is None:
+        existing = execute_query(
+            "SELECT id FROM discussion_reports WHERE discussion_id=? AND group_id IS NULL "
+            "ORDER BY id DESC LIMIT 1",
+            (disc_id,),
+        )
+    else:
+        existing = execute_query(
+            "SELECT id FROM discussion_reports WHERE discussion_id=? AND group_id=? "
+            "ORDER BY id DESC LIMIT 1",
+            (disc_id, group_id),
+        )
+    if existing:
+        execute_insert_update(
+            "UPDATE discussion_reports SET report_content=?, generated_at=? WHERE id=?",
+            (content, generated_at, existing[0][0]),
+        )
+    else:
+        execute_insert_update(
+            "INSERT INTO discussion_reports "
+            "(discussion_id, group_id, report_content, generated_at) VALUES (?, ?, ?, ?)",
+            (disc_id, group_id, content, generated_at),
+        )
 
 
 async def _auto_generate_report(disc_id: int):
@@ -791,18 +974,12 @@ async def _auto_generate_report(disc_id: int):
                         # 保存结构化报告
                         report_data = {"raw_content": summary, "parsed": parsed, "generated_at": now}
                         report_json = _json.dumps(report_data, ensure_ascii=False)
-                        execute_insert_update(
-                            "INSERT INTO discussion_reports (discussion_id, group_id, report_content, generated_at) VALUES (?, ?, ?, ?)",
-                            (disc_id, g[0], report_json, now),
-                        )
+                        _save_discussion_report(disc_id, g[0], report_json, now)
                 except Exception:
                     pass
 
     overall_report = "\n".join(overall_parts)
-    execute_insert_update(
-        "INSERT INTO discussion_reports (discussion_id, group_id, report_content, generated_at) VALUES (?, NULL, ?, ?)",
-        (disc_id, overall_report, now),
-    )
+    _save_discussion_report(disc_id, None, overall_report, now)
     logger.info(f"讨论 #{disc_id} 报告自动生成完成")
 
 
@@ -879,6 +1056,8 @@ async def join_discussion(disc_id: int, request: Request):
     if disc is None:
         raise HTTPException(status_code=404, detail="讨论不存在")
     status = disc["status"]
+    if user.get("role", 2) != 2:
+        raise HTTPException(status_code=400, detail="教师和管理员无需加入小组，可直接进入讨论区")
 
     # S10: 学生只能加入对自己可见的讨论 —— 旧实现任何学生按 ID 即可加入任意讨论,
     #      拿到成员身份后就能读写该组消息、查看 AI 报告
@@ -924,17 +1103,17 @@ async def join_discussion(disc_id: int, request: Request):
         )
         group_id = gid
     else:
-        # 找人数最少的小组加入
-        min_count = float("inf")
-        group_id = groups[0][0]
-        for g in groups:
-            cnt = execute_query(
-                "SELECT COUNT(*) FROM discussion_members WHERE group_id=?",
-                (g[0],),
-            )[0][0]
-            if cnt < min_count:
-                min_count = cnt
-                group_id = g[0]
+        # 找人数最少的小组加入（一条聚合查询，避免逐组 COUNT）
+        best = execute_query(
+            """SELECT dg.id FROM discussion_groups dg
+               LEFT JOIN discussion_members dm ON dm.group_id = dg.id
+               WHERE dg.discussion_id=?
+               GROUP BY dg.id
+               ORDER BY COUNT(dm.id) ASC, dg.group_index ASC
+               LIMIT 1""",
+            (disc_id,),
+        )
+        group_id = best[0][0] if best else groups[0][0]
 
     now = _now()
     execute_insert_update(
@@ -966,19 +1145,25 @@ async def broadcast_message(disc_id: int, req: BroadcastMessage, request: Reques
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可广播")
     _assert_discussion_owner(user, disc)
+    if (disc or {}).get("status") != "active":
+        raise HTTPException(status_code=400, detail="讨论未进行中，无法广播")
+    content = req.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="广播内容不能为空")
 
     groups = execute_query("SELECT id FROM discussion_groups WHERE discussion_id=?", (disc_id,))
     now = _now()
     for g in groups:
-        execute_insert_update(
+        msg_id = execute_insert_update(
             "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, ?, ?, 'broadcast', ?)",
-            (g[0], user["username"], req.content, now),
+            (g[0], user["username"], content, now),
         )
         # WebSocket 广播
         msg_data = {
             "type": "new_message",
+            "id": msg_id,
             "username": user["username"] or "教师",
-            "content": req.content,
+            "content": content,
             "msg_type": "broadcast",
             "created_at": now,
         }
@@ -996,6 +1181,23 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
     role = user.get("role", 2)
 
     _assert_can_access_group(user, group_id, "数据")
+    disc_id = _group_discussion_id(group_id)
+    disc = _disc_brief(disc_id) if disc_id else None
+    if not disc or disc.get("status") != "active":
+        raise HTTPException(status_code=400, detail="讨论未进行中，无法发送消息")
+    content = req.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="消息内容不能为空")
+    req_id = (req.client_request_id or "").strip()
+
+    # 幂等：同一请求重试直接返回原消息
+    if req_id:
+        existed = execute_query(
+            "SELECT id FROM discussion_messages WHERE group_id=? AND client_request_id=? AND username=? LIMIT 1",
+            (group_id, req_id, username),
+        )
+        if existed:
+            return {"status": "ok", "id": existed[0][0], "duplicate": True}
 
     # 验证是该组成员（管理员/教师例外，可发到任意组）
     if role == 2:
@@ -1006,8 +1208,22 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
         if not is_member:
             raise HTTPException(status_code=403, detail="你不在该小组中")
 
-        # ── AI 内容审核（仅对学生发言审核） ──
-        safe, reason = _ai_content_review(req.content, username)
+        allowed, rate_msg = _check_send_frequency(username)
+        if not allowed:
+            raise HTTPException(status_code=429, detail=rate_msg)
+        # 无请求 ID 时按“同组同人同内容 5 秒内”去重
+        if not req_id:
+            recent = execute_query(
+                "SELECT id FROM discussion_messages WHERE group_id=? AND username=? "
+                "AND content=? AND created_at>=datetime('now','localtime','-5 seconds') "
+                "ORDER BY id DESC LIMIT 1",
+                (group_id, username, content),
+            )
+            if recent:
+                return {"status": "ok", "id": recent[0][0], "duplicate": True}
+
+        # ── AI 内容审核（仅对学生发言审核，放线程池避免阻塞事件循环） ──
+        safe, reason = await asyncio.to_thread(_ai_content_review, content, username)
         if not safe:
             logger.info(f"学生 {username} 讨论发言内容不合规已拦截: {reason}")
             raise HTTPException(
@@ -1016,16 +1232,28 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
             )
 
     now = _now()
-    msg_id = execute_insert_update(
-        "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, ?, ?, 'text', ?)",
-        (group_id, username, req.content, now),
-    )
+    try:
+        msg_id = execute_insert_update(
+            "INSERT INTO discussion_messages "
+            "(group_id, username, content, msg_type, created_at, client_request_id) "
+            "VALUES (?, ?, ?, 'text', ?, ?)",
+            (group_id, username, content, now, req_id or None),
+        )
+    except Exception:
+        if req_id:
+            existed = execute_query(
+                "SELECT id FROM discussion_messages WHERE group_id=? AND client_request_id=? AND username=? LIMIT 1",
+                (group_id, req_id, username),
+            )
+            if existed:
+                return {"status": "ok", "id": existed[0][0], "duplicate": True}
+        raise
     # 广播新消息到 WebSocket（带上真实 ID，供前端去重）
     msg_data = {
         "type": "new_message",
         "id": msg_id,
         "username": username,
-        "content": req.content,
+        "content": content,
         "msg_type": "text",
         "created_at": now,
     }
@@ -1117,6 +1345,8 @@ async def get_my_discussions(request: Request):
 
 # ── AI 助教建议（手动触发）──
 
+_ai_suggest_last: dict[int, float] = {}
+
 @router.post("/groups/{group_id}/ai-suggest", summary="AI 助教建议")
 async def ai_suggest(group_id: int, request: Request):
     """手动触发 AI 助教生成讨论引导（仅教师/管理员可用）"""
@@ -1126,6 +1356,21 @@ async def ai_suggest(group_id: int, request: Request):
     _assert_can_access_group(user, group_id, "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可触发 AI 助教")
+    disc_status = execute_query(
+        "SELECT d.status, d.ai_role FROM discussions d "
+        "JOIN discussion_groups dg ON dg.discussion_id=d.id WHERE dg.id=?",
+        (group_id,),
+    )
+    if not disc_status:
+        raise HTTPException(status_code=404, detail="小组不存在")
+    if disc_status[0][0] != "active":
+        raise HTTPException(status_code=400, detail="讨论未进行中，无法触发 AI 助教")
+    if (disc_status[0][1] or "") == "observer":
+        raise HTTPException(status_code=400, detail="当前为观察者模式，AI 不主动发言")
+    now_ts = _dt_time.time()
+    last = _ai_suggest_last.get(group_id, 0)
+    if now_ts - last < 20:
+        raise HTTPException(status_code=429, detail="AI 助教刚刚发过言，请 20 秒后再试")
 
     # 获取讨论信息
     disc_row = execute_query(
@@ -1144,7 +1389,7 @@ async def ai_suggest(group_id: int, request: Request):
     # 获取最近消息
     msgs = execute_query(
         """SELECT username, content FROM discussion_messages
-           WHERE group_id=? ORDER BY id DESC LIMIT 10""",
+           WHERE group_id=? AND msg_type != 'ai_suggest' ORDER BY id DESC LIMIT 10""",
         (group_id,),
     )
     messages_text = "\n".join(
@@ -1182,6 +1427,7 @@ async def ai_suggest(group_id: int, request: Request):
     try:
         content = await call_ai_async(prompt, api_key, use_kb=False)
         if content:
+            content = str(content)[:1000]
             # 将 AI 回复作为消息存入
             now_str = _now()
             msg_id = execute_insert_update(
@@ -1197,6 +1443,7 @@ async def ai_suggest(group_id: int, request: Request):
                 "msg_type": "ai_suggest",
                 "created_at": now_str,
             }))
+            _ai_suggest_last[group_id] = _dt_time.time()
             return {"status": "ok", "content": content}
         return {"status": "error", "content": "AI 未返回有效结果"}
     except Exception as e:
@@ -1228,7 +1475,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
 
     # 获取讨论信息
     disc_row = execute_query(
-        """SELECT d.id, d.title, d.description, d.subject, d.status, dg.name
+        """SELECT d.id, d.title, d.description, d.subject, d.status, dg.name, dg.group_index
            FROM discussions d
            JOIN discussion_groups dg ON dg.discussion_id = d.id
            WHERE dg.id=?""",
@@ -1241,7 +1488,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
     title = disc_row[0][1]
     description = disc_row[0][2] or ""
     subject = disc_row[0][3] or ""
-    group_name = disc_row[0][5] or f"第{disc_row[0][4]}组"
+    group_name = disc_row[0][5] or f"第{disc_row[0][6]}组"
 
     # 获取该小组所有消息
     msgs = execute_query(
@@ -1284,13 +1531,13 @@ async def generate_group_ai_summary(group_id: int, request: Request):
     from backend.api.ai_service import call_ai_async
 
     try:
-        content = await call_ai_async(prompt, api_key, use_kb=False)
+        content = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False)
         if not content:
             return {"status": "error", "content": "AI 未返回有效结果"}
 
         # 尝试解析 JSON
         import json as _json
-        parsed = extract_json_from_text(content)
+        parsed = extract_json_from_text(content) or None
 
         # 构建结构化报告内容
         now_str = _now()
@@ -1319,7 +1566,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
 
         return {
             "status": "ok",
-            "content": content,
+            "content": {"parsed": parsed, "raw_content": content},
             "parsed": parsed,
             "generated_at": now_str,
         }
@@ -1583,18 +1830,12 @@ async def generate_report(disc_id: int, request: Request):
             report_content += f"## AI 分析\n{ai_summary}\n\n" if ai_summary else ""
             report_content += f"## 讨论内容\n```\n{messages_text}\n```"
 
-            execute_insert_update(
-                "INSERT INTO discussion_reports (discussion_id, group_id, report_content, generated_at) VALUES (?, ?, ?, ?)",
-                (disc_id, g[0], report_content, now),
-            )
+            _save_discussion_report(disc_id, g[0], report_content, now)
 
     overall_parts.extend(group_summaries)
     overall_report = "\n".join(overall_parts)
 
-    execute_insert_update(
-        "INSERT INTO discussion_reports (discussion_id, group_id, report_content, generated_at) VALUES (?, NULL, ?, ?)",
-        (disc_id, overall_report, now),
-    )
+    _save_discussion_report(disc_id, None, overall_report, now)
 
     return {"status": "ok", "message": "报告生成完成"}
 
@@ -1730,6 +1971,9 @@ async def monitor_discussion(disc_id: int, request: Request):
                 is_cold = idle_seconds > 60 and status == "active"
             except ValueError:
                 pass
+        elif status == "active":
+            # 已开始但一条消息都没有，同样属于冷场
+            is_cold = True
 
         if is_cold:
             cold_groups += 1
@@ -1762,6 +2006,8 @@ async def monitor_discussion(disc_id: int, request: Request):
 
 # ── AI 自动触发 ──
 
+_auto_nudge_last: dict[int, float] = {}
+
 @router.post("/discussions/{disc_id}/auto-trigger", summary="触发 AI 自动引导（冷场检测）")
 async def auto_trigger_ai(disc_id: int, request: Request):
     """检测所有小组是否需要 AI 介入（冷场超过 60 秒），自动发送引导"""
@@ -1770,9 +2016,12 @@ async def auto_trigger_ai(disc_id: int, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
 
-    rows = execute_query("SELECT status FROM discussions WHERE id=?", (disc_id,))
+    rows = execute_query(
+        "SELECT status, title, description, ai_role FROM discussions WHERE id=?", (disc_id,)
+    )
     if not rows or rows[0][0] != "active":
         return {"status": "ok", "triggered": 0, "message": "讨论未激活"}
+    disc_title, disc_desc = rows[0][1] or "", rows[0][2] or ""
 
     groups = execute_query(
         "SELECT id, group_index FROM discussion_groups WHERE discussion_id=?",
@@ -1789,25 +2038,36 @@ async def auto_trigger_ai(disc_id: int, request: Request):
 
     for g in groups:
         last_msg = execute_query(
-            "SELECT content FROM discussion_messages WHERE group_id=? AND username IS NOT NULL ORDER BY id DESC LIMIT 1",
+            "SELECT content, created_at FROM discussion_messages "
+            "WHERE group_id=? AND username IS NOT NULL AND msg_type='text' "
+            "ORDER BY id DESC LIMIT 1",
             (g[0],),
         )
-        if not last_msg:
+        if last_msg:
+            try:
+                last_time = datetime.strptime(last_msg[0][1], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                continue
+            idle_seconds = (now - last_time).total_seconds()
+            if idle_seconds < 60:
+                continue
+        if now.timestamp() - _auto_nudge_last.get(g[0], 0) < 120:
             continue
-
-        last_content = last_msg[0][0]
 
         # 获取最近 5 条消息
         recent = execute_query(
-            "SELECT username, content FROM discussion_messages WHERE group_id=? ORDER BY id DESC LIMIT 5",
+            "SELECT username, content FROM discussion_messages "
+            "WHERE group_id=? AND msg_type != 'ai_suggest' ORDER BY id DESC LIMIT 5",
             (g[0],),
         )
         messages_text = "\n".join(
             [f"{m[0] or 'AI助教'}: {m[1][:200]}" for m in reversed(recent)]
-        )
+        ) or "（小组尚未发言）"
 
         ai_role_text = build_ai_role()
         prompt = f"""{ai_role_text}你是一位课堂讨论的AI助教。
+讨论主题：{disc_title}
+讨论说明：{disc_desc}
 请根据以下讨论内容给出一个简短的引导问题或总结（30-50字），目的是推动讨论继续深入：
 
 讨论内容：
@@ -1832,6 +2092,7 @@ async def auto_trigger_ai(disc_id: int, request: Request):
                     "msg_type": "ai_suggest",
                     "created_at": now_str,
                 }))
+                _auto_nudge_last[g[0]] = now.timestamp()
                 triggered += 1
         except Exception as e:
             logger.warning(f"AI 自动触发失败 小组#{g[0]}: {e}")

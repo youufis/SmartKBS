@@ -119,7 +119,7 @@ def validate_activity_scope(user: dict, target_scope: str = "", target_grade: st
     if actor_role == 0:
         return
     teacher = user.get("username", "")
-    if (target_scope or "") == "all":
+    if (target_scope or "") in ("all", "school"):
         raise HTTPException(status_code=403, detail=f"面向全体用户的{what}仅管理员可发布")
     grades = {g["name"] for g in (get_teacher_grades(teacher) or [])}
     if target_grade:

@@ -55,6 +55,14 @@ BRIEFING_WAIT_SECONDS = 10          # NW21: 简报冷启动最多同步等这么
 BRIEFING_ESTIMATE_SECONDS = 20      # NW21: 给前端的预计等待提示
 BRIEFING_INFLIGHT_TTL = 180         # NW21: 简报生成单飞标记有效期（秒）
 SOURCE_COOLDOWN_MINUTES = 30        # NW18: 熔断后跳过多久（期间不再浪费超时）
+_ADMIN_NEWS_SELECT = (
+    "n.id, n.title, n.url, n.source_name, n.category, n.published_at, n.fetched_at, "
+    "n.is_ai_summarized, n.status, "
+    "(SELECT COUNT(*) FROM news_view_log v WHERE v.news_id=n.id) AS view_count, "
+    "(SELECT COUNT(*) FROM news_favorites f WHERE f.news_id=n.id) AS favorite_count, "
+    "n.ai_one_liner, n.ai_summary, n.tags, n.related_subjects, n.image_url, "
+    "n.admin_note, n.hidden_at, n.hidden_by, n.updated_at"
+)
 
 SYSTEM_CONFIG_PATH = Path(__file__).resolve().parents[1] / "system_config.json"
 
@@ -149,14 +157,65 @@ class FavoriteRequest(BaseModel):
     action: str  # favorite / unfavorite
 
 
+class NewsAdminUpdate(BaseModel):
+    title: str | None = None
+    category: str | None = None
+    tags: list[str] | None = None
+    related_subjects: list[str] | None = None
+    status: str | None = None
+    admin_note: str | None = None
+
+
+class NewsBulkRequest(BaseModel):
+    ids: list[int]
+    action: str  # hide / restore / delete
+
+
 # ── 辅助函数 ──
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+
+def _invalidate_today_briefing() -> None:
+    try:
+        execute_insert_update(
+            "DELETE FROM news_daily_briefing WHERE date=?",
+            (date.today().isoformat(),),
+        )
+    except Exception:
+        pass
+
+
 def _get_dashscope_api_key() -> str:
     key, _ = get_api_keys("")
     return key
+
+
+def _require_manager(user: dict[str, Any]) -> None:
+    if user.get("role") not in (0, 1):
+        raise HTTPException(403, "仅教师和管理员可执行该操作")
+
+
+def _require_admin(user: dict[str, Any]) -> None:
+    if user.get("role") != 0:
+        raise HTTPException(403, "仅管理员可执行该操作")
+
+
+def _admin_article_row(r) -> dict:
+    return {
+        "id": r[0], "title": r[1] or "", "url": r[2] or "",
+        "source_name": r[3] or "", "category": r[4] or "",
+        "published_at": r[5] or "", "fetched_at": r[6] or "",
+        "is_ai_summarized": bool(r[7]), "status": r[8] or "active",
+        "view_count": int(r[9] or 0), "favorite_count": int(r[10] or 0),
+        "ai_one_liner": r[11] or "", "ai_summary": r[12] or "",
+        "tags": _safe_json_loads(r[13], []),
+        "related_subjects": _safe_json_loads(r[14], []),
+        "image_url": r[15] or "", "admin_note": r[16] or "",
+        "hidden_at": r[17] or "", "hidden_by": r[18] or "",
+        "updated_at": r[19] or "",
+    }
 
 def _safe_json_loads(val: Any, default: Any = None) -> Any:
     """安全解析 JSON 字符串，失败返回默认值"""
@@ -368,7 +427,7 @@ class NewsService:
         NewsService._trigger_fetch_if_needed()
 
         cutoff_str = (datetime.now() - timedelta(hours=NEWS_WINDOW_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
-        where = "WHERE fetched_at >= ?"
+        where = "WHERE fetched_at >= ? AND status='active'"
         params: list[Any] = [cutoff_str]
         if category:
             where += " AND category=?"
@@ -395,7 +454,8 @@ class NewsService:
                           CASE WHEN is_ai_summarized=1 THEN COALESCE(ai_one_liner, '') ELSE '' END as display_summary,
                           category, image_url, published_at, fetched_at
                    FROM news_articles
-                   WHERE fetched_at = (SELECT MAX(fetched_at) FROM news_articles)
+                   WHERE status='active'
+                     AND fetched_at = (SELECT MAX(fetched_at) FROM news_articles WHERE status='active')
                    ORDER BY COALESCE(published_at, fetched_at) DESC
                    LIMIT ? OFFSET ?""",
                 (page_size, (page - 1) * page_size),
@@ -447,7 +507,7 @@ class NewsService:
             "SELECT id, title, url, source_name, summary, ai_summary, "
             "ai_one_liner, category, image_url, related_subjects, tags, "
             "published_at, is_ai_summarized "
-            "FROM news_articles WHERE id=?",
+            "FROM news_articles WHERE id=? AND status='active'",
             (news_id,)
         )
         if not row:
@@ -503,7 +563,10 @@ class NewsService:
     def _stored_article_count() -> int:
         """时效窗口内当前可用(可展示)的新闻条数"""
         cutoff = (datetime.now() - timedelta(hours=NEWS_WINDOW_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
-        row = execute_query("SELECT COUNT(*) FROM news_articles WHERE fetched_at>=?", (cutoff,))
+        row = execute_query(
+            "SELECT COUNT(*) FROM news_articles WHERE fetched_at>=? AND status='active'",
+            (cutoff,),
+        )
         return int(row[0][0]) if row else 0
 
     @staticmethod
@@ -1048,8 +1111,8 @@ class NewsService:
         rows = execute_query(
             "SELECT n.id, n.title, n.url, n.source_name, "
             "n.ai_one_liner, n.category, n.image_url, n.published_at "
-            "FROM news_favorites f JOIN news_articles n ON f.news_id = n.id "
-            "WHERE f.username=? ORDER BY f.created_at DESC",
+             "FROM news_favorites f JOIN news_articles n ON f.news_id = n.id "
+             "WHERE f.username=? AND n.status='active' ORDER BY f.created_at DESC",
             (username,)
         )
         return [
@@ -1224,13 +1287,36 @@ class NewsService:
         自己把唯一一批新闻删空，之后长期 0 条，页面整页空白。
         """
         cutoff = (datetime.now() - timedelta(hours=NEWS_WINDOW_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
-        keep = execute_query("SELECT COUNT(*) FROM news_articles WHERE fetched_at>=?", (cutoff,))
+        keep = execute_query(
+            "SELECT COUNT(*) FROM news_articles WHERE fetched_at>=? AND status='active'",
+            (cutoff,),
+        )
         if keep and int(keep[0][0] or 0) > 0:
+            execute_insert_update(
+                "DELETE FROM news_view_log WHERE news_id IN "
+                "(SELECT id FROM news_articles WHERE fetched_at < ?)",
+                (cutoff,),
+            )
+            execute_insert_update(
+                "DELETE FROM news_favorites WHERE news_id IN "
+                "(SELECT id FROM news_articles WHERE fetched_at < ?)",
+                (cutoff,),
+            )
             execute_insert_update("DELETE FROM news_articles WHERE fetched_at < ?", (cutoff,))
             return
         newest = execute_query("SELECT MAX(fetched_at) FROM news_articles")
         if newest and newest[0][0]:
             floor = str(newest[0][0])
+            execute_insert_update(
+                "DELETE FROM news_view_log WHERE news_id IN "
+                "(SELECT id FROM news_articles WHERE fetched_at < ? AND fetched_at <> ?)",
+                (cutoff, floor),
+            )
+            execute_insert_update(
+                "DELETE FROM news_favorites WHERE news_id IN "
+                "(SELECT id FROM news_articles WHERE fetched_at < ? AND fetched_at <> ?)",
+                (cutoff, floor),
+            )
             execute_insert_update(
                 "DELETE FROM news_articles WHERE fetched_at < ? AND fetched_at <> ?",
                 (cutoff, floor),
@@ -1241,7 +1327,7 @@ class NewsService:
     def get_categories() -> list[str]:
         rows = execute_query(
             "SELECT DISTINCT category FROM news_articles "
-            "WHERE category IS NOT NULL AND category != '' "
+            "WHERE status='active' AND category IS NOT NULL AND category != '' "
             "ORDER BY category"
         )
         cats = [r[0] for r in rows]
@@ -1367,6 +1453,226 @@ async def get_news_stats(request: Request):
     """获取个人新闻统计"""
     user = get_current_user(request)
     return NewsService.get_stats(user["username"])
+
+
+@router.get("/news/admin/articles")
+async def admin_list_news(
+    request: Request,
+    keyword: str = Query(""),
+    category: str = Query(""),
+    source_name: str = Query(""),
+    status: str = Query(""),
+    ai_status: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """教师/管理员：全量新闻管理列表（含已隐藏，不受 72h 窗口限制）。"""
+    user = get_current_user(request)
+    _require_manager(user)
+    conditions: list[str] = []
+    params: list[Any] = []
+    kw = (keyword or "").strip()
+    if kw:
+        like = f"%{kw}%"
+        conditions.append("(n.title LIKE ? OR n.summary LIKE ? OR n.source_name LIKE ?)")
+        params.extend([like, like, like])
+    if category:
+        conditions.append("n.category = ?")
+        params.append(category)
+    if source_name:
+        conditions.append("n.source_name = ?")
+        params.append(source_name)
+    if status in ("active", "hidden"):
+        conditions.append("n.status = ?")
+        params.append(status)
+    if ai_status in ("yes", "no"):
+        conditions.append("n.is_ai_summarized = ?")
+        params.append(1 if ai_status == "yes" else 0)
+    if date_from:
+        conditions.append("COALESCE(n.published_at, n.fetched_at) >= ?")
+        params.append(date_from[:10] + " 00:00:00")
+    if date_to:
+        conditions.append("COALESCE(n.published_at, n.fetched_at) <= ?")
+        params.append(date_to[:10] + " 23:59:59")
+    where = " AND ".join(conditions) if conditions else "1=1"
+    rows = execute_query(
+        f"SELECT {_ADMIN_NEWS_SELECT} FROM news_articles n "
+        f"WHERE {where} ORDER BY COALESCE(n.published_at, n.fetched_at) DESC "
+        "LIMIT ? OFFSET ?",
+        tuple(params + [page_size, (page - 1) * page_size]),
+    )
+    total_row = execute_query(
+        f"SELECT COUNT(*) FROM news_articles n WHERE {where}", tuple(params)
+    )
+    active_row = execute_query("SELECT COUNT(*) FROM news_articles WHERE status='active'")
+    hidden_row = execute_query("SELECT COUNT(*) FROM news_articles WHERE status<>'active'")
+    return {
+        "articles": [_admin_article_row(r) for r in rows],
+        "total": int(total_row[0][0] or 0) if total_row else 0,
+        "page": page,
+        "page_size": page_size,
+        "summary": {
+            "active": int(active_row[0][0] or 0) if active_row else 0,
+            "hidden": int(hidden_row[0][0] or 0) if hidden_row else 0,
+        },
+    }
+
+
+@router.patch("/news/admin/articles/{article_id}")
+async def admin_update_news(article_id: int, req: NewsAdminUpdate, request: Request):
+    """教师/管理员：编辑新闻分类/标签/状态。"""
+    user = get_current_user(request)
+    _require_manager(user)
+    if not execute_query("SELECT id FROM news_articles WHERE id=?", (article_id,)):
+        raise HTTPException(404, "新闻不存在")
+    updates: list[str] = []
+    params: list[Any] = []
+    if req.title is not None:
+        title = req.title.strip()
+        if not title:
+            raise HTTPException(400, "标题不能为空")
+        updates.append("title = ?")
+        params.append(title[:200])
+    if req.category is not None:
+        category = req.category.strip()
+        if not category:
+            raise HTTPException(400, "分类不能为空")
+        updates.append("category = ?")
+        params.append(category[:40])
+    if req.tags is not None:
+        updates.append("tags = ?")
+        params.append(json.dumps([str(x).strip() for x in req.tags if str(x).strip()][:30], ensure_ascii=False))
+    if req.related_subjects is not None:
+        updates.append("related_subjects = ?")
+        params.append(json.dumps(
+            [str(x).strip() for x in req.related_subjects if str(x).strip()][:20],
+            ensure_ascii=False,
+        ))
+    if req.admin_note is not None:
+        updates.append("admin_note = ?")
+        params.append(req.admin_note.strip()[:500])
+    if req.status is not None:
+        if req.status not in ("active", "hidden"):
+            raise HTTPException(400, "status 只能是 active / hidden")
+        updates.append("status = ?")
+        params.append(req.status)
+        if req.status == "hidden":
+            updates.extend(["hidden_at = ?", "hidden_by = ?"])
+            params.extend([_now(), user["username"]])
+        else:
+            updates.extend(["hidden_at = ''", "hidden_by = ''"])
+    if updates:
+        updates.append("updated_at = ?")
+        params.extend([_now(), article_id])
+        execute_insert_update(
+            f"UPDATE news_articles SET {', '.join(updates)} WHERE id=?",
+            tuple(params),
+        )
+        if req.status is not None:
+            _invalidate_today_briefing()
+    rows = execute_query(
+        f"SELECT {_ADMIN_NEWS_SELECT} FROM news_articles n WHERE n.id=?", (article_id,)
+    )
+    return {"article": _admin_article_row(rows[0]) if rows else None}
+
+
+@router.post("/news/admin/articles/bulk")
+async def admin_bulk_news(req: NewsBulkRequest, request: Request):
+    """教师/管理员批量隐藏/恢复；彻底删除仅管理员。"""
+    user = get_current_user(request)
+    if req.action == "delete":
+        _require_admin(user)
+    else:
+        _require_manager(user)
+    ids = list(dict.fromkeys(int(x) for x in req.ids if int(x) > 0))[:200]
+    if not ids:
+        raise HTTPException(400, "请选择至少一条新闻")
+    if req.action not in ("hide", "restore", "delete"):
+        raise HTTPException(400, "action 只能是 hide / restore / delete")
+    placeholders = ",".join("?" for _ in ids)
+    affected = 0
+    with _database.get_connection() as conn:
+        cur = conn.cursor()
+        if req.action == "hide":
+            cur.execute(
+                f"UPDATE news_articles SET status='hidden', hidden_at=?, hidden_by=?, updated_at=? "
+                f"WHERE id IN ({placeholders})",
+                tuple([_now(), user["username"], _now()] + ids),
+            )
+            affected = cur.rowcount
+        elif req.action == "restore":
+            cur.execute(
+                f"UPDATE news_articles SET status='active', hidden_at='', hidden_by='', updated_at=? "
+                f"WHERE id IN ({placeholders})",
+                tuple([_now()] + ids),
+            )
+            affected = cur.rowcount
+        else:
+            cur.execute(
+                f"DELETE FROM news_view_log WHERE news_id IN ({placeholders})", tuple(ids)
+            )
+            cur.execute(
+                f"DELETE FROM news_favorites WHERE news_id IN ({placeholders})", tuple(ids)
+            )
+            cur.execute(
+                f"DELETE FROM news_articles WHERE id IN ({placeholders})", tuple(ids)
+            )
+            affected = cur.rowcount
+        conn.commit()
+    if req.action in ("hide", "restore", "delete"):
+        _invalidate_today_briefing()
+    logger.info(f"[新闻管理] admin={user['username']} action={req.action} ids={ids} affected={affected}")
+    return {"success": True, "action": req.action, "affected": affected}
+
+
+@router.post("/news/admin/articles/{article_id}/resummarize")
+async def admin_resummarize_news(article_id: int, request: Request):
+    """教师/管理员：清空旧摘要并重新排队生成。"""
+    user = get_current_user(request)
+    _require_manager(user)
+    rows = execute_query(
+        "SELECT id, title, url, source_name, summary, ai_summary, ai_one_liner, "
+        "category, image_url, related_subjects, tags, published_at, is_ai_summarized "
+        "FROM news_articles WHERE id=?",
+        (article_id,),
+    )
+    if not rows:
+        raise HTTPException(404, "新闻不存在")
+    execute_insert_update(
+        "UPDATE news_articles SET ai_summary='', ai_one_liner='', is_ai_summarized=0, "
+        "updated_at=? WHERE id=?",
+        (_now(), article_id),
+    )
+    _try_mark_ai(article_id)
+    spawn_bg(NewsService._generate_ai_summary, article_id, rows[0], name="news_ai_summary")
+    return {"success": True, "message": "已排队重新生成摘要"}
+
+
+@router.get("/news/admin/health")
+async def admin_news_health(request: Request):
+    """教师/管理员：新闻库与抓取健康度。"""
+    user = get_current_user(request)
+    _require_manager(user)
+    active = execute_query("SELECT COUNT(*) FROM news_articles WHERE status='active'")
+    hidden = execute_query("SELECT COUNT(*) FROM news_articles WHERE status<>'active'")
+    categories = execute_query(
+        "SELECT category, COUNT(*) FROM news_articles WHERE status='active' "
+        "GROUP BY category ORDER BY COUNT(*) DESC"
+    )
+    sources = execute_query(
+        "SELECT source_name, COUNT(*) FROM news_articles WHERE status='active' "
+        "GROUP BY source_name ORDER BY COUNT(*) DESC"
+    )
+    return {
+        "active": int(active[0][0] or 0) if active else 0,
+        "hidden": int(hidden[0][0] or 0) if hidden else 0,
+        "categories": {r[0] or "未分类": int(r[1] or 0) for r in categories},
+        "sources": {r[0] or "未知来源": int(r[1] or 0) for r in sources},
+        "last_fetch": NewsService._fetch_health_summary(),
+        "stored_total": NewsService._stored_article_count(),
+    }
 
 
 # NW4: /news/{news_id} 是通配段, 必须放在 /news/stats 等字面路径之后,

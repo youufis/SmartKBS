@@ -93,6 +93,7 @@ const QuestRecordsTab: React.FC = () => {
   const [gradeFilter, setGradeFilter] = useState('')
   const [classFilter, setClassFilter] = useState('')
   const [nameFilter, setNameFilter] = useState('')
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   // 动态下拉选项
   const [grades, setGrades] = useState<string[]>([])
@@ -161,6 +162,13 @@ const QuestRecordsTab: React.FC = () => {
     startTransition(() => loadRecords())
   }, [loadRecords])
 
+  // 翻页/筛选后清掉不在当前列表里的选择，避免误删看不见的记录
+  useEffect(() => {
+    setSelectedRowKeys((keys) =>
+      keys.filter((k) => records.some((r) => r.id === Number(k))),
+    )
+  }, [records])
+
   const handleDelete = (record: QuestRecord) => {
     Modal.confirm({
       title: t('confirmDelete'),
@@ -178,6 +186,36 @@ const QuestRecordsTab: React.FC = () => {
         try {
           await apiClient.delete(`/api/quest/admin/records/${record.id}`)
           loadRecords()
+        } catch (e: any) {
+          message.error(e?.response?.data?.detail || t('deleteFailed'))
+        }
+      },
+    })
+  }
+
+  const handleBulkDelete = () => {
+    const ids = selectedRowKeys.map(Number)
+    if (ids.length === 0) return
+    const affected = new Set(
+      records.filter((r) => ids.includes(r.id)).map((r) => r.student_username),
+    ).size
+    Modal.confirm({
+      title: t('confirmBulkDeleteRecords', { count: ids.length }),
+      icon: <ExclamationCircleOutlined />,
+      content: t('confirmBulkDeleteRecordsDesc', { count: ids.length, students: affected }),
+      okText: t('bulkDelete'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      onOk: async () => {
+        try {
+          const { data } = await apiClient.post('/api/quest/admin/records/bulk-delete', { ids })
+          const deleted = Number(data?.deleted || 0)
+          const failed = Array.isArray(data?.failed) ? data.failed.length : 0
+          if (failed > 0) message.warning(t('bulkDeleteResult', { deleted, failed }))
+          else message.success(t('bulkDeleteResult', { deleted, failed: 0 }))
+          setSelectedRowKeys([])
+          if (records.length > 0 && ids.length >= records.length && page > 1) setPage(page - 1)
+          else loadRecords()
         } catch (e: any) {
           message.error(e?.response?.data?.detail || t('deleteFailed'))
         }
@@ -407,6 +445,17 @@ const QuestRecordsTab: React.FC = () => {
           />
           <Button type="primary" icon={<SearchOutlined />} onClick={loadRecords}>{t('search')}</Button>
           <Text type="secondary" style={{ fontSize: 13 }}>{t('totalRecords', { count: total })}</Text>
+          {selectedRowKeys.length > 0 && (
+            <>
+              <Text strong style={{ fontSize: 13 }}>
+                {t('selectedCount', { count: selectedRowKeys.length })}
+              </Text>
+              <Button danger icon={<DeleteOutlined />} onClick={handleBulkDelete}>
+                {t('bulkDeleteSelected')}
+              </Button>
+              <Button onClick={() => setSelectedRowKeys([])}>{t('clearSelection')}</Button>
+            </>
+          )}
         </Space>
       </Card>
 
@@ -428,6 +477,11 @@ const QuestRecordsTab: React.FC = () => {
           rowKey="id"
           loading={loading}
           size="small"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys),
+            preserveSelectedRowKeys: false,
+          }}
           pagination={{
             current: page,
             pageSize,
@@ -465,6 +519,7 @@ const QuestBankTab: React.FC = () => {
   const [keyword, setKeyword] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [categories, setCategories] = useState<{ name: string; count: number }[]>([])
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   // 编辑弹窗
   const [editModalOpen, setEditModalOpen] = useState(false)
@@ -590,6 +645,12 @@ const QuestBankTab: React.FC = () => {
     startTransition(() => loadQuestions())
   }, [loadQuestions])
 
+  useEffect(() => {
+    setSelectedRowKeys((keys) =>
+      keys.filter((k) => questions.some((q) => q.id === Number(k))),
+    )
+  }, [questions])
+
   // ── 删除 ──
   const handleDelete = (q: QuestBankQuestion) => {
     Modal.confirm({
@@ -603,6 +664,33 @@ const QuestBankTab: React.FC = () => {
         try {
           await apiClient.delete(`/api/quest/admin/bank/${q.id}`)
           loadQuestions()
+        } catch (e: any) {
+          message.error(e?.response?.data?.detail || t('deleteFailed'))
+        }
+      },
+    })
+  }
+
+  const handleBulkDelete = () => {
+    const ids = selectedRowKeys.map(Number)
+    if (ids.length === 0) return
+    Modal.confirm({
+      title: t('confirmBulkDeleteBank', { count: ids.length }),
+      icon: <ExclamationCircleOutlined />,
+      content: t('confirmBulkDeleteBankDesc', { count: ids.length }),
+      okText: t('bulkDelete'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      onOk: async () => {
+        try {
+          const { data } = await apiClient.post('/api/quest/admin/bank/bulk-delete', { ids })
+          const deleted = Number(data?.deleted || 0)
+          const failed = Array.isArray(data?.failed) ? data.failed.length : 0
+          if (failed > 0) message.warning(t('bulkDeleteResult', { deleted, failed }))
+          else message.success(t('bulkDeleteResult', { deleted, failed: 0 }))
+          setSelectedRowKeys([])
+          if (questions.length > 0 && ids.length >= questions.length && page > 1) setPage(page - 1)
+          else loadQuestions()
         } catch (e: any) {
           message.error(e?.response?.data?.detail || t('deleteFailed'))
         }
@@ -845,6 +933,18 @@ const QuestBankTab: React.FC = () => {
           />
           <Button icon={<ReloadOutlined />} onClick={loadQuestions}>{t('refresh')}</Button>
           <Text type="secondary" style={{ fontSize: 13 }}>{t('totalQuestions', { count: total })}</Text>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            disabled={selectedRowKeys.length === 0}
+            onClick={handleBulkDelete}
+          >
+            {t('bulkDeleteSelected')}
+            {selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : ''}
+          </Button>
+          {selectedRowKeys.length > 0 && (
+            <Button onClick={() => setSelectedRowKeys([])}>{t('clearSelection')}</Button>
+          )}
         </Space>
       </Card>
 
@@ -856,6 +956,11 @@ const QuestBankTab: React.FC = () => {
           rowKey="id"
           loading={loading}
           size="small"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys),
+            preserveSelectedRowKeys: false,
+          }}
           pagination={{
             current: page,
             pageSize,

@@ -2,11 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image,
+  DatePicker,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
   LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined, TagsOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import dayjs, { type Dayjs } from 'dayjs'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
@@ -69,6 +73,9 @@ const QuestionBankPage: React.FC = () => {
   const { t } = useTranslation('questions')
   const { t: tc } = useTranslation('common')
   const user = useAuthStore((s) => s.user)
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const queryString = searchParams.toString()
 
   // 从后端加载课程列表
   useEffect(() => {
@@ -78,6 +85,29 @@ const QuestionBankPage: React.FC = () => {
       }
     }).catch((err) => { reportLoadError(err, { key: 'questionBank.subjects' }) })
   }, [])
+
+  // 创建者筛选项（与统计页共用同一份元数据）
+  useEffect(() => {
+    questionsApi.getQuestionAnalyticsMeta()
+      .then((meta) => setCreatorOptions(meta.creators || []))
+      .catch(() => setCreatorOptions([]))
+  }, [])
+
+  // 支持从统计页下钻：/question-bank?type=...&creator=...&keyword=...
+  useEffect(() => {
+    const params = new URLSearchParams(queryString)
+    const next: any = {}
+    for (const key of ['type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'keyword', 'start_date', 'end_date']) {
+      const val = params.get(key)
+      if (val) next[key] = val
+    }
+    setFilters(next)
+    setKeywordInput(next.keyword || '')
+    const sd = params.get('start_date')
+    const ed = params.get('end_date')
+    setDateRange(sd || ed ? [sd ? dayjs(sd) : null, ed ? dayjs(ed) : null] : null)
+    setPage(1)
+  }, [queryString])
   // ── 生成试题表单 ──
   const [generateForm] = Form.useForm()
   // 知识点候选由共用控件从课程树拉取（含模块级缓存），此处只负责按学科过滤
@@ -110,7 +140,14 @@ const QuestionBankPage: React.FC = () => {
     keyword?: string
     difficulty?: string
     subject?: string
+    creator?: string
+    knowledge_points?: string
+    start_date?: string
+    end_date?: string
   }>({})
+  const [keywordInput, setKeywordInput] = useState('')
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
+  const [creatorOptions, setCreatorOptions] = useState<{ username: string; name: string }[]>([])
 
   // ── 编辑弹窗 ──
   const [editModal, setEditModal] = useState(false)
@@ -707,6 +744,9 @@ const QuestionBankPage: React.FC = () => {
               <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}>
                 {t('refresh')}
               </Button>
+              <Button icon={<BarChartOutlined />} onClick={() => navigate('/question-bank/analytics')}>
+                {t('analyticsTitle')}
+              </Button>
               <Button icon={<ClearOutlined />} onClick={handleDedup} loading={dedupLoading}>
                 {t('dedup')}
               </Button>
@@ -1084,10 +1124,57 @@ const QuestionBankPage: React.FC = () => {
               {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
             </Select>
           </Col>
-          <Col span={6}>
+          <Col span={4}>
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder={t('analyticsAllCreators')}
+              style={{ width: '100%' }}
+              value={filters.creator}
+              onChange={(val) => { setFilters(f => ({ ...f, creator: val })); setPage(1) }}
+              options={creatorOptions.map(c => ({ value: c.username, label: `${c.name} (${c.username})` }))}
+            />
+          </Col>
+          <Col span={4}>
+            <KnowledgePointSelect
+              subject={filters.subject || ''}
+              value={splitKps(filters.knowledge_points || '')}
+              onChange={(v) => {
+                setFilters(f => ({
+                  ...f,
+                  knowledge_points: joinKps(Array.isArray(v) ? v : [v]) || undefined,
+                }))
+                setPage(1)
+              }}
+              style={{ width: '100%' }}
+              placeholder={t('analyticsKnowledgePointFilter')}
+            />
+          </Col>
+          <Col span={4}>
+            <DatePicker.RangePicker
+              style={{ width: '100%' }}
+              value={dateRange}
+              onChange={(v) => {
+                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+                setFilters(f => ({
+                  ...f,
+                  start_date: v?.[0]?.format('YYYY-MM-DD'),
+                  end_date: v?.[1]?.format('YYYY-MM-DD'),
+                }))
+                setPage(1)
+              }}
+            />
+          </Col>
+          <Col span={4}>
             <Input.Search
               placeholder={t('searchContentOrKp')}
               allowClear
+              value={keywordInput}
+              onChange={(e) => {
+                setKeywordInput(e.target.value)
+                if (!e.target.value) { setFilters(f => ({ ...f, keyword: undefined })); setPage(1) }
+              }}
               onSearch={(val) => { setFilters(f => ({ ...f, keyword: val || undefined })); setPage(1) }}
             />
           </Col>
@@ -1187,8 +1274,11 @@ const QuestionBankPage: React.FC = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label={t('subject')} name="subject">
-                <Input placeholder={t('subject')} allowClear />
+              <Form.Item label={t('subject')} name="subject" rules={[{ required: true, message: t('subject') }]}>
+                <Select
+                  placeholder={t('subject')}
+                  options={subjectOptions.map(s => ({ value: s, label: s }))}
+                />
               </Form.Item>
             </Col>
           </Row>

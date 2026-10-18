@@ -101,6 +101,37 @@ export interface NewsStats {
   total_favorites: number;
 }
 
+export interface NewsAdminArticle {
+  id: number;
+  title: string;
+  url: string;
+  source_name: string;
+  category: string;
+  published_at: string;
+  fetched_at: string;
+  is_ai_summarized: boolean;
+  status: 'active' | 'hidden' | string;
+  view_count: number;
+  favorite_count: number;
+  ai_one_liner: string;
+  ai_summary: string;
+  tags: string[];
+  related_subjects: string[];
+  image_url: string;
+  admin_note: string;
+  hidden_at: string;
+  hidden_by: string;
+  updated_at: string;
+}
+
+export interface NewsAdminList {
+  articles: NewsAdminArticle[];
+  total: number;
+  page: number;
+  page_size: number;
+  summary: { active: number; hidden: number };
+}
+
 /** 获取新闻列表 */
 export async function getNewsList(category?: string, page = 1, pageSize = 20): Promise<NewsListResponse> {
   const params: Record<string, any> = { page, page_size: pageSize };
@@ -157,6 +188,60 @@ export async function getFetchStatus(): Promise<{
   stored_total: number;
 }> {
   const { data } = await apiClient.get('/api/news/fetch-status');
+  return data;
+}
+
+/** 教师/管理员：全量新闻管理列表 */
+export async function getAdminNews(params: {
+  keyword?: string;
+  category?: string;
+  source_name?: string;
+  status?: string;
+  ai_status?: string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<NewsAdminList> {
+  const { data } = await apiClient.get('/api/news/admin/articles', { params });
+  return data;
+}
+
+/** 教师/管理员：编辑新闻分类/标签/状态 */
+export async function updateAdminNews(articleId: number, payload: Record<string, unknown>): Promise<{ article: NewsAdminArticle }> {
+  const { data } = await apiClient.patch(`/api/news/admin/articles/${articleId}`, payload);
+  return data;
+}
+
+/** 教师/管理员：批量隐藏/恢复；彻底删除仅管理员 */
+export async function bulkAdminNews(ids: number[], action: 'hide' | 'restore' | 'delete'): Promise<{ success: boolean; affected: number }> {
+  const { data } = await apiClient.post('/api/news/admin/articles/bulk', { ids, action });
+  return data;
+}
+
+/** 教师/管理员：重新生成 AI 摘要 */
+export async function resummarizeAdminNews(articleId: number): Promise<{ success: boolean; message: string }> {
+  const { data } = await apiClient.post(`/api/news/admin/articles/${articleId}/resummarize`);
+  return data;
+}
+
+export interface NewsAdminHealth {
+  active: number;
+  hidden: number;
+  categories: Record<string, number>;
+  sources: Record<string, number>;
+  last_fetch?: NewsFetchHealth | null;
+  stored_total: number;
+}
+
+export async function getAdminNewsHealth(): Promise<NewsAdminHealth> {
+  const { data } = await apiClient.get('/api/news/admin/health');
+  return data;
+}
+
+/** 新闻源体检（教师/管理员） */
+export async function diagnoseNewsFeeds(): Promise<any> {
+  const { data } = await apiClient.get('/api/news/diagnose', { timeout: 120000 });
   return data;
 }
 

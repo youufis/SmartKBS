@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
-  Card, Row, Col, Typography, Spin, Select, Button, Space, message,
+  Alert, Card, Row, Col, Typography, Spin, Select, Button, Space, message,
   Empty, Tabs, Statistic, Table, Tag, Tooltip,
 } from 'antd'
 import {
@@ -12,7 +12,7 @@ import {
 import FormulaRenderer from '../components/FormulaRenderer'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import { pollAiTask } from '../api/aiTask'
+import { pollAiTaskWithProgress } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
 import LearningProgress from '../components/LearningProgress'
 import { reportLoadError } from '../utils/loadError'
@@ -86,6 +86,31 @@ interface ProgressStudent {
   [key: string]: unknown
 }
 
+async function downloadWord(url: string, filename: string) {
+  const { data } = await apiClient.get(url, { responseType: 'blob', timeout: 300000 })
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  })
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(href)
+}
+
+async function exportError(e: any, fallback: string): Promise<string> {
+  const data = e?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      const parsed = JSON.parse(text)
+      if (parsed?.detail) return String(parsed.detail)
+    } catch { /* 非 JSON 错误体 */ }
+  }
+  return e?.response?.data?.detail || e?.message || fallback
+}
+
 const AnalyticsPage: React.FC = () => {
   const { t } = useTranslation('dashboard')
   const user = useAuthStore((s) => s.user)
@@ -95,6 +120,10 @@ const AnalyticsPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState('')
   const [rawData, setRawData] = useState<ClassOverviewData | null>(null)
+  const [reportId, setReportId] = useState<number | null>(null)
+  const [suggestionsReportId, setSuggestionsReportId] = useState<number | null>(null)
+  const [examReportId, setExamReportId] = useState<number | null>(null)
+  const [examError, setExamError] = useState('')
 
   // 班级分析参数
   const [grade, setGrade] = useState('')
@@ -146,6 +175,30 @@ const AnalyticsPage: React.FC = () => {
         .catch((err) => { reportLoadError(err, { key: 'analytics.classes' }) })
     }
   }, [grade, user?.username])
+
+  // 换班级后旧报告立即失效，避免把上一个班的结论当成本班结论
+  useEffect(() => {
+    setReport('')
+    setRawData(null)
+    setReportId(null)
+    setSuggestionsData(null)
+    setSuggestionsReportId(null)
+  }, [grade, cls])
+
+  // 选中班级立即拉取统计快照，不必先烧一次 AI 才能看到数字
+  const snapshotSeq = useRef(0)
+  useEffect(() => {
+    if (!grade || !cls) return
+    const seq = ++snapshotSeq.current
+    apiClient.get('/api/analytics/class-overview', {
+      params: { grade, cls, teacher: user?.username, snapshot_only: 1 },
+    })
+      .then(({ data }) => {
+        if (seq !== snapshotSeq.current) return
+        setRawData(data?.data || null)
+      })
+      .catch(() => { /* 快照失败不阻断 AI 生成 */ })
+  }, [grade, cls, user?.username])
 
   // 加载考试列表
   useEffect(() => {
@@ -225,6 +278,19 @@ const AnalyticsPage: React.FC = () => {
     setProgressLoading(false)
   }
 
+  // 首次进入「学情进度」或筛选条件变化时自动加载，避免默认课程下空白
+  const progressLoadedRef = useRef(false)
+  useEffect(() => {
+    progressLoadedRef.current = false
+  }, [courseId, progressGrade, progressClass])
+  useEffect(() => {
+    if (activeTab === 'progress' && courseId && !progressLoadedRef.current) {
+      progressLoadedRef.current = true
+      void loadProgress(1)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, courseId, progressGrade, progressClass])
+
   // 展开某一行时才拉取该学生的知识点掌握明细
   useEffect(() => {
     (expandedRowKeys as React.Key[]).forEach((k) => {
@@ -245,26 +311,35 @@ const AnalyticsPage: React.FC = () => {
     if (!cls) return
     setLoading(true)
     setReport('')
+    setReportId(null)
     try {
       const { data } = await apiClient.get('/api/analytics/class-overview', {
         params: { grade, cls, teacher: user?.username },
       })
+      setRawData(data.data || null)
+      if (data.empty) {
+        message.info(data.message || t('analytics.noResult'))
+        return
+      }
       if (data.task_id) {
-        const result = await pollAiTask(data.task_id)
-        if (result) {
-          setReport(result.result || t('analytics.noResult'))
-          setRawData(data.data)
-        } else {
-          setReport(t('analytics.aiTimeout'))
-        }
+        const state = await pollAiTaskWithProgress(data.task_id, undefined, 300000)
+        const result: any = state.result || {}
+        setReport(result.result || t('analytics.noResult'))
+        setReportId(result.report_id || null)
       } else {
         setReport(data.report || t('analytics.noResult'))
-        setRawData(data.data)
+        setReportId(data.report_id || null)
       }
-    } catch {
+    } catch (e: any) {
+      if (e?.aiTaskTimeout) {
+        message.warning(t('analytics.aiStillRunning'))
+      } else {
+        message.error(e?.response?.data?.detail || e?.message || t('analytics.analysisFailed'))
+      }
       setReport(t('analytics.analysisFailed'))
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   // ── AI 教学建议 ──
@@ -274,22 +349,33 @@ const AnalyticsPage: React.FC = () => {
     if (!cls) return
     setSuggestionsLoading(true)
     setSuggestionsData(null)
+    setSuggestionsReportId(null)
     try {
       const { data } = await apiClient.get('/api/analytics/teaching-suggestions', {
         params: { grade, cls, teacher_username: user?.username },
       })
+      if (data.empty) {
+        message.info(data.message || t('analytics.noResult'))
+        return
+      }
       if (data.task_id) {
-        const result = await pollAiTask(data.task_id)
-        if (result) {
-          setSuggestionsData({ suggestions: result.result || '', data: data.data })
-        } else {
-        }
+        const state = await pollAiTaskWithProgress(data.task_id, undefined, 300000)
+        const result: any = state.result || {}
+        setSuggestionsData({ suggestions: result.result || '', data: data.data })
+        setSuggestionsReportId(result.report_id || null)
       } else {
         setSuggestionsData(data)
+        setSuggestionsReportId(data.report_id || null)
       }
-    } catch {
+    } catch (e: any) {
+      if (e?.aiTaskTimeout) {
+        message.warning(t('analytics.aiStillRunning'))
+      } else {
+        message.error(e?.response?.data?.detail || e?.message || t('analytics.suggestionsFailed'))
+      }
+    } finally {
+      setSuggestionsLoading(false)
     }
-    setSuggestionsLoading(false)
   }
 
   // 考试分析
@@ -297,22 +383,29 @@ const AnalyticsPage: React.FC = () => {
     if (!selectedExam) return
     setExamLoading(true)
     setExamAnalytics(null)
+    setExamReportId(null)
+    setExamError('')
     try {
       const { data } = await apiClient.get(`/api/analytics/exam/${selectedExam}/report`)
       if (data.task_id) {
-        const result = await pollAiTask(data.task_id)
-        if (result) {
-          setExamAnalytics({ ...(data as any), report: result.result || '' })
-        } else {
-          setReport(t('analytics.examAiTimeout'))
-        }
+        const state = await pollAiTaskWithProgress(data.task_id, undefined, 300000)
+        const result: any = state.result || {}
+        setExamAnalytics({ ...(data as any), report: result.result || '' })
+        setExamReportId(result.report_id || null)
       } else {
         setExamAnalytics(data)
+        setExamReportId(data.report_id || null)
       }
-    } catch {
-      setReport(t('analytics.examAnalysisFailed'))
+    } catch (e: any) {
+      const msg = e?.aiTaskTimeout
+        ? t('analytics.aiStillRunning')
+        : (e?.response?.data?.detail || e?.message || t('analytics.examAnalysisFailed'))
+      setExamError(msg)
+      if (e?.aiTaskTimeout) message.warning(msg)
+      else message.error(msg)
+    } finally {
+      setExamLoading(false)
     }
-    setExamLoading(false)
   }
 
   // ── 导出功能 ──
@@ -421,9 +514,25 @@ const AnalyticsPage: React.FC = () => {
                       <Space style={{ marginBottom: 12, justifyContent: 'space-between', width: '100%' }}>
                         <span />
                         <Space>
-                          <Button icon={<DownloadOutlined />} onClick={() => {
-                            if (!cls) return
-                            window.open(`/api/analytics/class-overview/export?${new URLSearchParams({ grade, cls, teacher: user?.username || '' }).toString()}`, '_blank')
+                          <Button icon={<DownloadOutlined />} disabled={!report}
+                            title={!report ? t('analytics.reportNotReady') : undefined}
+                            onClick={async () => {
+                            if (!report) {
+                              message.warning(t('analytics.reportNotReady'))
+                              return
+                            }
+                            const params = new URLSearchParams({
+                              grade, cls, teacher: user?.username || '',
+                            })
+                            if (reportId) params.set('report_id', String(reportId))
+                            try {
+                              await downloadWord(
+                                `/api/analytics/class-overview/export?${params.toString()}`,
+                                `学情分析_${grade}${cls}.docx`,
+                              )
+                            } catch (e: any) {
+                              message.error(await exportError(e, t('analytics.exportFailed')))
+                            }
                           }}>{t('analytics.exportWord')}</Button>
                           <Button icon={<DownloadOutlined />} onClick={exportReportAsMarkdown}>{t('analytics.exportMarkdown')}</Button>
                         </Space>
@@ -449,9 +558,25 @@ const AnalyticsPage: React.FC = () => {
                         </Row>
                       )}
                       <Space style={{ marginBottom: 12, justifyContent: 'flex-end', width: '100%' }}>
-                        <Button icon={<DownloadOutlined />} onClick={() => {
-                          if (!cls) return
-                          window.open(`/api/analytics/teaching-suggestions/export?${new URLSearchParams({ grade, cls, teacher_username: user?.username || '' }).toString()}`, '_blank')
+                        <Button icon={<DownloadOutlined />} disabled={!suggestionsData?.suggestions}
+                          title={!suggestionsData?.suggestions ? t('analytics.reportNotReady') : undefined}
+                          onClick={async () => {
+                          if (!suggestionsData?.suggestions) {
+                            message.warning(t('analytics.reportNotReady'))
+                            return
+                          }
+                          const params = new URLSearchParams({
+                            grade, cls, teacher_username: user?.username || '',
+                          })
+                          if (suggestionsReportId) params.set('report_id', String(suggestionsReportId))
+                          try {
+                            await downloadWord(
+                              `/api/analytics/teaching-suggestions/export?${params.toString()}`,
+                              `教学建议_${grade}${cls}.docx`,
+                            )
+                          } catch (e: any) {
+                            message.error(await exportError(e, t('analytics.exportFailed')))
+                          }
                         }}>{t('analytics.exportWord')}</Button>
                       </Space>
                       <Card style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
@@ -483,6 +608,10 @@ const AnalyticsPage: React.FC = () => {
                     <div style={{ textAlign: 'center', padding: 40 }}>
                       <Spin size="large" description={t('analytics.aiAnalyzing')} />
                     </div>
+                  )}
+
+                  {examError && (
+                    <Alert type="error" showIcon message={examError} style={{ marginBottom: 12 }} />
                   )}
 
                   {examAnalytics && (
@@ -521,9 +650,22 @@ const AnalyticsPage: React.FC = () => {
                       <Space style={{ marginBottom: 12, justifyContent: 'space-between', width: '100%' }}>
                         <span />
                         <Space>
-                          <Button icon={<DownloadOutlined />} onClick={() => {
-                            if (!selectedExam) return
-                            window.open(`/api/analytics/exam/${selectedExam}/report/export`, '_blank')
+                          <Button icon={<DownloadOutlined />} disabled={!examAnalytics?.report}
+                            title={!examAnalytics?.report ? t('analytics.reportNotReady') : undefined}
+                            onClick={async () => {
+                            if (!selectedExam || !examAnalytics?.report) {
+                              message.warning(t('analytics.reportNotReady'))
+                              return
+                            }
+                            const rid = examReportId ? `?report_id=${examReportId}` : ''
+                            try {
+                              await downloadWord(
+                                `/api/analytics/exam/${selectedExam}/report/export${rid}`,
+                                `考试分析_${selectedExam}.docx`,
+                              )
+                            } catch (e: any) {
+                              message.error(await exportError(e, t('analytics.exportFailed')))
+                            }
                           }}>{t('analytics.exportWord')}</Button>
                           <Button icon={<DownloadOutlined />} onClick={exportExamExcel}>{t('analytics.exportExcel')}</Button>
                         </Space>

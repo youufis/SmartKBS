@@ -953,6 +953,14 @@ def _s(v) -> str:
     return "" if v is None else str(v)
 
 
+def _numeric_header(header: str) -> bool:
+    """只对度量列做数值化，学号/活动ID/班级名等保持文本（避免丢前导零）。"""
+    h = str(header or "")
+    if h in ("学号", "活动ID", "ID"):
+        return False
+    return any(k in h for k in ("得分", "满分", "率", "次数", "人数", "积分", "应参与", "实参与"))
+
+
 def _summary_sheet_rows(data: dict) -> dict[str, tuple[list[str], list[list[str]]]]:
     """把 build_summary 结果转成 4 张表的 (headers, rows), Excel/CSV 共用"""
     types: dict = data["types"]  # 保持注册表顺序
@@ -1225,7 +1233,9 @@ def export_summary_excel(
         for ri, row in enumerate(rows):
             for ci, val in enumerate(row, 1):
                 # 数字单元格写数值, 便于透视/公式
-                if isinstance(val, str) and val != "" and re.fullmatch(r"-?\d+(\.\d+)?", val):
+                if (isinstance(val, str) and val != ""
+                        and _numeric_header(headers[ci - 1])
+                        and re.fullmatch(r"-?\d+(\.\d+)?", val)):
                     num = float(val)
                     ws.cell(4 + ri, ci, int(num) if num == int(num) else num)
                 else:

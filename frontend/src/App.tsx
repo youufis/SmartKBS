@@ -51,6 +51,7 @@ import ScorePage from './pages/ScorePage'
 import RollcallManagePage from './pages/RollcallManagePage'
 import AboutPage from './pages/AboutPage'
 import QuestionBankPage from './pages/QuestionBankPage'
+import QuestionBankAnalyticsPage from './pages/QuestionBankAnalyticsPage'
 import ExamPage from './pages/ExamPage'
 import QuestionExamPage from './pages/QuestionExamPage'
 import ExamTakePage from './pages/ExamTakePage'
@@ -93,6 +94,8 @@ import TaskTodoPage from './pages/TaskTodoPage'
 import PortraitPage from './pages/PortraitPage'
 import DailyDiscoveryPage from './pages/DailyDiscoveryPage'
 import NewsHubPage from './pages/NewsHubPage'
+import DailyDiscoveryAdminPage from './pages/DailyDiscoveryAdminPage'
+import NewsAdminPage from './pages/NewsAdminPage'
 import ShowcasePage from './pages/ShowcasePage'
 
 function App() {
@@ -161,6 +164,7 @@ function App() {
             <Route path="system-config" element={user?.role === 'admin' ? <SystemConfigPage /> : <Navigate to="/chat" />} />
             <Route path="question-exam" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionExamPage /> : <Navigate to="/chat" />} />
             <Route path="question-bank" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankPage /> : <Navigate to="/chat" />} />
+            <Route path="question-bank/analytics" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankAnalyticsPage /> : <Navigate to="/chat" />} />
             <Route path="exam" element={<ExamPage />} />
             <Route path="exam-compose/:examId" element={user?.role === 'admin' || user?.role === 'teacher' ? <ExamComposePage /> : <Navigate to="/exam" />} />
             <Route path="score" element={user?.role === 'student' ? <RewardPage /> : <ScorePage />} />
@@ -196,6 +200,8 @@ function App() {
             <Route path="whiteboard" element={<WhiteboardPage />} />
             <Route path="daily-discovery" element={<DailyDiscoveryPage />} />
             <Route path="news-hub" element={<NewsHubPage />} />
+            <Route path="daily-discovery-admin" element={<RequireRole roles={TA}><DailyDiscoveryAdminPage /></RequireRole>} />
+            <Route path="news-admin" element={<RequireRole roles={TA}><NewsAdminPage /></RequireRole>} />
             <Route path="whiteboard-room/:roomId" element={<WhiteboardRoomPage />} />
             <Route path="portrait" element={<PortraitPage />} />
             <Route path="showcase" element={<ShowcasePage />} />
