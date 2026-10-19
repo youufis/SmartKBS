@@ -45,8 +45,17 @@
 > - 💬 **Group discussion** — list editing; real automatic/random grouping; stable WebSocket; idempotent, rate-limited optimistic messages; posting blocked after the discussion ends
 > - 🏆 **Quest admin** — bulk deletion for records and question bank, teaching-scope checks, points and badge recalculation
 > - 📰 **Daily picks / news admin** — teacher and admin consoles with health checks and single/bulk disable, restore and delete
+> - 🖥️ **Desktop update prompt** — version management compares “version + release build stamp (`desktop_build`)” and points you to the newest installer instead of the misleading “install Git first” error
+> - 📦 **Source-package update prompt** — with no Git history it prompts for the newest source package; if Git is installed, one click converts the folder into a Git deployment with in-app incremental upgrades
 > - 🧪 **1100+ regression tests passing**
 > - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the repair script
+>
+> 🔄 **Upgrade notes for this release**
+>
+> - Desktop: install the newer build over the old one (data in `%APPDATA%\SmartKBS\` is kept)
+> - Source package: **replace the source once manually**; only then does the panel show 「Check Update」 and detect later releases
+> - Git deployment: 「Check Update → Incremental Upgrade」 works as before
+> - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
 
 ---
 
@@ -1109,6 +1118,9 @@ Current version **8.8.0**. Each release lists the changes a user can notice; per
 - 🏆 **Quest admin** — bulk deletion for records and bank questions; teachers are limited to their classes; cascade cleanup with points/badge recalculation; bank details no longer exposed to students
 - 📰 **Daily picks / news admin** — teacher/admin consoles with health checks and single/bulk disable, restore and delete
 - 🧪 **1100+ regression tests passing**
+- 🖥️ **Desktop update prompt** — the desktop shell has no Git (a frozen exe has no `.git`, and `git reset` cannot replace a running exe), so it compares “version + release build stamp `desktop_build`” and guides you to the installer; the old misleading “install Git first” error is gone
+- 📦 **Source-package update prompt** — the deployment form is now split into desktop / git / source; with no Git history the panel falls back to “detect + download the source package”, fixing the old bug where such deployments always reported “up to date”; if Git is present, one click converts the folder into a Git deployment and runs the existing fetch → reset → migrate → pip → restart → auto-rollback pipeline
+- 🔄 **Same-version rebuilds are detected** — the release build stamp is the tie-breaker, so rebuilding under the same version number still prompts an update (installs missing the field are prompted too)
 - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the deployment repair script
 
 ### v7.x – v8.7 (merged)
@@ -1141,7 +1153,7 @@ Don't want to install Python or Node.js? Use the desktop installer — double-cl
 | --- | --- |
 | Runtime dependencies | None — no Python / Node.js needed (Electron shell + PyInstaller backend + Vite frontend) |
 | Data location | `%APPDATA%\SmartKBS\` (database, uploads, logs) — **survives uninstall and reinstall** |
-| Upgrading | Just install the newer build over it; the desktop edition does not use the online incremental upgrade (Git deployments only) |
+| Upgrading | Use 「System Config → Version Management → Check Update」; when a newer build is found, install the new package over the old one (data is kept). The Git-style online incremental upgrade does not apply to the desktop edition. |
 | Port | Fixed `8086`. If the web edition already runs on this machine under IIS, stop it first or the desktop app won't start |
 | Platforms | Only a Windows x64 installer is published today; macOS / Linux packaging is configured but not released |
 
