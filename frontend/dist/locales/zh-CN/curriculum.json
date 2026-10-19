@@ -384,5 +384,10 @@
   "rbUnbindSuccess": "资源已解绑",
   "rbUnbindFailed": "解绑失败",
   "aiTools": "AI 工具",
-  "aiToolsTip": "AI 备课 / AI 推荐 / AI 课件"
+  "aiToolsTip": "AI 备课 / AI 推荐 / AI 课件",
+  "kpDescription": "知识点说明",
+  "kpRelatedCount": "共 {{count}} 个",
+  "kpNoResources": "该知识点还没有关联资源",
+  "kpUnbindConfirm": "确认解绑该资源？",
+  "kpViewStatsTip": "去重人数 / 总浏览次数"
 }

@@ -5,15 +5,14 @@ import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
-  Dropdown, Collapse, Segmented,
+  Collapse, Segmented, Drawer, Grid,
 } from 'antd'
 
 const { Sider, Content } = Layout
 import type { DataNode } from 'antd/es/tree'
 import {
   BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
-  FileOutlined, FileTextOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
-  TeamOutlined, CheckCircleOutlined, ClockCircleOutlined,
+  FileOutlined, FileTextOutlined, DownloadOutlined, FormOutlined,
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
   RightOutlined, DownOutlined, SettingOutlined,
@@ -28,7 +27,7 @@ import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
-import ResetActivityButton from '../components/ResetActivityButton'
+import KpDetailPanel from '../components/KpDetailPanel'
 import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
@@ -58,32 +57,16 @@ const STATUS_COLORS: Record<string, string> = {
   completed: 'success',
 }
 
-const RESOURCE_ICONS: Record<string, React.ReactNode> = {
-  html: <FileOutlined />,
-  download: <DownloadOutlined />,
-  question: <QuestionCircleOutlined />,
-  exam: <FormOutlined />,
-  discussion: <TeamOutlined />,
-  interaction_quiz: <FormOutlined />,
-  task: <CheckCircleOutlined />,
-}
-
-const RESOURCE_LABELS: Record<string, string> = {
-  html: 'resourceHtml',
-  download: 'resourceDownload',
-  question: 'resourceQuestion',
-  exam: 'resourceExam',
-  discussion: 'resourceDiscussion',
-  interaction_quiz: 'resourceInteractionQuiz',
-  task: 'resourceTask',
-}
-
 const CurriculumPage: React.FC = () => {
   const { t } = useTranslation('curriculum')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
+  // 知识点详情：宽屏（≥1600）走右栏内联卡片；更窄时改右侧 Drawer，
+  // 免得被压成窄条、或整块堆在长目录下面要找半天
+  const screens = Grid.useBreakpoint()
+  const wideKpPanel = !!screens.xxl
 
   // ── 从系统配置加载课程名称列表 ──
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
@@ -707,11 +690,23 @@ const CurriculumPage: React.FC = () => {
     }
   }, [courses, activeCourseId])
 
+  // 切换课程时收起右侧详情面板，避免上一门课的知识点残留在面板里
+  useEffect(() => {
+    setSelectedKp(null)
+    setKpResources([])
+  }, [activeCourseId])
+
   // ── 树节点选择 ──
   const handleTreeSelect = (_selectedKeys: React.Key[], info: Record<string, unknown>) => {
     const node = info.node as Record<string, unknown> | undefined
     if (node?.isKp) {
       const kpData = node.data as KnowledgePoint
+      // 再点一次已选中的知识点 = 收起面板（面板本身也有收起按钮）
+      if (selectedKp?.id === kpData.id) {
+        setSelectedKp(null)
+        setKpResources([])
+        return
+      }
       // 加载知识点详情
       setKpLoading(true)
       setSelectedKp(kpData)
@@ -1010,6 +1005,30 @@ const CurriculumPage: React.FC = () => {
     setKpModal(true)
   }
 
+  // AI 工具下拉：统一入口，原本内联在面板 JSX 里
+  const handleAiTool = (key: string) => {
+    if (!selectedKp) return
+    if (key === 'lesson-plan') handleAiLessonPlan(selectedKp.id)
+    else if (key === 'recommend') handleAiRecommend(selectedKp.id)
+    else if (key === 'courseware') handleAiCourseware(selectedKp.id)
+    else if (key === 'podcast') handleAiPodcast(selectedKp.id)
+  }
+
+  // 收起右侧知识点详情面板
+  const handleCloseKpPanel = () => {
+    setSelectedKp(null)
+    setKpResources([])
+  }
+
+  // 面板内改动资源（解绑/排序/重置）后刷新列表
+  const reloadKpResources = useCallback(async () => {
+    if (!selectedKp) return
+    try {
+      const res = await curriculumApi.getKpResources(selectedKp.id)
+      setKpResources(res.resources)
+    } catch { /* 刷新失败就保留现有列表 */ }
+  }, [selectedKp])
+
   const handleSaveKp = async () => {
     try {
       const values = await kpForm.validateFields()
@@ -1023,6 +1042,13 @@ const CurriculumPage: React.FC = () => {
       }
       setKpModal(false)
       loadTree()
+      // 编辑的正是当前打开的知识点时，刷新右侧面板，别显示旧内容
+      if (editingKp && selectedKp?.id === editingKp.id) {
+        try {
+          const fresh = await curriculumApi.getKnowledgePoint(editingKp.id)
+          setSelectedKp(fresh)
+        } catch { /* 面板保持原样 */ }
+      }
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       if (detail) {
@@ -1242,6 +1268,29 @@ const CurriculumPage: React.FC = () => {
     groupedCourses.push({ subject: t('uncategorized'), courses: unmatchedCourses })
   }
 
+
+  // 知识点详情面板的公共 props（宽屏内联 / 窄屏 Drawer 共用一份）
+  const kpPanelProps = selectedKp ? {
+    kp: selectedKp,
+    resources: kpResources,
+    loading: kpLoading,
+    isTeacherOrAdmin,
+    isStudent,
+    lessonPlanLoading,
+    podcastDisabled,
+    onClose: handleCloseKpPanel,
+    onEdit: handleEditKp,
+    onLink: openKpLink,
+    onAiPractice: handleAiPractice,
+    onAiTool: handleAiTool,
+    onProgress: handleUpdateProgress,
+    onManageBindings: () => {
+      setBinderKpId(selectedKp.id)
+      setBinderKpName(selectedKp.name)
+      setBinderOpen(true)
+    },
+    onResourcesChanged: reloadKpResources,
+  } : null
 
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: 'var(--bg-layout)' }}>
@@ -1492,7 +1541,7 @@ const CurriculumPage: React.FC = () => {
             ) : (
               <Row gutter={16}>
                 {/* ── 课程树区域 ── */}
-                <Col span={selectedKp ? 14 : 24}>
+                <Col xs={24} xxl={selectedKp ? 14 : 24}>
                   <Card
                     title={
                       <Space>
@@ -1605,209 +1654,28 @@ const CurriculumPage: React.FC = () => {
                   </div>
                 </Modal>
 
-                {/* ── 右侧：知识点详情面板 ── */}
-                {selectedKp && (
-                  <Col span={10}>
-                    <Card
+                {/* ── 知识点详情：宽屏内联右栏；窄屏右侧抽屉（见 components/KpDetailPanel.tsx） ── */}
+                {selectedKp && kpPanelProps && (
+                  wideKpPanel ? (
+                    <Col xs={24} xxl={10}>
+                      <KpDetailPanel {...kpPanelProps} />
+                    </Col>
+                  ) : (
+                    <Drawer
+                      open
+                      placement="right"
+                      width={screens.sm ? 480 : '88%'}
                       title={
-                        <Space>
+                        <Space size={6}>
                           <NodeIndexOutlined />
                           <span>{selectedKp.name}</span>
                         </Space>
                       }
-                      loading={kpLoading}
-                      extra={
-                        <Space wrap size={4}>
-                          {isTeacherOrAdmin && (
-                            <Tooltip title={t('kpLinkTip')}>
-                              <Button type="link" size="small" icon={<SettingOutlined />}
-                                onClick={() => openKpLink(selectedKp)}>
-                                {t('kpLink')}
-                              </Button>
-                            </Tooltip>
-                          )}
-                          {isTeacherOrAdmin && (
-                            <Tooltip title={t('aiGeneratePractice')}>
-                              <Button type="link" size="small" icon={<FormOutlined />}
-                                onClick={() => handleAiPractice(selectedKp.id)}>
-                                {t('aiPractice')}
-                              </Button>
-                            </Tooltip>
-                          )}
-                          {isTeacherOrAdmin && (
-                            <Tooltip title={t('aiToolsTip')}>
-                              <Dropdown
-                                trigger={['click']}
-                                menu={{
-                                  onClick: ({ key }) => {
-                                    if (key === 'lesson-plan') handleAiLessonPlan(selectedKp.id)
-                                    else if (key === 'recommend') handleAiRecommend(selectedKp.id)
-                                    else if (key === 'courseware') handleAiCourseware(selectedKp.id)
-                                    else if (key === 'podcast') handleAiPodcast(selectedKp.id)
-                                  },
-                                  items: [
-                                    { key: 'lesson-plan', icon: <RobotOutlined />, label: t('aiLessonPlan'), disabled: lessonPlanLoading },
-                                    { key: 'recommend', icon: <RobotOutlined />, label: t('aiRecommend') },
-                                    { key: 'courseware', icon: <FileOutlined />, label: t('aiCourseware') },
-                                    {
-                                      key: 'podcast',
-                                      icon: <SoundOutlined />,
-                                      label: podcastDisabled ? `${t('aiPodcast')}（${t('podcastTtsOffShort')}）` : t('aiPodcast'),
-                                      disabled: podcastDisabled,
-                                    },
-                                  ],
-                                }}
-                              >
-                                <Button type="link" size="small" icon={<BulbOutlined />}>
-                                  {t('aiTools')} <DownOutlined />
-                                </Button>
-                              </Dropdown>
-                            </Tooltip>
-                          )}
-                          {isStudent && (
-                            <>
-                              {selectedKp.progress_status !== 'completed' && (
-                                <Button
-                                  type="primary"
-                                  size="small"
-                                  icon={<CheckCircleOutlined />}
-                                  onClick={() => handleUpdateProgress(selectedKp.id, 'completed')}
-                                >
-                                  {t('cyMarkDone')}
-                                </Button>
-                              )}
-                              {selectedKp.progress_status === 'not_started' && (
-                                <Button
-                                  size="small"
-                                  icon={<ClockCircleOutlined />}
-                                  onClick={() => handleUpdateProgress(selectedKp.id, 'in_progress')}
-                                >
-                                  {t('cyStartLearn')}
-                                </Button>
-                              )}
-                            </>
-                          )}
-                        </Space>
-                      }
+                      onClose={handleCloseKpPanel}
                     >
-                      {/* 知识点信息 */}
-                      {selectedKp.description && (
-                        <Typography.Paragraph>{selectedKp.description}</Typography.Paragraph>
-                      )}
-                      {selectedKp.learning_objectives && (
-                        <div style={{ marginBottom: 12 }}>
-                          <Typography.Text strong>{t('learningObjectives')}：</Typography.Text>
-                          <Typography.Paragraph>{selectedKp.learning_objectives}</Typography.Paragraph>
-                        </div>
-                      )}
-                      <Space style={{ marginBottom: 12 }}>
-                        <Tag color={DIFFICULTY_COLORS[selectedKp.difficulty]}>
-                          {t(DIFFICULTY_LABELS[selectedKp.difficulty]) || selectedKp.difficulty}
-                        </Tag>
-                        {selectedKp.estimated_minutes > 0 && (
-                          <Tag icon={<ClockCircleOutlined />}>{t('kpMinutes', { minutes: selectedKp.estimated_minutes })}</Tag>
-                        )}
-                        {isStudent && selectedKp.progress_status && (
-                          <Tag color={STATUS_COLORS[selectedKp.progress_status]}>
-                            {t(STATUS_LABELS[selectedKp.progress_status])}
-                          </Tag>
-                        )}
-                      </Space>
-
-                      {/* 绑定的资源列表 */}
-                      <Typography.Title level={5} style={{ marginTop: 16 }}>
-                        {t('relatedResources')}
-                      </Typography.Title>
-                      {kpResources.length === 0 ? (
-                        <Typography.Text type="secondary">{t('noRelatedResources')}</Typography.Text>
-                      ) : (
-                        <Space orientation="vertical" style={{ width: '100%' }}>
-                          {kpResources.map((r) => {
-                            const isFileType = r.resource_type === 'html' || r.resource_type === 'download'
-                            const handleClick = () => {
-                              // 如果是学生点击文件资源，记录查看事件
-                              if (isStudent && isFileType && r.resource_url) {
-                                import('../api/tracking').then(mod => {
-                                  mod.logResourceView({
-                                    resource_type: r.resource_type,
-                                    resource_id: r.resource_id,
-                                    knowledge_point_id: selectedKp?.id,
-                                    binding_id: r.binding_id,
-                                    source: 'curriculum',
-                                    file_path: r.resource_url.replace('/api/files/', ''),
-                                  });
-                                });
-                              }
-                              if (r.resource_url) {
-                                if (isFileType) {
-                                  window.open(r.resource_url, '_blank');
-                                } else {
-                                  window.location.href = r.resource_url;
-                                }
-                              }
-                            };
-                            return (
-                              <Card
-                                key={r.binding_id}
-                                size="small"
-                                hoverable
-                                style={{ cursor: r.resource_url ? 'pointer' : 'default' }}
-                                onClick={handleClick}
-                              >
-                                <Space>
-                                  {RESOURCE_ICONS[r.resource_type] || <FileOutlined />}
-                                  <Typography.Text style={{ color: r.resource_url ? '#1677ff' : undefined }}>
-                                    {r.resource_name || `[${r.resource_type}:${r.resource_id}]`}
-                                  </Typography.Text>
-                                  <Tag>{t(RESOURCE_LABELS[r.resource_type]) || r.resource_type}</Tag>
-                                  {/* 教师端显示浏览统计 */}
-                                  {isTeacherOrAdmin && r.view_stats && (
-                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                      {t('views')}{r.view_stats.unique_viewers}/{r.view_stats.total_views}
-                                    </Typography.Text>
-                                  )}
-                                  {/* 学生端显示是否已查看 */}
-                                  {isStudent && r.viewed !== undefined && (
-                                    <Tag color={r.viewed ? 'success' : 'default'} style={{ fontSize: 11 }}>
-                                      {r.viewed ? t('viewed') : t('notViewed')}
-                                    </Tag>
-                                  )}
-                                  {/* 课程练习重置：只清该绑定的作答/浏览/进度数据，练习页面本体保留 */}
-                                  {isTeacherOrAdmin && !!r.binding_id && (
-                                    <ResetActivityButton activityType="course" activityId={r.binding_id}
-                                      iconOnly stopPropagation
-                                      onSuccess={() => {
-                                        if (!selectedKp) return
-                                        curriculumApi.getKpResources(selectedKp.id)
-                                          .then((res) => setKpResources(res.resources))
-                                          .catch(() => {})
-                                      }} />
-                                  )}
-                                </Space>
-                              </Card>
-                            )
-                          })}
-                        </Space>
-                      )}
-
-                      {/* 绑定资源按钮（教师） */}
-                      {isTeacherOrAdmin && (
-                        <Button
-                          type="dashed"
-                          block
-                          icon={<PlusOutlined />}
-                          style={{ marginTop: 12 }}
-                          onClick={() => {
-                            setBinderKpId(selectedKp.id)
-                            setBinderKpName(selectedKp.name)
-                            setBinderOpen(true)
-                          }}
-                        >
-                          {t('manageBindResources')}
-                        </Button>
-                      )}
-                    </Card>
-                  </Col>
+                      <KpDetailPanel {...kpPanelProps} variant="plain" />
+                    </Drawer>
+                  )
                 )}
               </Row>
             )}

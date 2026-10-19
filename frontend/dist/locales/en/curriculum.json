@@ -384,5 +384,10 @@
   "rbUnbindSuccess": "Resource unbound",
   "rbUnbindFailed": "Unbind failed",
   "aiTools": "AI tools",
-  "aiToolsTip": "AI lesson plan / recommendation / courseware"
+  "aiToolsTip": "AI lesson plan / recommendation / courseware",
+  "kpDescription": "Description",
+  "kpRelatedCount": "{{count}} total",
+  "kpNoResources": "No resources linked to this knowledge point yet",
+  "kpUnbindConfirm": "Unbind this resource?",
+  "kpViewStatsTip": "Unique viewers / total views"
 }

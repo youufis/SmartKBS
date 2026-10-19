@@ -116,6 +116,14 @@ export async function unbindResource(bindingId: number): Promise<{ message: stri
   return data;
 }
 
+/** 重排知识点下绑定资源的顺序（教师/管理员，整体覆盖式提交） */
+export async function reorderBindings(
+  items: { binding_id: number; sort_order: number }[],
+): Promise<{ message: string }> {
+  const { data } = await apiClient.put('/api/curriculum/bindings/reorder', { items });
+  return data;
+}
+
 /** 获取可绑定的候选资源 */
 export async function getAvailableResources(params: {
   resource_type: string;

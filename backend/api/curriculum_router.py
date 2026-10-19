@@ -133,6 +133,13 @@ class BindingCreate(BaseModel):
     resource_id: int
     sort_order: int = 0
 
+class BindingReorderItem(BaseModel):
+    binding_id: int
+    sort_order: int
+
+class BindingReorderRequest(BaseModel):
+    items: list[BindingReorderItem]
+
 class ProgressUpdate(BaseModel):
     status: str = "in_progress"  # not_started | in_progress | completed
     score: float | None = None
@@ -1680,6 +1687,52 @@ async def delete_binding(binding_id: int, request: Request):
     execute_insert_update("DELETE FROM curriculum_bindings WHERE id=?", (binding_id,))
     logger.info(f"用户 {user['username']} 解绑资源 binding_id={binding_id}")
     return {"message": "资源已解绑"}
+
+
+@router.put("/bindings/reorder", summary="重排知识点下绑定资源的展示顺序")
+async def reorder_bindings(req: BindingReorderRequest, request: Request):
+    """教师/管理员调整某知识点下关联资源的顺序（整体覆盖式提交）。
+
+    与章节/知识点的 /reorder 同口径：先整批校验（绑定存在 + 有该课程的维护权限），
+    再在一个事务里落库；任何一项不合格就整批拒绝，避免留下半套顺序。
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+    if not req.items:
+        raise HTTPException(status_code=400, detail="排序列表为空")
+
+    plans: list[tuple[str, tuple]] = []
+    rejected: list[dict[str, Any]] = []
+    for item in req.items:
+        b = execute_query_one(
+            "SELECT id, knowledge_point_id FROM curriculum_bindings WHERE id=?",
+            (item.binding_id,))
+        if not b:
+            rejected.append({"id": item.binding_id, "reason": "绑定不存在"})
+            continue
+        denial = _course_edit_denial(user, _course_of_kp(b["knowledge_point_id"]))
+        if denial:
+            rejected.append({"id": item.binding_id, "reason": denial})
+            continue
+        plans.append((
+            "UPDATE curriculum_bindings SET sort_order=? WHERE id=?",
+            (item.sort_order, item.binding_id),
+        ))
+
+    if rejected:
+        detail = "；".join(f"{r['id']}: {r['reason']}" for r in rejected[:5])
+        logger.warning(
+            f"用户 {user['username']} 资源排序整批未生效（{len(rejected)} 项不合格）: {detail}")
+        raise HTTPException(status_code=400, detail=f"排序未生效：{detail}")
+
+    with get_transaction() as conn:
+        cur = conn.cursor()
+        for sql, params in plans:
+            cur.execute(sql, params)
+
+    logger.info(f"用户 {user['username']} 调整知识点资源顺序: {len(plans)} 项")
+    return {"message": "排序已更新", "updated": {"bindings": len(plans)}}
 
 
 def _register_personal_resources(username: str, resource_type: str) -> None:
