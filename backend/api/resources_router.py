@@ -1372,7 +1372,10 @@ async def ai_preview_html(request: Request):
     if title:
         suggested_name = f"{_sanitize_filename(title)}_{type_label}.html"
     elif topic:
-        suggested_name = f"{_sanitize_filename(topic)}_{type_label}.html"
+        # 知识点可能是"、"连接的多个：文件名只取第一个，避免又长又串
+        from backend.question_select import split_tags as _split_tags
+        _first_topic = (_split_tags(topic) or [topic])[0]
+        suggested_name = f"{_sanitize_filename(_first_topic)}_{type_label}.html"
     else:
         suggested_name = f"AI生成_{type_label}_{int(time.time())}.html"
 
@@ -1935,8 +1938,11 @@ async def ai_generate_async(request: Request):
             main_html = (files.get("index.html") or next(iter(files.values()), "")) if files else html_cleaned
             html_dir = get_account_html_dir(username)
 
-            # 确定目录名
-            title = _extract_html_title(html_cleaned) or topic
+            # 确定目录名（多知识点用"、"连接时只取第一个，避免目录名又长又串）
+            title = _extract_html_title(html_cleaned)
+            if not title and topic:
+                from backend.question_select import split_tags as _split_tags
+                title = (_split_tags(topic) or [topic])[0]
             type_labels = {
                 "animation": "动画讲解", "quiz": "互动答题",
                 "practice": "练习题", "custom": "自定义", "interactive": "实验交互",

@@ -8,6 +8,7 @@ import { getFileIcon } from '../utils/fileIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { reportLoadError } from '../utils/loadError'
+import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 
 // 展平树节点为文件列表
 function flattenTree(nodes: TreeNode[], basePath = ''): { name: string; path: string; isLeaf: boolean }[] {
@@ -151,7 +152,7 @@ const ResourceMgmtPage: React.FC = () => {
   const [aiGrade, setAiGrade] = useState('')
   const [aiCustomPrompt, setAiCustomPrompt] = useState('')
   const [aiWorking, setAiWorking] = useState(false)  // 生成+保存中
-  const [aiDone, setAiDone] = useState<{ fileUrl: string; fileName: string } | null>(null)
+  const [aiDone, setAiDone] = useState<{ fileUrl: string; fileName: string; path: string; locate: string } | null>(null)
   // ── 主题选择 ──
   const [aiThemes, setAiThemes] = useState<resourcesApi.AiTheme[]>([])
   const [aiTheme, setAiTheme] = useState('')
@@ -165,12 +166,18 @@ const ResourceMgmtPage: React.FC = () => {
   // 题目数量：以前页面题量在 prompt 与检索里各写一套、界面上根本没有入口，
   // 老师想少几道题只能自己在页面上删。这里给它一个真入参（默认值与后端一致）。
   const [aiQuestionCount, setAiQuestionCount] = useState<number>(10)
+  // 老师手动改过题量后，切换类型不再把它重置回默认值
+  const [aiQuestionCountTouched, setAiQuestionCountTouched] = useState(false)
 
-  // 打开弹窗时加载学科、年级、主题
+  // 打开弹窗时加载学科、年级（只在打开时拉一次，不随类型重复请求）
   useEffect(() => {
     if (!aiModalOpen) return
     apiClient.get('/api/config/subjects').then(({ data }) => {
-      if (data?.subjects?.length > 0) setAiSubjectOptions(data.subjects)
+      if (data?.subjects?.length > 0) {
+        setAiSubjectOptions(data.subjects)
+        // 默认带出首个学科（与同步练习一致，方便知识点下拉按学科联动过滤）；已有选择则不覆盖
+        setAiSubject((prev) => prev || data.subjects[0])
+      }
     }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.subjects' }) })
     apiClient.get('/api/scores/my-grades').then(({ data }) => {
       // 返回格式: string[]，如 ["高一", "高二"]
@@ -178,21 +185,21 @@ const ResourceMgmtPage: React.FC = () => {
         setAiGradeOptions(data)
       }
     }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.grades' }) })
-    // 加载当前类型的主题
+  }, [aiModalOpen])
+
+  // 主题随资源类型联动（弹窗打开或切换类型各拉一次，不再重复请求）
+  useEffect(() => {
+    if (!aiModalOpen) return
     resourcesApi.getAiThemes(aiGenType).then(themes => {
       setAiThemes(themes)
       if (themes.length > 0) setAiTheme(themes[0].id)
     }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.themes' }) })
   }, [aiModalOpen, aiGenType])
 
-  // 切换类型时加载主题
+  // 切换类型：题量只在老师没手动改过时跟随类型默认值
   const handleAiTypeChange = (type: 'animation' | 'quiz' | 'practice' | 'custom' | 'interactive') => {
     setAiGenType(type)
-    setAiQuestionCount(type === 'practice' ? 15 : 10)
-    resourcesApi.getAiThemes(type).then(themes => {
-      setAiThemes(themes)
-      if (themes.length > 0) setAiTheme(themes[0].id)
-    }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.themesByType' }) })
+    if (!aiQuestionCountTouched) setAiQuestionCount(type === 'practice' ? 15 : 10)
   }
 
   // ── AI 生成+保存（一步完成）──
@@ -208,7 +215,8 @@ const ResourceMgmtPage: React.FC = () => {
         grade: aiGrade || undefined,
         custom_prompt: aiGenType === 'custom' || aiGenType === 'interactive' ? aiCustomPrompt : undefined,
         theme: aiTheme || undefined,
-        enable_media: enableMediaGen,
+        // 配图增强只在交互式/自定义类型生效，其它类型不发送，避免"开着没接线"
+        enable_media: (aiGenType === 'interactive' || aiGenType === 'custom') ? enableMediaGen : false,
       }
       // 只有答题/练习两类页面有"题目"概念，其它类型不发这个字段
       if (aiGenType === 'quiz' || aiGenType === 'practice') {
@@ -284,11 +292,11 @@ const ResourceMgmtPage: React.FC = () => {
         // 显示结果
         if (saved.is_subdir) {
           const fileUrl = `/api/files/${saved.url_path}`
-          setAiDone({ fileUrl, fileName: saved.main_entry || 'index.html' })
+          setAiDone({ fileUrl, fileName: saved.main_entry || 'index.html', path: saved.url_path || '', locate: saved.dir_name || '' })
           message.success(t('resource.generatedWithCount', { count: saved.file_count, dir: saved.dir_name }))
         } else {
           const fileUrl = `/api/files/${saved.url_path}`
-          setAiDone({ fileUrl, fileName: saved.file_name || '' })
+          setAiDone({ fileUrl, fileName: saved.file_name || '', path: saved.url_path || '', locate: saved.file_name || '' })
           message.success(t('resource.generatedSuccess'))
         }
         loadTree()
@@ -317,11 +325,11 @@ const ResourceMgmtPage: React.FC = () => {
       )
       if (saveResult.is_subdir) {
         const fileUrl = `/api/files/${saveResult.url_path}`
-        setAiDone({ fileUrl, fileName: saveResult.main_entry || 'index.html' })
+        setAiDone({ fileUrl, fileName: saveResult.main_entry || 'index.html', path: saveResult.url_path, locate: saveResult.dir_name || '' })
         message.success(t('resource.generatedWithCount', { count: saveResult.file_count, dir: saveResult.dir_name }))
       } else {
         const fileUrl = `/api/files/${saveResult.url_path}`
-        setAiDone({ fileUrl, fileName: saveResult.file_name || fileName })
+        setAiDone({ fileUrl, fileName: saveResult.file_name || fileName, path: saveResult.url_path, locate: saveResult.file_name || '' })
         message.success(t('resource.generatedSuccess'))
       }
       loadTree()
@@ -568,78 +576,7 @@ const ResourceMgmtPage: React.FC = () => {
             </Radio.Group>
           </div>
 
-          {/* 交互式实验 - 实验分类选择 */}
-          {aiGenType === 'interactive' && (
-            <>
-              <div>
-                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                  {t('resource.expCategory')} <span style={{ color: '#ff4d4f' }}>*</span>
-                </Typography.Text>
-                <Select
-                  value={aiExpCategory}
-                  onChange={(v) => setAiExpCategory(v)}
-                  style={{ width: '100%' }}
-                  placeholder={t('resource.expCategoryPlaceholder')}
-                  options={resourcesApi.EXPERIMENT_CATEGORIES.map(cat => ({
-                    value: cat.value,
-                    label: `${cat.label} — ${cat.desc}`,
-                  }))}
-                />
-              </div>
-              <div>
-                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                  {t('resource.expTopic')} <span style={{ color: '#ff4d4f' }}>*</span>
-                </Typography.Text>
-                <Input
-                  placeholder={t('resource.expTopicPlaceholder')}
-                  value={aiTopic}
-                  onChange={(e) => setAiTopic(e.target.value)}
-                />
-              </div>
-              <div>
-                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                  {t('resource.expCustomReq')} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('resource.expCustomReqOptional')}</span>
-                </Typography.Text>
-                <Input.TextArea
-                  rows={3}
-                  placeholder={t('resource.expCustomReqPlaceholder')}
-                  value={aiCustomPrompt}
-                  onChange={(e) => setAiCustomPrompt(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-
-          {/* 知识点/主题（非交互式且非自定义） */}
-          {aiGenType !== 'custom' && aiGenType !== 'interactive' ? (
-            <div>
-              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                {t('resource.topicLabel')} <span style={{ color: '#ff4d4f' }}>*</span>
-                </Typography.Text>
-              <Input
-                placeholder={t('resource.topicPlaceholder')}
-                value={aiTopic}
-                onChange={(e) => setAiTopic(e.target.value)}
-              />
-            </div>
-          ) : null}
-
-          {/* 自定义 HTML */}
-          {aiGenType === 'custom' ? (
-            <div>
-              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                {t('resource.customReqLabel')} <span style={{ color: '#ff4d4f' }}>*</span>
-              </Typography.Text>
-              <Input.TextArea
-                rows={5}
-                placeholder={t('resource.customReqPlaceholder')}
-                value={aiCustomPrompt}
-                onChange={(e) => setAiCustomPrompt(e.target.value)}
-              />
-            </div>
-          ) : null}
-
-          {/* 学科 & 年级 */}
+          {/* 学科 & 年级（放在知识点之前：知识点下拉按学科联动过滤） */}
           <Space>
             <div>
               <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('resource.subjectLabel')}</Typography.Text>
@@ -667,6 +604,80 @@ const ResourceMgmtPage: React.FC = () => {
             </div>
           </Space>
 
+          {/* 交互式实验 - 实验分类选择 */}
+          {aiGenType === 'interactive' && (
+            <>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                  {t('resource.expCategory')} <span style={{ color: '#ff4d4f' }}>*</span>
+                </Typography.Text>
+                <Select
+                  value={aiExpCategory}
+                  onChange={(v) => setAiExpCategory(v)}
+                  style={{ width: '100%' }}
+                  placeholder={t('resource.expCategoryPlaceholder')}
+                  options={resourcesApi.EXPERIMENT_CATEGORIES.map(cat => ({
+                    value: cat.value,
+                    label: `${cat.label} — ${cat.desc}`,
+                  }))}
+                />
+              </div>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                  {t('resource.expTopic')} <span style={{ color: '#ff4d4f' }}>*</span>
+                </Typography.Text>
+                <KnowledgePointSelect
+                  subject={aiSubject}
+                  value={splitKps(aiTopic)}
+                  onChange={(v) => setAiTopic(joinKps(v as string[]))}
+                  placeholder={t('resource.expTopicPlaceholder')}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                  {t('resource.expCustomReq')} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('resource.expCustomReqOptional')}</span>
+                </Typography.Text>
+                <Input.TextArea
+                  rows={3}
+                  placeholder={t('resource.expCustomReqPlaceholder')}
+                  value={aiCustomPrompt}
+                  onChange={(e) => setAiCustomPrompt(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
+          {/* 知识点（非交互式且非自定义）：与同步练习同款统一控件（下拉选课程知识点 + 手输） */}
+          {aiGenType !== 'custom' && aiGenType !== 'interactive' ? (
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                {t('resource.topicLabel')} <span style={{ color: '#ff4d4f' }}>*</span>
+              </Typography.Text>
+              <KnowledgePointSelect
+                subject={aiSubject}
+                value={splitKps(aiTopic)}
+                onChange={(v) => setAiTopic(joinKps(v as string[]))}
+                style={{ width: '100%' }}
+              />
+            </div>
+          ) : null}
+
+          {/* 自定义 HTML */}
+          {aiGenType === 'custom' ? (
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                {t('resource.customReqLabel')} <span style={{ color: '#ff4d4f' }}>*</span>
+              </Typography.Text>
+              <Input.TextArea
+                rows={5}
+                placeholder={t('resource.customReqPlaceholder')}
+                value={aiCustomPrompt}
+                onChange={(e) => setAiCustomPrompt(e.target.value)}
+              />
+            </div>
+          ) : null}
+
           {/* 主题选择 */}
           {aiThemes.length > 0 && (
             <div>
@@ -684,33 +695,40 @@ const ResourceMgmtPage: React.FC = () => {
             </div>
           )}
 
-          {/* ── 配图增强开关 ── */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '10px 14px', background: '#f6f8fa', borderRadius: 8, border: '1px solid #e8ecf0' }}>
-            <div>
-              {(aiGenType === 'quiz' || aiGenType === 'practice') && (
-              <Space size={6} align="center">
-                <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.questionCountLabel')}</Typography.Text>
-                <InputNumber
-                  size="small"
-                  min={1}
-                  max={aiGenType === 'practice' ? 50 : 30}
-                  value={aiQuestionCount}
-                  onChange={(v) => setAiQuestionCount(v || (aiGenType === 'practice' ? 15 : 10))}
-                  style={{ width: 84 }}
-                />
-                <Tooltip title={t('resource.questionCountHint')}>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>({t('resource.bankFirstNote')})</Typography.Text>
-                </Tooltip>
-              </Space>
-            )}
-            <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.autoMediaLabel')}</Typography.Text>
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
-                {t('resource.autoMediaDesc')}
-              </Typography.Text>
+          {/* 题目数量（只有答题/练习两类页面有"题目"概念） */}
+          {(aiGenType === 'quiz' || aiGenType === 'practice') && (
+            <Space size={8} align="center" wrap>
+              <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.questionCountLabel')}</Typography.Text>
+              <InputNumber
+                size="small"
+                min={1}
+                max={aiGenType === 'practice' ? 50 : 30}
+                value={aiQuestionCount}
+                onChange={(v) => {
+                  setAiQuestionCountTouched(true)
+                  setAiQuestionCount(v || (aiGenType === 'practice' ? 15 : 10))
+                }}
+                style={{ width: 84 }}
+              />
+              <Tooltip title={t('resource.questionCountHint')}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>({t('resource.bankFirstNote')})</Typography.Text>
+              </Tooltip>
+            </Space>
+          )}
+
+          {/* ── 配图增强开关（仅交互式/自定义类型生效，其它类型隐藏，避免"开着没接线"） ── */}
+          {(aiGenType === 'interactive' || aiGenType === 'custom') && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 14px', background: '#f6f8fa', borderRadius: 8, border: '1px solid #e8ecf0' }}>
+              <div>
+                <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.autoMediaLabel')}</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+                  {t('resource.autoMediaDesc')}
+                </Typography.Text>
+              </div>
+              <Switch checked={enableMediaGen} onChange={setEnableMediaGen} size="small" />
             </div>
-            <Switch checked={enableMediaGen} onChange={setEnableMediaGen} size="small" />
-          </div>
+          )}
 
           {/* 生成按钮 / 完成状态 */}
           {aiDone ? (
@@ -719,8 +737,13 @@ const ResourceMgmtPage: React.FC = () => {
                 {t('resource.generatedSuccess')}
               </Typography.Text>
               {aiDone.fileName && aiDone.fileName !== 'index.html' && (
-                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
                   {t('resource.fileLabel')}{aiDone.fileName}
+                </Typography.Text>
+              )}
+              {aiDone.path && (
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16, wordBreak: 'break-all' }}>
+                  {t('resource.resultPathLabel')}{aiDone.path}
                 </Typography.Text>
               )}
               <Button type="primary" size="large" icon={<EyeOutlined />}
@@ -729,15 +752,30 @@ const ResourceMgmtPage: React.FC = () => {
                 {t('resource.openPreview')}
               </Button>
               <br />
-              <Button onClick={() => { setAiModalOpen(false); setAiDone(null) }}>
-                {t('resource.finish')}
-              </Button>
+              <Space>
+                <Button icon={<SearchOutlined />}
+                  onClick={() => {
+                    setAiModalOpen(false)
+                    setAiDone(null)
+                    setViewMode('tree')
+                    setSearchText(aiDone.locate || aiDone.fileName)
+                  }}>
+                  {t('resource.locateInTree')}
+                </Button>
+                <Button onClick={() => { setAiModalOpen(false); setAiDone(null) }}>
+                  {t('resource.finish')}
+                </Button>
+              </Space>
             </div>
           ) : (
             <Button type="primary" block size="large"
               icon={aiWorking ? <LoadingOutlined /> : <BulbOutlined />}
               loading={aiWorking}
-              disabled={aiWorking || (aiGenType === 'custom' ? !aiCustomPrompt : aiGenType === 'interactive' ? !aiTopic : !aiTopic)}
+              disabled={aiWorking || (aiGenType === 'custom'
+                ? !aiCustomPrompt.trim()
+                : aiGenType === 'interactive'
+                  ? !(aiTopic.trim() || aiCustomPrompt.trim())
+                  : !aiTopic.trim())}
               onClick={handleAiGenerate}
             >
               {aiWorking ? t('resource.generating') : t('resource.generateAndSave')}
