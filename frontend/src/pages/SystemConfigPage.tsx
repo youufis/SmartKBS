@@ -10,6 +10,7 @@ import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
   CheckCircleOutlined, CloseCircleOutlined, EditOutlined, DownOutlined, BarChartOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
@@ -1223,6 +1224,68 @@ const UpgradePanel: React.FC = () => {
     (r: any) => r?.migrations_unverified && !r?.migrations_ack,
   )
 
+  // ── 桌面版：没有 .git，只能「检测 + 引导下载新安装包」──
+  if (verInfo?.desktop_mode) {
+    const dl = verInfo.download_url || 'https://github.com/youufis/SmartKBS/releases/latest'
+    const w = window as any
+    const openDownload = () => {
+      if (w.smartkbs?.openExternal) w.smartkbs.openExternal(dl)
+      else window.open(dl, '_blank', 'noopener,noreferrer')
+    }
+    return (
+      <Spin spinning={verLoading}>
+        <Alert
+          type="info"
+          showIcon
+          icon={<DesktopOutlined />}
+          title={t('desktopUpdateTitle')}
+          description={t('desktopUpdateDesc')}
+          style={{ marginBottom: 16 }}
+        />
+        <Card style={{ marginBottom: 16 }}>
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label={t('currentVersion')}>
+              <Tag color="blue">{verInfo.current_version}</Tag>
+              {verInfo.desktop_build && <Text type="secondary" style={{ marginLeft: 8 }}>{t('buildLabel')} {verInfo.desktop_build}</Text>}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('latestVersionLabel')}>
+              <Tag color={verInfo.has_update ? 'green' : 'default'}>{verInfo.latest_version}</Tag>
+              {verInfo.latest_desktop_build && <Text type="secondary" style={{ marginLeft: 8 }}>{t('buildLabel')} {verInfo.latest_desktop_build}</Text>}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('status')}>
+              {verInfo.has_update
+                ? <Tag color="green">📥 {t('desktopNewBuild')}</Tag>
+                : <Tag>{t('upToDate')}</Tag>}
+            </Descriptions.Item>
+            {verInfo.release_date && (
+              <Descriptions.Item label={t('releaseDate')}>{verInfo.release_date}</Descriptions.Item>
+            )}
+          </Descriptions>
+          {verInfo.changelog && verInfo.changelog.length > 0 && (
+            <>
+              <Divider />
+              <Title level={5}>{t('changelogTitle')}</Title>
+              <div style={{ maxHeight: changelogAll ? 360 : 'none', overflowY: changelogAll ? 'auto' : 'hidden', paddingRight: 6 }}>
+                <Timeline
+                  items={(changelogAll ? verInfo.changelog : verInfo.changelog.slice(0, 6)).map((c: string) => ({ content: c }))}
+                />
+              </div>
+              {verInfo.changelog.length > 6 && (
+                <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setChangelogAll((v) => !v)}>
+                  {changelogAll ? t('changelogCollapse') : t('changelogShowMore', { count: verInfo.changelog.length })}
+                </Button>
+              )}
+            </>
+          )}
+          <Divider />
+          <Space>
+            <Button icon={<SearchOutlined />} onClick={loadVersion}>{t('checkUpdate')}</Button>
+            <Button type="primary" icon={<DownloadOutlined />} onClick={openDownload}>{t('desktopDownloadBtn')}</Button>
+          </Space>
+        </Card>
+      </Spin>
+    )
+  }
   return (
     <Spin spinning={verLoading}>
       {/* Git 环境问题警告 */}

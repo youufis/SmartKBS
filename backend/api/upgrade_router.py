@@ -54,6 +54,12 @@ MIGRATIONS_DIR = BASE_DIR / "backend" / "migrations"
 GIT_DOWNLOAD_URL = "https://git-scm.com/downloads/win"
 REMOTE_REPO_URL = "https://github.com/youufis/SmartKBS.git"
 
+# ── 桌面版（PyInstaller 冻结）在线更新 ──
+# 桌面版没有 .git、也没有源码树，git 升级链路天生不可用；而且 git reset 替换不了
+# 正在运行的 exe 与 resources/static/frontend。桌面版只做「检测 + 引导下载」：
+# 用户自行下载新版安装包重装。
+DESKTOP_RELEASES_URL = "https://github.com/youufis/SmartKBS/releases/latest"
+
 # ── Git 仓库垃圾：中断 fetch 留下的 tmp_* / 孤立 .idx ──
 PACK_DIR = BASE_DIR / ".git" / "objects" / "pack"
 # 只清理 10 分钟前的残留：并发 fetch 正在写的临时文件绝不能碰
@@ -350,6 +356,10 @@ class VersionCheckResult(BaseModel):
     pack_residue: dict[str, Any] | None = None  # .git 中断 fetch 残留（数量/大小），前端据此显示「清理仓库垃圾」
     version_source: str = ""  # 远程版本的来源（raw/jsdelivr/git 兜底），排查「检测不到新版本」
     remote_errors: list[str] = []  # 各候选地址的失败原因，前端可展开
+    desktop_mode: bool = False  # 桌面版：只做检测+引导下载，不提供 git 升级
+    desktop_build: str = ""  # 桌面版当前构建标识（打包时写入 version.json）
+    latest_desktop_build: str = ""  # 远端 version.json 里的构建标识
+    download_url: str = ""  # 桌面版：新安装包下载页
     prefetched: bool = False  # 是否已预缓存代码到本地（升级可跳过网络拉取）
 
 
@@ -585,6 +595,26 @@ def _read_disk_version() -> str:
         return str(data.get("latest_version") or "")
     except Exception:
         return ""
+
+
+def _is_desktop_mode() -> bool:
+    """是否运行在桌面版（PyInstaller 冻结）里。
+
+    桌面版由 Electron 拉起 backend-dist 里的 exe，没有 .git、也没有源码树；
+    IIS/Python 部署的 Web 版始终从源码运行，不会是冻结态。
+    本地调试可用环境变量 SMARTKB_DESKTOP=1 强制打开。
+    """
+    if os.environ.get("SMARTKB_DESKTOP", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    return bool(getattr(sys, "frozen", False))
+
+
+def _read_local_version_payload() -> dict[str, Any]:
+    """读本机 version.json（桌面版里就是打包时塞进 _internal 的那份）"""
+    try:
+        return json.loads((BASE_DIR / "version.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1259,6 +1289,67 @@ def _compare_versions(v1: str, v2: str) -> int:
     return len(p1) - len(p2)
 
 
+async def _check_version_desktop() -> VersionCheckResult:
+    """桌面版版本检测：只比 version.json，不碰 git。
+
+    桌面版更新频繁，常常「同一个发布版本号重新打包」，只比版本号会漏报，
+    所以再比一个打包时写入的构建标识 desktop_build：版本号或构建标识任一变化
+    都算「有更新」，引导用户去下载页取新安装包。
+    """
+    remote = await _fetch_remote_version()
+    local = _read_local_version_payload()
+    current = APP_VERSION
+    local_build = str(local.get("desktop_build") or "")
+
+    if remote is None:
+        hint = (
+            "远程版本获取失败（HTTP 镜像与 git 兜底都没通）：\n"
+            + "\n".join(_remote_version_cache["errors"][:3])
+            + "\n桌面版可直接前往下载页手动取最新安装包。"
+        )
+        return VersionCheckResult(
+            current_version=current,
+            latest_version=current,
+            has_update=False,
+            changelog=[],
+            breaking_changes=[],
+            release_date="",
+            desktop_mode=True,
+            desktop_build=local_build,
+            download_url=DESKTOP_RELEASES_URL,
+            git_issues=[hint],
+            remote_errors=list(_remote_version_cache["errors"]),
+        )
+
+    latest = str(remote.get("latest_version") or current)
+    latest_build = str(remote.get("desktop_build") or "")
+    # 版本号更高 → 有更新；版本号相同但构建标识不同 → 同版本号重打包，也算有更新
+    version_changed = _compare_versions(latest, current) > 0
+    build_changed = bool(latest_build) and bool(local_build) and latest_build != local_build
+    has_update = version_changed or build_changed
+
+    logger.info(
+        f"[version-check] 桌面版 当前={current}/{local_build or '未知构建'} "
+        f"远端={latest}/{latest_build or '未知构建'} 有更新={has_update}"
+    )
+
+    return VersionCheckResult(
+        current_version=current,
+        latest_version=latest,
+        has_update=has_update,
+        changelog=remote.get("changelog", []),
+        breaking_changes=remote.get("breaking_changes", []),
+        release_date=remote.get("release_date", ""),
+        behind_commits=0,
+        last_checked=datetime.now(timezone.utc).isoformat(),
+        desktop_mode=True,
+        desktop_build=local_build,
+        latest_desktop_build=latest_build,
+        download_url=DESKTOP_RELEASES_URL,
+        version_source=_remote_version_cache["source"],
+    )
+
+
 # ═══════════════════════════════════════════════════════
 #  API 端点
 # ═══════════════════════════════════════════════════════
@@ -1268,6 +1359,10 @@ async def check_version(request: Request) -> VersionCheckResult:
     """① 检测最新版本（仅 HTTP 获取 version.json，~1KB）"""
     user = get_current_user(request)
     require_admin(user)
+
+    # 桌面版：没有 .git / 没有源码树，git 升级链路天生不可用，只做检测 + 引导下载
+    if _is_desktop_mode():
+        return await _check_version_desktop()
 
     git_ok = _check_git_installed()
     if git_ok:

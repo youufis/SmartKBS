@@ -16,6 +16,10 @@ export interface VersionInfo {
   git_download_url: string
   git_issues: string[]
   prefetched: boolean
+  desktop_mode: boolean
+  desktop_build: string
+  latest_desktop_build: string
+  download_url: string
 }
 
 export interface UpgradeProgress {
