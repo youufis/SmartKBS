@@ -47,7 +47,6 @@
 > - 📰 **Daily picks / news admin** — teacher and admin consoles with health checks and single/bulk disable, restore and delete
 > - 🖥️ **Desktop update prompt** — version management compares “version + release build stamp (`desktop_build`)” and points you to the newest installer instead of the misleading “install Git first” error
 > - 📦 **Source-package update prompt** — with no Git history it prompts for the newest source package; if Git is installed, one click converts the folder into a Git deployment with in-app incremental upgrades
-> - 🧪 **1100+ regression tests passing**
 > - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the repair script
 >
 > 🔄 **Upgrade notes for this release**
@@ -1204,15 +1203,6 @@ If deployed via `git clone`, system upgrades are fully automated:
 ```bash
 pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 ```
-
-**Optional enhancements**
-
-| Package | What it adds | Without it |
-| --- | --- | --- |
-| `matplotlib` | Renders LaTeX formulas in papers and handouts as images | Formulas degrade to Unicode text; everything else works |
-| `cairosvg` | Rasterises SVG figures | Falls back to svglib, with weaker Chinese label and gradient fidelity |
-
-Install them separately with `pip install matplotlib` when needed — they are left out of `requirements.txt` so the base install stays fast.
 
 ---
 
