@@ -17,6 +17,10 @@ export interface VersionInfo {
   git_issues: string[]
   prefetched: boolean
   desktop_mode: boolean
+  /** 部署形态：desktop 桌面版 / git 克隆部署 / source 源码包部署（旧后端可能不返回） */
+  deploy_mode?: 'desktop' | 'git' | 'source'
+  /** 源码包部署且本机已装 Git：可一键转成 Git 部署 */
+  git_init_available?: boolean
   desktop_build: string
   latest_desktop_build: string
   download_url: string

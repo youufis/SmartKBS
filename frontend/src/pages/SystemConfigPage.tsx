@@ -1224,8 +1224,11 @@ const UpgradePanel: React.FC = () => {
     (r: any) => r?.migrations_unverified && !r?.migrations_ack,
   )
 
-  // ── 桌面版：没有 .git，只能「检测 + 引导下载新安装包」──
-  if (verInfo?.desktop_mode) {
+  // ── 引导型部署（桌面版 / 源码包部署）：没有可用的 git 历史，只能「检测 + 引导下载」──
+  // deploy_mode 缺省时回退到旧的 desktop_mode，保证与旧后端兼容
+  const promptOnly = verInfo ? (verInfo.deploy_mode ? verInfo.deploy_mode !== 'git' : verInfo.desktop_mode) : false
+  if (verInfo && promptOnly) {
+    const isDesktop = verInfo.deploy_mode ? verInfo.deploy_mode === 'desktop' : true
     const dl = verInfo.download_url || 'https://github.com/youufis/SmartKBS/releases/latest'
     const w = window as any
     const openDownload = () => {
@@ -1237,9 +1240,9 @@ const UpgradePanel: React.FC = () => {
         <Alert
           type="info"
           showIcon
-          icon={<DesktopOutlined />}
-          title={t('desktopUpdateTitle')}
-          description={t('desktopUpdateDesc')}
+          icon={isDesktop ? <DesktopOutlined /> : <DownloadOutlined />}
+          title={isDesktop ? t('desktopUpdateTitle') : t('sourceUpdateTitle')}
+          description={isDesktop ? t('desktopUpdateDesc') : t('sourceUpdateDesc')}
           style={{ marginBottom: 16 }}
         />
         <Card style={{ marginBottom: 16 }}>
@@ -1254,7 +1257,7 @@ const UpgradePanel: React.FC = () => {
             </Descriptions.Item>
             <Descriptions.Item label={t('status')}>
               {verInfo.has_update
-                ? <Tag color="green">📥 {t('desktopNewBuild')}</Tag>
+                ? <Tag color="green">📥 {isDesktop ? t('desktopNewBuild') : t('sourceNewBuild')}</Tag>
                 : <Tag>{t('upToDate')}</Tag>}
             </Descriptions.Item>
             {verInfo.release_date && (
@@ -1278,11 +1281,35 @@ const UpgradePanel: React.FC = () => {
             </>
           )}
           <Divider />
-          <Space>
+          <Space wrap>
             <Button icon={<SearchOutlined />} onClick={loadVersion}>{t('checkUpdate')}</Button>
-            <Button type="primary" icon={<DownloadOutlined />} onClick={openDownload}>{t('desktopDownloadBtn')}</Button>
+            <Button type="primary" icon={<DownloadOutlined />} onClick={openDownload}>
+              {isDesktop ? t('desktopDownloadBtn') : t('sourceDownloadBtn')}
+            </Button>
+            {!isDesktop && verInfo.git_init_available && (
+              <Button icon={<SyncOutlined />} ghost loading={upgrading} disabled={upgrading} onClick={handleUpgrade}>
+                {t('gitConvertBtn')}
+              </Button>
+            )}
           </Space>
+          {!isDesktop && verInfo.git_init_available && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 16 }}
+              title={t('gitConvertTitle')}
+              description={t('gitConvertDesc')}
+            />
+          )}
         </Card>
+        {(upgrading || (upgradeProg && upgradeProg.running)) && (
+          <Card title={t('upgradeProgress')}>
+            <Progress percent={upgradeProg ? upgradeProg.progress : 0} status={upgradeProg && upgradeProg.error ? 'exception' : 'active'} />
+            <div style={{ marginTop: 8 }}>
+              {restarting ? t('waitingServiceRecovery') : (upgradeProg ? upgradeProg.message : '')}
+            </div>
+          </Card>
+        )}
       </Spin>
     )
   }

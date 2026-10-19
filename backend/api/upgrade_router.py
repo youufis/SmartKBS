@@ -54,11 +54,12 @@ MIGRATIONS_DIR = BASE_DIR / "backend" / "migrations"
 GIT_DOWNLOAD_URL = "https://git-scm.com/downloads/win"
 REMOTE_REPO_URL = "https://github.com/youufis/SmartKBS.git"
 
-# ── 桌面版（PyInstaller 冻结）在线更新 ──
-# 桌面版没有 .git、也没有源码树，git 升级链路天生不可用；而且 git reset 替换不了
-# 正在运行的 exe 与 resources/static/frontend。桌面版只做「检测 + 引导下载」：
-# 用户自行下载新版安装包重装。
-DESKTOP_RELEASES_URL = "https://github.com/youufis/SmartKBS/releases/latest"
+# ── 「检测 + 引导下载」型部署（桌面版 / 源码包部署）──
+# 这两类部署都没有可用的 git 链路：桌面版是冻结的 exe（连 .git 和源码树都没有，
+# git reset 也替换不了正在运行的 exe 与 resources/static/frontend）；源码包部署是
+# 解压出来的代码目录，没有提交历史。它们只做「检测 + 引导」：提示有新版本，
+# 用户去 Release 页取对应产物（安装包 / 源码包）。
+RELEASE_PAGE_URL = "https://github.com/youufis/SmartKBS/releases/latest"
 
 # ── Git 仓库垃圾：中断 fetch 留下的 tmp_* / 孤立 .idx ──
 PACK_DIR = BASE_DIR / ".git" / "objects" / "pack"
@@ -356,10 +357,12 @@ class VersionCheckResult(BaseModel):
     pack_residue: dict[str, Any] | None = None  # .git 中断 fetch 残留（数量/大小），前端据此显示「清理仓库垃圾」
     version_source: str = ""  # 远程版本的来源（raw/jsdelivr/git 兜底），排查「检测不到新版本」
     remote_errors: list[str] = []  # 各候选地址的失败原因，前端可展开
-    desktop_mode: bool = False  # 桌面版：只做检测+引导下载，不提供 git 升级
-    desktop_build: str = ""  # 桌面版当前构建标识（打包时写入 version.json）
+    desktop_mode: bool = False  # 兼容字段：桌面版为 True（等价 deploy_mode == "desktop"）
+    deploy_mode: str = "git"  # 部署形态：desktop（桌面版）/ git（克隆）/ source（源码包）
+    git_init_available: bool = False  # 源码包部署且已装 Git：可一键转成 Git 部署
+    desktop_build: str = ""  # 本机构建标识（打包/发版时写入 version.json）
     latest_desktop_build: str = ""  # 远端 version.json 里的构建标识
-    download_url: str = ""  # 桌面版：新安装包下载页
+    download_url: str = ""  # 引导型部署：去哪个页面取新产物（安装包 / 源码包）
     prefetched: bool = False  # 是否已预缓存代码到本地（升级可跳过网络拉取）
 
 
@@ -615,6 +618,35 @@ def _read_local_version_payload() -> dict[str, Any]:
         return json.loads((BASE_DIR / "version.json").read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _has_git_history() -> bool:
+    """`.git` 里是否有真实提交（HEAD 可解析）。
+
+    刚 `git init` 的空仓库不算：没有历史，`rev-list HEAD..origin/master`、
+    `HEAD@{1}` 这些判据全都不成立，得先做一次全量同步。
+    """
+    if not (BASE_DIR / ".git").exists():
+        return False
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+            capture_output=True, timeout=5, stdin=subprocess.DEVNULL, cwd=str(BASE_DIR),
+            startupinfo=_make_startupinfo(),
+            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _deploy_mode() -> str:
+    """部署形态：desktop（桌面版）/ git（克隆部署，可增量升级）/ source（源码包部署）"""
+    if _is_desktop_mode():
+        return "desktop"
+    if _check_git_installed() and _has_git_history():
+        return "git"
+    return "source"
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1289,23 +1321,29 @@ def _compare_versions(v1: str, v2: str) -> int:
     return len(p1) - len(p2)
 
 
-async def _check_version_desktop() -> VersionCheckResult:
-    """桌面版版本检测：只比 version.json，不碰 git。
+async def _check_version_prompt(mode: str, *, git_init_available: bool = False) -> VersionCheckResult:
+    """引导型版本检测（desktop / source）：只比 version.json，不碰 git。
 
-    桌面版更新频繁，常常「同一个发布版本号重新打包」，只比版本号会漏报，
-    所以再比一个打包时写入的构建标识 desktop_build：版本号或构建标识任一变化
-    都算「有更新」，引导用户去下载页取新安装包。
+    这两类部署更新频繁，常常「同一个发布版本号重新打包」，只比版本号会漏报，
+    所以再比一个发版时写入的构建标识 desktop_build：版本号或构建标识任一变化
+    都算「有更新」，引导用户去 Release 页取新产物。
+
+    Args:
+        mode: "desktop"（下载新安装包）或 "source"（下载新源码包）
+        git_init_available: 源码包部署且本机已装 Git 时置 True，前端据此显示
+            「一键转 Git 部署，以后站内增量升级」入口。
     """
     remote = await _fetch_remote_version()
     local = _read_local_version_payload()
     current = APP_VERSION
     local_build = str(local.get("desktop_build") or "")
+    target = "安装包" if mode == "desktop" else "源码包"
 
     if remote is None:
         hint = (
             "远程版本获取失败（HTTP 镜像与 git 兜底都没通）：\n"
             + "\n".join(_remote_version_cache["errors"][:3])
-            + "\n桌面版可直接前往下载页手动取最新安装包。"
+            + f"\n可直接前往下载页手动取最新{target}。"
         )
         return VersionCheckResult(
             current_version=current,
@@ -1314,9 +1352,11 @@ async def _check_version_desktop() -> VersionCheckResult:
             changelog=[],
             breaking_changes=[],
             release_date="",
-            desktop_mode=True,
+            desktop_mode=(mode == "desktop"),
+            deploy_mode=mode,
             desktop_build=local_build,
-            download_url=DESKTOP_RELEASES_URL,
+            download_url=RELEASE_PAGE_URL,
+            git_init_available=git_init_available,
             git_issues=[hint],
             remote_errors=list(_remote_version_cache["errors"]),
         )
@@ -1325,11 +1365,12 @@ async def _check_version_desktop() -> VersionCheckResult:
     latest_build = str(remote.get("desktop_build") or "")
     # 版本号更高 → 有更新；版本号相同但构建标识不同 → 同版本号重打包，也算有更新
     version_changed = _compare_versions(latest, current) > 0
-    build_changed = bool(latest_build) and bool(local_build) and latest_build != local_build
+    # 本机没有构建标识（早于该字段的旧包 / 旧源码包）而远端有 → 也算有新产物
+    build_changed = bool(latest_build) and latest_build != local_build
     has_update = version_changed or build_changed
 
     logger.info(
-        f"[version-check] 桌面版 当前={current}/{local_build or '未知构建'} "
+        f"[version-check] {mode} 当前={current}/{local_build or '未知构建'} "
         f"远端={latest}/{latest_build or '未知构建'} 有更新={has_update}"
     )
 
@@ -1342,10 +1383,12 @@ async def _check_version_desktop() -> VersionCheckResult:
         release_date=remote.get("release_date", ""),
         behind_commits=0,
         last_checked=datetime.now(timezone.utc).isoformat(),
-        desktop_mode=True,
+        desktop_mode=(mode == "desktop"),
+        deploy_mode=mode,
         desktop_build=local_build,
         latest_desktop_build=latest_build,
-        download_url=DESKTOP_RELEASES_URL,
+        download_url=RELEASE_PAGE_URL,
+        git_init_available=git_init_available,
         version_source=_remote_version_cache["source"],
     )
 
@@ -1360,9 +1403,13 @@ async def check_version(request: Request) -> VersionCheckResult:
     user = get_current_user(request)
     require_admin(user)
 
-    # 桌面版：没有 .git / 没有源码树，git 升级链路天生不可用，只做检测 + 引导下载
-    if _is_desktop_mode():
-        return await _check_version_desktop()
+    # 引导型部署（桌面版 / 源码包部署）：没有可用的 git 历史，走「检测 + 引导下载」。
+    # 源码包部署若本机已装 Git，额外给一个「一键转 Git 部署」入口（转完即可站内增量升级）。
+    deploy_mode = _deploy_mode()
+    if deploy_mode == "desktop":
+        return await _check_version_prompt("desktop")
+    if deploy_mode == "source":
+        return await _check_version_prompt("source", git_init_available=_check_git_installed())
 
     git_ok = _check_git_installed()
     if git_ok:
@@ -1586,7 +1633,12 @@ async def start_upgrade(request: Request):
         raise HTTPException(status_code=503, detail="无法连接 GitHub，请稍后重试")
     behind = await _count_behind()
     version_changed = remote.get("latest_version") != APP_VERSION
-    if not version_changed and behind <= 0:
+    # 同版本号重打包（构建标识变了）也算有更新；behind < 0 = 算不出落后数
+    # （典型：源码包部署首次转 Git，空仓库还没有 HEAD），交给流水线按全量同步处理。
+    build_changed = bool(remote.get("desktop_build")) and str(remote.get("desktop_build")) != str(
+        _read_local_version_payload().get("desktop_build") or ""
+    )
+    if not version_changed and not build_changed and behind <= 0:
         raise HTTPException(status_code=400, detail="已是最新版本，无需升级")
 
     # ── 文件锁检查（防止 IIS 多 worker 并发升级） ──
@@ -1637,9 +1689,15 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
 
         # Step 1b: 如果 start_upgrade 未传入 behind，则重新计算
         if behind <= 0:
-            behind = int(await _run_git(
-                ["rev-list", "--count", "HEAD..origin/master"], timeout=30
-            ))
+            try:
+                behind = int(await _run_git(
+                    ["rev-list", "--count", "HEAD..origin/master"], timeout=30
+                ))
+            except Exception as rb_e:
+                # 空仓库（源码包部署首次转 Git）没有 HEAD，落后数算不出来：
+                # 按 0 处理即可 —— Step 2 的 reset --hard 会把工作区整体对齐到 origin/master。
+                logger.info(f"[upgrade] 落后提交数无法计算（多为空仓库首次同步），按 0 处理: {rb_e}")
+                behind = 0
         logger.info(f"[upgrade] 落后 {behind} 个提交")
 
         # 升级前的 HEAD 必须先存进占位记录：进程一旦在 Step 2 之后被打断，对账只能靠
