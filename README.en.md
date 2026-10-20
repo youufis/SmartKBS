@@ -15,7 +15,7 @@
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/version-8.9.0-blue)
+![Version](https://img.shields.io/badge/version-8.8.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -35,22 +35,29 @@
 
 ---
 
-> 📌 **Highlights of V8.9.0**
+> 📌 **Highlights of V8.8.0**
 >
-> - 🏁 **Class Ladder (big screen)** — a "Who Wants to Be a Millionaire"-style **single-player ladder** for the projector: 15 levels (415 points), safe levels 5 / 10, one wrong answer or a timeout ends the run, and a session can keep going all lesson
-> - 🎲 **Questions and pool** — a subject alone is enough (knowledge point optional or typed); the bank comes first with per-level difficulty and AI fills the gap; the pool builds in the background with progress on the button
-> - 👤 **Picking and lifelines** — the same fair weighted picking as roll call / class drill with voice announcement; three lifelines (50:50, phone a friend, ask the audience) sharing the student-side discounts
-> - 🏆 **Automatic rewards** — settling writes the **levels cleared** straight into classroom points and leaves a student record; wrong answer / timeout shows a full-screen result, and the session board refreshes live
-> - 🎨 **7 big-screen skins** — defaults to the light "Cloud" theme (plus Sunrise / Mint light and four dark skins); **one sound switch** covers effects and the name announcement
-> - 🔗 **Fits the existing system** — classroom-activities menu, activity monitor (per-class completion), activity reset, system settings (AI fill / default skin / sound), bilingual strings
-> - 🧪 **1130+ regression tests passing**
-> - ⚠️ **Breaking changes**: none; the four new `class_ladder_*` tables are created on startup
+> - 🏁 **Class Ladder (big screen)** — a single-player ladder for the projector: 15 levels (415 points), safe levels, run ends on a wrong answer or timeout
+> - 💡 **Questions and lifelines** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap; three lifelines (50:50, phone a friend, ask the audience)
+> - 🏆 **Automatic rewards and big-screen feel** — levels cleared count into classroom points; live session board + full-screen result; 7 skins (light by default) and one sound switch
+> - 📚 **Question-bank analytics and governance** — new analysis page for type / difficulty / subject / knowledge point / creator / quality; knowledge points remain optional and can be selected or typed; subjects must come from the configured courses
+> - 🧑‍🏫 **Creator audit** — historical questions created by students/non-teachers can be reviewed and transferred; non-course subjects can be audited and archived with a repair script
+> - 📊 **Learning analytics** — class and time-window snapshots, corrected exam/task metrics and teacher scope; clear AI failure feedback and cached report export
+> - 🧾 **Class summary / teaching suggestions / exam analysis** — strictly class-scoped data; Word export reuses the generated report instead of calling the model again
+> - 📤 **Summary export** — corrected "submitted / pending grading" semantics, best attempt per activity, immediate filter invalidation, Blob download with visible errors
+> - 💬 **Group discussion** — list editing; real automatic/random grouping; stable WebSocket; idempotent, rate-limited optimistic messages; posting blocked after the discussion ends
+> - 🏆 **Quest admin** — bulk deletion for records and question bank, teaching-scope checks, points and badge recalculation
+> - 📰 **Daily picks / news admin** — teacher and admin consoles with health checks and single/bulk disable, restore and delete
+> - 🖥️ **Desktop update prompt** — version management compares "version + release build stamp (`desktop_build`)" and points you to the newest installer instead of the misleading "install Git first" error
+> - 📦 **Source-package update prompt** — with no Git history it prompts for the newest source package; if Git is installed, one click converts the folder into a Git deployment with in-app incremental upgrades
+> - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the repair script
 >
 > 🔄 **Upgrade notes for this release**
 >
 > - Desktop: install the newer build over the old one (data in `%APPDATA%\SmartKBS\` is kept)
-> - Source package / Git deployment: 「Check Update → Incremental Upgrade」 works as before — **no manual replace needed**
-> - Database: the four new tables are created on startup, no migration script required
+> - Source package: **replace the source once manually**; only then does the panel show 「Check Update」 and detect later releases
+> - Git deployment: 「Check Update → Incremental Upgrade」 works as before
+> - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
 
 ---
 
@@ -693,7 +700,7 @@ Integrated smart roll call + attendance statistics management:
 
 ### Class Ladder (Big Screen)
 
-A "Who Wants to Be a Millionaire"-style **single-player ladder** for the projector — one session can run all lesson long:
+A **single-player ladder** for the projector — one session can run all lesson long:
 
 - **🎯 15-level ladder**: level 1 worth 10 up to level 15 worth 50 (415 total), accumulating; levels 5 and 10 are safe levels (a wrong answer keeps what you have earned)
 - **🎲 Questions**: a subject alone is enough (the knowledge point is optional or can be typed); the bank comes first with per-level difficulty, AI fills the gap and stores new questions
@@ -703,7 +710,7 @@ A "Who Wants to Be a Millionaire"-style **single-player ladder** for the project
 - **🏆 Automatic rewards**: the run settles straight into classroom points (levels cleared) and leaves a record on the student's timeline
 - **📊 Session board and settle screen**: a wrong answer or timeout triggers a full-screen result with the explanation; the board refreshes live and the next student starts a new run
 - **🎨 7 big-screen skins**: defaults to the light "Cloud" theme; Sunrise / Mint (light) and Star / Cyber / Academy / Classic (dark) are also available
-- **🔊 One sound switch**: big-screen effects (synthesised in the browser, no assets) and the name announcement together
+- **🔊 One sound switch**: covers both big-screen effects and the name announcement
 - **⌨️ Keyboard friendly**: `Space` draw, `1-4` pick, `Enter` submit, `0` skip
 - **🖥 Built for the projector**: students never use their own devices
 
@@ -1121,22 +1128,16 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.9.0**. Each release lists the changes a user can notice; per-commit detail lives in the git history.
-
-### v8.9.0
-
-- 🏁 **Class Ladder (big screen)** — new single-player ladder for the projector: 15 levels (10/15/20/25/30/50, 415 total), safe levels 5 / 10, the run ends on a wrong answer or timeout
-- 🎲 **Questions and pool** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap and stores new questions; the pool builds in the background with progress on the button
-- 👤 **Picking and lifelines** — shared fair picking plus voice announcement; three lifelines (50:50 ×0.85, phone a friend / ask the audience ×0.70) matching the student-side knowledge quest
-- 🧮 **Judging and scoring** — answers never leave the server; settling writes the levels cleared into classroom points and leaves a student record; full-screen result plus a live session board
-- 🎨 **Big-screen skins** — 7 skins (light Cloud by default, plus Sunrise / Mint and four dark ones) with zero backend cost; one sound switch for effects and announcement
-- 🧩 **Fits the existing system** — classroom-activities menu, activity monitor, activity reset, system settings, bilingual strings
-- 🖥️ **Layout** — wider question area (narrower ladder / board), the answering name moved into the top bar, keyboard shortcuts
-- 🧪 **1130+ regression tests passing**
-- ⚠️ **Breaking changes**: none; the four new `class_ladder_*` tables are created on startup
+Current version **8.8.0**. Each release lists the changes a user can notice; per-commit detail lives in the git history.
 
 ### v8.8.0
 
+- 🏁 **Class Ladder (big screen)** — single-player ladder for the projector: 15 levels (415 points), safe levels, run ends on a wrong answer or timeout
+- 🎲 **Questions and pool** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap and stores new questions
+- 👤 **Picking and lifelines** — shared fair picking plus voice announcement; three lifelines (50:50, phone a friend, ask the audience)
+- 🧮 **Judging and scoring** — server-side judging; settling counts levels cleared into classroom points and leaves a student record
+- 🎨 **Big-screen feel** — 7 skins (light by default), one sound switch, a live session board and a full-screen result
+- 🧩 **Fits the existing system** — classroom-activities menu, activity monitor, activity reset, system settings, bilingual strings
 - 📚 **Question-bank analytics and governance** — new analytics page (type / difficulty / subject / knowledge point / creator / quality); the shared dropdown-plus-typing knowledge-point control allows empty values; filters and drill-down by knowledge point, creator and date
 - 🧑‍🏫 **Creator and subject audit** — historical questions created by students/non-teachers can be reviewed and transferred; non-course subjects can be audited and archived; subject creation, import, AI generation and editing now require a configured course subject
 - 📊 **Learning analytics and class summary** — class/time-window snapshots and permission checks; corrected exam, task and roll-call metrics and teacher impersonation; clear AI failure/timeout feedback; reports are cached for export
@@ -1144,7 +1145,6 @@ Current version **8.9.0**. Each release lists the changes a user can notice; per
 - 💬 **Group discussion** — list editing; real class-roster pre-grouping with working automatic/random modes; no WebSocket reconnect per message; idempotent, rate-limited optimistic messages; posting, broadcasting and AI blocked after the end
 - 🏆 **Quest admin** — bulk deletion for records and bank questions; teachers are limited to their classes; cascade cleanup with points/badge recalculation; bank details no longer exposed to students
 - 📰 **Daily picks / news admin** — teacher/admin consoles with health checks and single/bulk disable, restore and delete
-- 🧪 **1100+ regression tests passing**
 - 🖥️ **Desktop update prompt** — the desktop shell has no Git (a frozen exe has no `.git`, and `git reset` cannot replace a running exe), so it compares “version + release build stamp `desktop_build`” and guides you to the installer; the old misleading “install Git first” error is gone
 - 📦 **Source-package update prompt** — the deployment form is now split into desktop / git / source; with no Git history the panel falls back to “detect + download the source package”, fixing the old bug where such deployments always reported “up to date”; if Git is present, one click converts the folder into a Git deployment and runs the existing fetch → reset → migrate → pip → restart → auto-rollback pipeline
 - 🔄 **Same-version rebuilds are detected** — the release build stamp is the tie-breaker, so rebuilding under the same version number still prompts an update (installs missing the field are prompted too)
