@@ -10,8 +10,8 @@
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
-> - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio, plus 12-level titles, achievement badges and the automatic points engine
-> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, My portrait, online incremental upgrade, multi-theme appearance
+> - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
+> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, online incremental upgrade, multi-theme appearance
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
@@ -135,8 +135,8 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 11 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 9 |
-| 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio | 10 |
-| ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, My portrait, upgrade, about, other services | 9 |
+| 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 11 |
+| ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, upgrade, about, other services | 8 |
 
 > The **permission note** at the end of each section states which roles can reach that feature; the full matrix is in the [Permissions Overview](#permissions).
 
@@ -971,6 +971,32 @@ Full-dimension learning data aggregation profile:
 
 ---
 
+### My Portrait
+
+A personalised illustration (AI portrait) drawn with Tongyi Wanxiang from the learning data of the current period:
+
+- **🤖 AI Image Generation**: Generates exclusive portraits based on user platform data (points, title, learning/teaching data)
+- **🎭 15 Creative Styles**:
+  🔮 Magic Academy | 💻 Cyber Scholar | 🖌️ Chinese Ink | 🚀 Space Explorer | 💥 Action Comics
+  🧚 Fairy Tale Elf | ⚙️ Steampunk | 🎮 Pixel World | 🎭 Dunhuang Flying Apsaras | 🌌 Aurora Dreamscape
+  🦸 Superhero | ⚔️ Temple Knight | 🦋 Cyber Elf | 🐚 Ocean Explorer | ⏳ Time Traveler
+- **📝 Creative Messages**: Large model automatically generates stylized messages based on user data (martial arts, interstellar, classical, etc.)
+- **👤 Role-Aware**: Automatically adjusts portrait identity and message tone based on Student/Teacher/Admin
+- **🗓️ Configurable period**: one portrait per week by default, switchable to monthly in system configuration; the period decides both the free allowance and which slice of data the portrait is built from (this week / this month), so the name matches the content
+- **📊 Data attribution**: identity comes from lifetime data (title, total points, streak) while performance comes from **this period** (points earned, activities, exams, new wrong answers, chats, resource views) — lifetime numbers are never described as "this week"
+- **🖼️ Personal Gallery**: Historical portraits displayed chronologically, tagged with the period they cover
+- **🌐 Sharing Gallery**:
+  - School-wide gallery / Class gallery / Popular recommendations
+  - Like interaction
+  - Three privacy scopes: Public / Class-visible / Private
+- **🔒 Image compliance**: stylised illustrations only — the image prompt carries no real name or gender and never aims at a photorealistic face (K12 context)
+- **⏰ Generation Limit**: one free portrait per period, then points as configured; teachers/admins are free but capped per period
+- **🩺 Generation health**: admins see the last 7 days' success rate, average duration and common failures; a failed image can be retried without spending allowance or points
+
+> **Available to all logged-in users**
+
+---
+
 <a id="ch-manage"></a>
 
 ## System Management
@@ -1065,32 +1091,6 @@ Real-time message notification system:
 
 ---
 
-### My Portrait
-
-Personalized My portrait generated based on Tongyi Wanxiang model:
-
-- **🤖 AI Image Generation**: Generates exclusive portraits based on user platform data (points, title, learning/teaching data)
-- **🎭 15 Creative Styles**:
-  🔮 Magic Academy | 💻 Cyber Scholar | 🖌️ Chinese Ink | 🚀 Space Explorer | 💥 Action Comics
-  🧚 Fairy Tale Elf | ⚙️ Steampunk | 🎮 Pixel World | 🎭 Dunhuang Flying Apsaras | 🌌 Aurora Dreamscape
-  🦸 Superhero | ⚔️ Temple Knight | 🦋 Cyber Elf | 🐚 Ocean Explorer | ⏳ Time Traveler
-- **📝 Creative Messages**: Large model automatically generates stylized messages based on user data (martial arts, interstellar, classical, etc.)
-- **👤 Role-Aware**: Automatically adjusts portrait identity and message tone based on Student/Teacher/Admin
-- **🗓️ Configurable period**: one portrait per week by default, switchable to monthly in system configuration; the period decides both the free allowance and which slice of data the portrait is built from (this week / this month), so the name matches the content
-- **📊 Data attribution**: identity comes from lifetime data (title, total points, streak) while performance comes from **this period** (points earned, activities, exams, new wrong answers, chats, resource views) — lifetime numbers are never described as "this week"
-- **🖼️ Personal Gallery**: Historical portraits displayed chronologically, tagged with the period they cover
-- **🌐 Sharing Gallery**:
-  - School-wide gallery / Class gallery / Popular recommendations
-  - Like interaction
-  - Three privacy scopes: Public / Class-visible / Private
-- **🔒 Image compliance**: stylised illustrations only — the image prompt carries no real name or gender and never aims at a photorealistic face (K12 context)
-- **⏰ Generation Limit**: one free portrait per period, then points as configured; teachers/admins are free but capped per period
-- **🩺 Generation health**: admins see the last 7 days' success rate, average duration and common failures; a failed image can be retried without spending allowance or points
-
-> **Available to all logged-in users**
-
----
-
 ### Online Upgrade System (Version Management)
 
 Git-based online incremental upgrade system:
@@ -1123,6 +1123,7 @@ Git-based online incremental upgrade system:
 | 🔑 **Change Password** | All users can change their own password |
 | 🔐 **Forgot Password** | Self-service password recovery via security questions |
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
+ | 🎨 **Multi-theme appearance** | Theme switcher in the top bar: default blue-white, forest green, sunset orange, midnight starry and lavender purple; the choice is stored locally and is available on the sign-in page too |
 
 <a id="changelog"></a>
 
