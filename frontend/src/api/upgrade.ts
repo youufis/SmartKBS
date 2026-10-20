@@ -24,6 +24,14 @@ export interface VersionInfo {
   desktop_build: string
   latest_desktop_build: string
   download_url: string
+  /** 远端 version.json 的检测来源（raw / github / API / 镜像），排查"检测不到" */
+  version_source?: string
+  /** 各候选源的失败原因 */
+  remote_errors?: string[]
+  /** 远端版本取自 CDN 镜像（可能滞后）→ 不能据此断言"已是最新" */
+  mirror_source?: boolean
+  /** 远端 version.json 是否成功取到（false = 网络不通，而非"已是最新"） */
+  remote_fetched?: boolean
 }
 
 export interface UpgradeProgress {

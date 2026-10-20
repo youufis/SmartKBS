@@ -5,6 +5,7 @@ import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
   Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip,
   AutoComplete,
+  Collapse,
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
@@ -1258,7 +1259,11 @@ const UpgradePanel: React.FC = () => {
             <Descriptions.Item label={t('status')}>
               {verInfo.has_update
                 ? <Tag color="green">📥 {isDesktop ? t('desktopNewBuild') : t('sourceNewBuild')}</Tag>
-                : <Tag>{t('upToDate')}</Tag>}
+                : verInfo.remote_fetched === false
+                  ? <Tag color="orange">⚠️ {t('updateUnverifiedOffline')}</Tag>
+                  : verInfo.mirror_source
+                    ? <Tag color="orange">⚠️ {t('updateUnverifiedMirror')}</Tag>
+                    : <Tag>{t('upToDate')}</Tag>}
             </Descriptions.Item>
             {verInfo.release_date && (
               <Descriptions.Item label={t('releaseDate')}>{verInfo.release_date}</Descriptions.Item>
@@ -1301,6 +1306,31 @@ const UpgradePanel: React.FC = () => {
               description={t('gitConvertDesc')}
             />
           )}
+          <Collapse
+            ghost
+            size="small"
+            style={{ marginTop: 8 }}
+            items={[{
+              key: 'diag',
+              label: t('diagTitle'),
+              children: (
+                <div style={{ fontSize: 12, lineHeight: 2, wordBreak: 'break-all' }}>
+                  <div>{t('diagSource')}: {verInfo.version_source || '-'}</div>
+                  <div>{t('diagLocalBuild')}: {verInfo.desktop_build || '-'}</div>
+                  <div>{t('diagRemoteBuild')}: {verInfo.latest_desktop_build || '-'}</div>
+                  {(verInfo.remote_errors || []).length > 0 && (
+                    <div>
+                      {t('diagErrors')}:
+                      {(verInfo.remote_errors || []).map((er, i) => <div key={i} style={{ paddingLeft: 12 }}>{er}</div>)}
+                    </div>
+                  )}
+                  {(verInfo.git_issues || []).map((g, i) => (
+                    <div key={'g' + i} style={{ whiteSpace: 'pre-wrap' }}>{g}</div>
+                  ))}
+                </div>
+              ),
+            }]}
+          />
         </Card>
         {(upgrading || (upgradeProg && upgradeProg.running)) && (
           <Card title={t('upgradeProgress')}>

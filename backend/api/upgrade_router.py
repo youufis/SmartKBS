@@ -28,23 +28,34 @@ router = APIRouter()
 
 # ── 常量 ──
 REMOTE_VERSION_URL = "https://raw.githubusercontent.com/youufis/SmartKBS/master/version.json"
+# GitHub contents API：raw 域名被墙时的权威替代。它按 ref 直接取文件原文，
+# 不经过 jsDelivr 那种分支缓存；实测「raw 超时」的机器上它仍然可用。
+# 必须带 Accept: application/vnd.github.raw，否则返回的是 base64 包装的 JSON。
+VERSION_API_URL = "https://api.github.com/repos/youufis/SmartKBS/contents/version.json?ref=master"
 
-# ── 远程 version.json 候选地址（顺序=优先级）──
+# ── 远程 version.json 权威候选地址（顺序=优先级）──
 # 现场最常见的网络形状：github.com 通（管理员手动 git pull 能升级），但
 # raw.githubusercontent.com 被 DNS 污染/防火墙掐断。只试 raw 一个域名就会出现
-# 「页面说连不上 GitHub、git 却能拉」的矛盾，所以多镜像退避 + git 兜底。
+# 「页面说连不上 GitHub、git 却能拉」的矛盾，所以多候选退避 + git 兜底。
 REMOTE_VERSION_URLS: list[str] = [
     REMOTE_VERSION_URL,
     "https://github.com/youufis/SmartKBS/raw/master/version.json",
+    VERSION_API_URL,
 ]
 # 公共 CDN 镜像排最后才用：边缘节点有缓存，版本回退或同版本号重发时会继续吐旧值。
 # 本项目 8.6.0 回退 8.5.0 当天，fastly 节点缓存了二十多分钟的 8.6.0，
 # 部署机于是"检测到"一个仓库里根本不存在的版本。
+# 2026-10-20 又栽了一次：同版本号重发（8.8.0 只换构建戳），jsDelivr 的 @master
+# 缓存继续吐昨天的 version.json，客户端据此显示"已是最新"。注意随机查询参数
+# **击不穿**它的缓存（实测两次随机 ?nocache= 仍返回旧副本）。
+# 所以镜像只能用来「发现」新版本，不能用来「确认没有新版本」（见 MIRROR_SOURCE_MARK）。
 REMOTE_VERSION_MIRRORS: list[str] = [
     "https://cdn.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
     "https://fastly.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
     "https://gcore.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
 ]
+# 镜像命中时给 source 打的标记：客户端据此区分「真的已是最新」与「只是没读到」
+MIRROR_SOURCE_MARK = "（CDN 缓存可能滞后）"
 VERSION_FETCH_TIMEOUT = 6  # 单个候选的超时：页面要等得起，连不上就快点换下一个
 VERSION_CACHE_TTL = 60  # 秒：页面轮询 + 后台自动检查都会调，缓存住别反复打网络
 BACKUP_DIR = BASE_DIR / ".upgrade_backups"
@@ -357,6 +368,8 @@ class VersionCheckResult(BaseModel):
     pack_residue: dict[str, Any] | None = None  # .git 中断 fetch 残留（数量/大小），前端据此显示「清理仓库垃圾」
     version_source: str = ""  # 远程版本的来源（raw/jsdelivr/git 兜底），排查「检测不到新版本」
     remote_errors: list[str] = []  # 各候选地址的失败原因，前端可展开
+    mirror_source: bool = False  # 远端版本取自 CDN 镜像（可能滞后）→ 不能据此断言"已是最新"
+    remote_fetched: bool = True  # 远端 version.json 是否成功取到（False = 网络不通，而非"已是最新"）
     desktop_mode: bool = False  # 兼容字段：桌面版为 True（等价 deploy_mode == "desktop"）
     deploy_mode: str = "git"  # 部署形态：desktop（桌面版）/ git（克隆）/ source（源码包）
     git_init_available: bool = False  # 源码包部署且已装 Git：可一键转成 Git 部署
@@ -1019,6 +1032,12 @@ def _version_mirror_candidates() -> list[str]:
     return urls
 
 
+def _version_request_headers(url: str) -> dict[str, str]:
+    """GitHub contents API 必须显式要求 raw，否则拿到的是 base64 包装的 JSON"""
+    if "api.github.com" in url:
+        return {"Accept": "application/vnd.github.raw", "User-Agent": "SmartKBS-version-check"}
+    return {}
+
 async def _fetch_version_http(
     urls: list[str] | None = None, *, rotate: bool = True
 ) -> tuple[dict[str, Any] | None, str, list[str]]:
@@ -1032,7 +1051,7 @@ async def _fetch_version_http(
     for idx, url in enumerate(candidates):
         try:
             async with httpx.AsyncClient(timeout=VERSION_FETCH_TIMEOUT, follow_redirects=True) as c:
-                resp = await c.get(url)
+                resp = await c.get(url, headers=_version_request_headers(url))
             if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, dict) and data.get("latest_version"):
@@ -1096,7 +1115,7 @@ async def _fetch_remote_version(*, use_cache: bool = True) -> dict[str, Any] | N
         errors.extend(mirror_errors)
         if mirror_data is not None:
             data = mirror_data
-            source = f"{mirror_url}（CDN 缓存可能滞后）"
+            source = f"{mirror_url}{MIRROR_SOURCE_MARK}"
             logger.warning(
                 f"[upgrade] git 兜底也不通，退回公共镜像 {mirror_url}；"
                 "镜像有缓存，报出的版本可能偏旧或偏新，以 git 恢复后的结果为准"
@@ -1108,6 +1127,15 @@ async def _fetch_remote_version(*, use_cache: bool = True) -> dict[str, Any] | N
         return None
     logger.info(f"[upgrade] 远程版本 {data.get('latest_version')} 来源={source}")
     return data
+
+
+def _remote_from_mirror() -> bool:
+    """本轮远端 version.json 是不是从 CDN 镜像读到的。
+
+    镜像有边缘缓存，同版本号重发时可能继续吐旧值 —— 据此断言"已是最新"就是误报，
+    所以引导型面板只把它当作「未确认」。
+    """
+    return MIRROR_SOURCE_MARK in (_remote_version_cache.get("source") or "")
 
 
 async def _git_fetch_latest(*, timeout: int = 120) -> str:
@@ -1357,6 +1385,7 @@ async def _check_version_prompt(mode: str, *, git_init_available: bool = False) 
             desktop_build=local_build,
             download_url=RELEASE_PAGE_URL,
             git_init_available=git_init_available,
+            remote_fetched=False,
             git_issues=[hint],
             remote_errors=list(_remote_version_cache["errors"]),
         )
@@ -1368,10 +1397,13 @@ async def _check_version_prompt(mode: str, *, git_init_available: bool = False) 
     # 本机没有构建标识（早于该字段的旧包 / 旧源码包）而远端有 → 也算有新产物
     build_changed = bool(latest_build) and latest_build != local_build
     has_update = version_changed or build_changed
+    # 镜像源只能「发现」新版本，不能「确认没有新版本」：它的边缘缓存会吐旧值，
+    # 而同版本号重发时旧值恰好与本机完全相等 —— 直接说"已是最新"就是误报。
+    from_mirror = _remote_from_mirror()
 
     logger.info(
         f"[version-check] {mode} 当前={current}/{local_build or '未知构建'} "
-        f"远端={latest}/{latest_build or '未知构建'} 有更新={has_update}"
+        f"远端={latest}/{latest_build or '未知构建'} 有更新={has_update} 镜像源={from_mirror}"
     )
 
     return VersionCheckResult(
@@ -1390,6 +1422,8 @@ async def _check_version_prompt(mode: str, *, git_init_available: bool = False) 
         download_url=RELEASE_PAGE_URL,
         git_init_available=git_init_available,
         version_source=_remote_version_cache["source"],
+        mirror_source=from_mirror,
+        remote_fetched=True,
     )
 
 
@@ -1449,6 +1483,7 @@ async def check_version(request: Request) -> VersionCheckResult:
             git_available=git_ok,
             git_download_url="https://git-scm.com/downloads/win" if not git_ok else "",
             pack_residue=residue,
+            remote_fetched=False,
             git_issues=git_issues + [hint],
             remote_errors=list(_remote_version_cache["errors"]),
         )
@@ -1510,6 +1545,7 @@ async def check_version(request: Request) -> VersionCheckResult:
         prefetched=prefetched,
         pack_residue=residue,
         version_source=_remote_version_cache["source"],
+        mirror_source=_remote_from_mirror(),
     )
 
 
