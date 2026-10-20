@@ -9,13 +9,13 @@
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
-> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
+> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, My portrait, online incremental upgrade, multi-theme appearance
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/version-8.8.0-blue)
+![Version](https://img.shields.io/badge/version-8.9.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -35,26 +35,22 @@
 
 ---
 
-> 📌 **Highlights of V8.8.0**
+> 📌 **Highlights of V8.9.0**
 >
-> - 📚 **Question-bank analytics and governance** — new analysis page for type / difficulty / subject / knowledge point / creator / quality; knowledge points remain optional and can be selected or typed; subjects must come from the configured courses
-> - 🧑‍🏫 **Creator audit** — historical questions created by students/non-teachers can be reviewed and transferred; non-course subjects can be audited and archived with a repair script
-> - 📊 **Learning analytics** — class and time-window snapshots, corrected exam/task metrics and teacher scope; clear AI failure feedback and cached report export
-> - 🧾 **Class summary / teaching suggestions / exam analysis** — strictly class-scoped data; Word export reuses the generated report instead of calling the model again
-> - 📤 **Summary export** — corrected “submitted / pending grading” semantics, best attempt per activity, immediate filter invalidation, Blob download with visible errors
-> - 💬 **Group discussion** — list editing; real automatic/random grouping; stable WebSocket; idempotent, rate-limited optimistic messages; posting blocked after the discussion ends
-> - 🏆 **Quest admin** — bulk deletion for records and question bank, teaching-scope checks, points and badge recalculation
-> - 📰 **Daily picks / news admin** — teacher and admin consoles with health checks and single/bulk disable, restore and delete
-> - 🖥️ **Desktop update prompt** — version management compares “version + release build stamp (`desktop_build`)” and points you to the newest installer instead of the misleading “install Git first” error
-> - 📦 **Source-package update prompt** — with no Git history it prompts for the newest source package; if Git is installed, one click converts the folder into a Git deployment with in-app incremental upgrades
-> - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the repair script
+> - 🏁 **Class Ladder (big screen)** — a "Who Wants to Be a Millionaire"-style **single-player ladder** for the projector: 15 levels (415 points), safe levels 5 / 10, one wrong answer or a timeout ends the run, and a session can keep going all lesson
+> - 🎲 **Questions and pool** — a subject alone is enough (knowledge point optional or typed); the bank comes first with per-level difficulty and AI fills the gap; the pool builds in the background with progress on the button
+> - 👤 **Picking and lifelines** — the same fair weighted picking as roll call / class drill with voice announcement; three lifelines (50:50, phone a friend, ask the audience) sharing the student-side discounts
+> - 🏆 **Automatic rewards** — settling writes the **levels cleared** straight into classroom points and leaves a student record; wrong answer / timeout shows a full-screen result, and the session board refreshes live
+> - 🎨 **7 big-screen skins** — defaults to the light "Cloud" theme (plus Sunrise / Mint light and four dark skins); **one sound switch** covers effects and the name announcement
+> - 🔗 **Fits the existing system** — classroom-activities menu, activity monitor (per-class completion), activity reset, system settings (AI fill / default skin / sound), bilingual strings
+> - 🧪 **1130+ regression tests passing**
+> - ⚠️ **Breaking changes**: none; the four new `class_ladder_*` tables are created on startup
 >
 > 🔄 **Upgrade notes for this release**
 >
 > - Desktop: install the newer build over the old one (data in `%APPDATA%\SmartKBS\` is kept)
-> - Source package: **replace the source once manually**; only then does the panel show 「Check Update」 and detect later releases
-> - Git deployment: 「Check Update → Incremental Upgrade」 works as before
-> - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
+> - Source package / Git deployment: 「Check Update → Incremental Upgrade」 works as before — **no manual replace needed**
+> - Database: the four new tables are created on startup, no migration script required
 
 ---
 
@@ -131,7 +127,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
 | 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 11 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
-| 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 8 |
+| 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio | 10 |
 | ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, My portrait, upgrade, about, other services | 9 |
 
@@ -157,7 +153,7 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 
 #### Desktop only
 
-Question bank management and paper composing, question maintenance, user management, system configuration, roll call, class drill, AI podcast generation, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
+Question bank management and paper composing, question maintenance, user management, system configuration, roll call, class drill, class ladder, AI podcast generation, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
 
 <a id="ch-home"></a>
 
@@ -695,6 +691,26 @@ Integrated smart roll call + attendance statistics management:
 
 ---
 
+### Class Ladder (Big Screen)
+
+A "Who Wants to Be a Millionaire"-style **single-player ladder** for the projector — one session can run all lesson long:
+
+- **🎯 15-level ladder**: level 1 worth 10 up to level 15 worth 50 (415 total), accumulating; levels 5 and 10 are safe levels (a wrong answer keeps what you have earned)
+- **🎲 Questions**: a subject alone is enough (the knowledge point is optional or can be typed); the bank comes first with per-level difficulty, AI fills the gap and stores new questions
+- **👤 Fair picking**: the same weighted algorithm as roll call / class drill, with voice announcement of the drawn name
+- **💡 Three lifelines** (one use each per run, discounts stack): 50:50 (×0.85), phone a friend (×0.70), ask the audience (×0.70)
+- **🧮 Server-side judging**: the answer is never sent to the client; the student taps an option and the server judges and reveals it
+- **🏆 Automatic rewards**: the run settles straight into classroom points (levels cleared) and leaves a record on the student's timeline
+- **📊 Session board and settle screen**: a wrong answer or timeout triggers a full-screen result with the explanation; the board refreshes live and the next student starts a new run
+- **🎨 7 big-screen skins**: defaults to the light "Cloud" theme; Sunrise / Mint (light) and Star / Cyber / Academy / Classic (dark) are also available
+- **🔊 One sound switch**: big-screen effects (synthesised in the browser, no assets) and the name announcement together
+- **⌨️ Keyboard friendly**: `Space` draw, `1-4` pick, `Enter` submit, `0` skip
+- **🖥 Built for the projector**: students never use their own devices
+
+> **Teachers and admins (limited to their own classes); points are awarded by levels cleared**
+
+---
+
 ### Class Drill
 
 A big-screen "draw a question → pick a student → answer" loop for warm-ups and in-class questioning, repeatable as long as you like:
@@ -1105,7 +1121,19 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.8.0**. Each release lists the changes a user can notice; per-commit detail lives in the git history.
+Current version **8.9.0**. Each release lists the changes a user can notice; per-commit detail lives in the git history.
+
+### v8.9.0
+
+- 🏁 **Class Ladder (big screen)** — new single-player ladder for the projector: 15 levels (10/15/20/25/30/50, 415 total), safe levels 5 / 10, the run ends on a wrong answer or timeout
+- 🎲 **Questions and pool** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap and stores new questions; the pool builds in the background with progress on the button
+- 👤 **Picking and lifelines** — shared fair picking plus voice announcement; three lifelines (50:50 ×0.85, phone a friend / ask the audience ×0.70) matching the student-side knowledge quest
+- 🧮 **Judging and scoring** — answers never leave the server; settling writes the levels cleared into classroom points and leaves a student record; full-screen result plus a live session board
+- 🎨 **Big-screen skins** — 7 skins (light Cloud by default, plus Sunrise / Mint and four dark ones) with zero backend cost; one sound switch for effects and announcement
+- 🧩 **Fits the existing system** — classroom-activities menu, activity monitor, activity reset, system settings, bilingual strings
+- 🖥️ **Layout** — wider question area (narrower ladder / board), the answering name moved into the top bar, keyboard shortcuts
+- 🧪 **1130+ regression tests passing**
+- ⚠️ **Breaking changes**: none; the four new `class_ladder_*` tables are created on startup
 
 ### v8.8.0
 
@@ -1382,6 +1410,7 @@ SmartKBS/
 | Roll Call Management | ❌ | ✅ Own Class | ✅ All |
 | Attendance Statistics | ❌ | ✅ Own Class | ✅ All |
 | Class Drill | ❌ | ✅ Own Class | ✅ All |
+| Class Ladder | ❌ | ✅ Own Class | ✅ All |
 | Class Quiz | ✅ Answer | ✅ Create | ✅ Create |
 | Classroom Voting | ✅ Vote | ✅ Create | ✅ Create |
 | Question Management | ✅ Ask | ✅ Approve | ✅ Manage |
