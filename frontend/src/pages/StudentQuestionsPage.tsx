@@ -385,6 +385,7 @@ const AskQuestionForm: React.FC<AskQuestionFormProps> = ({
 const StudentQuestionsPage: React.FC = () => {
   const { t } = useTranslation('questions')
   const user = useAuthStore((s) => s.user)
+  const sessionToken = useAuthStore((s) => s.token)   // 登录/滑动续期都会变：实时推送要跟着换令牌重连
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
   const { subjects } = useSubjectOptions()
@@ -541,23 +542,49 @@ const StudentQuestionsPage: React.FC = () => {
       classFilter, keyword, answerPending, sortBy, subjectFilter, timeRange, unresolvedOnly])
 
   // 实时推送：新提问/新回答/审批/置顶/点赞/追问都触发一次静默刷新
+  //
+  // 重连策略（2026-10-21 现场：一个挂着失效令牌的页面每 5 秒撞一次握手，后端
+  // 每分钟 36 行 "WebSocket /questions/ws?token=... 403" 把终端刷满）：
+  //   · 关闭码是"重连也不会变"的那几种（未认证/无权限/房间不存在）→ 立刻停手，
+  //     等重新登录或刷新页面，别再敲网关；
+  //   · 其余（网络抖动、后端 --reload 重启）→ 指数退避 2s→60s，最多 8 轮，
+  //     之后交给 30 秒一轮的列表轮询兜底，不再无限重连；
+  //   · 令牌一律现取，且 store 里的 token 一变（登录/滑动续期）就重连一次 ——
+  //     避免"HTTP 已经在用新令牌、WS 还攥着旧令牌"被后端判成 token_stale。
   useEffect(() => {
     if (!user?.username) return
+    const NON_RETRYABLE = new Set([4001, 4401, 4403, 4404, 4410])
+    const MAX_ATTEMPTS = 8
     let closed = false
+    let attempts = 0
     let socket: WebSocket | null = null
     let reconnectTimer: number | undefined
     let pingTimer: number | undefined
     let refreshTimer: number | undefined
 
+    const dropSocket = () => {
+      const old = socket
+      socket = null
+      if (!old) return
+      old.onopen = null
+      old.onmessage = null
+      old.onerror = null
+      old.onclose = null
+      try { old.close() } catch { /* 已经断了 */ }
+      if (pingTimer) { window.clearInterval(pingTimer); pingTimer = undefined }
+    }
+
     const connect = () => {
       if (closed) return
       const token = getToken()
-      if (!token) return
+      if (!token) return                                  // 未登录不发握手
+      if (socket && socket.readyState <= WebSocket.OPEN) return   // 已有一条在跑
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       socket = new WebSocket(
         `${proto}//${window.location.host}/api/interaction/questions/ws?token=${encodeURIComponent(token)}`,
       )
       socket.onopen = () => {
+        attempts = 0
         if (pingTimer) window.clearInterval(pingTimer)
         pingTimer = window.setInterval(() => {
           if (socket?.readyState === WebSocket.OPEN) socket.send('ping')
@@ -578,24 +605,30 @@ const StudentQuestionsPage: React.FC = () => {
         }, 300)
       }
       socket.onclose = (event) => {
-        if (pingTimer) window.clearInterval(pingTimer)
-        // 未认证/无权限不要无限重连
-        if (!closed && event.code !== 4401 && event.code !== 4403) {
-          reconnectTimer = window.setTimeout(connect, 5000)
-        }
+        if (pingTimer) { window.clearInterval(pingTimer); pingTimer = undefined }
+        if (closed) return
+        if (NON_RETRYABLE.has(event.code)) return   // 4401/4403：重连也不会变，停手
+        if (attempts >= MAX_ATTEMPTS) return
+        const delay = Math.min(60_000, 2_000 * 2 ** attempts)
+        attempts += 1
+        if (reconnectTimer) window.clearTimeout(reconnectTimer)
+        reconnectTimer = window.setTimeout(connect, delay)
       }
-      socket.onerror = () => socket?.close()
+      socket.onerror = () => {
+        try { socket?.close() } catch { /* 交给 onclose 统一退避 */ }
+      }
     }
 
     connect()
+
     return () => {
       closed = true
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
-      if (pingTimer) window.clearInterval(pingTimer)
       if (refreshTimer) window.clearTimeout(refreshTimer)
-      socket?.close()
+      dropSocket()
     }
-  }, [user?.username])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.username, sessionToken])
 
   useEffect(() => {
     refreshQuestionsRef.current = () => {

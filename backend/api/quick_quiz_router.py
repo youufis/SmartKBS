@@ -2156,22 +2156,34 @@ async def quick_quiz_websocket(websocket: WebSocket, room_id: int):
     并直接采信客户端传来的 username, 任何人可连任意房间、冒充任意学号,
     还会收到广播出去的正确答案与解析。
     """
-    from backend.auth import authenticate_payload
+    from backend.auth import verify_token
+    from backend.ws_reject import close_hint, reject_websocket
 
     token = websocket.query_params.get("token") or ""
-    payload = authenticate_payload(token)
+    payload, auth_code = verify_token(token)
     if not payload:
-        await websocket.close(code=4401)
+        # 与提问/讨论 WS 一致: 先握手再按应用状态码关闭，客户端才拿得到 4401 并停止重连
+        code, reason = close_hint(auth_code)
+        await reject_websocket(
+            websocket, code=code, reason=reason, where="抢答WS",
+            token=token, auth_code=auth_code, send_frame=False,
+        )
         return
 
     username = payload.get("username", "")
     role = payload.get("role", 2)
     room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
     if not room:
-        await websocket.close(code=4404)
+        await reject_websocket(
+            websocket, code=4404, reason="活动不存在", where="抢答WS",
+            username=username, send_frame=False,
+        )
         return
     if not _can_view_room(room, username, role):
-        await websocket.close(code=4403)
+        await reject_websocket(
+            websocket, code=4403, reason="无权进入该活动", where="抢答WS",
+            username=username, send_frame=False,
+        )
         return
 
     # S13: 进程重启后内存态丢失时按房间配置自愈, 否则连接根本不被登记(收不到任何推送)

@@ -2810,11 +2810,21 @@ async def _broadcast_question_event(
 @router.websocket("/questions/ws")
 async def questions_ws(websocket: WebSocket, token: str = ""):
     """课堂提问实时推送。客户端带 token 连接，收到 question_* 事件后刷新列表。"""
-    from backend.auth import authenticate_payload
+    from backend.auth import verify_token
+    from backend.ws_reject import close_hint, reject_websocket
 
-    payload = authenticate_payload(token or websocket.query_params.get("token", ""))
+    raw_token = token or websocket.query_params.get("token", "")
+    payload, auth_code = verify_token(raw_token)
     if not payload or not payload.get("username"):
-        await websocket.close(code=4401, reason="未认证")
+        # 现场(2026-10-21)是挂机页面攥着已被顶下线的旧 token_version 每 5 秒撞一次
+        # 握手。accept 之前 close() 只会被 uvicorn 当成 HTTP 403，浏览器拿到的是没有
+        # 原因的 1006，前端"未认证就别重连"的判断触发不了 —— 必须先握手再按 4401 关闭
+        # （见 backend/ws_reject.py），同时只留一行限流后的可排查记录。
+        code, reason = close_hint(auth_code)
+        await reject_websocket(
+            websocket, code=code, reason=reason, where="提问WS",
+            token=raw_token, auth_code=auth_code,
+        )
         return
     username = payload["username"]
     role = payload.get("role", 2)

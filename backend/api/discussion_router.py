@@ -1879,28 +1879,40 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int):
     S2: 握手必须携带有效 token, 且必须是该组成员(学生)/任教范围内教师/管理员。
     旧实现匿名也能 accept 并回 pong, 任意 group_id 均可挂接。
     """
-    from backend.auth import authenticate_payload
+    from backend.auth import verify_token
+    from backend.ws_reject import close_hint, reject_websocket
 
     token = websocket.query_params.get("token", "")
-    payload = authenticate_payload(token)
+    payload, auth_code = verify_token(token)
     if not payload:
-        logger.warning(f"[讨论WS] 拒绝未认证连接 group={group_id}")
-        await websocket.close(code=4401, reason="未认证")
+        code, reason = close_hint(auth_code)
+        await reject_websocket(
+            websocket, code=code, reason=reason, where="讨论WS",
+            token=token, auth_code=auth_code, send_frame=False,
+        )
         return
     username = payload.get("username", "")
     if not username:
-        await websocket.close(code=4401, reason="未认证")
+        await reject_websocket(
+            websocket, code=4401, reason="未认证", where="讨论WS",
+            token=token, send_frame=False,
+        )
         return
     try:
         _assert_can_access_group(
             {"username": username, "role": payload.get("role", 2)}, group_id, "消息",
         )
-    except HTTPException:
-        logger.warning(f"[讨论WS] 拒绝越权连接 user={username} group={group_id}")
-        await websocket.close(code=4403, reason="无权访问该小组")
+    except HTTPException as e:
+        await reject_websocket(
+            websocket, code=4403, reason=str(e.detail), where="讨论WS",
+            username=username, send_frame=False,
+        )
         return
     except Exception:
-        await websocket.close(code=4404, reason="小组不存在")
+        await reject_websocket(
+            websocket, code=4404, reason="小组不存在", where="讨论WS",
+            username=username, send_frame=False,
+        )
         return
 
     await ws_manager.connect(group_id, websocket)

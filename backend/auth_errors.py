@@ -7,7 +7,6 @@
 detail 仍然是中文字符串（大量页面直接把 detail 丢给 message.error），
 code 作为平铺字段附加，老前端读不懂也不会炸。
 """
-import time
 from typing import Any, Optional
 
 from fastapi import Request, status
@@ -131,10 +130,12 @@ def auth_error_response(code: str, message: Optional[str] = None) -> JSONRespons
     return response
 
 
-# ── 401 拒绝日志（限流：同一 原因+方法+路径 每分钟一条，避免挂机页面刷屏）──
-
-_REJECT_LOG_INTERVAL = 60.0
-_reject_logged: dict[str, float] = {}
+# ── 401 拒绝日志（限流 + 退避：挂机页面/旧 bundle 的重复 401 不该刷满屏幕）──
+#
+# 满速阶段同一 "原因+方法+路径" 每分钟一条（够看清问题），连续重复后按
+# 1→2→4→8 分钟退避、最长 15 分钟一条；静默超过 15 分钟视为新一轮问题，回到满速。
+# 封禁计数（security_guard）不受这里影响 —— 它在节流之前就照常累计每一次失败。
+_reject_throttle = None
 
 
 def log_auth_reject(request: Request, code: str, where: str = "middleware",
@@ -156,13 +157,15 @@ def log_auth_reject(request: Request, code: str, where: str = "middleware",
 
     record_auth_failure(request, code)
 
+    global _reject_throttle
     key = f"{code}|{where}|{request.method} {request.url.path}"
-    now = time.monotonic()
-    if now - _reject_logged.get(key, 0.0) < _REJECT_LOG_INTERVAL:
+    if _reject_throttle is None:
+        # 延迟导入：backend.logger 依赖 config，模块级导入会碰启动顺序
+        from backend.logger import RepeatThrottle
+
+        _reject_throttle = RepeatThrottle(60.0, 900.0, 3)
+    if not _reject_throttle.allow(key):
         return
-    _reject_logged[key] = now
-    if len(_reject_logged) > 256:
-        _reject_logged.clear()
     logger.warning(
         f"[401] {request.method} {request.url.path} code={code} "
         f"ip={client_ip(request)} from={where} ua={user_agent(request, 80)}"

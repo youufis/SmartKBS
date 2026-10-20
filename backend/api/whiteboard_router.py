@@ -228,10 +228,12 @@ def _assert_room_access(user: dict, room_id: int, need_manage: bool = False,
 # ── WebSocket 握手拒绝码 ──
 # 为什么要在 accept 之后才关闭：Starlette 在 accept 之前 close()，uvicorn 只会
 # 记一行 "WebSocket /api/whiteboard/ws/3 403 connection rejected"，浏览器侧拿到的是
-# 一个没有原因的失败 —— 教师端表现成"白板一片空白"，谁也不知道是房间结束了、
-# 令牌过期了，还是自己跟这个房间没关系。已通过认证的请求一律先握手、把原因作为
-# 业务帧发给前端、再按应用状态码关闭；只有认证失败（不给未认证方回显通道）保留
-# accept 前关闭。
+# 一个没有原因的失败（close code 1006）—— 教师端表现成"白板一片空白"，谁也不知道是
+# 房间结束了、令牌过期了，还是自己跟这个房间没关系；前端的
+# NON_RETRYABLE_CODES(4001/4403/4404/4410) 也永远命中不了，于是挂机页面无限退避重连，
+# 连不上 WS 的只读端再退化成 3 秒一轮的 /snapshot 兜底轮询，403 与 401 一起把日志刷满
+# （2026-10-21 现场）。所以现在所有拒绝都先握手、再按应用状态码关闭；
+# 只有"回显业务原因"这件事仍然区分：认证失败只给关闭码，不回业务帧。
 WS_CLOSE_AUTH = 4001
 WS_CLOSE_FORBIDDEN = 4403
 WS_CLOSE_NOT_FOUND = 4404
@@ -240,20 +242,19 @@ WS_CLOSE_INTERNAL = 4500      # 服务端处理异常：可重连，不是权限
 
 
 async def _ws_reject(websocket: WebSocket, code: int, reason: str, *,
-                     room_id: Any, username: str = "", role: str = "") -> None:
-    """拒绝一次白板 WS 连接：日志留下一行可诊断的记录，前端拿到可读的原因"""
-    logger.warning(
-        f"[白板WS] 拒绝连接 room={room_id} user={username or '<未认证>'}"
-        f"({role or '-'}) code={code} 原因={reason}"
+                    room_id: Any, username: str = "", role: str = "") -> None:
+    """拒绝一次白板 WS 连接：日志留下一行可诊断的记录（限流），前端拿到真实的关闭码。
+
+    握手成功的请求还额外收到一帧 ws_rejected，界面能把"房间结束了/你没在名单里"
+    直接说给人听；认证失败不回这一帧，只把 4001 送到位。
+    """
+    from backend.ws_reject import reject_websocket
+
+    await reject_websocket(
+        websocket, code=code, reason=reason,
+        where=f"白板WS room={room_id} role={role or '-'}",
+        username=username or "", send_frame=(code != WS_CLOSE_AUTH),
     )
-    try:
-        if code != WS_CLOSE_AUTH:
-            await websocket.accept()
-            await websocket.send_json(
-                {"type": "ws_rejected", "code": code, "reason": reason})
-        await websocket.close(code=code, reason=reason)
-    except Exception as e:
-        logger.debug(f"[白板WS] 拒绝响应未送达 room={room_id}: {e}")
 
 
 def _operate_denied_reason(role: str, mode: str, can_manage: bool) -> str:

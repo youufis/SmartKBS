@@ -3,8 +3,10 @@
 - _SmartLogger: except 块内调用 logger.error 自动附带堆栈(exc_info), 全局免逐处改造
 - SizeRotatingHandler: 延迟打开 + 每 32 条抽样查大小 + rename 轮转归档(.gz)保留 5 份 + 被多实例锁住时退避重试并告警(绝不复制)
 - 级别策略: logger=DEBUG, 控制台=INFO(现场不刷屏), 文件=DEBUG(排障可查)
-- uvicorn.access: 恢复 INFO(可见 4xx/5xx) + 内置噪音路径过滤器(统一配置, main.py 不再重复)
-- uvicorn.access: URL 里的 token= 一律打码(_AccessTokenRedactFilter), 不让 JWT 明文进日志文件
+- uvicorn.access/uvicorn.error: 恢复 INFO(可见 4xx/5xx) + 内置噪音路径过滤器(统一配置, main.py 不再重复)
+- 两条 uvicorn 日志: URL 里的 token= 一律打码(_AccessTokenRedactFilter), 超长 query 截断,
+  不让 JWT 明文和整份板书 JSON 进日志(WS 握手行出自 uvicorn.error, 以前只过滤了 access)
+- uvicorn.access/uvicorn.error: 反复撞开的 WebSocket 握手按"路径+结果"限流(_WsHandshakeNoiseFilter)
 """
 import logging
 import os
@@ -46,27 +48,73 @@ _POLL_401_NOISE = (
 )
 
 
-class _AccessTokenRedactFilter(logging.Filter):
-    """把访问日志 URL 中的 token= 值替换成 ***，其余(路径/状态码)原样保留。
+#: 访问日志里必须打码的参数：token 类是凭据；sig/snapshot/document 会把整份板书
+#: JSON 抄进 URL（一条 600+ 字符，连"抑制 N 条"的汇总样例都成了新的刷屏源）。
+_SECRET_PARAMS = (
+    "token", "access_token", "id_token", "refresh_token", "api_key", "apikey",
+    "password", "secret", "sig", "signature", "snapshot", "document",
+)
+_MAX_URL_LOG_CHARS = 300      # 带 query string 的单行日志上限，超出部分折成计数
+_MAX_SAMPLE_CHARS = 160       # 汇总告警里样例的长度上限
+
+_PARAM_RE = re.compile(
+    r"([?&])(" + "|".join(_SECRET_PARAMS) + r")=([^&\s\x22\x27]+)",
+    re.IGNORECASE,
+)
+
+
+def redact_log_text(text: str) -> str:
+    """打码凭据/超长参数 + 截断带 query 的超长行；其余(方法/路径/状态码)原样保留。
 
     WebSocket 握手只能靠 URL 或 Cookie 带令牌(白板/讨论区/抢答都用过 ?token=)，
-    uvicorn 的 access log 连 query string 一起打印，于是每连一次就往日志文件里
-    抄一份可用的 JWT —— 而日志的可见范围远大于令牌本该到的地方。
+    uvicorn 的访问日志连 query string 一起打印，于是每连一次就往日志里抄一份可用的
+    JWT —— 而日志的可见范围远大于令牌本该到的地方。
     """
+    out = _PARAM_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}=***", text)
+    if "?" in out and len(out) > _MAX_URL_LOG_CHARS:
+        cut = out[:_MAX_URL_LOG_CHARS]
+        out = f"{cut}…(截断 {len(out) - _MAX_URL_LOG_CHARS} 字符)"
+    return out
 
-    PATTERN = re.compile(r"([?&])token=[^&\s\x22\x27]+")
+
+class _AccessTokenRedactFilter(logging.Filter):
+    """访问/协议日志的打码过滤器（uvicorn.access 与 uvicorn.error 共用）。
+
+    注意 uvicorn 的两类记录都是"模板 + args"发出来的：
+      · uvicorn.access 的 AccessFormatter 会把 record.args 解包成
+        (client_addr, method, full_path, http_version, status_code)；
+      · uvicorn.error 的握手行同理。
+    所以有 args 时必须逐个参数打码、模板不动 —— 早先只改 record.msg 再清空 args，
+    解包直接抛错，一条越权的 GET 能换来一整屏 "--- Logging error ---" 堆栈。
+    """
 
     def filter(self, record):
         try:
             msg = record.getMessage()
         except Exception:
             return True
-        if "token=" not in msg:
+        if "?" not in msg:
             return True
-        redacted = self.PATTERN.sub(r"\1token=***", msg)
-        if redacted != msg:
+        lowered = msg.lower()
+        # 快路径：没有敏感参数名、长度也正常的行直接放行（访问日志每请求一条，别做无用功）
+        if len(msg) <= _MAX_URL_LOG_CHARS and not any(k in lowered for k in _SECRET_PARAMS):
+            return True
+        redacted = redact_log_text(msg)
+        if redacted == msg:
+            return True
+        args = record.args
+        if isinstance(args, tuple) and args:
+            record.args = tuple(
+                redact_log_text(a) if isinstance(a, str) else a for a in args
+            )
+        elif isinstance(args, dict) and args:
+            record.args = {
+                k: redact_log_text(v) if isinstance(v, str) else v
+                for k, v in args.items()
+            }
+        else:
             record.msg = redacted
-            record.args = ()
+            record.args = None
         return True
 
 
@@ -88,6 +136,49 @@ class _AccessNoiseFilter(logging.Filter):
         return not any(n in msg for n in _ACCESS_NOISE)
 
 
+class RepeatThrottle:
+    """同一件事再说一遍也没意义的记录节流：满速几条，然后指数退避到上限。
+
+    挂机页面/缓存里的旧 bundle 会没完没了地重复同一个失败（轮询接口 401、
+    WebSocket 握手被拒、访问日志噪音汇总）。这类记录第一条有价值，之后每分钟
+    一条就是把排障信息埋进噪音里。策略：
+
+      * 第 1 条立刻放行；
+      * 前 full_speed_repeats 条按 base_seconds（默认 60 秒）放行，够看清问题；
+      * 之后间隔翻倍，封顶 cap_seconds（默认 15 分钟）—— 问题还在，人不会漏看；
+      * 某个键静默超过 cap_seconds，说明是新一轮问题，重新按满速记录。
+    """
+
+    def __init__(self, base_seconds: float = 60.0, cap_seconds: float = 900.0,
+                 full_speed_repeats: int = 3):
+        self.base = float(base_seconds)
+        self.cap = float(cap_seconds)
+        self.full = max(1, int(full_speed_repeats))
+        self._state: dict[str, tuple[float, int]] = {}   # 键 -> (上次放行时间, 已放行条数)
+
+    def _gap(self, repeats: int) -> float:
+        if repeats < self.full:
+            return self.base
+        return min(self.cap, self.base * (2 ** (repeats - self.full + 1)))
+
+    def allow(self, key: str, now: float | None = None) -> bool:
+        if now is None:
+            now = time.monotonic()
+        last, repeats = self._state.get(key, (0.0, 0))
+        if now - last > self.cap:          # 静默已久：新一轮，回到满速
+            repeats = 0
+        if last and now - last < self._gap(repeats):
+            return False
+        self._state[key] = (now, repeats + 1)
+        if len(self._state) > 512:
+            cutoff = now - self.cap
+            for stale in [k for k, (ts, _) in self._state.items() if ts < cutoff]:
+                self._state.pop(stale, None)
+            if len(self._state) > 512:
+                self._state.clear()
+        return True
+
+
 class _PollAuthNoiseFilter(logging.Filter):
     """压掉"前端轮询接口 + 401"这类已知访问日志噪音，改为限流汇总告警。
 
@@ -105,11 +196,14 @@ class _PollAuthNoiseFilter(logging.Filter):
     #  改成按结尾匹配，顺带把状态码位置锁死在引号收尾之后，不会误伤路径里的数字。
     _STATUS_401 = re.compile(r'"\s+401\s*$')
 
-    def __init__(self, name: str = ""):
+    def __init__(self, name: str = "", throttle: RepeatThrottle | None = None):
         super().__init__(name)
         self._suppressed = 0
         self._sample = ""
-        self._last_report = 0.0
+        self._sample_key = ""
+        self._last_group = ""
+        # 同一个样例会连着刷屏：满速 3 轮(每分钟一条)后退避到最长 15 分钟一条
+        self._throttle = throttle or RepeatThrottle(self.SUMMARY_INTERVAL)
 
     def filter(self, record):
         try:
@@ -122,20 +216,109 @@ class _PollAuthNoiseFilter(logging.Filter):
 
         self._suppressed += 1
         if not self._sample:
-            self._sample = msg.strip()
+            # 样例只留一句能定位的长度：白板兜底轮询的 ?sig= 是整份板书 JSON 的
+            # 前 200 字符，URL 编码后 600+ 字符，汇总告警本身反倒成了刷屏主力
+            self._sample = redact_log_text(msg.strip())[:_MAX_SAMPLE_CHARS]
+            # 归组键只取"命中的轮询路径 + 方法"。绝不能用整行或含 client:port 的片段：
+            # 每次请求的临时端口都在变，键随之变，限流等于没限 —— 2026-10-21 就是
+            # 这么把"每分钟一条汇总"刷成"每 5 秒一条汇总"的。
+            self._sample_key = next((path for path in _POLL_401_NOISE if path in msg), "poll")
         now = time.monotonic()
-        if now - self._last_report >= self.SUMMARY_INTERVAL:
-            self._last_report = now
+        if self._throttle.allow("poll401|" + self._sample_key, now):
             count, sample = self._suppressed, self._sample
-            self._suppressed, self._sample = 0, ""
+            self._last_group = self._sample_key or "poll"
+            self._suppressed, self._sample, self._sample_key = 0, "", ""
             try:
                 logging.getLogger("smartkb").warning(
-                    f"[access] 近 60 秒内抑制 {count} 条轮询接口 401 访问日志，"
-                    f"样例: {sample}"
+                    f"[access] 抑制 {count} 条轮询接口 401 访问日志"
+                    f"（{self._last_group}：重复的只汇总一条，越持续越稀疏），样例: {sample}"
                 )
             except Exception:
                 pass
         return False
+
+
+class _WsHandshakeNoiseFilter(logging.Filter):
+    """把"同一个客户端反复撞 WebSocket 握手"的三连行压成每分钟一条。
+
+    现场（2026-10-21）：挂机页面的提问 WS 带着已失效的令牌（token_version 已被
+    登录流程递增）每 5 秒重连一次，而该端点在 accept 之前 close()，uvicorn 只会
+    把它当成 HTTP 403 拒绝，浏览器拿到的是没有原因的 1006，"未认证就别重连"的
+    判断永远不触发。每次尝试 uvicorn.error 打三行：
+
+        171.34.210.119:22494 - "WebSocket /api/interaction/questions/ws?token=***" 403
+        connection rejected (403 Forbidden)
+        connection closed
+
+    一分钟 36 行同义反复，真正的 4xx/5xx 与堆栈全被埋掉。令牌失效这件事后端在
+    拒绝时已经记了一行可排查的 WARN（见 backend/ws_reject.py），这三行纯属重复，
+    所以按"路径+结果"限流：每类 60 秒放行一条，其余计数，每分钟汇总一次。
+    只针对握手行 —— 白板/抢答正常的 accepted 连接同样只留一条样例，
+    业务层日志（谁进了哪个房间）不受影响。
+    """
+
+    WINDOW_SECONDS = 60.0
+
+    _HANDSHAKE = re.compile(r'"WebSocket (?P<path>[^"\s]+)" (?P<result>\[accepted\]|\d{3})')
+
+    def __init__(self, name: str = "", throttle: RepeatThrottle | None = None):
+        super().__init__(name)
+        self._passed: dict[str, float] = {}
+        self._suppressed = 0
+        self._sample = ""
+        self._summary_key = ""
+        # 放行窗口固定 60 秒(总得让人看见问题还在)，汇总行按退避节奏出
+        self._throttle = throttle or RepeatThrottle(self.WINDOW_SECONDS)
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        key = self._noise_key(msg)
+        if key is None:
+            return True
+
+        now = time.monotonic()
+        if now - self._passed.get(key, 0.0) >= self.WINDOW_SECONDS:
+            self._passed[key] = now
+            if len(self._passed) > 128:      # 防长期运行堆积（路径数量本该有限）
+                cutoff = now - self.WINDOW_SECONDS
+                for seen_key in [k for k, ts in self._passed.items() if ts < cutoff]:
+                    self._passed.pop(seen_key, None)
+            return True
+
+        self._suppressed += 1
+        if not self._sample:
+            self._sample = redact_log_text(msg.strip())[:_MAX_SAMPLE_CHARS]
+            self._summary_key = key
+        if self._throttle.allow("wsnoise|" + self._summary_key, now):
+            count, sample = self._suppressed, self._sample
+            self._suppressed, self._sample = 0, ""
+            try:
+                logging.getLogger("smartkb").warning(
+                    f"[access] 近 60 秒内抑制 {count} 条 WebSocket 握手日志"
+                    f"（已按路径+结果去重），样例: {sample}"
+                )
+            except Exception:
+                pass
+        return False
+
+    @classmethod
+    def _noise_key(cls, msg: str) -> str | None:
+        """这类记录归到哪个去重键；不是握手噪音返回 None（照常输出）"""
+        hit = cls._HANDSHAKE.search(msg)
+        if hit:
+            path = hit.group("path").split("?", 1)[0]
+            return f"ws|{path}|{hit.group('result')}"
+        stripped = msg.strip()
+        # "connection rejected (...)" / "connection closed" 不带任何上下文：
+        # 前者是 403 的复述，后者每条连接（含正常断开）都打，留着只会稀释日志。
+        # "connection handler failed" 是带堆栈的异常，绝不属于噪音。
+        if stripped.startswith("connection rejected (") or stripped == "connection closed":
+            return "ws|handshake-tail"
+        return None
+
 
 
 class SizeRotatingHandler(logging.FileHandler):
@@ -304,12 +487,22 @@ logging.setLoggerClass(_SmartLogger)
 # 全局默认 logger
 logger = setup_logger()
 
-# uvicorn HTTP 访问日志: INFO 级(可捕获 4xx), 由过滤器去噪; 统一在此配置
+# uvicorn 日志去噪/脱敏: HTTP 访问日志(uvicorn.access) + WebSocket 握手与协议行
+# (uvicorn.error —— websockets 实现把 logger 直接绑在它上面, 握手行里的 ?token=
+#  以前没人打码, JWT 明文就这么一遍遍打进终端)
 uvicorn_access = logging.getLogger("uvicorn.access")
 uvicorn_access.setLevel(logging.INFO)
+uvicorn_error = logging.getLogger("uvicorn.error")
+uvicorn_error.setLevel(logging.INFO)
+
+# 顺序要紧：先打码再判重，_WsHandshakeNoiseFilter 留下的样例才是脱敏后的
+for _uvicorn_logger in (uvicorn_access, uvicorn_error):
+    if not any(isinstance(f, _AccessTokenRedactFilter) for f in _uvicorn_logger.filters):
+        _uvicorn_logger.addFilter(_AccessTokenRedactFilter())
+    if not any(isinstance(f, _WsHandshakeNoiseFilter) for f in _uvicorn_logger.filters):
+        _uvicorn_logger.addFilter(_WsHandshakeNoiseFilter())
+
 if not any(isinstance(f, _AccessNoiseFilter) for f in uvicorn_access.filters):
     uvicorn_access.addFilter(_AccessNoiseFilter())
 if not any(isinstance(f, _PollAuthNoiseFilter) for f in uvicorn_access.filters):
     uvicorn_access.addFilter(_PollAuthNoiseFilter())
-if not any(isinstance(f, _AccessTokenRedactFilter) for f in uvicorn_access.filters):
-    uvicorn_access.addFilter(_AccessTokenRedactFilter())
