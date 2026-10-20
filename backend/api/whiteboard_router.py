@@ -1982,6 +1982,10 @@ async def ai_generate_diagram(request: Request):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
     description = body.get("description", "")
+    # room_id 必须从请求体里取：这两个接口原先直接引用一个从未赋值的 room_id，
+    # 一进来就 NameError -> 500（教师点"AI 生成图示/一键板书"必然失败）。
+    # 前端现在会带 room_id；老客户端不带时按 None 走，学科/知识点仍按教师口径解析。
+    room_id = body.get("room_id")
     subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     if not description:
         raise HTTPException(status_code=400, detail="请输入描述")
@@ -2104,7 +2108,10 @@ async def ai_generate_board(request: Request):
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
-    kp_name = body.get("kp_name", "")
+    room_id = body.get("room_id")
+    # 与随堂提问/双语板书同口径：前端只拿得到 course_kp_id 时，用房间绑定的知识点名兜住，
+    # 别把「知识点#7」这种占位喂给模型
+    kp_name = _resolve_kp_name(body.get("kp_name"), room_id)
     subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     grade = body.get("grade", "")
     if not kp_name:

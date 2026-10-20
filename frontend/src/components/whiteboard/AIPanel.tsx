@@ -487,7 +487,7 @@ export const AIPanel: React.FC<Props> = ({
             ])
           },
         },
-        { signal: abortController.signal },
+        { signal: abortController.signal, roomId },
       )
     } catch (err: any) {
       if (err.name === 'AbortError') {
@@ -498,7 +498,7 @@ export const AIPanel: React.FC<Props> = ({
       progressModal.updateStep('generate', 'error')
       progressModal.markError(friendlyError(err, t('aiFigFailed')))
     }
-  }, [editorRef, subject, progressModal])
+  }, [editorRef, subject, roomId, progressModal])
 
   // 一键生成板书（带进度模态框）
   const handleGenerateBoard = useCallback(async () => {
@@ -544,7 +544,7 @@ export const AIPanel: React.FC<Props> = ({
     })
 
     try {
-      const result = await whiteboardApi.aiGenerateBoard(topic, subject || '', grade || '')
+      const result = await whiteboardApi.aiGenerateBoard(topic, subject || '', grade || '', roomId)
       progressModal.updateStep('generate', 'done')
 
       if (result.shapes && result.shapes.length > 0) {
@@ -585,7 +585,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI一键板书]', err)
       progressModal.markError(friendlyError(err, t('aiBoardFailed')))
     }
-  }, [editorRef, kpName, subject, grade, progressModal, getRightSidePosition])
+  }, [editorRef, kpName, subject, grade, roomId, progressModal, getRightSidePosition])
 
   // 板书美化+自动排版（带进度模态框）
   const handleBeautify = useCallback(async () => {

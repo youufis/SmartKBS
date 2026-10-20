@@ -232,7 +232,7 @@ export async function aiGenerateDiagramStream(
     onResult: (result: DiagramResultEvent) => void
     onError: (error: string) => void
   },
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; roomId?: number },
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token')
   try {
@@ -242,7 +242,7 @@ export async function aiGenerateDiagramStream(
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ description, subject }),
+      body: JSON.stringify({ description, subject, room_id: options?.roomId }),
       signal: options?.signal,
     })
 
@@ -300,6 +300,7 @@ export async function aiGenerateDiagramStream(
 export async function aiGenerateDiagram(
   description: string,
   subject?: string,
+  roomId?: number,
 ): Promise<{
   mode: 'svg' | 'image' | 'text'
   svg?: string
@@ -309,7 +310,7 @@ export async function aiGenerateDiagram(
   width?: number
   height?: number
 }> {
-  const res = await apiClient.post('/api/whiteboard/ai/generate-diagram', { description, subject }, { timeout: 320000 })
+  const res = await apiClient.post('/api/whiteboard/ai/generate-diagram', { description, subject, room_id: roomId }, { timeout: 320000 })
   return res.data
 }
 
@@ -317,6 +318,7 @@ export async function aiGenerateBoard(
   kpName: string,
   subject?: string,
   grade?: string,
+  roomId?: number,
 ): Promise<{
   title: string
   shapes: unknown[]
@@ -325,6 +327,7 @@ export async function aiGenerateBoard(
     kp_name: kpName,
     subject: subject || '',
     grade: grade || '',
+    room_id: roomId,
   }, { timeout: 320000 })
   return res.data
 }
