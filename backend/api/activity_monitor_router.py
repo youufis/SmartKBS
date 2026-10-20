@@ -31,6 +31,7 @@ ACTIVITY_TYPE_LABELS = {
     "discussion": "分组讨论",
     "poll": "快速投票",
     "course": "课程练习",
+    "class_ladder": "课堂闯关",
 }
 
 
@@ -319,6 +320,27 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         p["submitted_count"] = sub[0]["cnt"] if sub else 0
         activities.append(p)
 
+    # ── 9. 课堂闯关（smartkb.db，大屏版）──
+    ladder_rows = db_query_dict(
+        """SELECT id,
+                  COALESCE(NULLIF(topic,''), NULLIF(subject,''), '课堂闯关') as title,
+                  CASE status WHEN 'ready' THEN 'active' ELSE status END as status,
+                  created_at, updated_at, COALESCE(subject,'') as subject,
+                  0 as total_score, 0 as pass_score, 0 as duration,
+                  'class' as target_scope, grade as target_grade, class_name as target_class,
+                  '' as target_users, 'class_ladder' as activity_type
+           FROM class_ladder_sessions
+           WHERE teacher_username = ?
+           ORDER BY created_at DESC""",
+        (teacher_username,),
+    )
+    for p in ladder_rows:
+        agg = db_query_dict(
+            "SELECT COUNT(*) as runs, COUNT(DISTINCT student_name) as students "
+            "FROM class_ladder_runs WHERE session_id=?", (p["id"],))
+        p["submitted_count"] = (agg[0]["students"] if agg else 0) or 0
+        p["run_count"] = (agg[0]["runs"] if agg else 0) or 0
+        activities.append(p)
     # 统一设置创建者姓名（课程练习已有独立的 creator_name，不覆盖）
     # 同时兜底范围字段: 课程练习按资源归属(年级来自课程)且非班级定向, 其余活动取各自表值
     for act in activities:
@@ -679,6 +701,34 @@ def _get_students_with_completion(
                 "status": "completed",
             }
 
+    elif activity_type == "class_ladder":
+        # 局里存的是姓名（大屏口播，没有学号），按 姓名+班级 反查学号
+        by_name = {}
+        for uname, info in student_map.items():
+            by_name[(str(info.get("name") or ""), str(info.get("class") or ""))] = uname
+        rows = db_query_dict(
+            """SELECT r.student_name, s.class_name, COUNT(*) as runs,
+                      MAX(r.ladder_score) as best,
+                      MAX(COALESCE(r.ended_at, r.created_at)) as submitted_at
+               FROM class_ladder_runs r JOIN class_ladder_sessions s ON s.id = r.session_id
+               WHERE r.session_id=? AND r.status != 'playing'
+               GROUP BY r.student_name, s.class_name""",
+            (activity_id,),
+        )
+        for a in rows:
+            uname = by_name.get((str(a.get("student_name") or ""), str(a.get("class_name") or "")))
+            if not uname or uname not in student_map:
+                continue
+            completed_map[uname] = {
+                "username": uname,
+                "name": student_map[uname].get("name", ""),
+                "grade": student_map[uname].get("grade", ""),
+                "class_name": student_map[uname].get("class", ""),
+                "score": int(a.get("best") or 0),
+                "total_score": 415,
+                "submitted_at": a.get("submitted_at") or "",
+                "status": "completed",
+            }
     # 构建已完成列表
     completed = list(completed_map.values())
 
@@ -800,7 +850,7 @@ def _lookup_activity(activity_type: str, activity_id: int, username: str):
     db_source: 'qdb' 表示 questions.db, 'db' 表示 smartkb.db
     """
     qdb_types = {"exam", "practice", "code"}
-    db_types = {"quick_quiz", "task", "quiz", "discussion", "poll", "course"}
+    db_types = {"quick_quiz", "task", "quiz", "discussion", "poll", "course", "class_ladder"}
 
     _QDB_TABLES = {"exam": "exams", "practice": "practice_sessions", "code": "code_problems"}
     _DB_TABLES = {

@@ -451,6 +451,85 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 课堂闯关（大屏版）· 会话 / 题池 / 局 / 主题包 ──
+            # 规则与学生端「知识闯关」同口径（15 关阶梯 + 3 锦囊 + 答错终止），
+            # 抽人与出题复用课堂抽问；会话/题池/局自成一套，不写进点名或抽问的表。
+            c.execute("""CREATE TABLE IF NOT EXISTS class_ladder_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_username TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                subject TEXT DEFAULT '',
+                topic TEXT DEFAULT '',
+
+                ai_enabled INTEGER DEFAULT 0,
+                question_type TEXT DEFAULT 'single',
+                time_limit_sec INTEGER DEFAULT 90,
+                pool_size INTEGER DEFAULT 30,
+                safe_mode INTEGER DEFAULT 0,
+                skin TEXT DEFAULT '',
+                lifelines TEXT DEFAULT '[]',
+                status TEXT DEFAULT 'ready',
+                weights TEXT DEFAULT '{}',
+                picked_in_round TEXT DEFAULT '[]',
+                last_time REAL,
+                build_note TEXT DEFAULT '',
+                created_at TEXT,
+                updated_at TEXT
+            )""")
+            _ensure_column(c, "class_ladder_sessions", "lifelines", "TEXT DEFAULT '[]'")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cls_active ON class_ladder_sessions(teacher_username, grade, class_name, status)")
+            except sqlite3.OperationalError:
+                pass
+
+            # 题池：一场一次生成、每局抽 15 题（跨局去重）；level 决定难度与分值档
+            c.execute("""CREATE TABLE IF NOT EXISTS class_ladder_pool (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                level INTEGER NOT NULL,
+                difficulty TEXT DEFAULT '',
+                question_id INTEGER,
+                question_text TEXT DEFAULT '',
+                question_type TEXT DEFAULT 'single',
+                options TEXT DEFAULT '[]',
+                correct_answer TEXT DEFAULT '',
+                explanation TEXT DEFAULT '',
+                source TEXT DEFAULT 'bank',
+                svg_content TEXT DEFAULT '',
+                has_svg INTEGER DEFAULT 0,
+                media_files TEXT DEFAULT '',
+                media_placeholders TEXT DEFAULT '',
+                used_count INTEGER DEFAULT 0,
+                created_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_clp_session ON class_ladder_pool(session_id, level, used_count)")
+            except sqlite3.OperationalError:
+                pass
+
+            # 一局 = 一名学生的一次闯关（含 15 题快照与逐关作答明细）
+            c.execute("""CREATE TABLE IF NOT EXISTS class_ladder_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                student_name TEXT NOT NULL,
+                status TEXT DEFAULT 'playing',
+                reached_level INTEGER DEFAULT 0,
+                correct_count INTEGER DEFAULT 0,
+                ladder_score INTEGER DEFAULT 0,
+                points_awarded INTEGER DEFAULT 0,
+                lifelines_used TEXT DEFAULT '[]',
+                lifeline_by_level TEXT DEFAULT '{}',
+                questions TEXT DEFAULT '[]',
+                answers TEXT DEFAULT '[]',
+                created_at TEXT,
+                ended_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_clr_session ON class_ladder_runs(session_id, created_at)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY,

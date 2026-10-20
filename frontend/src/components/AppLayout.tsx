@@ -28,6 +28,7 @@ import {
   PictureOutlined,
   GlobalOutlined,
   CrownOutlined,
+  RiseOutlined,
   DownloadOutlined,
   QuestionCircleOutlined,
 } from '@ant-design/icons'
@@ -136,6 +137,7 @@ function buildTeacherMenu(t: (k: string) => string) {
       { key: '/whiteboard', icon: <EditOutlined />, label: g('whiteboard') },
       { key: '/rollcall', icon: <AuditOutlined />, label: g('rollcallManage') },
       { key: '/class-question', icon: <QuestionCircleOutlined />, label: g('classQuestion') },
+      { key: '/class-ladder', icon: <RiseOutlined />, label: g('classLadder') },
       { key: '/student-questions', icon: <MessageOutlined />, label: g('questionManage') },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: g('taskManage') },
       { key: '/quest-records', icon: <TrophyOutlined />, label: g('questManage'), adminOrTeacherOnly: true },

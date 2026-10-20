@@ -138,6 +138,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 页面上的「AI 生题」开关是否可用：关掉后课堂抽问只从题库取题，不再调用大模型（零 AI 计费）。
     # 页面开关是当堂临时选择，这里是全校总闸；两者都开才走 AI。
     "CLASS_DRILL_AI_ENABLED": True,
+    # ── 课堂闯关（backend/api/class_ladder_router.py）──
+    # AI 生题总闸（关掉后只从题库取题，零 AI 计费）。
+    "CLASS_LADDER_AI_ENABLED": True,
+    # 大屏默认皮肤：cloud/sunrise/mint（浅色，默认 cloud）/ star/cyber/academy/classic（深色）
+    "CLASS_LADDER_DEFAULT_SKIN": "cloud",
+    # 大屏音效总闸（前端用 WebAudio 合成，零素材零成本）
+    "CLASS_LADDER_SOUND_ENABLED": True,
     # 积分防刷：每日上限（0 = 不限制）
     "REWARD_DAILY_CHAT_POINTS": 10,
     "REWARD_DAILY_QUIZ_SESSIONS": 3,
@@ -399,7 +406,7 @@ _BOOL_KEYS = {
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
-    "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED",
+    "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED", "CLASS_LADDER_AI_ENABLED", "CLASS_LADDER_SOUND_ENABLED",
     "PORTRAIT_ENABLED", "PORTRAIT_PERIOD_MONTHLY", "PORTRAIT_AUTO_PUSH",
     "SHOWCASE_AUTO_ENABLED",
     "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
@@ -410,6 +417,7 @@ _STR_LIMITS: dict[str, int] = {
     "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80,
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
     "SHOWCASE_RANK_MODE": 16,
+    "CLASS_LADDER_DEFAULT_SKIN": 16,
     "dashscope_api_key": 200, "APPID": 128,
     "KB_API_BASE": 300, "KB_AGENT_ID": 128,
     "CHAT_SKILL_SEGMENT_MODE": 16,

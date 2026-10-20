@@ -261,7 +261,20 @@ RESET_SCOPES: dict[str, dict[str, Any]] = {
         keep=[("poll_body", "投票题目与选项")],
         reward_types=("poll",), notify_type="poll",
     ),
-    # 9. 课程练习（活动标识=binding_id，数据按 knowledge_point_id 归属，跨两个库）
+    # 10. 课堂闯关（大屏版）—— 大屏课堂活动：重置只回收"局与题池"，不碰课堂积分
+    #     （积分记在 scores 表，回退走积分管理的撤销流水，见 notes）
+    "class_ladder": Scope(
+        "class_ladder", "课堂闯关", master="class_ladder_sessions", title_col="topic",
+        targets=[
+            Target("class_ladder_runs", "session_id = :aid", "本场所有局（含逐关明细与成绩）"),
+            Target("class_ladder_pool", "session_id = :aid", "本场题池"),
+        ],
+        keep=[("class_ladder_topic", "主题与知识点设置")],
+        reward_types=(),
+        status=("status", ("ready", "ended"), "ready"),
+        options=(OPT_RESET_STATUS,),
+        notes=[("class_ladder_reward_scope", "课堂积分记在「积分管理」中，本处重置不回退积分")],
+    ),    # 9. 课程练习（活动标识=binding_id，数据按 knowledge_point_id 归属，跨两个库）
     "course": Scope(
         "course", "课程练习", master="curriculum_bindings", title_col="", creator_col="",
         targets=[

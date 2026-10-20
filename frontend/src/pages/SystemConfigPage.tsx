@@ -70,7 +70,7 @@ interface ConfigZone {
 
 const CONFIG_ZONES: ConfigZone[] = [
   { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward', 'showcase'] },
-  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill', 'portrait'] },
+  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill', 'classladder', 'portrait'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
   { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
@@ -92,6 +92,7 @@ const SECTION_TITLES: Record<string, string> = {
   imagegen: 'group_imagegen',
   tts: 'group_tts',
   classdrill: 'group_classdrill',
+  classladder: 'group_classladder',
   portrait: 'group_portrait',
   upload: 'group_upload',
   quota: 'group_quota',
@@ -246,6 +247,10 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'PODCAST_MAX_SECONDS', labelKey: 'field_PODCAST_MAX_SECONDS', descKey: 'field_PODCAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
   // 课堂抽问（backend/api/class_drill_router.py）：总闸关掉后该页只从题库取题，零 AI 计费
   { key: 'CLASS_DRILL_AI_ENABLED', labelKey: 'field_CLASS_DRILL_AI_ENABLED', descKey: 'field_CLASS_DRILL_AI_ENABLED_desc', type: 'boolean', group: 'classdrill', required: false },
+  // 课堂闯关（backend/api/class_ladder_router.py）：AI 补题总闸 + 大屏默认皮肤
+  { key: 'CLASS_LADDER_AI_ENABLED', labelKey: 'field_CLASS_LADDER_AI_ENABLED', descKey: 'field_CLASS_LADDER_AI_ENABLED_desc', type: 'boolean', group: 'classladder', required: false },
+  { key: 'CLASS_LADDER_DEFAULT_SKIN', labelKey: 'field_CLASS_LADDER_DEFAULT_SKIN', descKey: 'field_CLASS_LADDER_DEFAULT_SKIN_desc', type: 'text', group: 'classladder', required: false, placeholderKey: 'placeholder_CLASS_LADDER_DEFAULT_SKIN' },
+  { key: 'CLASS_LADDER_SOUND_ENABLED', labelKey: 'field_CLASS_LADDER_SOUND_ENABLED', descKey: 'field_CLASS_LADDER_SOUND_ENABLED_desc', type: 'boolean', group: 'classladder', required: false },
 
   // AI 画像（backend/api/portrait_router.py）：周期决定"免费额度"与"画像吃哪一段数据"
   { key: 'PORTRAIT_ENABLED', labelKey: 'field_PORTRAIT_ENABLED', descKey: 'field_PORTRAIT_ENABLED_desc', type: 'boolean', group: 'portrait', required: false },

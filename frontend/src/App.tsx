@@ -83,6 +83,7 @@ import PracticePage from './pages/PracticePage'
 import CodePracticePage from './pages/CodePracticePage'
 import StudentQuestionsPage from './pages/StudentQuestionsPage'
 import ClassQuestionPage from './pages/ClassQuestionPage'
+import ClassLadderPage from './pages/ClassLadderPage'
 import QuickPollPage from './pages/QuickPollPage'
 import ClassSummaryPage from './pages/ClassSummaryPage'
 import ActivityMonitorPage from './pages/ActivityMonitorPage'
@@ -193,6 +194,7 @@ function App() {
             <Route path="code-practice" element={<CodePracticePage />} />
             <Route path="student-questions" element={<StudentQuestionsPage />} />
           <Route path="class-question" element={<RequireRole roles={TA}><ClassQuestionPage /></RequireRole>} />
+          <Route path="class-ladder" element={<RequireRole roles={TA}><ClassLadderPage /></RequireRole>} />
             <Route path="quick-poll" element={<QuickPollPage />} />
             <Route path="class-summary" element={user?.role === 'admin' || user?.role === 'teacher' ? <ClassSummaryPage /> : <Navigate to="/chat" />} />
             <Route path="activity-monitor" element={user?.role === 'admin' || user?.role === 'teacher' ? <ActivityMonitorPage /> : <Navigate to="/chat" />} />
