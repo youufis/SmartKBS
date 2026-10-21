@@ -75,7 +75,7 @@ LIFELINE_NAMES = {
 DEFAULT_LIFELINES = ("remove_one", "phone_friend", "audience_vote")
 MAX_LIFELINES = 3
 QUESTION_TYPES = ("single", "true_false")
-DEFAULT_TIME_LIMIT = 90
+DEFAULT_TIME_LIMIT = 0  # 0 = no countdown (default)
 DEFAULT_POOL_SIZE = 30
 SKINS = ("star", "cyber", "academy", "classic", "cloud", "sunrise", "mint")
 
@@ -87,6 +87,15 @@ WEIGHT_MAX = 10
 
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _as_time_limit(value: Any) -> int:
+    """限时秒数：0 = 不限时。必须显式判 None，不能用 or 兜默认值（会把 0 吞掉）。"""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_TIME_LIMIT
+    return max(0, n)
 
 
 def _ai_enabled_by_admin() -> bool:
@@ -108,8 +117,8 @@ def _sound_enabled_by_admin() -> bool:
 def _default_skin() -> str:
     try:
         from backend.api.config_router import get_config_value
-        skin = str(get_config_value("CLASS_LADDER_DEFAULT_SKIN", "star") or "star")
-        return skin if skin in SKINS else "star"
+        skin = str(get_config_value("CLASS_LADDER_DEFAULT_SKIN", "cloud") or "cloud")
+        return skin if skin in SKINS else "cloud"
     except Exception:
         return "cloud"
 
@@ -231,7 +240,7 @@ def _create_session(teacher: str, grade: str, cls: str, *, subject: str, topic: 
         " picked_in_round, last_time, build_note, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', '{}', '[]', ?, '', ?, ?)",
         (teacher, grade, cls, subject, topic,
-         1 if ai_enabled else 0, question_type, int(time_limit_sec or DEFAULT_TIME_LIMIT),
+         1 if ai_enabled else 0, question_type, _as_time_limit(time_limit_sec),
          int(pool_size or DEFAULT_POOL_SIZE), int(safe_mode or 0), skin,
          _encode(_norm_lifelines(lifelines), list(DEFAULT_LIFELINES)),
          time.time(), now, now),
@@ -247,7 +256,7 @@ def _save_session(session: dict) -> None:
         (
             session.get("subject") or "", session.get("topic") or "",
             1 if session.get("ai_enabled") else 0, session.get("question_type") or "single",
-            int(session.get("time_limit_sec") or DEFAULT_TIME_LIMIT),
+            _as_time_limit(session.get("time_limit_sec")),
             int(session.get("pool_size") or DEFAULT_POOL_SIZE),
             int(session.get("safe_mode") or 0), session.get("skin") or "",
             _encode(session.get("lifelines"), list(DEFAULT_LIFELINES)),
@@ -289,7 +298,7 @@ def _session_dict(session: dict, grade: str, cls: str) -> dict:
 
         "ai_enabled": bool(session.get("ai_enabled")),
         "question_type": session.get("question_type") or "single",
-        "time_limit_sec": int(session.get("time_limit_sec") or DEFAULT_TIME_LIMIT),
+        "time_limit_sec": _as_time_limit(session.get("time_limit_sec")),
         "pool_size": int(session.get("pool_size") or DEFAULT_POOL_SIZE),
         "safe_mode": int(session.get("safe_mode") or 0),
         "skin": session.get("skin") or _default_skin(),
@@ -639,7 +648,7 @@ def _run_public(run: dict, session: dict, *, with_question: bool = True) -> dict
         "points_awarded": int(run.get("points_awarded") or 0),
         "lifelines_used": _decode(run.get("lifelines_used"), []),
         "current_level": level,
-        "time_limit_sec": int(session.get("time_limit_sec") or DEFAULT_TIME_LIMIT),
+        "time_limit_sec": _as_time_limit(session.get("time_limit_sec")),
         "answered": answers,
     }
     if with_question and run.get("status") == "playing":
@@ -732,7 +741,7 @@ async def ladder_config(request: Request):
             {"value": "single", "label": "单选题"},
             {"value": "true_false", "label": "判断题"},
         ],
-        "time_limits": [30, 45, 60, 90],
+        "time_limits": [60, 90, 120],
         "default_time_limit": DEFAULT_TIME_LIMIT,
         "default_pool_size": DEFAULT_POOL_SIZE,
     }
@@ -763,7 +772,7 @@ async def open_session(request: Request):
         subject=subject, topic=topic,
         ai_enabled=bool(body.get("allow_ai")),
         question_type="true_false" if body.get("question_type") == "true_false" else "single",
-        time_limit_sec=int(body.get("time_limit_sec") or DEFAULT_TIME_LIMIT),
+        time_limit_sec=_as_time_limit(body.get("time_limit_sec")),
         pool_size=int(body.get("pool_size") or DEFAULT_POOL_SIZE),
         safe_mode=int(body.get("safe_mode") or 0),
         skin=skin or _default_skin(),

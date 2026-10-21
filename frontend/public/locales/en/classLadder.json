@@ -107,7 +107,7 @@
   "recordsTitle": "History",
   "recordsEmpty": "No records",
   "recordsCount": "{{count}} runs",
-  "kbdHint": "Space draw · 1-4 pick · Enter submit · 0 skip · N next",
+  "kbdHint": "Space draw · 1-9 pick · Enter submit · 0 skip (wrong)",
   "exitFullscreen": "Exit fullscreen",
   "fullscreen": "Fullscreen",
   "loadFailed": "Load failed",
@@ -119,5 +119,12 @@
   "resultFailed": "Failed to load result",
   "mobileGuide": "Class Ladder is for big-screen projection; please use a desktop",
   "soundOnHint": "Sound on: effects + name announcement",
-  "soundOffHint": "Sound off: effects and announcement muted"
+  "soundOffHint": "Sound off: effects and announcement muted",
+  "scoreUnit": "pts",
+  "setupExpand": "Setup",
+  "setupCollapse": "Hide setup",
+  "skinNames": {
+    "star": "Star Gold", "cyber": "Neon Cyber", "academy": "Academy Blue", "classic": "Vintage Gold",
+    "cloud": "Cloud White", "sunrise": "Sunrise Cream", "mint": "Mint Fresh"
+  }
 }

@@ -107,7 +107,7 @@
   "recordsTitle": "流水",
   "recordsEmpty": "暂无记录",
   "recordsCount": "本场 {{count}} 局",
-  "kbdHint": "空格 抽人 · 1-4 选答案 · 回车 提交 · 0 跳过 · N 下一关",
+  "kbdHint": "空格 抽人 · 1-9 选答案 · 回车 提交 · 0 跳过（判错）",
   "exitFullscreen": "退出全屏",
   "fullscreen": "投屏全屏",
   "loadFailed": "加载失败",
@@ -119,5 +119,12 @@
   "resultFailed": "结算读取失败",
   "mobileGuide": "课堂闯关用于教室大屏投屏，请用电脑端打开",
   "soundOnHint": "声音已开：音效 + 抽中念名",
-  "soundOffHint": "声音已关：音效与念名都静音"
+  "soundOffHint": "声音已关：音效与念名都静音",
+  "scoreUnit": "分",
+  "setupExpand": "设置",
+  "setupCollapse": "收起设置",
+  "skinNames": {
+    "star": "星海紫金", "cyber": "赛博霓虹", "academy": "学院蓝", "classic": "复古金色",
+    "cloud": "云白课堂", "sunrise": "暖阳米", "mint": "薄荷清"
+  }
 }
