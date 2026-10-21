@@ -31,6 +31,21 @@ export interface RecentExamItem {
   creator_name?: string
 }
 
+/** 一个年级的任教班级；all_classes=true 表示整年级（teacher_assignments.class_id IS NULL） */
+export interface TeacherScopeGrade {
+  grade_id?: number
+  grade_name: string
+  all_classes?: boolean
+  /** 短班号（"1"、"2"），后端已按数值序排好；整年级时为空 */
+  classes?: string[]
+}
+
+/** 一个学科下的任教年级；subject 为空串表示该教师未登记学科 */
+export interface TeacherScopeGroup {
+  subject: string
+  grades: TeacherScopeGrade[]
+}
+
 export interface DashboardSummary {
   role: 'admin' | 'teacher' | 'student'
   username: string
@@ -90,6 +105,8 @@ export interface DashboardSummary {
   teacher_grades?: string
   teacher_classes?: string
   teacher_subjects?: string[]
+  /** 任教范围（按学科分组）：与越权校验同源，来自 teacher_assignments */
+  teacher_scope?: TeacherScopeGroup[]
   teacher_quiz_count?: number
   teacher_active_quiz_count?: number
   teacher_poll_count?: number

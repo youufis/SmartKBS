@@ -14,7 +14,6 @@
     "rank": "Rank",
     "taskList": "Task List",
     "aiCompanion": "AI Companion",
-    "teaching": "Teaching: ",
     "greeting": "{{time}}, {{name}}{{role}}! 👋",
     "streak": "{{n}}-day streak",
     "daysToExam": "Nearest exam ends in {{n}} days",

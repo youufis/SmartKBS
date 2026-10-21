@@ -245,6 +245,77 @@ def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict[str, 
     )
 
 
+def _class_no_of(name: Any) -> str:
+    """班级名 → 短班号："高一1班"/"1班"/"1" 都取到 "1"；纯文字班名（"实验班"）去掉"班"原样给回"""
+    s = str(name if name is not None else "").replace("班", "").strip()
+    if not s:
+        return ""
+    digits = ""
+    for ch in reversed(s):
+        if ch.isdigit():
+            digits = ch + digits
+        else:
+            break
+    return digits or s
+
+
+def _class_sort_key(token: str) -> tuple[int, int, str]:
+    """数字班号按数值序排前，非数字班名按字典序跟后 —— 展示层压缩连续号段依赖这个顺序"""
+    return (0, int(token), "") if token.isdigit() else (1, 0, token)
+
+
+def get_teacher_scope(teacher_username: str) -> list[dict[str, Any]]:
+    """教师任教范围（按学科分组），与所有越权校验同源：只认 teacher_assignments。
+
+    为什么不再用 users.grade / users.class 那两条竖线字符串（2026-10）：
+      1) 权限判定全部走 teacher_assignments，展示走 legacy 列，只要有旁路写入
+         （批量导入、升年级工具），横幅就变成"说能管 15 个班、接口只放行 13 个班"；
+      2) legacy 把学科压成另一条独立清单，"哪个班教哪门课"在展示层直接丢了；
+      3) class_id IS NULL 表示"该年级全部班级"，legacy 只能渲染成光秃秃的年级名，
+         和"这个年级压根没填班级"长得一模一样，这里用 all_classes 显式区分。
+
+    返回 [{"subject": "通用技术",
+           "grades": [{"grade_id": 10, "grade_name": "高一",
+                       "all_classes": False, "classes": ["1", "2", ...]}]}]
+    班级只留短班号并排好数值序，连续号段的压缩交给展示层。
+    """
+    rows = get_teacher_assignments(teacher_username)
+    groups: dict[str, dict[int, dict[str, Any]]] = {}
+    grade_order: dict[str, list[int]] = {}
+    subject_order: list[str] = []
+
+    for r in rows:
+        subject = str(r.get("subject") or "").strip()
+        gid = int(r["grade_id"])
+        if subject not in groups:
+            groups[subject] = {}
+            grade_order[subject] = []
+            subject_order.append(subject)
+        grade = groups[subject].get(gid)
+        if grade is None:
+            grade = {"grade_id": gid, "grade_name": str(r.get("grade_name") or ""),
+                     "all_classes": False, "classes": []}
+            groups[subject][gid] = grade
+            grade_order[subject].append(gid)
+        if r.get("class_id") is None:
+            # 整年级任教：不再列具体班级，列了反而误导（看起来像只教其中几个）
+            grade["all_classes"] = True
+            grade["classes"] = []
+            continue
+        if not grade["all_classes"]:
+            token = _class_no_of(r.get("class_display_name") or r.get("class_name"))
+            if token and token not in grade["classes"]:
+                grade["classes"].append(token)
+
+    result: list[dict[str, Any]] = []
+    for subject in subject_order:
+        grades = [groups[subject][gid] for gid in grade_order[subject]]
+        for grade in grades:
+            grade["classes"].sort(key=_class_sort_key)
+        result.append({"subject": subject, "grades": grades})
+    return result
+
+
 def assign_teacher(teacher_username: str, grade_id: int, class_id: int | None = None, subject: str = ""):
     """为教师添加任教关系（幂等）"""
     execute_insert_update(

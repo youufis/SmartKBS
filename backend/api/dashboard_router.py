@@ -69,6 +69,34 @@ def _get_cached(key: str) -> dict[str, Any] | None:
     return None
 
 
+def _legacy_scope_strings(scope: list) -> tuple[str, str]:
+    """结构化任教范围 → legacy 竖线字符串（teacher_grades / teacher_classes）。
+
+    这两个字段还有别的消费方（桌面端旧 dist、纯文本导出），保留但不再独立取数：
+    一律从 teacher_assignments 的聚合结果反推，两边不可能再漂移。多学科时按年级取并集；
+    整年级任教（all_classes）落成该年级的空班级段，与 parse_legacy_teacher_grade_class 同语义。
+    """
+    order: list[str] = []
+    merged: dict[str, list[str]] = {}
+    whole: set[str] = set()
+    for group in scope:
+        for g in group.get("grades") or []:
+            name = str(g.get("grade_name") or "").strip()
+            if not name:
+                continue
+            if name not in merged:
+                merged[name] = []
+                order.append(name)
+            if g.get("all_classes"):
+                whole.add(name)
+                continue
+            for c in g.get("classes") or []:
+                if c not in merged[name]:
+                    merged[name].append(c)
+    classes_txt = "|".join("" if n in whole else ",".join(merged[n]) for n in order)
+    return "|".join(order), classes_txt
+
+
 def _act_q(sql: str, params=()):
     """recent-activity 单源容错查询: 任何数据源失败只丢该源并记日志, 不再整体 500;
     同时天然兜住空范围 IN () 等非法 SQL(K5)"""
@@ -854,17 +882,22 @@ async def dashboard_summary(request: Request):
         ]
 
         if role == 1:
-            rows = execute_query(
-                "SELECT grade, class FROM users WHERE username = ?",
-                (username,),
-            )
-            if rows:
-                result["teacher_grades"] = rows[0][0] or ""
-                result["teacher_classes"] = rows[0][1] or ""
-            # 获取教师任教学科
-            from backend.permission_service import get_teacher_subjects
-            subjects = get_teacher_subjects(username)
-            result["teacher_subjects"] = subjects
+            # 任教范围只认 teacher_assignments（与全部越权校验同源），理由见 get_teacher_scope
+            from backend.permission_service import get_teacher_scope, get_teacher_subjects
+            scope = get_teacher_scope(username)
+            result["teacher_scope"] = scope
+            result["teacher_subjects"] = get_teacher_subjects(username)
+            grades_txt, classes_txt = _legacy_scope_strings(scope)
+            if not grades_txt:
+                # 从未迁移过任教关系的旧账号：退回 legacy 列，至少横幅不空白
+                rows = execute_query(
+                    "SELECT grade, class FROM users WHERE username = ?",
+                    (username,),
+                )
+                if rows:
+                    grades_txt, classes_txt = rows[0][0] or "", rows[0][1] or ""
+            result["teacher_grades"] = grades_txt
+            result["teacher_classes"] = classes_txt
 
     # 写入缓存
     _set_cache(cache_key, result)

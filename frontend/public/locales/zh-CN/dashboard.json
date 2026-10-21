@@ -14,7 +14,6 @@
     "rank": "排名",
     "taskList": "任务清单",
     "aiCompanion": "AI学伴",
-    "teaching": "任教：",
     "greeting": "{{time}}，{{name}}{{role}}！👋",
     "streak": "连学{{n}}天",
     "daysToExam": "距最近考试截止 {{n}} 天",

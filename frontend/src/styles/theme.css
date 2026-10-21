@@ -65,3 +65,32 @@ body {
 .markdown-content code {
   background: var(--bg-layout);
 }
+/* 教师任教范围明细（TeacherScopeChips 折叠态的 Popover）：三列小表格，长清单可滚动 */
+.teacher-scope-detail {
+  max-width: min(420px, 78vw);
+  max-height: 46vh;
+  overflow: auto;
+  font-size: 12px;
+}
+.teacher-scope-detail-group + .teacher-scope-detail-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+}
+.teacher-scope-detail-subject {
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.teacher-scope-detail-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+}
+.teacher-scope-detail-grade {
+  font-weight: 600;
+}
+.teacher-scope-detail-count {
+  color: var(--text-tertiary);
+}

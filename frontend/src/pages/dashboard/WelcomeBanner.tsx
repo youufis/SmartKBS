@@ -4,11 +4,11 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Button, Card, Progress, Tag, Typography } from 'antd'
 import {
-  FireOutlined, TeamOutlined, ExperimentOutlined, TrophyOutlined,
+  FireOutlined, TeamOutlined, TrophyOutlined,
 } from '@ant-design/icons'
 import { getTodayPortrait } from '../../api/portrait'
 import type { PortraitData } from '../../api/portrait'
-import { teacherScopeText } from '../../utils/studentLabel'
+import TeacherScopeChips from '../../components/TeacherScopeChips'
 import { deadlineInfo } from './fmt'
 import type { DashboardSummary } from '../../api/dashboard'
 import { reportLoadError } from '../../utils/loadError'
@@ -140,15 +140,17 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
           </span>
         )}
         {(isTeacher || isAdmin) && (
-          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 12, fontSize: 13, color: 'rgba(255,255,255,0.9)', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <span className="banner-teacher-meta" style={{ marginLeft: 'auto', maxWidth: '62%', display: 'inline-flex', alignItems: 'center', gap: 12, fontSize: 13, color: 'rgba(255,255,255,0.9)', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {isAdmin && (
               <span><TeamOutlined /> {t('currentOnline')}: {summary.online_count ?? 0}</span>
             )}
-            {isTeacher && summary.teacher_grades && (
-              <span><TeamOutlined /> {teacherScopeText(summary.teacher_grades, summary.teacher_classes)}</span>
-            )}
-            {isTeacher && summary.teacher_subjects && summary.teacher_subjects.length > 0 && (
-              <span><ExperimentOutlined style={{ marginRight: 4 }} />{t('welcome.teaching')}{summary.teacher_subjects.join('、')}</span>
+            {isTeacher && (
+              <TeacherScopeChips
+                scope={summary.teacher_scope}
+                legacyGrades={summary.teacher_grades}
+                legacyClasses={summary.teacher_classes}
+                legacySubjects={summary.teacher_subjects}
+              />
             )}
           </span>
         )}
