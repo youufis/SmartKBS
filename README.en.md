@@ -9,7 +9,7 @@
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
-> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, dialogue homework
+> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, online incremental upgrade, multi-theme appearance
 >
@@ -37,6 +37,11 @@
 
 > 📌 **Highlights of V8.8.0**
 >
+> - 📎 **File submissions**: the assignment centre now accepts "files" and "files + note" — students upload Word, PDF, spreadsheets, slides or photos (camera on phones), the AI grades and the teacher publishes after review
+> - 🧾 **Configurable rubric**: custom scoring dimensions (content / structure / compliance / creativity by default), per-checkpoint verdicts quoting the original text; scans and unreadable images go to a human instead of being guessed
+> - 🔁 **Resubmission and lateness**: 3 attempts by default, only the last one is graded, earlier batches are kept; past the deadline uploads are still accepted and merely tagged
+> - 🛠️ **Grading board**: file list, extracted text and image preview, dimension scores, edit-and-review, publish, similarity check and a zip of every original
+> - 🧹 **Filled in along the way**: homework deadlines (countdown in the student to-do list), grade-level points on publish, AI drafting for both types, and automatic re-flowing of run-on requirements
 > - 🏁 **Class Ladder (big screen)** — a single-player ladder for the projector: 15 levels (415 points), safe levels, run ends on a wrong answer or timeout
 > - 💡 **Questions and lifelines** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap; three lifelines (50:50, phone a friend, ask the audience)
 > - 🏆 **Automatic rewards and big-screen feel** — levels cleared count into classroom points; live session board + full-screen result; 7 skins (light by default) and one sound switch
@@ -58,6 +63,8 @@
 > - Source package: **replace the source once manually**; only then does the panel show 「Check Update」 and detect later releases
 > - Git deployment: 「Check Update → Incremental Upgrade」 works as before
 > - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
+> - **Restart the backend once for file assignments**: it creates the `homework_files` table and the new assignment columns, and repairs the visibility flag of existing chat-homework grades (idempotent, no data loss)
+> - Four new settings: `HOMEWORK_MAX_FILE_MB`, `HOMEWORK_MAX_FILES`, `HOMEWORK_ALLOWED_EXTS`, `HOMEWORK_ENABLE_VL` (image reading); keep the `task` notification type enabled or publishing sends nothing
 
 ---
 
@@ -134,7 +141,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
 | 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 11 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
-| 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, dialogue homework, knowledge quests | 9 |
+| 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 11 |
 | ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, upgrade, about, other services | 8 |
 
@@ -149,7 +156,7 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 | Role | Count | Pages |
 | --- | --- | --- |
 | Student | 27 | dashboard, AI companion, wrong questions, daily picks, hot news, notifications, announcements, classroom questions, quick quiz, to-dos, homework, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction, classroom polls, group discussions and rooms, file centre, growth portfolio, showcase, my resources, resource centre, about |
-| Teacher / admin | 22 | dashboard, AI assistant, notifications, announcements, question management, AI class summary, learning analytics, homework grading confirmation, classroom points, weekly AI profile, group discussions and monitor, quest records, summary export, file centre, growth portfolio, showcase, my resources, resource centre, resource management, about |
+| Teacher / admin | 22 | dashboard, AI assistant, notifications, announcements, question management, AI class summary, learning analytics, assignment grading confirmation, classroom points, weekly AI profile, group discussions and monitor, quest records, summary export, file centre, growth portfolio, showcase, my resources, resource centre, resource management, about |
 
 #### How it behaves on a phone
 
@@ -566,7 +573,7 @@ Online programming practice and auto-grading system:
 
 ## Classroom Activities
 
-The real-time tools that run a single 40-minute lesson: quizzes, polls, questions, drills, buzzer rounds, discussions, the whiteboard, roll call, quests and dialogue homework.
+The real-time tools that run a single 40-minute lesson: quizzes, polls, questions, drills, buzzer rounds, discussions, the whiteboard, roll call, quests and the assignment centre.
 
 ### Classroom Interaction Tools
 
@@ -735,20 +742,21 @@ A big-screen "draw a question → pick a student → answer" loop for warm-ups a
 
 ---
 
-### Dialogue Homework
+### Assignments (Chat / Files)
 
-Teachers set a topic, students work it out with the AI and hand in the conversation transcript for per-student grading:
+One entry, two submission types: **chat transcript** (students work it out with the AI and hand in the conversation) and **files** (Word / PDF / spreadsheets / slides / images). Both are graded by the AI first and published by the teacher after review:
 
 - **Teacher Side**:
-  - Create homework (title/requirements/audience), or use "Draft with AI" to turn one sentence into an editable draft
-  - Requirements are the rubric: AI splits them into 3-5 checkpoints and judges each one against the transcript
-  - AI smart grading (3 dimensions: completeness, depth of understanding, expression): grade the whole class at once (with a class summary and per-checkpoint status) or grade a single student from their row
-  - Each item shows how many submissions still await grading, with a one-click pending-only filter (the home to-do badge lands here)
-  - Open details to read each student transcript and the original requirements, revoke submissions, close homework
+  - Pick the submission type when creating homework; for file assignments set the deadline, allowed types, file count and size, attempts, full score and scoring dimensions
+  - Requirements are the rubric: AI splits them into 3-5 checkpoints and judges each one against the submitted content
+  - AI grading: chat homework is graded in one call; file homework runs as a background job (images are read by a vision model first, then the whole class is graded from a single package) with live progress
+  - The grading board shows each student's files, extracted text or image preview, per-dimension scores, checkpoints with quotes from the work, similarity flags and a zip download of every original
+  - Edit scores and comments freely - the original AI score is kept for comparison
+  - Students see results only after "Publish grades", which also awards the grade-level bonus points
 - **Student Side**:
-  - See active homework and its full requirements
-  - Submit the current conversation in one click after working it out in Knowledge Q&A
-  - View the AI score, checkpoint results, comments and advice
+  - See active assignments, the deadline countdown and how many attempts are left
+  - Chat homework: submit the current conversation in one click; file homework: drag and drop or take a photo on a phone, resubmit before the deadline (only the last attempt is graded, late ones are just tagged)
+  - Download your own originals, and after publication view total score, dimension scores, checkpoints, comments and next steps
 - **📖 How to use**: the button next to the title opens step-by-step guidance for students and teachers
 - **🧮 Math rendering**: formulas in transcripts and requirements display correctly, even written in the same line as the text
 
@@ -1133,6 +1141,14 @@ Current version **8.8.0**. Each release lists the changes a user can notice; per
 
 ### v8.8.0
 
+- 📎 **File submissions**: `tasks.submit_mode` gains "file" and "mixed" (no new activity type, existing chat homework untouched); students upload Word/PDF/Excel/PPT/text/images, validated by both extension and content, legacy `.doc/.ppt/.xls` rejected with guidance
+- 📥 **Text and image extraction**: docx/pdf/xlsx via already-installed libraries, pptx by reading OOXML directly (no new dependency); images are transcribed and described by a vision model first; scans and unparsable files go to manual review instead of scoring 0
+- 🤖 **AI grading**: the whole class is packed into one document and graded in a single long-context call; dimensions are configurable and rescaled to the full score; output carries per-dimension scores, checkpoint verdicts, quotes and next steps; students the model missed are written as needing review
+- 🔐 **Review and publish**: AI scores stay unpublished by default, teacher edits keep the AI score for comparison; publishing is what makes results visible and awards the grade-level bonus that was never actually granted before
+- 🔁 **Submission rules**: deadline, attempt limit (3 by default, last attempt wins, history kept), lateness only tagged; both file types require at least one real file
+- 🧰 **Teacher tools**: similarity check (flag only), zip download of all originals, per-file downloads behind an authorising endpoint (other teachers cannot read them); deleting, resetting or reverting an assignment also clears the disk
+- 🧩 **Wired into the platform**: deadline and "submit files" in the student to-do list, activity monitoring reports the teacher score, export gains new columns, four settings exposed in the admin page, bilingual copy and in-app guides updated
+- 🩹 **Also fixed**: run-on AI-drafted requirements are re-flowed by section and numbering (idempotent, keeps sentence punctuation, does not split "1.5 line spacing"); the student upload dialog now closes on success; off-by-one in the remaining-attempts counter
 - 🏁 **Class Ladder (big screen)** — single-player ladder for the projector: 15 levels (415 points), safe levels, run ends on a wrong answer or timeout
 - 🎲 **Questions and pool** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap and stores new questions
 - 👤 **Picking and lifelines** — shared fair picking plus voice announcement; three lifelines (50:50, phone a friend, ask the audience)
@@ -1400,7 +1416,7 @@ SmartKBS/
 | Course Exercises | ✅ Practice | ✅ Create | ✅ Create |
 | Daily Picks | ✅ | ✅ | ✅ |
 | Trending News | ✅ | ✅ | ✅ |
-| Dialogue Homework | ✅ Submit | ✅ Manage | ✅ Manage |
+| Assignments (chat / files) | ✅ Submit | ✅ Manage | ✅ Manage |
 | To-Do Items | ✅ | ❌ | ❌ |
 | Resource Center (Browse Shared) | ✅ | ✅ | ✅ |
 | Resource Management | ❌ | ✅ | ✅ |
