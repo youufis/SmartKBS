@@ -110,6 +110,21 @@ export interface TaskInfo {
   /** 教师端列表附带：已批改与待批改份数 */
   graded_count?: number;
   pending_grade_count?: number;
+  // ── 文件提交类作业（方案 A：提交形态是同一类作业的一个维度）──
+  /** conversation=交对话记录 | file=交文件 | mixed=文件+说明 */
+  submit_mode?: 'conversation' | 'file' | 'mixed';
+  allowed_exts?: string;
+  max_files?: number;
+  max_file_mb?: number;
+  /** 截止时间 'YYYY-MM-DD HH:mm:ss'，空=不限 */
+  deadline_at?: string;
+  resubmit_limit?: number;
+  allow_late?: number;
+  total_score?: number;
+  /** 评分维度 JSON 串 [{name,max}] */
+  rubric?: string;
+  grading_policy?: 'ai_then_review' | 'manual_only' | 'ai_auto_publish';
+  publish_status?: 'draft' | 'published';
 }
 
 // ── 试题库类型 ──

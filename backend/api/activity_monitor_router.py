@@ -531,12 +531,13 @@ def _get_students_with_completion(
                FROM task_submissions WHERE task_id=?""",
             (activity_id,),
         )
-        # 同时查 task_grades 获取分数
+        # 同时查 task_grades 获取分数：教师改过就以教师分为准（文件作业必有这一步）
         grade_rows = db_query_dict(
-            """SELECT student_username, ai_score FROM task_grades WHERE task_id=?""",
+            """SELECT student_username, COALESCE(teacher_score, ai_score) AS score
+               FROM task_grades WHERE task_id=?""",
             (activity_id,),
         )
-        grade_map = {g["student_username"]: g["ai_score"] for g in grade_rows}
+        grade_map = {g["student_username"]: g["score"] for g in grade_rows}
         for a in rows:
             uname = a["student_username"]
             if uname not in student_map:

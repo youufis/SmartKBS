@@ -207,10 +207,12 @@ RESET_SCOPES: dict[str, dict[str, Any]] = {
         targets=[
             Target("task_grades", "task_id = :aid", "AI 批改结果", student_col="student_username"),
             Target("task_submissions", "task_id = :aid", "任务提交记录", student_col="student_username"),
+            Target("homework_files", "task_id = :aid", "上传的作业文件记录",
+                   student_col="student_username"),
         ],
         keep=[("task_body", "任务标题、要求与截止时间")],
         reward_types=("task",), notify_type="task",
-        status=("status", ("inactive",), "active"),
+        status=("status", ("inactive",), "active"), runtime="task_files",
         warnings=[("task_ai_queue",
                    "该任务的 AI 批改可能仍在后台排队，极少数情况下会在重置后补回个别批改记录，"
                    "届时再执行一次重置即可")],
@@ -790,7 +792,21 @@ def _recompute_points(students: list[str], deleted: list[dict[str, Any]]) -> int
 
 
 def _run_runtime(sc: dict[str, Any], ctx: dict[str, Any]) -> list[str]:
-    """清理进程内状态。抢答房间态只活在内存里，不清就会把旧分数再广播回学生端。"""
+    """清理进程内状态与磁盘产物。
+
+    抢答房间态只活在内存里，不清就会把旧分数再广播回学生端；
+    作业文件落在 stu/<学号>/homework/<任务指纹>/，重置只删库会留下整摞原件越攒越多。
+    """
+    if sc["runtime"] == "task_files":
+        try:
+            from backend.api.tasks_router import purge_task_files_on_disk
+            n = purge_task_files_on_disk(ctx["aid"])
+            if n:
+                logger.info(f"[活动重置] 已清理作业上传目录 {n} 个 (task={ctx['aid']})")
+            return [f"task_files:{n}"]
+        except Exception as e:
+            logger.warning(f"[活动重置] 清理作业文件失败（数据已重置，不影响结果）: {e}")
+            return []
     if sc["runtime"] != "quick_quiz":
         return []
     try:

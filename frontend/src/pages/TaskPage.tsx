@@ -1,7 +1,7 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox, Alert,
+  Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox, Alert, Radio,
   Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select, Empty,
 } from 'antd'
 import {
@@ -23,6 +23,8 @@ import { useChatStore, setTaskFilename } from '../stores/chatStore'
 import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
 import MobileCardTable from '../components/MobileCardTable'
+import { HomeworkForm, HomeworkBoard, HomeworkSubmitModal } from './task/HomeworkPanel'
+import { emptyHomework, homeworkFromTask, type HomeworkValue } from './task/homeworkModel'
 import { useIsMobile } from '../hooks/useIsMobile'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 
@@ -119,7 +121,10 @@ const TaskPage: React.FC = () => {
     target_class: '',
     target_users: '',
   })
+  // 文件作业参数：对话作业保持默认值即可，后端按 conversation 走老路径
+  const [hw, setHw] = useState<HomeworkValue>(emptyHomework())
   const [submitModal, setSubmitModal] = useState(false)
+  const [fileSubmitOpen, setFileSubmitOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<TaskInfo | null>(null)
 
   // 提交详情
@@ -150,7 +155,9 @@ const TaskPage: React.FC = () => {
   const [aiIdea, setAiIdea] = useState('')
   const [aiDuration, setAiDuration] = useState('')
   const [aiDraftLoading, setAiDraftLoading] = useState(false)
-  const [aiDraft, setAiDraft] = useState<{ name: string; description: string; tips: string } | null>(null)
+  const [aiDraft, setAiDraft] = useState<tasksApi.HomeworkDraft | null>(null)
+  // 起草前先定形态：对话作业与文件作业的要求写法完全不同，不能用同一套 prompt
+  const [aiDraftMode, setAiDraftMode] = useState<'conversation' | 'file' | 'mixed'>('conversation')
   // 作业要求全文弹窗：列表里只显示两行，长文点「查看」
   const [reqModal, setReqModal] = useState<string | null>(null)
 
@@ -181,6 +188,8 @@ const TaskPage: React.FC = () => {
       if (editingTaskId) {
         const res = await tasksApi.updateTask(editingTaskId, {
           name: taskName.trim(), description: taskDesc.trim(), subject: taskSubject,
+          // 截止/限额/维度随时可改；提交方式已由后端在有提交时锁死
+          ...hw,
         })
         message.success(res.message)
         setCreateModal(false)
@@ -189,7 +198,8 @@ const TaskPage: React.FC = () => {
         loadTasks()
         return
       }
-      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope, taskSubject)
+      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope, taskSubject,
+        hw.submit_mode === 'conversation' ? undefined : hw)
       message.success(res.message)
       setCreateModal(false)
       setTaskName('')
@@ -311,7 +321,12 @@ const TaskPage: React.FC = () => {
     }
   }
 
-  const openAiDraft = () => { setAiDraft(null); setAiDraftOpen(true) }
+  const openAiDraft = () => {
+    setAiDraft(null)
+    // 默认跟随创建表单里已选的提交方式，教师切了形态再来起草就不会拿到对话作业的要求
+    setAiDraftMode(hw.submit_mode)
+    setAiDraftOpen(true)
+  }
 
   const handleAiDraft = async () => {
     if (!aiIdea.trim()) { message.warning(t('aiIdeaRequired')); return }
@@ -322,8 +337,10 @@ const TaskPage: React.FC = () => {
         grade: taskScope.target_grade,
         class: taskScope.target_class,
         duration_minutes: aiDuration,
+        submit_mode: aiDraftMode,
+        total_score: hw.total_score,
       })
-      setAiDraft({ name: res.name, description: res.description, tips: res.tips || '' })
+      setAiDraft(res)
     } catch (err: any) {
       message.error(err?.response?.data?.detail || err?.message || t('aiDraftFailed'))
     } finally {
@@ -335,6 +352,13 @@ const TaskPage: React.FC = () => {
     if (!aiDraft) return
     setTaskName(aiDraft.name.slice(0, 60))
     setTaskDesc(aiDraft.description)
+    // 文件作业的草稿连评分维度和要收的文件类型一起带过去，教师只需微调
+    setHw((prev) => ({
+      ...prev,
+      submit_mode: aiDraftMode,
+      rubric: aiDraft.rubric || prev.rubric,
+      allowed_exts: aiDraft.allowed_exts ?? prev.allowed_exts,
+    }))
     setAiDraftOpen(false)
     setCreateModal(true)
   }
@@ -402,19 +426,46 @@ const TaskPage: React.FC = () => {
     }
   }
 
+  // 文件作业（file/mixed）与对话作业在抽屉里走两套界面
+  const isFileTask = (t0?: string) => !!t0 && t0 !== 'conversation'
+
   // ── 列定义 ──
   const studentStatusColumn = {
-    title: t('myStatus'), key: 'myStatus', width: 100,
+    title: t('myStatus'), key: 'myStatus', width: 120,
     render: (_: any, record: TaskInfo) => {
       const submitted = record.submissions?.includes(username)
-      return submitted
-        ? <Tag color="success">{t('submitted')}</Tag>
-        : <Tag color="default">{t('notSubmitted')}</Tag>
+      const mode = record.submit_mode && record.submit_mode !== 'conversation'
+      return (
+        <Space size={4} wrap>
+          <Tag color={submitted ? 'success' : 'default'}>
+            {submitted ? t('hwSubmittedShort') : t('notSubmitted')}
+          </Tag>
+          {/* 文件作业批完默认待复核，学生先看到"批改中"而不是空白 */}
+          {submitted && mode && record.publish_status !== 'published' && (
+            <Tag color="processing">{t('hwGradingSoon')}</Tag>
+          )}
+        </Space>
+      )
     },
   }
 
   const columns = [
-    { title: t('taskName'), dataIndex: 'name', key: 'name', width: 180 },
+    {
+      title: t('taskName'), dataIndex: 'name', key: 'name', width: 210,
+      render: (name: string, r: TaskInfo) => (
+        <Space size={4} wrap>
+          <span>{name}</span>
+          {/* 一眼分清交文件还是交对话记录（老作业没有该字段时按对话作业显示） */}
+          {isFileTask(r.submit_mode) ? (
+            <Tag color="purple" style={{ marginInlineEnd: 0 }}>
+              {r.submit_mode === 'mixed' ? t('hwModeMixed') : t('hwModeFile')}
+            </Tag>
+          ) : (
+            <Tag style={{ marginInlineEnd: 0 }}>{t('hwModeConversation')}</Tag>
+          )}
+        </Space>
+      ),
+    },
     // 科目：创建作业时选的（tasks.subject），列表以前没展示
     { title: t('subject'), dataIndex: 'subject', key: 'subject', width: 90,
       render: (v: string) => v || '-' },
@@ -452,6 +503,19 @@ const TaskPage: React.FC = () => {
       ),
     },
     { title: t('createdTime'), dataIndex: 'created_time', key: 'created_time', width: 160 },
+    {
+      title: t('hwDeadline'), key: 'deadline', width: 150,
+      render: (_: any, r: TaskInfo) => {
+        if (!r.deadline_at) return <Typography.Text type="secondary">-</Typography.Text>
+        const passed = new Date(r.deadline_at.replace(' ', 'T')).getTime() < Date.now()
+        return (
+          <Space size={4}>
+            <Typography.Text style={{ fontSize: 12 }} type={passed ? 'danger' : undefined}>{r.deadline_at}</Typography.Text>
+            {passed && <Tag color="red">{t('hwClosed')}</Tag>}
+          </Space>
+        )
+      },
+    },
     ...(isStudent
       ? [studentStatusColumn]
       : [{
@@ -491,7 +555,12 @@ const TaskPage: React.FC = () => {
           {isStudent && record.status === 'active' && (
             <Tooltip title={t('submitAction')}>
               <Button size="small" type="primary" icon={<SendOutlined />}
-                onClick={() => { setSelectedTask(record); setSubmitModal(true) }}
+                onClick={() => {
+                  setSelectedTask(record)
+                  // 交文件与交对话记录是两套表单，按作业形态分流
+                  if (record.submit_mode && record.submit_mode !== 'conversation') setFileSubmitOpen(true)
+                  else setSubmitModal(true)
+                }}
               >{isMobile ? t('submitAction') : null}</Button>
             </Tooltip>
           )}
@@ -518,6 +587,7 @@ const TaskPage: React.FC = () => {
                   setTaskName(record.name || '')
                   setTaskDesc(record.description || '')
                   setTaskSubject(record.subject || '')
+                  setHw(homeworkFromTask(record))
                   setCreateModal(true)
                 }}
               />
@@ -626,6 +696,7 @@ const TaskPage: React.FC = () => {
           setTaskName(''); setTaskDesc('')
           setTaskSubject(subjectOptions[0] || '')
           setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
+          setHw(emptyHomework())
         }}
         okText={editingTaskId ? t('save') : t('createTask')} cancelText={t('cancel')}
         width={640}
@@ -645,6 +716,12 @@ const TaskPage: React.FC = () => {
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
           {t('taskDescHint')}
         </Typography.Text>
+        {/* 提交方式放在要求下面：教师第一眼就能看到「交文件」这个新形态 */}
+        <HomeworkForm
+          value={hw}
+          onChange={setHw}
+          modeLocked={!!editingTaskId}
+        />
         {/* 学科：落库后作业列表与活动监控的"科目"列才显示得出来 */}
         <div style={{ marginTop: 12 }}>
           <Select
@@ -679,7 +756,7 @@ const TaskPage: React.FC = () => {
             <div>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('taskDescLabel')}</Typography.Text>
               <div className="markdown-content requirement-box">
-                <FormulaRenderer content={selectedTask.description} />
+                <FormulaRenderer content={selectedTask.description} breaks />
               </div>
             </div>
           )}
@@ -688,6 +765,16 @@ const TaskPage: React.FC = () => {
           </Typography.Text>
         </Space>
       </Modal>
+
+      {/* 文件作业：学生上传弹窗（对话作业仍走上面的确认弹窗） */}
+      {selectedTask && isFileTask(selectedTask.submit_mode) && (
+        <HomeworkSubmitModal
+          task={selectedTask}
+          open={fileSubmitOpen}
+          onClose={() => { setFileSubmitOpen(false); setSelectedTask(null) }}
+          onSubmitted={() => { loadTasks() }}
+        />
+      )}
 
       {/* 提交详情侧栏 */}
       <Drawer
@@ -707,7 +794,7 @@ const TaskPage: React.FC = () => {
                 {t('gradedCount', { graded: Object.keys(gradesMap).length, total: submissionsData.count })}
               </Tag>
             )}
-            {viewTask && submissionsData.submissions.length > 0 && (
+            {viewTask && !isFileTask(viewTask.submit_mode) && submissionsData.submissions.length > 0 && (
               <Button size="small" icon={<RobotOutlined />}
                 loading={aiGradingTaskId === viewTask.id}
                 onClick={() => handleAiGrade(viewTask.id)}
@@ -729,7 +816,7 @@ const TaskPage: React.FC = () => {
                 ),
                 children: (
                   <div className="markdown-content requirement-box" style={{ maxHeight: 280 }}>
-                    <FormulaRenderer content={viewTask.description} />
+                    <FormulaRenderer content={viewTask.description} breaks />
                   </div>
                 ),
               }]}
@@ -742,7 +829,15 @@ const TaskPage: React.FC = () => {
             />
           )}
 
-          {classSummary && (
+          {viewTask && isFileTask(viewTask.submit_mode) && (
+            <HomeworkBoard
+              task={viewTask}
+              roster={submissionsData.submissions.map((x) => ({ username: x.username, name: x.name }))}
+              onChanged={loadTasks}
+            />
+          )}
+
+          {!isFileTask(viewTask?.submit_mode) && classSummary && (
             <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
               <Space orientation="vertical" style={{ width: '100%' }} size={4}>
                 <Typography.Text strong style={{ color: '#1d39c4' }}>
@@ -791,7 +886,7 @@ const TaskPage: React.FC = () => {
             </Card>
           )}
 
-          {submissionsData.submissions.length === 0 ? (
+          {isFileTask(viewTask?.submit_mode) ? null : submissionsData.submissions.length === 0 ? (
             <Typography.Text type="secondary">{t('noSubmissions')}</Typography.Text>
           ) : (
             <>
@@ -978,6 +1073,16 @@ const TaskPage: React.FC = () => {
 
               {renderCriteria(myGrade.criteria)}
 
+              {/* 文件作业的维度分与迟交标记（对话作业没有这两项，自动不显示） */}
+              {myGrade.dim_scores && Object.keys(myGrade.dim_scores).length > 0 && (
+                <Space wrap size={4}>
+                  {Object.entries(myGrade.dim_scores).map(([k, v]) => (
+                    <Tag key={k}>{k} {Number(v)}</Tag>
+                  ))}
+                </Space>
+              )}
+              {myGrade.late_submitted && <Tag color="volcano">{t('hwLate')}</Tag>}
+
               {myGrade.strengths && myGrade.strengths.length > 0 && (
                 <div>
                   <Typography.Text strong style={{ color: '#52c41a' }}>{t('strengthsTitle')}</Typography.Text>
@@ -1062,6 +1167,20 @@ const TaskPage: React.FC = () => {
       >
         <Spin spinning={aiDraftLoading} tip={t('aiDraftLoading')}>
           <Space orientation="vertical" size={10} style={{ width: '100%' }}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('aiDraftModeLabel')}</Typography.Text>
+              <Radio.Group
+                style={{ display: 'block', marginTop: 4 }}
+                value={aiDraftMode}
+                onChange={(e) => { setAiDraftMode(e.target.value); setAiDraft(null) }}
+                optionType="button"
+                options={[
+                  { value: 'conversation', label: t('hwModeConversation') },
+                  { value: 'file', label: t('hwModeFile') },
+                  { value: 'mixed', label: t('hwModeMixed') },
+                ]}
+              />
+            </div>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('aiCreateIntro')}</Typography.Text>
             <Input.TextArea
               rows={3}
@@ -1096,8 +1215,20 @@ const TaskPage: React.FC = () => {
                 <Space orientation="vertical" size={6} style={{ width: '100%' }}>
                   <Typography.Text strong>{aiDraft.name}</Typography.Text>
                   <div className="markdown-content requirement-box">
-                    <FormulaRenderer content={aiDraft.description} />
+                    <FormulaRenderer content={aiDraft.description} breaks />
                   </div>
+                  {(aiDraft.dims?.length ?? 0) > 0 && (
+                    <Space wrap size={4}>
+                      {aiDraft.dims!.map((d, i) => (
+                        <Tag key={i} color="purple">{d.name} {d.max}</Tag>
+                      ))}
+                    </Space>
+                  )}
+                  {aiDraft.allowed_exts && (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('hwAllowedTypes')}: {aiDraft.allowed_exts}
+                    </Typography.Text>
+                  )}
                   {aiDraft.tips && (
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>💡 {aiDraft.tips}</Typography.Text>
                   )}
@@ -1117,7 +1248,8 @@ const TaskPage: React.FC = () => {
         width={640}
       >
         <div className="markdown-content requirement-box" style={{ maxHeight: 460 }}>
-          <FormulaRenderer content={reqModal || ''} />
+          {/* breaks：教师与 AI 写的要求里大量用单个换行分段，不转硬换行就会糊成一段 */}
+          <FormulaRenderer content={reqModal || ''} breaks />
         </div>
       </Modal>
     </div>

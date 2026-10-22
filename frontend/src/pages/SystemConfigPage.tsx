@@ -197,6 +197,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'model_select', optionsKind: 'long', group: 'models' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models' },
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
+  { key: 'HOMEWORK_ENABLE_VL', labelKey: 'field_HOMEWORK_ENABLE_VL', descKey: 'field_HOMEWORK_ENABLE_VL_desc', type: 'boolean', group: 'models' },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
   { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', type: 'boolean', group: 'knowledgebase', required: false },
   { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
@@ -271,6 +272,10 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', descKey: 'field_MAX_IMAGE_SIZE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB' },
   { key: 'IMAGE_EXTENSIONS', labelKey: 'field_IMAGE_EXTENSIONS', descKey: 'field_IMAGE_EXTENSIONS_desc', type: 'tags', group: 'upload' },
   { key: 'DOCUMENT_EXTENSIONS', labelKey: 'field_DOCUMENT_EXTENSIONS', descKey: 'field_DOCUMENT_EXTENSIONS_desc', type: 'tags', group: 'upload' },
+  // ── 文件提交类作业（上传限额是天花板：教师建作业时只能在这个框里往下调）──
+  { key: 'HOMEWORK_MAX_FILE_MB', labelKey: 'field_HOMEWORK_MAX_FILE_MB', descKey: 'field_HOMEWORK_MAX_FILE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB', required: false },
+  { key: 'HOMEWORK_MAX_FILES', labelKey: 'field_HOMEWORK_MAX_FILES', descKey: 'field_HOMEWORK_MAX_FILES_desc', type: 'number', group: 'upload', unitKey: 'unitCount', required: false },
+  { key: 'HOMEWORK_ALLOWED_EXTS', labelKey: 'field_HOMEWORK_ALLOWED_EXTS', descKey: 'field_HOMEWORK_ALLOWED_EXTS_desc', type: 'tags', group: 'upload' },
   // 下载配额
   { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'quota', unitKey: 'unitGB' },
 

@@ -43,6 +43,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "APPID": "",  # 留空则直接调用大模型(MODEL_NAME)；填写后调用百炼智能体应用。注意：APPID 必须与 DASHSCOPE_API_KEY 归属于同一个阿里云账号，否则无法调用
     "AGENT_ENABLED": False,  # 智能体启用闸门：勾选且 APPID 已填才走智能体；默认关，需显式开启（知识库就绪时优先走知识库，不受此项影响）
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    # ── 文件提交类作业（上传 + AI 批改）──
+    "HOMEWORK_MAX_FILE_MB": 10,        # 单文件上限，同时是教师可设值的天花板
+    "HOMEWORK_MAX_FILES": 3,           # 一次提交最多几个文件（教师未按作业设时）
+    "HOMEWORK_ENABLE_VL": True,        # 图片作业的多模态预解读（与聊天的 ENABLE_MULTIMODAL 解耦）
+    "HOMEWORK_ALLOWED_EXTS": [".docx", ".pdf", ".txt", ".md", ".xlsx", ".pptx",
+                              ".jpg", ".jpeg", ".png", ".webp", ".bmp"],
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-plus",
     "MODEL_NAME": "qwen3.7-flash",   # 默认值统一由 backend/model_catalog.py 维护（DEFAULT_CHAT_MODEL）
@@ -111,8 +117,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         {"key": "essay", "label": "作文"},
         {"key": "subjective", "label": "主观题"},
     ],
-    # 消息通知类型（默认只启用考试通知，管理员可在系统配置中调整）
-    "enabled_notification_types": ["exam", "system"],
+    # 消息通知类型（默认启用考试/系统/作业通知，管理员可在系统配置中调整）
+    # task 必须默认开：文件作业「发布成绩」靠它通知学生，静默丢弃会让教师以为已推送
+    "enabled_notification_types": ["exam", "system", "task"],
     # 图片生成（通义万相，与对话模型共享 API Key）
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
@@ -359,6 +366,9 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "LOGIN_FAIL_LIMIT": (1, 100000),
     "MAX_DOC_SIZE_MB": (1, 200),
     "MAX_IMAGE_SIZE_MB": (1, 200),
+    # ── 文件提交类作业 ──
+    "HOMEWORK_MAX_FILE_MB": (1, 100),
+    "HOMEWORK_MAX_FILES": (1, 20),
     "IMAGE_GEN_MAX_PLACEHOLDERS": (0, 8),
     "REWARD_DAILY_CHAT_POINTS": (0, 200),
     # ── 我的画像 ──
@@ -411,6 +421,7 @@ _BOOL_KEYS = {
     "SHOWCASE_AUTO_ENABLED",
     "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
+    "HOMEWORK_ENABLE_VL",
 }
 _STR_LIMITS: dict[str, int] = {
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
@@ -425,7 +436,8 @@ _STR_LIMITS: dict[str, int] = {
     "PODCAST_VOICE_A": 128, "PODCAST_VOICE_B": 128, "PODCAST_DURATION_OPTIONS": 32,
 }
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
-                 "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64}
+                 "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64,
+                 "HOMEWORK_ALLOWED_EXTS": 60}
 _TITLE_LIST_KEYS = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG"}
 _EXT_RE = None
 
@@ -541,7 +553,8 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"{key} 必须是非空字符串列表")
             if len(value) > _STRLIST_KEYS[key]:
                 raise HTTPException(status_code=400, detail=f"{key} 最多 {_STRLIST_KEYS[key]} 项")
-            if key.endswith("EXTENSIONS") and any(_bad_ext(x) for x in value):
+            # 作业白名单 HOMEWORK_ALLOWED_EXTS 同样按扩展名校验，防管理员手滑写成 "docx"
+            if key.endswith(("EXTENSIONS", "_EXTS")) and any(_bad_ext(x) for x in value):
                 raise HTTPException(status_code=400, detail=f"{key} 每一项需形如 .pdf（点号 + 1~10 位字母数字）")
             out[key] = [x.strip() for x in value]
         elif key == "ENABLE_AI_CHAT_FOR_ROLES":

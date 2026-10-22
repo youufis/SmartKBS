@@ -1934,15 +1934,21 @@ def _recent_done(username: str, days: int = 30, limit: int = 30) -> list[dict[st
                    "detail": "", "score": None, "total": None,
                    "time": r[1], "url": "/quick-poll"})
 
-    # 7) 任务提交（smartkb.db）
+    # 7) 任务提交（smartkb.db）—— 带上成绩，但只认「教师已发布」的，AI 待复核分不外泄
     _push(_act_q(
-        """SELECT ts.id, ts.submitted_at, t.name
-           FROM task_submissions ts JOIN tasks t ON ts.task_id = t.id
+        """SELECT ts.id, ts.submitted_at, t.name,
+                  CASE WHEN COALESCE(tg.published, 1) = 1
+                       THEN COALESCE(tg.teacher_score, tg.ai_score) END AS score,
+                  t.total_score
+           FROM task_submissions ts
+           JOIN tasks t ON ts.task_id = t.id
+           LEFT JOIN task_grades tg ON tg.task_id = ts.task_id
+                AND tg.student_username = ts.student_username
            WHERE ts.student_username=? AND COALESCE(ts.submitted_at,'') >= ?
            ORDER BY ts.submitted_at DESC LIMIT 10""",
         (username, since)),
         lambda r: {"id": f"done-task-{r[0]}", "type": "task", "title": str(r[2] or ""),
-                   "detail": "", "score": None, "total": None,
+                   "detail": "", "score": r[3], "total": r[4],
                    "time": r[1], "url": "/tasks"})
 
     # 8) 知识闯关（smartkb.db）
@@ -2060,18 +2066,23 @@ async def get_task_todo(request: Request):
                 (tk["id"], username),
             )
             if has_submitted == 0:
+                mode = tk.get("submit_mode") or "conversation"
+                deadline = (tk.get("deadline_at") or "").strip() or None
                 items.append({
                     "id": f"task-{tk['id']}",
                     "type": "task",
                     "title": tk["name"],
                     "description": tk.get("description", "") or "教师布置的任务",
-                    "subject": "",
+                    "subject": tk.get("subject") or "",
                     "status": "pending",
-                    "priority": 65,
-                    "deadline": None,
+                    "priority": 70 if deadline else 65,
+                    # 对话作业一直没有截止时间，文件作业必须让用户看得见"还剩多久"
+                    "deadline": deadline,
                     "url": "/tasks",
-                    "action_label": "去提交",
-                    "meta": {},
+                    "action_label": "去交文件" if mode in ("file", "mixed") else "去提交",
+                    "meta": {"submit_mode": mode,
+                             "max_files": tk.get("max_files"),
+                             "total_score": tk.get("total_score")},
                 })
     except Exception as e:
         logger.warning(f"[task-todo] 查询任务失败: {e}")

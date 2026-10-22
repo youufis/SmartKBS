@@ -553,6 +553,20 @@ def init_db():
                 ("target_users", "TEXT DEFAULT ''"),
                 # 学科：对话作业的创建弹窗原先没有这一项，活动监控/列表的"科目"只能显示"-"
                 ("subject", "TEXT DEFAULT ''"),
+                # ── 文件提交类作业（方案 A：提交形态是同一类作业的一个维度，不新建活动类型）──
+                # 注意：只能往末尾追加。_task_row_to_dict 与各查询都按「显式列清单」的顺序取值，
+                # 中间插列会静默错位。
+                ("submit_mode", "TEXT DEFAULT 'conversation'"),   # conversation|file|mixed
+                ("allowed_exts", "TEXT DEFAULT ''"),              # 空=用系统默认白名单
+                ("max_files", "INTEGER DEFAULT 3"),
+                ("max_file_mb", "INTEGER DEFAULT 10"),
+                ("deadline_at", "TEXT DEFAULT ''"),               # 截止时间(本地时间,与全站一致)
+                ("resubmit_limit", "INTEGER DEFAULT 3"),          # 可提交次数, 0=不限
+                ("allow_late", "INTEGER DEFAULT 1"),              # 截止后仍可提交(只标记迟交,不扣分)
+                ("total_score", "REAL DEFAULT 100"),
+                ("rubric", "TEXT DEFAULT ''"),                    # 评分维度 JSON
+                ("grading_policy", "TEXT DEFAULT 'ai_then_review'"),  # ai_then_review|manual_only|ai_auto_publish
+                ("publish_status", "TEXT DEFAULT 'draft'"),       # draft|published
             ]:
                 try:
                     c.execute(f"ALTER TABLE tasks ADD COLUMN {col_def[0]} {col_def[1]}")
@@ -580,6 +594,8 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ts_task ON task_submissions(task_id)")
             except sqlite3.OperationalError:
                 pass
+            # mixed 模式（文件 + 文字说明）的说明正文；对话作业一直不用这一列
+            _ensure_column(c, "task_submissions", "note", "TEXT DEFAULT ''")
 
             # ── 对话历史索引表（替代文件扫描） ──
             c.execute("""CREATE TABLE IF NOT EXISTS conversations (
@@ -672,6 +688,54 @@ def init_db():
                 pass
             # 按教师要求逐条判定的「要求点核对表」（旧库补列）
             _ensure_column(c, "task_grades", "ai_criteria", "TEXT DEFAULT ''")
+
+            # ── 文件作业：批改状态机（照考试侧 ai_pending / needs_review / teacher_reviewed 的范式）──
+            # 只有 AI 分一列是不够的：教师改分要留痕、发布前学生不能看到 AI 分、
+            # 取不到内容的卷子必须标"转人工"而不是给 0 分。
+            for _col, _ddl in [
+                ("dim_scores", "TEXT DEFAULT ''"),        # 各评分维度得分 JSON
+                ("teacher_score", "REAL"),                # 教师改分(非空即以它为准)
+                ("teacher_comment", "TEXT DEFAULT ''"),
+                ("graded_by", "TEXT DEFAULT 'ai'"),       # ai|teacher|none
+                ("needs_review", "INTEGER DEFAULT 0"),    # 1=机器判不准, 等教师
+                ("published", "INTEGER DEFAULT 1"),       # 1=已发布, 学生可见
+                # 默认 1 是刻意的：对话作业历来批完学生就能看，加列后存量行必须保持可见；
+                # 文件作业批完由代码显式写 0，教师点「发布」才改 1。
+                ("late_submitted", "INTEGER DEFAULT 0"),
+                ("similarity", "TEXT DEFAULT ''"),        # 同班相似提示 JSON
+            ]:
+                _ensure_column(c, "task_grades", _col, _ddl)
+
+            # ── 文件作业：一次提交 → N 个文件 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS homework_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                student_username TEXT NOT NULL,
+                submission_seq INTEGER DEFAULT 1,
+                filename TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                ext TEXT DEFAULT '',
+                mime TEXT DEFAULT '',
+                kind TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                sha256 TEXT DEFAULT '',
+                text_digest TEXT DEFAULT '',
+                vl_digest TEXT DEFAULT '',
+                extract_status TEXT DEFAULT 'pending',
+                chars INTEGER DEFAULT 0,
+                error TEXT DEFAULT '',
+                created_at TEXT,
+                UNIQUE(task_id, student_username, submission_seq, filename)
+            )""")
+            for _idx, _ddl in [
+                ("idx_hwf_task", "CREATE INDEX IF NOT EXISTS idx_hwf_task ON homework_files(task_id, student_username)"),
+                ("idx_hwf_sha", "CREATE INDEX IF NOT EXISTS idx_hwf_sha ON homework_files(sha256)"),
+                ("idx_hwf_student", "CREATE INDEX IF NOT EXISTS idx_hwf_student ON homework_files(student_username, created_at)"),
+            ]:
+                try:
+                    c.execute(_ddl)
+                except sqlite3.OperationalError:
+                    pass
 
             # ── 公告表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS announcements (
@@ -2323,6 +2387,14 @@ def init_db():
             # ── 自动回填存量数据的 grade_id/class_id ──
             _backfill_grade_class_ids(c)
 
+            # ── 一次性修复：文件作业上线后补正对话作业的发布标记 ──
+            try:
+                _backfill_hw_published(c)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"[db-fix] task_grades.published 回填未完成，下次启动会重试: {e}")
+
             # ── 清理主库里与试题库重名的空壳表（只删 0 行的表，失败不阻断启动）──
             try:
                 _drop_legacy_question_shell_tables(c)
@@ -2461,6 +2533,31 @@ def _state_set(c, key: str, value: str):
         )
     except Exception:
         pass
+
+
+def _backfill_hw_published(c):
+    """一次性修复：对话作业的批改结果必须对学生可见。
+
+    「发布」这道闸门只属于文件作业。published 是后加的列，存量行的值取决于
+    加列那一刻代码里的默认值 —— 曾以 DEFAULT 0 建过库的环境里，5 行对话作业成绩
+    会被当成"未发布"，学生会突然看不到自己早就批完的分。这里按作业形态一次性补正，
+    读取口径也同步改成不依赖物理默认值（见 tasks_router.get_task_grades）。
+    """
+    key = "hw_published_backfill_v1"
+    if _state_get(c, key):
+        return
+    try:
+        cur = c.execute(
+            """UPDATE task_grades SET published = 1
+               WHERE COALESCE(published, 1) = 0
+                 AND task_id IN (SELECT id FROM tasks
+                                 WHERE COALESCE(submit_mode, 'conversation') = 'conversation')""")
+        n = int(cur.rowcount or 0)
+        _state_set(c, key, str(n))
+        if n:
+            logger.info(f"[数据修复] 对话作业批改结果补标为已发布: {n} 行")
+    except Exception as e:
+        logger.warning(f"[数据修复] task_grades.published 回填失败（不影响启动）: {e}")
 
 
 def _prune_unlocatable_rows(c):

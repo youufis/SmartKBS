@@ -591,17 +591,42 @@ def export_tasks(
             (task_id_val,),
         )
 
-        headers = ["序号", "学生用户名", "学生姓名", "提交时间"]
+        # 文件作业要把"交了什么文件、判了多少分、是不是迟交"一起带走，教师才好离线留档
+        grades = {g[0]: g for g in execute_query(
+            """SELECT student_username, COALESCE(teacher_score, ai_score), teacher_score, ai_score,
+                      needs_review, published
+               FROM task_grades WHERE task_id = ?""", (task_id_val,))}
+        files_map: dict[str, list[str]] = {}
+        for fr in execute_query(
+                """SELECT student_username, filename FROM homework_files
+                   WHERE task_id = ? ORDER BY submission_seq, id""", (task_id_val,)):
+            files_map.setdefault(fr[0], []).append(fr[1])
+        mode = ""
+        trow = execute_query("SELECT submit_mode, deadline_at FROM tasks WHERE id = ?", (task_id_val,))
+        if trow:
+            mode = {"conversation": "对话记录", "file": "文件", "mixed": "文件+说明"}.get(
+                trow[0][0] or "conversation", "对话记录")
+
+        headers = ["序号", "学生用户名", "学生姓名", "提交时间", "提交方式", "成绩",
+                   "迟交", "待人工", "已发布", "提交文件"]
         for i, h in enumerate(headers, 1):
             ws.cell(4, i, h)
         _style_header(ws, 4, len(headers))
 
         for idx, s in enumerate(submissions):
             row = 5 + idx
+            g = grades.get(s[1])
+            deadline = (trow[0][1] if trow else "") or ""
             ws.cell(row, 1, idx + 1)
             ws.cell(row, 2, s[1])
             ws.cell(row, 3, s[2] or "")
             ws.cell(row, 4, s[0] or "")
+            ws.cell(row, 5, mode)
+            ws.cell(row, 6, g[1] if g and g[1] is not None else "")
+            ws.cell(row, 7, "是" if (deadline and s[0] and str(s[0]) > deadline) else "")
+            ws.cell(row, 8, "是" if g and g[4] else "")
+            ws.cell(row, 9, "是" if g and g[5] else "")
+            ws.cell(row, 10, "、".join(files_map.get(s[1], [])))
 
         _style_cells(ws, 5, 5 + len(submissions) - 1, len(headers))
         _auto_width(ws, len(headers))
