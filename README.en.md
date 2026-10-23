@@ -55,6 +55,10 @@
 > - 📰 **Daily picks / news admin** — teacher and admin consoles with health checks and single/bulk disable, restore and delete
 > - 🖥️ **Desktop update prompt** — version management compares "version + release build stamp (`desktop_build`)" and points you to the newest installer instead of the misleading "install Git first" error
 > - 📦 **Source-package update prompt** — with no Git history it prompts for the newest source package; if Git is installed, one click converts the folder into a Git deployment with in-app incremental upgrades
+> - 🎯 **Unified picking** — roll call, questioning, ladder and AI quiz pages share one set of class weights, keyed by student ID
+> - 🧾 **Pick records** — a cross-activity ledger in roll-call management: timeline, per-activity stats, most-picked, Excel export, new round
+> - 🗑️ **Question bank** — multi-select bulk deletion (foreign and in-use questions are skipped with reasons); compact rows and re-balanced columns
+> - 🩹 **Reader side & strings** — portfolio / analytics / exports now match students by ID first; fixed the always-zero roll-call accuracy and single-brace placeholders
 > - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the repair script
 >
 > 🔄 **Upgrade notes for this release**
@@ -64,6 +68,7 @@
 > - Git deployment: 「Check Update → Incremental Upgrade」 works as before
 > - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
 > - **Restart the backend once for file assignments**: it creates the `homework_files` table and the new assignment columns, and repairs the visibility flag of existing chat-homework grades (idempotent, no data loss)
+> - **Restart the backend once and run one migration for unified picking**: it adds `pick_state / pick_round / pick_ledger` and the `student_username` column on the three pick-record tables; move historical weights and picks over with `python scripts/backfill_pick_shared_state.py` (dry-run by default, `--apply` writes after backing up the main database; safe to re-run)
 > - Four new settings: `HOMEWORK_MAX_FILE_MB`, `HOMEWORK_MAX_FILES`, `HOMEWORK_ALLOWED_EXTS`, `HOMEWORK_ENABLE_VL` (image reading); keep the `task` notification type enabled or publishing sends nothing
 
 ---
@@ -270,7 +275,8 @@ AI-powered smart question management system supporting multiple question types a
   - Tongyi Wanxiang generates realistic images
   - Supports image generation, preview, deletion, concurrent generation optimization
   - Image placeholder management
-- **📂 Question Bank Management**: Category filtering, search, edit, delete
+- **📂 Question Bank Management**: filtering, search, edit, delete; **multi-select bulk deletion** with the same rules as single delete (others' questions and ones in use are skipped with per-row reasons, 500 per call)
+- **📐 Compact list**: fixed table layout with measured column widths — the stem column takes the remaining space, media thumbnails shrink, rows lose about 30% height
 - **🔄 AI Image Generation**: Automatically generates images for subjective question SVG/image placeholders
 
 > **Available to Admin and Teacher**
@@ -352,7 +358,7 @@ Use AI directly in the Resource Center to generate HTML teaching resources:
 
 - **📄 5 Resource Types**:
   - 🎬 **Animation Explanation**: 3D parallax, particle animations, etc. to vividly explain knowledge
-  - ✍️ **Interactive Quiz**: Card-based interactive answering, including multiple-choice questions and instant feedback
+  - ✍️ **Interactive Quiz**: card-based answering with instant feedback; picking calls the roll-call API, so it shares the weights and shows up in Pick records
   - 📝 **Chapter Exercise**: Structured exercises with question number navigation and submit button
   - 🧪 **Lab Interaction**: Algorithm visualization, math/physics/chemistry experiments, AI interactive simulation
   - 🎨 **Custom HTML**: Freely input topics, generate any HTML as needed
@@ -692,8 +698,8 @@ Real-time collaborative whiteboard system based on TLDraw, with built-in AI whit
 
 Integrated smart roll call + attendance statistics management:
 
-- **🎲 Weighted Random Roll Call**: Each student has dynamic weight, weight decreases after being called,
-  automatically resets after covering over 60% of students, ensuring fairness
+- **🎲 Weighted Random Roll Call**: dynamic weights, decay on pick, new round after 60% coverage — kept **per class, keyed by student ID**, shared with questioning, ladder and AI quiz pages
+- **🧾 Pick records**: one cross-activity timeline with activity/class filters, per-activity stats, most-picked, Excel export and "new round"
 - **🗣 Voice announcement**: the picked student's name is spoken aloud (polyphonic surnames auto-corrected), enabled by the admin in System Settings
 - **✅ Roll Call Records**: Mark correct/incorrect, view history and statistics
 - **📊 Roll Call Statistics**: Per-person statistics on times called and accuracy rate
@@ -711,7 +717,7 @@ A **single-player ladder** for the projector — one session can run all lesson 
 
 - **🎯 15-level ladder**: level 1 worth 10 up to level 15 worth 50 (415 total), accumulating; levels 5 and 10 are safe levels (a wrong answer keeps what you have earned)
 - **🎲 Questions**: a subject alone is enough (the knowledge point is optional or can be typed); the bank comes first with per-level difficulty, AI fills the gap and stores new questions
-- **👤 Fair picking**: the same weighted algorithm as roll call / class drill, with voice announcement of the drawn name
+- **👤 Fair picking**: shares roll call's class weights; every pick lands in Pick records, with voice announcement
 - **💡 Three lifelines** (one use each per run, discounts stack): 50:50 (×0.85), phone a friend (×0.70), ask the audience (×0.70)
 - **🧮 Server-side judging**: the answer is never sent to the client; the student taps an option and the server judges and reveals it
 - **🏆 Automatic rewards**: the run settles straight into classroom points (levels cleared) and leaves a record on the student's timeline
@@ -731,7 +737,7 @@ A big-screen "draw a question → pick a student → answer" loop for warm-ups a
 
 - **🎲 Two ways to get questions**: pick a course knowledge point (searchable dropdown) or type one, then draw from the question bank; limited to single-choice and true/false
 - **🤖 AI generation behind a switch**: when on, the bank still comes first and AI only fills the gap — **those questions are stored**, so next lesson the same knowledge point hits the bank directly; the admin can turn this feature's AI off in System Settings (zero AI cost while off)
-- **👤 Fair picking**: the same weighted algorithm as roll call (weight decays once picked, resets after covering over 60%), with optional voice announcement of the name
+- **👤 Fair picking**: shares the class weights of roll call and questioning, with voice announcement; "ask a helper" picks are logged too
 - **✍️ Tap to answer**: the student taps an option; on submit the server judges it and reveals the answer and explanation
 - **🏆 Instant scoring**: correct +5, wrong +2, skipped 0 — points go to the existing classroom points and show up in points management
 - **♻️ Loop as long as you like**: picking a new student clears the previous choice and the revealed answer, so one lesson can keep going
@@ -1161,6 +1167,14 @@ Current version **8.8.0**. Each release lists the changes a user can notice; per
 - 📤 **Summary export** — corrected exam “submitted / pending grading” status; best attempt per activity, class-aware point mapping; filter changes invalidate old previews; Blob download with visible errors
 - 💬 **Group discussion** — list editing; real class-roster pre-grouping with working automatic/random modes; no WebSocket reconnect per message; idempotent, rate-limited optimistic messages; posting, broadcasting and AI blocked after the end
 - 🏆 **Quest admin** — bulk deletion for records and bank questions; teachers are limited to their classes; cascade cleanup with points/badge recalculation; bank details no longer exposed to students
+- 🎯 **Unified picking** — roll call, questioning, ladder and AI quiz pages share one set of **class weights** (`pick_state / pick_round`, keyed by student ID); same-name students no longer shadow each other
+- 🧾 **Pick ledger** — `pick_ledger` stores one row per pick; new tab in roll-call management with timeline, filters, per-activity stats, most-picked and Excel export
+- 🔁 **New round** — clears only this round's picked list and bumps the round; "restart" in questioning / ladder follows the same rule instead of wiping shared weights
+- 🩹 **Concurrency** — whole-class DELETE+INSERT snapshot writes replaced by a single atomic row update in a write transaction; name-only marks from legacy quiz pages are attributed via the ledger row
+- 🗑️ **Question bank bulk delete** — multi-select deletion with the same rules as single delete (not-owner and in-use rows skipped with reasons), `POST /api/questions/batch-delete` capped at 500
+- 📐 **Compact question list** — fixed table layout with measured column widths; the stem column grows from ~280px to ~460px at 1440, media thumbnails 100×50 → 60×30 and row height ~66px → ~46px
+- 🧾 **ID-first readers** — portfolio, analytics and roll-call / ledger exports match students by ID first, name only as fallback; fixes the always-zero roll-call accuracy and raw `correct` values leaking into exports
+- 🩹 **Side fixes** — single-brace placeholders in two homework strings (the UI showed `{used}`); column migrations reordered so a fresh database no longer logs "no such table"
 - 📰 **Daily picks / news admin** — teacher/admin consoles with health checks and single/bulk disable, restore and delete
 - 🖥️ **Desktop update prompt** — the desktop shell has no Git (a frozen exe has no `.git`, and `git reset` cannot replace a running exe), so it compares “version + release build stamp `desktop_build`” and guides you to the installer; the old misleading “install Git first” error is gone
 - 📦 **Source-package update prompt** — the deployment form is now split into desktop / git / source; with no Git history the panel falls back to “detect + download the source package”, fixing the old bug where such deployments always reported “up to date”; if Git is present, one click converts the folder into a Git deployment and runs the existing fetch → reset → migrate → pip → restart → auto-rollback pipeline
