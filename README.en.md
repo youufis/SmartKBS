@@ -59,6 +59,7 @@
 > - 🧾 **Pick records** — a cross-activity ledger in roll-call management: timeline, per-activity stats, most-picked, Excel export, new round
 > - 🗑️ **Question bank** — multi-select bulk deletion (foreign and in-use questions are skipped with reasons); compact rows and re-balanced columns
 > - 🩹 **Reader side & strings** — portfolio / analytics / exports now match students by ID first; fixed the always-zero roll-call accuracy and single-brace placeholders
+> - 💻 **Code in questions** renders as a real code block — monospace, indentation kept, scrolls sideways; lists and options collapse into a “N-line code” chip with a hover preview; the Word paper follows suit
 > - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the repair script
 >
 > 🔄 **Upgrade notes for this release**
@@ -1171,6 +1172,8 @@ Current version **8.8.0**. Each release lists the changes a user can notice; per
 - 🗑️ **Question bank bulk delete** — multi-select deletion with the same rules as single delete; others' and in-use questions are skipped with reasons, 500 per call
 - 📐 **Compact question list** — column widths and row height rebalanced from real data; the stem column gets clearly more room and a screen fits about 40% more questions
 - 🧾 **ID-first readers** — portfolio, analytics and roll-call / pick exports match students by ID first, name only as fallback; fixes the always-zero roll-call accuracy and raw English verdicts leaking into exports
+- 💻 **Code blocks in questions** — code in stems and explanations renders monospaced with indentation kept and horizontal scrolling; lists and options collapse into an “N-line code” chip with a hover preview; the Word paper export does the same, and AI-generated quiz pages understand fences now
+- 🤖 **Prompt rules** — generation must wrap code in fences and keep indentation, text and image extraction must copy it line by line; “programming questions go to Code Practice” now only means questions that must be run and graded, so read-the-code multiple choice questions are back
 - 🩹 **Side fixes** — homework quota messages used to render braces literally; a fresh database no longer logs a missing-table warning at startup
 - 📰 **Daily picks / news admin** — teacher/admin consoles with health checks and single/bulk disable, restore and delete
 - 🖥️ **Desktop update prompt** — the desktop shell has no Git chain, so it compares “version + release build stamp” and guides you to the installer; the misleading “install Git first” error is gone
