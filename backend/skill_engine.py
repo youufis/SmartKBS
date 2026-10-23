@@ -28,6 +28,10 @@ from backend.logger import logger
 # 优先使用环境变量，默认相对于 backend 目录
 DEFAULT_SKILL_DIR = Path(__file__).resolve().parent / "skills"
 
+# enabled_skills 的"全部启用"哨兵：新装默认就是它，技能文件增减都自动跟随，
+# 不必把技能名抄进默认值（抄了就会漏掉后来新增的技能）。
+ALL_SKILLS_MARKER = "*"
+
 
 # ═══════════════════════════════════════════════
 # 数据结构
@@ -59,6 +63,7 @@ class SkillDoc:
     file_path: str               # 源文件路径
     file_mtime: float            # 文件修改时间戳
     parse_error: Optional[str] = None  # 解析错误信息
+    recommended: bool = False          # 建议常开（关掉会掉底线约束，如内容安全）
 
 
 # ═══════════════════════════════════════════════
@@ -498,6 +503,8 @@ class SkillEngine:
             raw_yaml=yaml_dict,
             file_path=str(fpath),
             file_mtime=mtime,
+            recommended=str(yaml_dict.get("recommended", "")).strip().lower()
+                        in ("1", "true", "yes"),
         )
 
     def _resolve_dependencies(self, skills: list[SkillDoc]) -> list[SkillDoc]:
@@ -597,6 +604,8 @@ class SkillEngine:
             "conflicts_with": skill.compose.conflicts_with,
             "inject_sections": skill.compose.inject_sections,
             "sections": list(skill.sections.keys()),
+            # 管理页据此给"关掉就丢底线约束"的技能打标（如内容安全）
+            "recommended": bool(skill.recommended),
             "parse_error": skill.parse_error if include_private else None,
         }
         return data
@@ -615,6 +624,42 @@ def get_engine() -> SkillEngine:
     if _engine is None:
         _engine = SkillEngine()
     return _engine
+
+
+def resolve_enabled_names(raw: Any, available: list[str]) -> list[str]:
+    """把配置里的 enabled_skills 解析成实际生效的技能名（保持引擎的优先级顺序）。
+
+    - 键缺失 / None / 含 "*"  → 全部技能：新装部署默认就是"技能全开"；
+    - 显式列表（包括空列表）  → 完全按列表来，管理员关掉全部是合法选择；
+    - 配置被写坏成字符串/字典 → 退回全开，绝不因为配置脏了就静默变成"没技能"。
+    """
+    if raw is None:
+        return list(available)
+    if isinstance(raw, str):
+        only = raw.strip()
+        # 单个名字是合法写法；其它脏值按"未配置"处理 = 全开，绝不静默变成没技能
+        return list(available) if only in (ALL_SKILLS_MARKER, "") or (only and only not in available) else [only]
+    if not isinstance(raw, (list, tuple, set)):
+        return list(available)
+    names = [str(x).strip() for x in raw if str(x).strip()]
+    if ALL_SKILLS_MARKER in names:
+        return list(available)
+    allowed = set(names)
+    return [n for n in available if n in allowed]
+
+
+def get_enabled_skill_names() -> list[str]:
+    """各链路唯一的"当前生效技能"入口：读配置 + 技能目录，异常退回全开不影响使用。"""
+    try:
+        from backend.api.config_router import get_config_value
+        raw = get_config_value("enabled_skills", None)
+    except Exception:
+        raw = None
+    try:
+        available = [sk.name for sk in get_engine().list_skills()]
+    except Exception:
+        available = []
+    return resolve_enabled_names(raw, available)
 
 
 def build_skill_prompt_segment(

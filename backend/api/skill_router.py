@@ -96,8 +96,8 @@ async def list_skills(request: Request):
     engine.ensure_fresh(SKILL_CACHE_TTL)
     skills = engine.list_skills()
 
-    config = _load_global_config()
-    enabled = config.get("enabled_skills", [])
+    from backend.skill_engine import ALL_SKILLS_MARKER, get_enabled_skill_names
+    enabled = get_enabled_skill_names()
 
     result = []
     for skill in skills:
@@ -120,8 +120,8 @@ async def get_enabled_skills(request: Request):
     user = get_current_user(request)
     admin = _is_admin(user)
 
-    config = _load_global_config()
-    enabled = config.get("enabled_skills", [])
+    from backend.skill_engine import get_enabled_skill_names
+    enabled = get_enabled_skill_names()
 
     engine = _get_engine()
     engine.ensure_fresh(SKILL_CACHE_TTL)
@@ -146,7 +146,11 @@ async def update_enabled_skills(req: EnabledSkillsUpdate, request: Request):
     # 验证所有技能都存在
     engine = _get_engine()
     engine.ensure_fresh(SKILL_CACHE_TTL)
-    not_found = [n for n in req.enabled_skills if not engine.get(n)]
+    names = [str(n).strip() for n in req.enabled_skills if str(n).strip()]
+    # 全选就存 "*"：当下语义等价，但以后新增技能会自动纳入，不必回头再勾一次
+    if ALL_SKILLS_MARKER in names or (names and set(names) == {s.name for s in engine.list_skills()}):
+        names = [ALL_SKILLS_MARKER]
+    not_found = [n for n in names if n != ALL_SKILLS_MARKER and not engine.get(n)]
 
     if not_found:
         raise HTTPException(
@@ -156,13 +160,16 @@ async def update_enabled_skills(req: EnabledSkillsUpdate, request: Request):
 
     # 保存到 system_config.json
     config = _load_global_config()
-    config["enabled_skills"] = list(req.enabled_skills)
+    config["enabled_skills"] = names
     _save_global_config(config)
 
-    logger.info(f"已启用技能列表更新: {req.enabled_skills}")
+    effective = get_enabled_skill_names()
+    logger.info(f"已启用技能列表更新: {names}（实际生效 {len(effective)} 个）")
     return {
-        "enabled_skills": req.enabled_skills,
-        "message": f"已启用 {len(req.enabled_skills)} 个技能",
+        "enabled_skills": effective,
+        "stored": names,
+        "message": f"已启用 {len(effective)} 个技能"
+                   + ("（全部启用，新增技能自动纳入）" if names == [ALL_SKILLS_MARKER] else ""),
     }
 
 
@@ -207,8 +214,9 @@ async def preview_scene_skills(scene: str, request: Request, mode: str = "curren
 
     engine = _get_engine()
     engine.ensure_fresh(SKILL_CACHE_TTL)
+    from backend.skill_engine import get_enabled_skill_names
+    enabled = get_enabled_skill_names()
     config = _load_global_config()
-    enabled = config.get("enabled_skills", [])
     from backend.prompts import resolve_scene_skills
     effective = resolve_scene_skills(scene, enabled, config.get("skill_scene_map", {}))
 
@@ -285,8 +293,8 @@ async def get_skill_detail(name: str, request: Request):
     except Exception as e:
         logger.warning(f"读取技能文件失败: {e}")
 
-    config = _load_global_config()
-    enabled = config.get("enabled_skills", [])
+    from backend.skill_engine import get_enabled_skill_names
+    enabled = get_enabled_skill_names()
 
     detail = _skill_dict(engine, skill, admin=True)
     detail["enabled"] = skill.name in enabled

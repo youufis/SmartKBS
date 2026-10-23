@@ -188,7 +188,9 @@ def compose_scene_segment(scene_type: str) -> tuple[str, list[str]]:
     from backend.api.config_router import get_config_value
     from backend.skill_engine import build_skill_prompt_segment, get_engine
 
-    enabled = get_config_value("enabled_skills", [])
+    # 生效技能统一走解析器：缺省或 "*" = 全部启用，显式列表（含空）= 按列表
+    from backend.skill_engine import get_enabled_skill_names
+    enabled = get_enabled_skill_names()
     scene_map = get_config_value("skill_scene_map", {})
     effective, used_fallback = resolve_dialogue_fallback(scene_type, enabled, scene_map)
     if not effective:
