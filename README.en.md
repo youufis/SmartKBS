@@ -68,7 +68,7 @@
 > - Git deployment: 「Check Update → Incremental Upgrade」 works as before
 > - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
 > - **Restart the backend once for file assignments**: it creates the `homework_files` table and the new assignment columns, and repairs the visibility flag of existing chat-homework grades (idempotent, no data loss)
-> - **Restart the backend once and run one migration for unified picking**: it adds `pick_state / pick_round / pick_ledger` and the `student_username` column on the three pick-record tables; move historical weights and picks over with `python scripts/backfill_pick_shared_state.py` (dry-run by default, `--apply` writes after backing up the main database; safe to re-run)
+> - **Unified picking needs one backend restart**: `pick_state / pick_round / pick_ledger` and the `student_username` column are created automatically, and old weights, round markers and historical picks are migrated at startup (idempotent; a failure only logs). `scripts/backfill_pick_shared_state.py` is a maintenance-box dry-run tool and is not shipped
 > - Four new settings: `HOMEWORK_MAX_FILE_MB`, `HOMEWORK_MAX_FILES`, `HOMEWORK_ALLOWED_EXTS`, `HOMEWORK_ENABLE_VL` (image reading); keep the `task` notification type enabled or publishing sends nothing
 
 ---

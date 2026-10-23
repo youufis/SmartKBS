@@ -68,7 +68,7 @@
 > - Git 部署：站内「检测更新 → 增量升级」照旧，无需特殊操作
 > - 版本号仍为 **8.8.0**：本次为同版本号重发，客户端以「发版构建号」区分新旧
 > - **文件作业需重启后端一次**：新建 `homework_files` 表与作业相关列，并一次性补正对话作业成绩的可见标记（存量数据不丢、重复启动幂等）
-- **抽人统一需重启后端一次并跑一次迁移**：新增 `pick_state / pick_round / pick_ledger` 三张表与三张抽人记录表的 `student_username` 列；历史权重与抽人记录用 `python scripts/backfill_pick_shared_state.py` 迁移（默认预演，加 `--apply` 才写库并自动备份主库；重复执行幂等）
+- **抽人统一只需重启后端一次**：`pick_state / pick_round / pick_ledger` 三张表与三张抽人记录表的 `student_username` 列自动创建，老权重、本轮名单与历史抽人记录在启动时一次性补正进新表（幂等；失败只记一条日志，不影响上课）。`scripts/backfill_pick_shared_state.py` 是维护机上的预演核对工具，`scripts/` 不随包部署
 > - 系统配置新增 4 项：`HOMEWORK_MAX_FILE_MB`、`HOMEWORK_MAX_FILES`、`HOMEWORK_ALLOWED_EXTS`、`HOMEWORK_ENABLE_VL`（图片作业开关）；通知类型需含 `task`，否则「发布成绩」不推送学生
 
 ---

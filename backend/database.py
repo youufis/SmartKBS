@@ -2460,6 +2460,14 @@ def init_db():
                 conn.rollback()
                 logger.warning(f"[db-fix] task_grades.published 回填未完成，下次启动会重试: {e}")
 
+            # ── 一次性修复：抽人统一后迁移老权重、本轮名单与历史抽人记录 ──
+            try:
+                _bootstrap_pick_shared(c)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"[db-fix] 抽人统一补正未完成，下次启动会重试: {e}")
+
             # ── 清理主库里与试题库重名的空壳表（只删 0 行的表，失败不阻断启动）──
             try:
                 _drop_legacy_question_shell_tables(c)
@@ -2598,6 +2606,142 @@ def _state_set(c, key: str, value: str):
         )
     except Exception:
         pass
+
+
+# ── 抽人统一后的一次性补正（启动自动、幂等、失败不阻断） ──
+
+_PICK_MIG_KEY = "pick_shared_backfill"
+_PICK_MIG_VER = "2026.10"
+
+
+def _pick_identity_map(c) -> dict:
+    """(姓名, 班级写法) → 学号。只收"全校唯一命中"的组合，同名多人一律留空。
+
+    猜一个学号把抽人记录记到别人头上，比留空按姓名记账严重得多 —— 留空只是
+    少了一条优化，记错人会把权重、积分、成长档案全带偏。
+    """
+    bucket: dict[tuple, set] = {}
+    for uname, name, disp, raw in c.execute(
+            """SELECT u.username, u.name, COALESCE(cl.display_name, u.class), u.class
+               FROM users u LEFT JOIN classes cl ON u.class_id = cl.id
+               WHERE u.role = 2 AND u.name IS NOT NULL AND u.name != ''"""
+    ).fetchall():
+        if not uname:
+            continue
+        variants = {v for v in (str(disp or "").strip(), str(raw or "").strip()) if v}
+        # 班级在不同表里写过 "高一1班" / "1班" / "1"，把数字形态也一并建键
+        for v in list(variants):
+            digits = "".join(ch for ch in v if ch.isdigit())
+            if digits:
+                variants |= {digits, f"{digits}班"}
+        for v in variants:
+            if v:
+                bucket.setdefault((str(name).strip(), v), set()).add(str(uname))
+    return {k: next(iter(v)) for k, v in bucket.items() if len(v) == 1}
+
+
+def _bootstrap_pick_shared(c) -> int:
+    """把老的抽人权重、本轮名单与历史抽人记录迁进共用三张表，并补 student_username。
+
+    为什么在启动做而不是留给运维脚本：scripts/ 在 .gitignore 里标注"不部署"，
+    README 让别的部署机去跑一个拿不到的文件就是空话；新表本来就是启动建的。
+    幂等靠 system_state 标记 + NOT EXISTS；整体失败只记一条 warning，
+    最坏情况是历史台账为空，新抽的人照常记账，不影响上课。
+    """
+    if _state_get(c, _PICK_MIG_KEY) == _PICK_MIG_VER:
+        return 0
+
+    import json as _json
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ids = _pick_identity_map(c)
+
+    def uname_of(name, cls):
+        return ids.get((str(name or "").strip(), str(cls or "").strip()), "")
+
+    def key_of(name, cls):
+        u = uname_of(name, cls)
+        return u or ("NAME:" + str(name or "").strip())
+
+    # 1) 权重：rollcall_weights（按教师、按姓名）→ pick_state（按班级、按学号）
+    #    同班多个教师各存一份时取最小值 —— 那是"最近被抽过"的最强信号
+    merged: dict[tuple, list] = {}
+    for grade, cls, sname, weight in c.execute(
+            "SELECT grade, class_name, student_name, weight FROM rollcall_weights").fetchall():
+        key = key_of(sname, cls)
+        slot = merged.setdefault((grade, cls, key), [str(sname or ""), float(weight if weight is not None else 10)])
+        slot[1] = min(slot[1], float(weight if weight is not None else 10))
+    for (grade, cls, key), (sname, w) in merged.items():
+        c.execute(
+            "INSERT INTO pick_state (grade, class_name, student_key, student_username, student_name,"
+            " weight, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(grade, class_name, student_key) DO NOTHING",
+            (grade, cls, key, "" if key.startswith("NAME:") else key, sname, w, now),
+        )
+
+    # 2) 本轮名单：rollcall_meta.picked_in_round（姓名）→ pick_round（学号键，第 1 轮）
+    for teacher, grade, cls, last_time, raw in c.execute(
+            "SELECT teacher_username, grade, class_name, last_time, picked_in_round FROM rollcall_meta"
+    ).fetchall():
+        try:
+            picked_names = _json.loads(raw or "[]")
+        except (ValueError, TypeError):
+            picked_names = []
+        keys = [key_of(n, cls) for n in picked_names if str(n or "").strip()]
+        if c.execute("SELECT 1 FROM pick_round WHERE grade=? AND class_name=?", (grade, cls)).fetchone():
+            continue
+        c.execute(
+            "INSERT INTO pick_round (grade, class_name, round_no, picked, last_time, updated_at)"
+            " VALUES (?, ?, 1, ?, ?, ?)",
+            (grade, cls, _json.dumps(keys, ensure_ascii=False), last_time, now),
+        )
+
+    # 3) 三张记录表：补学号 + 回填统一台账（按 ref_table+ref_id 幂等）
+    sources = (
+        ("rollcall_history", "rollcall", "result", "points", "created_at", "teacher_username"),
+        ("class_drill_records", "class_drill", "result", "points", "created_at", "teacher_username"),
+        ("class_ladder_runs", "class_ladder",
+         "CASE WHEN t.status='playing' THEN 'pending' ELSE t.status END", "points_awarded",
+         "created_at", "teacher_username"),
+    )
+    for table, activity, res_col, pts_col, time_col, teacher_col in sources:
+        try:
+            cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
+        except Exception:
+            continue
+        if not cols:
+            continue
+        has_uname = "student_username" in cols
+        sel_uname = f"IFNULL(t.{teacher_col},'')" if table != "class_ladder_runs" else "IFNULL(s.teacher_username,'')"
+        join = "LEFT JOIN class_ladder_sessions s ON s.id = t.session_id" if table == "class_ladder_runs" else ""
+        grade_src = "t.grade" if table != "class_ladder_runs" else "s.grade"
+        cls_src = "t.class_name" if table != "class_ladder_runs" else "s.class_name"
+        uname_src = f"IFNULL(t.student_username,'')" if has_uname else "''"
+        rows = c.execute(
+            f"SELECT t.id, {grade_src}, {cls_src}, t.student_name, {uname_src},"
+            f" COALESCE({res_col},''), COALESCE(t.{pts_col},0), COALESCE(t.{time_col},''), {sel_uname}"
+            f" FROM {table} t {join} ORDER BY t.id", ()).fetchall()
+        for rid, grade, cls, sname, had_uname, result, points, created, teacher in rows:
+            uname = had_uname or uname_of(sname, cls)
+            if has_uname and not had_uname and uname:
+                c.execute(f"UPDATE {table} SET student_username=? WHERE id=?", (uname, rid))
+            if c.execute("SELECT 1 FROM pick_ledger WHERE ref_table=? AND ref_id=?",
+                         (table, int(rid))).fetchone():
+                continue
+            c.execute(
+                "INSERT INTO pick_ledger (activity, teacher_username, grade, class_name, student_key,"
+                " student_username, student_name, round_no, result, points, ref_table, ref_id, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+                (activity, teacher or "", grade or "", cls or "",
+                 uname or ("NAME:" + str(sname or "").strip()), uname, str(sname or ""),
+                 str(result or "pending") or "pending", int(points or 0), table, int(rid),
+                 created or now),
+            )
+
+    _state_set(c, _PICK_MIG_KEY, _PICK_MIG_VER)
+    done = c.execute("SELECT COUNT(*) FROM pick_ledger").fetchone()[0]
+    logger.info(f"[db-fix] 抽人统一补正完成：权重 {len(merged)} 条、台账累计 {done} 条")
+    return len(merged)
+
 
 
 def _backfill_hw_published(c):
