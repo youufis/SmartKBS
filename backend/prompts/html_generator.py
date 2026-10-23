@@ -294,7 +294,9 @@ select:disabled{opacity:.45}
 .q-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 .q-number{color:var(--gold);font-weight:700}
 .q-principle{background:var(--accent-dim);padding:4px 12px;border-radius:20px;font-size:.85rem}
-.q-text{font-size:1.15rem;line-height:1.75;margin:12px 0;min-height:50px;background:rgba(0,0,0,.22);padding:16px 18px;border-radius:var(--radius-sm);border-left:4px solid var(--primary)}
+.q-text{font-size:1.15rem;line-height:1.75;margin:12px 0;min-height:50px;background:rgba(0,0,0,.22);padding:16px 18px;border-radius:var(--radius-sm);border-left:4px solid var(--primary);white-space:pre-wrap}
+  /* 题干里的代码块：等宽、保留缩进、超宽横向滚动，不与正文混成一段 */
+  .q-code{font-family:'JetBrains Mono',Consolas,Menlo,'Courier New',monospace;font-size:.9rem;line-height:1.6;white-space:pre;overflow-x:auto;margin:10px 0;padding:12px 14px;background:rgba(0,0,0,.38);border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:var(--radius-sm)}
 .q-svg{margin:10px auto;text-align:center}
 .q-svg svg{max-width:100%;height:auto}
 .options-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
@@ -431,6 +433,13 @@ const MOCK_CLASSES = ['高一(1)班','高一(2)班','高一(3)班'];
 
 /* ═══════ 工具函数（勿改） ═══════ */
 function $(id){return document.getElementById(id);}
+/* 只把 ``` 围栏换成 <pre class=q-code>（块内做 HTML 转义），其余内容原样交给页面既有渲染 */
+function renderQHtml(raw){
+  const s=String(raw==null?'':raw).replace(/\r\n/g,'\n');
+  const esc=x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return s.replace(/\n?```[^\n]*\n([\s\S]*?)```[ \t]*\n?/g,
+    (w,g)=>'<pre class="q-code">'+esc(g.replace(/\n$/,''))+'</pre>');
+}
 function show(id){$(id).classList.remove('hidden');}
 function hide(id){$(id).classList.add('hidden');}
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
@@ -533,7 +542,7 @@ function showQuestion(){
   const q=GROUPS[state.round][state.qIdx];
   $('qNumber').textContent='第'+(state.qIdx+1)+'题/共'+GROUPS[state.round].length+'题';
   $('qPrinciple').textContent=q.knowledge_point||'知识点';
-  $('qText').innerHTML=q.question;
+  $('qText').innerHTML=renderQHtml(q.question);
   $('qSvgContainer').innerHTML=q.svg_code?'<div class="q-svg">'+q.svg_code+'</div>':'';
   const grid=$('optionsGrid');grid.innerHTML='';
   Object.keys(q.options).forEach(k=>{

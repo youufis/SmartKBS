@@ -27,8 +27,40 @@ body {
 .markdown-content table { border-collapse: collapse; margin: 8px 0; width: 100%; }
 .markdown-content th, .markdown-content td { border: 1px solid var(--border-color); padding: 6px 12px; text-align: left; }
 .markdown-content th { background: color-mix(in srgb, var(--bg-layout) 60%, transparent); font-weight: 600; }
-.markdown-content pre { background: var(--bg-layout); padding: 12px; border-radius: 6px; overflow-x: auto; }
-.markdown-content code { background: var(--bg-layout); padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
+/* 题干里的代码块（阅读程序写结果、算法填空）必须看得出"这是代码"：等宽、保留缩进、
+   超宽横向滚动。以前这些样式只挂在 .markdown-content pre/code 上，聊天与任务页包了
+   那层 class 所以有底色，题目那一片没包 —— 围栏代码于是渲染成浏览器默认的裸 <pre>，
+   看着仍和正文一样。现在类名由 FormulaRenderer 自己带，调用方不必再包一层。 */
+.markdown-content pre, .formula-code {
+  margin: 8px 0; padding: 12px 14px;
+  background: var(--bg-layout); border: 1px solid var(--border-color); border-radius: 6px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px; line-height: 1.6;
+  white-space: pre; overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.markdown-content pre code, .formula-code code {
+  background: none; padding: 0; border-radius: 0;
+  font-family: inherit; font-size: inherit; white-space: pre;
+}
+.markdown-content code, .formula-code-inline {
+  background: color-mix(in srgb, var(--bg-layout) 72%, transparent);
+  padding: 1px 5px; border-radius: 3px; font-size: 0.92em;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+}
+/* 行内场景（列表行、选项、表格单元格）不放块级代码，压成一枚徽标 */
+.formula-code-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px; margin: 0 2px;
+  font-size: 12px; line-height: 20px; color: var(--text-secondary);
+  background: var(--bg-layout); border: 1px dashed var(--border-color); border-radius: 10px;
+  cursor: help; white-space: nowrap; vertical-align: middle;
+}
+/* 徽标 Tooltip 里的代码预览：限高可滚、保留缩进 */
+.formula-code-tip {
+  margin: 0; max-height: 40vh; overflow: auto;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 12px; line-height: 1.55; white-space: pre; text-align: left;
+}
 
 /* 点名动画 */
 @keyframes rollcallRoll {

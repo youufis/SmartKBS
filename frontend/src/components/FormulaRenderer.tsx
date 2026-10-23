@@ -14,6 +14,8 @@
  * - 把 \\(\\) / \\[\\] 这种 LaTeX 定界符换成 $ / $$。
  */
 import React from 'react'
+import { Tooltip } from 'antd'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -113,6 +115,83 @@ export function preserveBreaks(text: string): string {
   return out.join('\n')
 }
 
+/**
+ * 按行扫描切出 ``` / ~~~ 围栏代码块。
+ *
+ * 为什么自己切而不交给 react-markdown：行内场景（列表行、选项、表格单元格）不能出现
+ * 块级 <pre> —— 它会把 nowrap + ellipsis 的单元格整个撑破，正好毁掉刚做完的行高收紧。
+ * 切出来之后，文字段照常行内渲染，代码段单独压成一枚徽标。
+ */
+export type Segment = { code: boolean; text: string; lines: number }
+
+export function splitFences(src: string): Segment[] {
+  if (!src || (!src.includes('```') && !src.includes('~~~'))) {
+    return [{ code: false, text: src || '', lines: 0 }]
+  }
+  const out: Segment[] = []
+  let buf: string[] = []
+  let fence: string[] | null = null
+  const flushText = () => {
+    const text = buf.join('\n')
+    buf = []
+    if (text.trim()) out.push({ code: false, text, lines: 0 })
+  }
+  for (const line of src.replace(/\r\n/g, '\n').split('\n')) {
+    const t = line.trim()
+    const isFence = t.startsWith('```') || t.startsWith('~~~')
+    if (fence) {
+      if (isFence && t.slice(0, 3) === fence[0]) {
+        // 收尾：丢掉 ```python 那行的语言名，只留代码本体
+        const body = fence.slice(1).join('\n')
+        out.push({ code: true, text: body, lines: body.split('\n').filter(l => l.trim()).length })
+        fence = null
+      } else {
+        // 保留原始行：Python 的缩进就是语义，只去掉行尾空白
+        fence.push(line.replace(/\s+$/, ''))
+      }
+      continue
+    }
+    if (isFence) {
+      flushText()
+      fence = [t.slice(0, 3)]
+      continue
+    }
+    buf.push(line)
+  }
+  if (fence) {
+    // 模型只写了开头没闭合：按代码处理，别把 ``` 原样甩在题干里
+    const body = fence.slice(1).join('\n')
+    out.push({ code: true, text: body, lines: body.split('\n').filter(l => l.trim()).length })
+  }
+  flushText()
+  return out.length ? out : [{ code: false, text: src, lines: 0 }]
+}
+
+/** 行内场景的代码徽标：只报行数，完整内容在 Tooltip 里看（等宽、保留缩进、可滚） */
+const CodeChip: React.FC<{ text: string; lines: number }> = ({ text, lines }) => {
+  const { t } = useTranslation('common')
+  return (
+    <Tooltip title={<pre className="formula-code-tip">{text}</pre>} overlayStyle={{ maxWidth: 560 }}>
+      <span className="formula-code-chip">
+        {'{'}…{'}'} {t('codeChip', { count: Math.max(1, lines) })}
+      </span>
+    </Tooltip>
+  )
+}
+
+/**
+ * 块级代码与行内代码的渲染。类名自带样式，不再要求调用方额外包一层 .markdown-content
+ * —— 之前代码块样式只挂在 .markdown-content pre/code 上，聊天/任务页包了就有底色，
+ * 题目那一片没包，于是围栏代码渲染成光秃秃的浏览器默认 <pre>，看着仍像正文。
+ */
+const codeComponents: Components = {
+  // node 是 hast 节点对象，不能跟着 spread 进 DOM
+  pre: ({ node, children, ...rest }) => <pre className="formula-code" {...rest}>{children}</pre>,
+  code: ({ node, children, ...rest }) => (
+    <code className="formula-code-inline" {...rest}>{children}</code>
+  ),
+}
+
 interface FormulaRendererProps {
   /** Markdown / LaTeX 混合内容 */
   content: string
@@ -134,29 +213,46 @@ const FormulaRenderer: React.FC<FormulaRendererProps> = ({ content, inline = fal
 
   if (inline) {
     // 选项等简短内容：公式 + 图片 + 基本 Markdown
+    const inlineComponents: Components = {
+      // 使图片在行内模式也能正常显示
+      img: ({ src, alt }) => (
+        <img src={src} alt={alt || ''} style={{ maxWidth: 120, maxHeight: 80, verticalAlign: 'middle', margin: '0 4px', borderRadius: 4 }} />
+      ),
+      ...components,
+    }
+    const segments = splitFences(source)
+    if (!segments.some(seg => seg.code)) {
+      return (
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={inlineComponents}>
+          {source}
+        </ReactMarkdown>
+      )
+    }
+    // 题干里带代码块时：文字照常行内渲染，代码压成徽标，块级 <pre> 不进单元格
     return (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{
-          // 使图片在行内模式也能正常显示
-          img: ({ src, alt }) => (
-            <img src={src} alt={alt || ''} style={{ maxWidth: 120, maxHeight: 80, verticalAlign: 'middle', margin: '0 4px', borderRadius: 4 }} />
-          ),
-          ...components,
-        }}
-      >
-        {source}
-      </ReactMarkdown>
+      <>
+        {segments.map((seg, i) => (seg.code
+          ? <CodeChip key={`code-${i}`} text={seg.text} lines={seg.lines} />
+          : (
+            <ReactMarkdown
+              key={`text-${i}`}
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={inlineComponents}
+            >
+              {seg.text}
+            </ReactMarkdown>
+          )))}
+      </>
     )
   }
 
-  // 完整模式：支持 GFM（表格、列表等）+ 公式
+  // 完整模式：GFM（表格、列表、代码块）+ 公式；调用方自带的 components 优先级更高
   return (
     <ReactMarkdown
       remarkPlugins={gfm ? [remarkGfm, remarkMath] : [remarkMath]}
       rehypePlugins={[rehypeKatex]}
-      components={components}
+      components={{ ...codeComponents, ...components }}
     >
       {source}
     </ReactMarkdown>

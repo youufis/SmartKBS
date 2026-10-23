@@ -59,12 +59,15 @@ body {
 .markdown-content th {
   background: color-mix(in srgb, var(--bg-layout) 60%, transparent);
 }
-.markdown-content pre {
+/* 代码块与徽标的主题色：形状（内边距/圆角/等宽/滚动）只在 index.css 定义一次，
+   这里只补背景与描边，避免同一套样式两处各写一半 */
+.markdown-content pre, .formula-code, .formula-code-chip, .formula-code-inline {
   background: var(--bg-layout);
 }
-.markdown-content code {
-  background: var(--bg-layout);
+.markdown-content pre, .formula-code, .formula-code-chip {
+  border-color: var(--border-color);
 }
+.formula-code-chip { color: var(--text-secondary); }
 /* 教师任教范围明细（TeacherScopeChips 折叠态的 Popover）：三列小表格，长清单可滚动 */
 .teacher-scope-detail {
   max-width: min(420px, 78vw);

@@ -728,6 +728,54 @@ def _sanitize_text(text: str) -> str:
     return text
 
 
+# ── 题干里的代码块（阅读程序写结果、算法填空）：等宽 + 保留缩进 + 浅底纹 ──
+FONT_CODE = "Consolas"
+CODE_FILL = "F2F2F2"
+_FENCE_RE = re.compile(r"\n?```[^\n]*\n([\s\S]*?)```[ \t]*\n?")
+
+
+def _split_code_fences(text: str) -> list[tuple[bool, str]]:
+    """把 ``` 围栏切成独立段：代码段走等宽渲染，正文段仍走公式/加粗那套。"""
+    out: list[tuple[bool, str]] = []
+    last = 0
+    for m in _FENCE_RE.finditer(text or ""):
+        if m.start() > last:
+            out.append((False, text[last:m.start()]))
+        out.append((True, m.group(1).rstrip("\n")))
+        last = m.end()
+    if not out:
+        return [(False, text or "")]
+    if last < len(text or ""):
+        out.append((False, text[last:]))
+    return out
+
+
+def _shade_run(run, fill: str = CODE_FILL) -> None:
+    """给一个 run 铺底色 —— Word 里没有 <pre>，只能逐段上色模拟代码块。"""
+    try:
+        rPr = run._element.get_or_add_rPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), fill)
+        rPr.append(shd)
+    except Exception:
+        pass
+
+
+def _append_code_lines(paragraph, code: str, size, color=None) -> None:
+    lines = (code or "").rstrip("\n").split("\n")
+    for i, line in enumerate(lines):
+        body = line.replace("\t", "    ")
+        lead = len(body) - len(body.lstrip(" "))
+        # Word 会吃掉行首普通空格，缩进用不间断空格保住 —— Python 的缩进就是题目本身
+        run = paragraph.add_run("\u00A0" * lead + body[lead:])
+        _style_run(run, FONT_CODE, size or Pt(9.5), color)
+        _shade_run(run)
+        if i < len(lines) - 1:
+            run.add_break()
+
+
 def _render_question_text(paragraph, q_text: str, doc=None, color=None,
                           size=None, bold: bool = False):
     """渲染题目文本（解析、答案也用这一套，别再退回纯文本 run）
@@ -742,14 +790,19 @@ def _render_question_text(paragraph, q_text: str, doc=None, color=None,
         return
     font_size = size or SIZE_QUESTION
 
-    # 是否含公式：$...$ 包裹的，或没包裹的裸命令（\mu、\beta 等）
-    has_math = ('$' in text) or bool(re.search(r"\\[a-zA-Z]{2,}", text))
-
-    if has_math and _HAS_MPL:
-        _render_latex_inline(paragraph, text, FONT_BODY, font_size, doc, color, bold)
-    else:
-        # 无 LaTeX 时，仅处理 **加粗**
-        parts = re.split(r'(\*\*.*?\*\*)', text)
+    for is_code, seg in _split_code_fences(text):
+        if is_code:
+            _append_code_lines(paragraph, seg, Pt(9.5), color)
+            continue
+        if not seg.strip():
+            continue
+        # 是否含公式：$...$ 包裹的，或没包裹的裸命令（\mu、\beta 等）
+        # 代码段已经在上面走掉，bash 提示符里的 $ 不会再被误当公式
+        has_math = ('$' in seg) or bool(re.search(r"\\[a-zA-Z]{2,}", seg))
+        if has_math and _HAS_MPL:
+            _render_latex_inline(paragraph, seg, FONT_BODY, font_size, doc, color, bold)
+            continue
+        parts = re.split(r'(\*\*.*?\*\*)', seg)
         for part in parts:
             if not part:
                 continue
@@ -763,6 +816,8 @@ def _plain_text(text: str) -> str:
     """把 $...$ 与裸命令都转成可读 Unicode、去掉 ** 标记
     —— 用于放不下公式图片的窄格子（如答题卡题号）。"""
     out = _sanitize_text(text or "")
+    # 答题卡这类窄格子放不下图片，围栏符号去掉、代码留成普通文字即可
+    out = _FENCE_RE.sub(lambda m: m.group(1), out)
     out = re.sub(r"\$([^$]+)\$", lambda m: _latex_to_unicode(m.group(1)), out)
     out = _bare_latex_to_unicode(out)
     return out.replace("**", "")
