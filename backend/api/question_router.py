@@ -1959,6 +1959,8 @@ def _build_batch_extract_prompt(subject: str, difficulty: str, chunk: str,
     from backend.prompts import build_ai_role
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     ai_role = build_ai_role(subject=subject)
+    from backend.prompts.question_schema import CODE_KEEP_RULE
+    code_rule = CODE_KEEP_RULE
     return f"""下面是一份长文档的第 {part}/{total} 部分，其中包含若干试题（部分题目可能被截断不完整）。
 
 === 文本数据 ===
@@ -1978,6 +1980,7 @@ def _build_batch_extract_prompt(subject: str, difficulty: str, chunk: str,
 3. 每个试题必须包含：题目、正确答案、题型（single/multiple/true_false/short/fill）
 4. 选择题必须有选项（A/B/C/D），判断题选项为 {{"对":"对","错":"错"}}
 5. 本段没有题目时输出 []
+6. {code_rule}
 
 JSON 格式：
 [
@@ -2176,6 +2179,8 @@ def _build_image_extract_prompt(subject: str, difficulty_desc: str,
     svg_rule = (
         "3. 仅当图片里本来就印有图形时，用一句话在 explanation 里说明该图含义即可，不要生成 svg_code 或 media_placeholders"        if not allow_svg else
         "3. 一般不要生成 svg_code 和 media_placeholders；只有图片中确有复杂示意图且对解题必需时才可生成，且务必保证 JSON 引号转义完整"    )
+    from backend.prompts.question_schema import CODE_KEEP_RULE
+    code_rule = CODE_KEEP_RULE
     return f"""你是一个试题提取助手。请从图片中识别并提取出所有试题。
 按照 JSON 格式输出。
 
@@ -2210,6 +2215,7 @@ def _build_image_extract_prompt(subject: str, difficulty_desc: str,
 - 判断题 options 为 null，answer 为"对"或"错"
 - 简答题/填空题 options 为 null，answer 为参考答案
 - 作文/主观题 options 为 null，answer 为评分要点
+{code_rule}
 {extra_hint}"""
 
 
@@ -2514,6 +2520,8 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
     ai_role = build_ai_role(subject=subject)
     MAX_EXTRACT_LEN = 7000
     trimmed = content[:MAX_EXTRACT_LEN]
+    from backend.prompts.question_schema import CODE_KEEP_RULE
+    code_rule = CODE_KEEP_RULE
     prompt = f"""下面是一段需要处理的文本数据，请根据数据后面的要求进行操作。
 
 === 文本数据 ===
@@ -2532,6 +2540,7 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 2. 如果文本是知识点讲解，则针对每个核心知识点生成一道试题
 3. 每个试题必须包含：题目、正确答案、题型（single/multiple/true_false/short/fill）
 4. 选择题必须有选项（A/B/C/D），判断题选项为 {{"对":"对","错":"错"}}
+5. {code_rule}
 
 JSON 格式：
 [
