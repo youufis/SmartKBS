@@ -351,5 +351,6 @@
   "answerProgressLine": "Question {{current}}/{{total}} · answered {{done}}",
   "answerNavLabel": "Question no.",
   "jumpToQuestion": "Question {{n}}",
-  "leaveConfirmOk": "Leave"
+  "leaveConfirmOk": "Leave",
+  "codeChip": "{{count}}-line code"
 }

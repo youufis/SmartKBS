@@ -347,5 +347,6 @@
   "answerProgressLine": "第 {{current}}/{{total}} 题 · 已答 {{done}}",
   "answerNavLabel": "题号",
   "jumpToQuestion": "第 {{n}} 题",
-  "leaveConfirmOk": "离开"
+  "leaveConfirmOk": "离开",
+  "codeChip": "代码 {{count}} 行"
 }
