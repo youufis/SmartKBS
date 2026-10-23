@@ -53,7 +53,7 @@
 > - 💬 **Group discussion** — list editing; real automatic/random grouping; stable WebSocket; idempotent, rate-limited optimistic messages; posting blocked after the discussion ends
 > - 🏆 **Quest admin** — bulk deletion for records and question bank, teaching-scope checks, points and badge recalculation
 > - 📰 **Daily picks / news admin** — teacher and admin consoles with health checks and single/bulk disable, restore and delete
-> - 🖥️ **Desktop update prompt** — version management compares "version + release build stamp (`desktop_build`)" and points you to the newest installer instead of the misleading "install Git first" error
+> - 🖥️ **Desktop update prompt** — updates are decided by “version + release build stamp” and point to the newest installer instead of the misleading “install Git first” error
 > - 📦 **Source-package update prompt** — with no Git history it prompts for the newest source package; if Git is installed, one click converts the folder into a Git deployment with in-app incremental upgrades
 > - 🎯 **Unified picking** — roll call, questioning, ladder and AI quiz pages share one set of class weights, keyed by student ID
 > - 🧾 **Pick records** — a cross-activity ledger in roll-call management: timeline, per-activity stats, most-picked, Excel export, new round
@@ -67,9 +67,6 @@
 > - Source package: **replace the source once manually**; only then does the panel show 「Check Update」 and detect later releases
 > - Git deployment: 「Check Update → Incremental Upgrade」 works as before
 > - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
-> - **Restart the backend once for file assignments**: it creates the `homework_files` table and the new assignment columns, and repairs the visibility flag of existing chat-homework grades (idempotent, no data loss)
-> - **Unified picking needs one backend restart**: `pick_state / pick_round / pick_ledger` and the `student_username` column are created automatically, and old weights, round markers and historical picks are migrated at startup (idempotent; a failure only logs). `scripts/backfill_pick_shared_state.py` is a maintenance-box dry-run tool and is not shipped
-> - Four new settings: `HOMEWORK_MAX_FILE_MB`, `HOMEWORK_MAX_FILES`, `HOMEWORK_ALLOWED_EXTS`, `HOMEWORK_ENABLE_VL` (image reading); keep the `task` notification type enabled or publishing sends nothing
 
 ---
 
@@ -1147,7 +1144,7 @@ Current version **8.8.0**. Each release lists the changes a user can notice; per
 
 ### v8.8.0
 
-- 📎 **File submissions**: `tasks.submit_mode` gains "file" and "mixed" (no new activity type, existing chat homework untouched); students upload Word/PDF/Excel/PPT/text/images, validated by both extension and content, legacy `.doc/.ppt/.xls` rejected with guidance
+- 📎 **File submissions**: assignments gain “file” and “file + note” modes with no new activity type and zero migration; students upload Word/PDF/Excel/PPT/text/images, checked by extension and content, legacy Office formats rejected with guidance
 - 📥 **Text and image extraction**: docx/pdf/xlsx via already-installed libraries, pptx by reading OOXML directly (no new dependency); images are transcribed and described by a vision model first; scans and unparsable files go to manual review instead of scoring 0
 - 🤖 **AI grading**: the whole class is packed into one document and graded in a single long-context call; dimensions are configurable and rescaled to the full score; output carries per-dimension scores, checkpoint verdicts, quotes and next steps; students the model missed are written as needing review
 - 🔐 **Review and publish**: AI scores stay unpublished by default, teacher edits keep the AI score for comparison; publishing is what makes results visible and awards the grade-level bonus that was never actually granted before
@@ -1167,16 +1164,16 @@ Current version **8.8.0**. Each release lists the changes a user can notice; per
 - 📤 **Summary export** — corrected exam “submitted / pending grading” status; best attempt per activity, class-aware point mapping; filter changes invalidate old previews; Blob download with visible errors
 - 💬 **Group discussion** — list editing; real class-roster pre-grouping with working automatic/random modes; no WebSocket reconnect per message; idempotent, rate-limited optimistic messages; posting, broadcasting and AI blocked after the end
 - 🏆 **Quest admin** — bulk deletion for records and bank questions; teachers are limited to their classes; cascade cleanup with points/badge recalculation; bank details no longer exposed to students
-- 🎯 **Unified picking** — roll call, questioning, ladder and AI quiz pages share one set of **class weights** (`pick_state / pick_round`, keyed by student ID); same-name students no longer shadow each other
-- 🧾 **Pick ledger** — `pick_ledger` stores one row per pick; new tab in roll-call management with timeline, filters, per-activity stats, most-picked and Excel export
-- 🔁 **New round** — clears only this round's picked list and bumps the round; "restart" in questioning / ladder follows the same rule instead of wiping shared weights
-- 🩹 **Concurrency** — whole-class DELETE+INSERT snapshot writes replaced by a single atomic row update in a write transaction; name-only marks from legacy quiz pages are attributed via the ledger row
-- 🗑️ **Question bank bulk delete** — multi-select deletion with the same rules as single delete (not-owner and in-use rows skipped with reasons), `POST /api/questions/batch-delete` capped at 500
-- 📐 **Compact question list** — fixed table layout with measured column widths; the stem column grows from ~280px to ~460px at 1440, media thumbnails 100×50 → 60×30 and row height ~66px → ~46px
-- 🧾 **ID-first readers** — portfolio, analytics and roll-call / ledger exports match students by ID first, name only as fallback; fixes the always-zero roll-call accuracy and raw `correct` values leaking into exports
-- 🩹 **Side fixes** — single-brace placeholders in two homework strings (the UI showed `{used}`); column migrations reordered so a fresh database no longer logs "no such table"
+- 🎯 **Unified picking** — roll call, questioning, ladder and AI quiz pages share one set of class weights keyed by student ID; same-name students no longer shadow each other
+- 🧾 **Pick records** — one row per pick; a new roll-call tab with cross-activity timeline, filters, per-activity stats, most-picked and Excel export
+- 🔁 **New round** — clears only this round's picked list and keeps the weights; “restart” in questioning and ladder follows the same rule
+- 🩹 **Concurrency** — a single atomic row update replaces the whole-class snapshot write, so two screens in one class no longer overwrite each other; legacy pages reporting only a name are attributed through the ledger
+- 🗑️ **Question bank bulk delete** — multi-select deletion with the same rules as single delete; others' and in-use questions are skipped with reasons, 500 per call
+- 📐 **Compact question list** — column widths and row height rebalanced from real data; the stem column gets clearly more room and a screen fits about 40% more questions
+- 🧾 **ID-first readers** — portfolio, analytics and roll-call / pick exports match students by ID first, name only as fallback; fixes the always-zero roll-call accuracy and raw English verdicts leaking into exports
+- 🩹 **Side fixes** — homework quota messages used to render braces literally; a fresh database no longer logs a missing-table warning at startup
 - 📰 **Daily picks / news admin** — teacher/admin consoles with health checks and single/bulk disable, restore and delete
-- 🖥️ **Desktop update prompt** — the desktop shell has no Git (a frozen exe has no `.git`, and `git reset` cannot replace a running exe), so it compares “version + release build stamp `desktop_build`” and guides you to the installer; the old misleading “install Git first” error is gone
+- 🖥️ **Desktop update prompt** — the desktop shell has no Git chain, so it compares “version + release build stamp” and guides you to the installer; the misleading “install Git first” error is gone
 - 📦 **Source-package update prompt** — the deployment form is now split into desktop / git / source; with no Git history the panel falls back to “detect + download the source package”, fixing the old bug where such deployments always reported “up to date”; if Git is present, one click converts the folder into a Git deployment and runs the existing fetch → reset → migrate → pip → restart → auto-rollback pipeline
 - 🔄 **Same-version rebuilds are detected** — the release build stamp is the tie-breaker, so rebuilding under the same version number still prompts an update (installs missing the field are prompted too)
 - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the deployment repair script
