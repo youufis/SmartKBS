@@ -286,12 +286,14 @@ async def student_analytics(target_username: str, request: Request):
     total_score = score_rows[0][0] if score_rows else 0
 
     # 点名
+    # 学号优先、老数据按姓名兜底：同名同班两人生时只按姓名会互相顶数
     rc_rows = execute_query(
         f"""SELECT COUNT(*), SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END)
             FROM rollcall_history
-            WHERE student_name=? AND grade=? AND class_name IN ({vph})
+            WHERE (student_username=? OR (IFNULL(student_username,'')='' AND student_name=?))
+              AND grade=? AND class_name IN ({vph})
               AND result IN ('correct','incorrect')""",
-        (student_name, student_grade, *variants),
+        (target_username, student_name, student_grade, *variants),
     )
     rc_total = rc_rows[0][0] if rc_rows else 0
     rc_correct = rc_rows[0][1] if rc_rows else 0

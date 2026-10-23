@@ -31,9 +31,10 @@ router = APIRouter()
 def _rollcall_class_conditions(username: str) -> tuple[str, list]:
     """教师看点名：按"我教的班级"，而不是只数自己点过的那些。
 
-    rollcall_history 里没有 student_username，只有 grade / class_name，且 class_name
-    历史上存在"高一1班""1班""1"三种写法，所以只能按班级文本匹配（三种写法都认），
-    不能套用"学生范围"那套 username IN(...)。
+    这里是**班级**范围统计，与学生范围无关：rollcall_history 虽有 student_username
+    （2026-10 补列，历史行由脚本回填），但 class_name 历史上存在"高一1班""1班""1"
+    三种写法，所以仍按班级文本匹配（三种写法都认），不套用 username IN(...)。
+    学生维度的取数请走 portfolio / analytics 那套"学号优先、姓名兜底"条件。
     """
     from backend.permission_service import parse_legacy_teacher_grade_class
     grade, cls = get_user_grade_class(username)

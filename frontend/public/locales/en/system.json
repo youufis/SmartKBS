@@ -1385,8 +1385,8 @@
   "hwPresetTomorrow": "Tomorrow 20:00",
   "hwPresetThisSunday": "This Sunday 20:00",
   "hwPresetNextWeek": "Next week 20:00",
-  "hwTimesUsed": "Submitted {used} · {left} left (limit {limit})",
-  "hwNoTimesLeft": "No submissions left (limit {limit})",
+  "hwTimesUsed": "Submitted {{used}} · {{left}} left (limit {{limit}})",
+  "hwNoTimesLeft": "No submissions left (limit {{limit}})",
   "hwNoTimesLeftHint": "Ask your teacher to revert your submission in the assignment details to submit again.",
   "hwPickFirstAgain": "No new file selected: pick the file(s) to re-submit above (already uploaded files need not be re-added)"
 }

@@ -1385,8 +1385,8 @@
   "hwPresetTomorrow": "明晚 20:00",
   "hwPresetThisSunday": "本周日 20:00",
   "hwPresetNextWeek": "下周同一时间 20:00",
-  "hwTimesUsed": "已交 {used} 次 · 剩余 {left} 次（上限 {limit}）",
-  "hwNoTimesLeft": "提交次数已用完（上限 {limit} 次）",
+  "hwTimesUsed": "已交 {{used}} 次 · 剩余 {{left}} 次（上限 {{limit}}）",
+  "hwNoTimesLeft": "提交次数已用完（上限 {{limit}} 次）",
   "hwNoTimesLeftHint": "需要再交一次，请老师在作业详情里点「回退提交」清掉本次记录。",
   "hwPickFirstAgain": "这次没有选择新文件：要重交请先点上方区域选要上传的文件（已交过的文件不必重复上传）"
 }

@@ -19,6 +19,26 @@ from backend.prompts import apply_skills, build_ai_role
 router = APIRouter()
 
 
+def _rc_result_is(result: str, want: str) -> bool:
+    """点名结果判定：库里存的是 correct/incorrect/skip，早期还有 1/0 两种写法。
+
+    旧代码只比 '1'/'0'，成长档案里的"点名正确数"因此常年显示 0 ——
+    看板那边 2026-10 已经修过同一个错（见 dashboard_router 的 _rc_map），
+    档案这三处一直没人管。
+    """
+    v = str(result or "").strip().lower()
+    return v in (("correct", "1", "true", "对") if want == "correct"
+                 else ("incorrect", "0", "false", "错") if want == "incorrect" else (want,))
+
+
+_rc_sql_correct = ("lower(trim(COALESCE(result, ''))) IN ('correct', '1', 'true', '\u5bf9')")
+
+
+def _rc_student_where() -> str:
+    """学生维度查点名历史的匹配条件：学号优先，老数据（没学号）才按姓名兜。"""
+    return "(student_username = ? OR (IFNULL(student_username, '') = '' AND student_name = ?))"
+
+
 def _assert_can_view_student(user: dict, target: str, what: str = "档案") -> None:
     """R3: 学生只看自己, 教师只看任教范围内学生, 管理员不限"""
     username = user.get("username", "")
@@ -160,17 +180,17 @@ async def get_portfolio(username: str, request: Request):
 
     # ── 3. 点名记录 ──
     rollcall_rows = execute_query(
-        """SELECT teacher_username, grade, class_name, result, points, created_at
-           FROM rollcall_history WHERE student_name = ?
+        f"""SELECT teacher_username, grade, class_name, result, points, created_at
+           FROM rollcall_history WHERE {_rc_student_where()}
            ORDER BY created_at DESC""",
-        (user_info['name'],),
+        (username, user_info['name']),
     )
 
     rollcall_stats = {"total_calls": 0, "correct_count": 0, "wrong_count": 0, "accuracy": 0, "total_points": 0}
     if rollcall_rows:
         total_calls = len(rollcall_rows)
-        correct = sum(1 for r in rollcall_rows if r[3] == "1")
-        wrong = sum(1 for r in rollcall_rows if r[3] == "0")
+        correct = sum(1 for r in rollcall_rows if _rc_result_is(r[3], "correct"))
+        wrong = sum(1 for r in rollcall_rows if _rc_result_is(r[3], "incorrect"))
         total_points = sum(r[4] or 0 for r in rollcall_rows)
         rollcall_stats = {
             "total_calls": total_calls,
@@ -382,14 +402,15 @@ async def get_timeline(username: str, request: Request):
 
     # 点名事件
     rc_events = execute_query(
-        """SELECT created_at, result, points, teacher_username
-           FROM rollcall_history WHERE student_name = ?
+        f"""SELECT created_at, result, points, teacher_username
+           FROM rollcall_history WHERE {_rc_student_where()}
            ORDER BY created_at ASC""",
-        (student_name,),
+        (username, student_name),
     )
     for ev in rc_events:
         if ev[0]:
-            result_label = "正确" if ev[1] == "1" else ("错误" if ev[1] == "0" else "待定")
+            result_label = ("正确" if _rc_result_is(ev[1], "correct")
+                            else "错误" if _rc_result_is(ev[1], "incorrect") else "待定")
             events.append({
                 "time": ev[0],
                 "type": "rollcall",
@@ -540,9 +561,9 @@ async def get_learning_report(username: str, request: Request):
 
     # ── 3. 点名 ──
     rc_rows = execute_query(
-        """SELECT COUNT(*), COALESCE(SUM(CASE WHEN result='1' THEN 1 ELSE 0 END), 0)
-           FROM rollcall_history WHERE student_name = ? AND created_at >= ?""",
-        (student_name, since),
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN {_rc_sql_correct} THEN 1 ELSE 0 END), 0)
+           FROM rollcall_history WHERE {_rc_student_where()} AND created_at >= ?""",
+        (username, student_name, since),
     )
     rc_total = rc_rows[0][0] if rc_rows else 0
     rc_correct = rc_rows[0][1] if rc_rows else 0
@@ -683,9 +704,9 @@ async def export_learning_report_docx(username: str, request: Request):
     total_score = sr[0]
 
     rc_rows = execute_query(
-        """SELECT COUNT(*), COALESCE(SUM(CASE WHEN result='1' THEN 1 ELSE 0 END), 0)
-           FROM rollcall_history WHERE student_name = ? AND created_at >= ?""",
-        (student_name, since),
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN {_rc_sql_correct} THEN 1 ELSE 0 END), 0)
+           FROM rollcall_history WHERE {_rc_student_where()} AND created_at >= ?""",
+        (username, student_name, since),
     )
     rc_total = rc_rows[0][0] if rc_rows else 0
     rc_correct = rc_rows[0][1] if rc_rows else 0
