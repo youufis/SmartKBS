@@ -7,7 +7,7 @@ import {
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
   LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined, TagsOutlined,
-  BarChartOutlined,
+  BarChartOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -148,6 +148,9 @@ const QuestionBankPage: React.FC = () => {
   const [keywordInput, setKeywordInput] = useState('')
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
   const [creatorOptions, setCreatorOptions] = useState<{ username: string; name: string }[]>([])
+  // 多选批量删除：只作用于当前页可见行（翻页后自动剔除不可见 id，见下方 effect）
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
+  const [batchDeleting, setBatchDeleting] = useState(false)
 
   // ── 编辑弹窗 ──
   const [editModal, setEditModal] = useState(false)
@@ -180,6 +183,12 @@ const QuestionBankPage: React.FC = () => {
   useEffect(() => {
     loadQuestions()
   }, [loadQuestions])
+
+  // 列表一变（翻页/改筛选/删完刷新）就把不在这一页的 id 从选择里剔掉：
+  // 否则"已选 30 道"里混着一屏看不见的题，删除结果永远对不上号
+  useEffect(() => {
+    setSelectedRowKeys((keys) => keys.filter((k) => questions.some((q) => q.id === Number(k))))
+  }, [questions])
 
   // ── 生成试题 ──
   const [genError, setGenError] = useState<string | null>(null)
@@ -568,13 +577,84 @@ const QuestionBankPage: React.FC = () => {
     }
   }
 
+  // 权限口径统一在这里：管理员（role=admin）可动全部，教师只能动自己创建的
+  const canOperate = (record: QuestionInfo) => user?.role === 'admin' || record.creator_username === user?.username
+
+  // ── 多选批量删除 ──
+  /**
+   * 把后端按条返回的跳过原因翻成一句提示。
+   * 原因文案放前端而不是后端拼中文，英文界面才不会露出中文兜底。
+   */
+  const describeSkipped = (skipped: questionsApi.BatchDeleteSkipped[]): string => {
+    if (skipped.length === 0) return ''
+    const groups = new Map<string, questionsApi.BatchDeleteSkipped[]>()
+    skipped.forEach((s) => {
+      const arr = groups.get(s.kind) || []
+      arr.push(s)
+      groups.set(s.kind, arr)
+    })
+    const parts: string[] = []
+    groups.forEach((items, kind) => {
+      const count = items.length
+      if (kind === 'in_use') {
+        const names = items.flatMap((i) => [...(i.exams || []), ...(i.practices || [])]).slice(0, 3)
+        parts.push(t('bulkDeleteSkipInUse', { count, names: names.join(', ') }))
+      } else if (kind === 'not_owner') {
+        parts.push(t('bulkDeleteSkipNotOwner', { count }))
+      } else if (kind === 'not_found' || kind === 'already_deleted') {
+        parts.push(t('bulkDeleteSkipGone', { count }))
+      } else {
+        parts.push(t('bulkDeleteSkipOther', { count }))
+      }
+    })
+    return parts.join(' · ')
+  }
+
+  const handleBulkDelete = () => {
+    const ids = selectedRowKeys.map(Number)
+    if (ids.length === 0) {
+      message.warning(t('bulkDeleteSelectFirst'))
+      return
+    }
+    Modal.confirm({
+      title: t('confirmBulkDeleteQuestions', { count: ids.length }),
+      icon: <ExclamationCircleOutlined />,
+      content: t('confirmBulkDeleteQuestionsDesc'),
+      okText: t('bulkDelete'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      onOk: async () => {
+        setBatchDeleting(true)
+        try {
+          const res = await questionsApi.batchDeleteQuestions(ids)
+          const skipped = res.skipped || []
+          if (res.deleted > 0 && skipped.length === 0) {
+            message.success(t('bulkDeleteDone', { count: res.deleted }))
+          } else if (res.deleted > 0) {
+            // 部分成功：把跳过的原因摊开说，教师才知道去哪儿解除占用
+            message.warning(t('bulkDeletePartial', { deleted: res.deleted, detail: describeSkipped(skipped) }), 10)
+          } else {
+            message.warning(t('bulkDeleteNone', { detail: describeSkipped(skipped) }), 10)
+          }
+          setSelectedRowKeys([])
+          loadQuestions()
+        } catch (err: any) {
+          const detail = err?.response?.data?.detail
+          message.error(typeof detail === 'string' ? detail : t('deleteFailed'))
+        } finally {
+          setBatchDeleting(false)
+        }
+      },
+    })
+  }
+
   // ── 表格列定义 ──
   const columns = [
     {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
-      width: 72,
+      width: 54,
       render: (id: number) => (
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>#{id}</span>
       ),
@@ -583,7 +663,7 @@ const QuestionBankPage: React.FC = () => {
       title: t('questionType'),
       dataIndex: 'type',
       key: 'type',
-      width: 80,
+      width: 68,
       render: (type: string) => (
         <Tag color={TYPE_COLORS[type]}>{TYPE_LABELS[type] || type}</Tag>
       ),
@@ -598,12 +678,10 @@ const QuestionBankPage: React.FC = () => {
           title={<div style={{ maxWidth: 400 }}><FormulaRenderer content={text} /></div>}
           overlayStyle={{ maxWidth: 500 }}
         >
+          {/* 省略号交给列宽（CSS），这里只限制送进 KaTeX 的字符数：
+              247 字的长题干整段渲染会让 50 行的表格明显变卡 */}
           <span style={{ cursor: 'pointer' }}>
-            {text.length > 80 ? (
-              <FormulaRenderer content={text.slice(0, 80) + '...'} inline />
-            ) : (
-              <FormulaRenderer content={text} inline />
-            )}
+            <FormulaRenderer content={text.length > 120 ? text.slice(0, 120) : text} inline />
           </span>
         </Tooltip>
       ),
@@ -612,17 +690,20 @@ const QuestionBankPage: React.FC = () => {
       title: t('knowledgePoints'),
       dataIndex: 'knowledge_points',
       key: 'knowledge_points',
-      width: 150,
+      width: 96,
       ellipsis: true,
+      // 知识点最长 46 字，列宽只兜得住 p90（15 字）：截断时悬浮看全，别让人去展开行翻
       render: (text: string) => text ? (
-        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{text}</span>
+        <Tooltip title={text}>
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{text}</span>
+        </Tooltip>
       ) : '-',
     },
     {
       title: t('difficulty'),
       dataIndex: 'difficulty',
       key: 'difficulty',
-      width: 80,
+      width: 60,
       render: (d: string) => (
         <Tag color={DIFFICULTY_COLORS[d]}>{t(DIFFICULTY_LABELS[d]) || d}</Tag>
       ),
@@ -633,7 +714,8 @@ const QuestionBankPage: React.FC = () => {
       // 导致同一批题的创建者一会儿 root、一会儿 管理员、一会儿 UNET; creator_username 恒有值且唯一
       dataIndex: 'creator_username',
       key: 'creator_username',
-      width: 100,
+      width: 88,
+      ellipsis: true,
       render: (username: string, record: QuestionInfo) => (
         <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
           {username || record.creator_name}
@@ -645,6 +727,7 @@ const QuestionBankPage: React.FC = () => {
       dataIndex: 'has_svg',
       key: 'has_svg',
       width: 80,
+      align: 'center' as const,
       render: (has_svg: number, record: QuestionInfo) => {
         // 解析 media_files（可能是 JSON 字符串或数组）
         let mf: any[] = []
@@ -655,12 +738,12 @@ const QuestionBankPage: React.FC = () => {
         }
         // 有 SVG 配图 → 显示 SVG 缩略图
         if (has_svg && record.svg_content) {
-          return <SVGViewer svgCode={record.svg_content} description={t('preview')} thumbHeight={50} />
+          return <SVGViewer svgCode={record.svg_content} description={t('preview')} thumbHeight={30} />
         }
         // 有万相/上传的图片 → 显示第一张缩略图
         if (mf.length > 0 && mf[0].url) {
           return (
-            <div style={{ width: 60, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <div style={{ width: 60, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
               <Image src={mf[0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                 preview={{ mask: null }} />
             </div>
@@ -681,16 +764,25 @@ const QuestionBankPage: React.FC = () => {
       title: t('time'),
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 150,
-      render: (t: string) => t ? t.slice(0, 16) : '-',
+      width: 96,
+      render: (v: string) => {
+        if (!v) return '-'
+        // 同一年的题只显示"月-日 时:分"，跨年才补年份；完整时间戳收进 Tooltip
+        const compact = v.slice(0, 4) === dayjs().format('YYYY') ? v.slice(5, 16) : v.slice(0, 10)
+        return (
+          <Tooltip title={v.slice(0, 19)}>
+            <span style={{ fontSize: 12, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{compact}</span>
+          </Tooltip>
+        )
+      },
     },
     {
       title: t('actions'),
       key: 'action',
-      width: 100,
+      width: 112,
       render: (_: any, record: QuestionInfo) => {
-        // 权限：管理员（role=0）可操作全部，教师只能操作自己的
-        const canEdit = user?.role === 'admin' || record.creator_username === user?.username
+        // 权限：管理员（role=0）可操作全部，教师只能操作自己的（与勾选框同一口径）
+        const canEdit = canOperate(record)
         if (!canEdit) return <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('onlyCreatorCanOperate')}</span>
         return (
           <Space size="small">
@@ -1185,6 +1277,22 @@ const QuestionBankPage: React.FC = () => {
           </Col>
         </Row>
 
+        {/* ── 多选操作条：勾选后才出现，紧贴表格，删完即隐藏 ── */}
+        {selectedRowKeys.length > 0 && (
+          <Card size="small" style={{ borderRadius: 8, background: '#fff7f7', border: '1px solid #ffccc7' }}>
+            <Space wrap size={8}>
+              <Typography.Text style={{ fontSize: 13 }}>
+                <DeleteOutlined /> {t('selectedCount', { count: selectedRowKeys.length })}
+              </Typography.Text>
+              <Button danger size="small" loading={batchDeleting} onClick={handleBulkDelete}>
+                {t('bulkDelete')}
+              </Button>
+              <Button size="small" onClick={() => setSelectedRowKeys([])}>{t('clearSelection')}</Button>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('bulkDeleteScopeTip')}</Typography.Text>
+            </Space>
+          </Card>
+        )}
+
         {/* ── 题库表格 ── */}
         <Table
           dataSource={questions}
@@ -1192,6 +1300,18 @@ const QuestionBankPage: React.FC = () => {
           rowKey="id"
           loading={loading}
           size="small"
+          tableLayout="fixed"
+          scroll={{ x: 1000 }}
+          rowSelection={{
+            columnWidth: 40,
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys),
+            preserveSelectedRowKeys: false,
+            getCheckboxProps: (record: QuestionInfo) => ({
+              // 别人创建的题直接不让勾，省掉"删完才发现没权限"
+              disabled: !canOperate(record),
+            }),
+          }}
           pagination={{
             current: page,
             pageSize,
@@ -1202,6 +1322,7 @@ const QuestionBankPage: React.FC = () => {
           }}
           locale={{ emptyText: <Empty description={t('emptyQuestions')} /> }}
           expandable={{
+            columnWidth: 36,
             expandedRowRender: (record) => (
               <div style={{ padding: '8px 0', maxWidth: 800 }}>
                 <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>

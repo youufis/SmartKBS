@@ -199,6 +199,29 @@ export async function deleteQuestion(id: number): Promise<{ message: string }> {
   return data;
 }
 
+/** 批量删除里被跳过的题：kind 由前端翻译，exams/practices 是占用该题的活动名 */
+export interface BatchDeleteSkipped {
+  id: number;
+  kind: 'not_found' | 'already_deleted' | 'not_owner' | 'in_use' | string;
+  exams?: string[];
+  practices?: string[];
+}
+
+export interface BatchDeleteResult {
+  success: boolean;
+  deleted: number;
+  skipped: BatchDeleteSkipped[];
+}
+
+/**
+ * 试题管理多选批量删除（软删除）。
+ * 逐条校验归属与占用：能删的都删，删不掉的按条返回原因，不整批回滚。
+ */
+export async function batchDeleteQuestions(ids: number[]): Promise<BatchDeleteResult> {
+  const { data } = await apiClient.post('/api/questions/batch-delete', { ids });
+  return data;
+}
+
 export async function getQuestionTypes(): Promise<{ types: QuestionTypeOption[] }> {
   const { data } = await apiClient.get('/api/questions/types/list');
   return data;

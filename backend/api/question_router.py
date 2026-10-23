@@ -1479,6 +1479,125 @@ async def delete_question(question_id: int, request: Request):
     return {"message": "删除成功"}
 
 
+class BatchDeleteRequest(BaseModel):
+    """批量删除试题请求（试题管理页多选批量删除）"""
+    ids: list[int]
+
+
+def _questions_refs_map(ids: list[int]) -> dict[int, tuple[list, list]]:
+    """批量查引用：一次拿到每道题各自被哪些考试/同步练习引用。
+
+    判定口径与单题删除的 _question_refs 完全一致，只是把 2N 次查询压成 2 次
+    —— 勾选几十上百道题时，逐题查引用会让接口明显变慢。
+    """
+    ph = ",".join("?" for _ in ids)
+    params = tuple(ids)
+    exam_rows = execute_query(
+        f"""SELECT DISTINCT eq.question_id, e.id, e.title, e.status
+            FROM exams e
+            JOIN exam_questions eq ON eq.exam_id = e.id
+            WHERE eq.question_id IN ({ph})""",
+        params,
+    )
+    prac_rows = execute_query(
+        f"""SELECT DISTINCT psq.question_id, ps.id, ps.title, ps.status
+            FROM practice_sessions ps
+            JOIN practice_session_questions psq ON psq.session_id = ps.id
+            WHERE psq.question_id IN ({ph})""",
+        params,
+    )
+    refs: dict[int, tuple[list, list]] = {qid: ([], []) for qid in ids}
+    for row in exam_rows or []:
+        qid = int(row["question_id"])
+        if qid in refs:
+            refs[qid][0].append({k: v for k, v in row.items() if k != "question_id"})
+    for row in prac_rows or []:
+        qid = int(row["question_id"])
+        if qid in refs:
+            refs[qid][1].append({k: v for k, v in row.items() if k != "question_id"})
+    return refs
+
+
+@router.post("/batch-delete", summary="批量删除试题(多选, 软删除)")
+async def batch_delete_questions(req: BatchDeleteRequest, request: Request):
+    """多选批量删除题库试题，规则与单题删除完全一致：
+
+      1. 只有创建者本人和管理员能删（教师删别人创建的题会被跳过）；
+      2. 被考试/同步练习引用的题不删（"正在使用中"保护和单删同口径）。
+
+    批量场景里"整批回滚"的体验最差：勾了 50 道、只因 1 道被引用就一道都删不掉。
+    因此逐条判定，能删的全删，不能删的把原因结构化返回（kind + 活动名），
+    由前端按语种汇总提示，不在这里拼中文句子。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+
+    ids = list(dict.fromkeys(int(x) for x in (req.ids or []) if int(x) > 0))
+    if not ids:
+        raise HTTPException(status_code=400, detail="请先勾选要删除的试题")
+    if len(ids) > 500:
+        # 既是 SQLite 变量上限的保护，也防一次误删几千道（一屏 50 条，500 已够用）
+        raise HTTPException(status_code=400, detail="一次最多删除 500 道试题，请分批操作")
+
+    idph = ",".join("?" for _ in ids)
+    rows = {
+        int(r["id"]): r for r in (execute_query(
+            f"SELECT id, creator_username, status, type, question_text, correct_answer "
+            f"FROM question_bank WHERE id IN ({idph})",
+            tuple(ids),
+        ) or [])
+    }
+    refs_map = _questions_refs_map(ids)
+
+    deletable: list[int] = []
+    skipped: list[dict[str, Any]] = []
+    for qid in ids:
+        row = rows.get(qid)
+        if not row:
+            skipped.append({"id": qid, "kind": "not_found"})
+            continue
+        if (row.get("status") or "active") != "active":
+            skipped.append({"id": qid, "kind": "already_deleted"})
+            continue
+        if role != 0 and (row.get("creator_username") or "") != username:
+            skipped.append({"id": qid, "kind": "not_owner"})
+            continue
+        exam_refs, practice_refs = refs_map.get(qid, ([], []))
+        if exam_refs or practice_refs:
+            skipped.append({
+                "id": qid,
+                "kind": "in_use",
+                "exams": [str(r.get("title") or r.get("id")) for r in exam_refs],
+                "practices": [str(r.get("title") or r.get("id")) for r in practice_refs],
+            })
+            continue
+        deletable.append(qid)
+
+    if deletable:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        delph = ",".join("?" for _ in deletable)
+        execute_update(
+            f"UPDATE question_bank SET status = 'deleted', updated_at = ? "
+            f"WHERE id IN ({delph}) AND status = 'active'",
+            (now,) + tuple(deletable),
+        )
+        for qid in deletable:
+            row = rows[qid]
+            logger.info(
+                "题目软删 id=%s by=%s(批量): 题型=%s 答案=%s 题干=%s"
+                % (qid, username, row.get("type"), str(row.get("correct_answer"))[:40],
+                   str(row.get("question_text"))[:60].replace("\n", " "))
+            )
+            # Q6: 配图目录归档而非物理删除, 保证以后"恢复题目"不会丢图
+            _archive_media_dir(qid)
+
+    logger.info(f"[题库] 批量删除 by={username}: 已删 {len(deletable)} 道, 跳过 {len(skipped)} 道")
+    return {"success": True, "deleted": len(deletable), "skipped": skipped}
+
+
 class DedupRequest(BaseModel):
     """题库去重请求(Q4: 默认只做预览)"""
     confirm: bool = False

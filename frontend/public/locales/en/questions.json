@@ -541,5 +541,16 @@
   "tagFillTruncated": "Showing at most 100 suggestions; confirming writes all of them",
   "tagFillColText": "Question",
   "tagFillEditTip": "Tags are editable (textbook knowledge points only, max 3); clear a row to skip that question.",
-  "imageExtractHint": "Tall screenshots are auto-sliced; upload pages one by one — duplicates are detected and reused."
+  "imageExtractHint": "Tall screenshots are auto-sliced; upload pages one by one — duplicates are detected and reused.",
+  "confirmBulkDeleteQuestions": "Delete the selected {{count}} questions?",
+  "confirmBulkDeleteQuestionsDesc": "Only your own questions (all questions for admins) that no exam or practice session references will be deleted; their image folders get archived.",
+  "bulkDeleteSelectFirst": "Select the questions to delete first",
+  "bulkDeleteDone": "Deleted {{count}} questions",
+  "bulkDeletePartial": "Deleted {{deleted}}, skipped: {{detail}}",
+  "bulkDeleteNone": "Nothing was deleted: {{detail}}",
+  "bulkDeleteSkipInUse": "{{count}} in use by exams/practice ({{names}})",
+  "bulkDeleteSkipNotOwner": "{{count}} not created by you",
+  "bulkDeleteSkipGone": "{{count}} no longer exists",
+  "bulkDeleteSkipOther": "{{count}} not deleted",
+  "bulkDeleteScopeTip": "Deletes only your own questions (all for admins) that no exam or practice session references"
 }

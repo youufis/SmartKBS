@@ -541,5 +541,16 @@
   "tagFillTruncated": "建议列表最多展示 100 条；确认写入会处理全部建议",
   "tagFillColText": "题干",
   "tagFillEditTip": "标签可增删改（只能选教材知识点，最多 3 个）；清空表示该题不写入。",
-  "imageExtractHint": "长截图会自动分片识别；多页试卷请逐张上传，重复题目自动判重回填。"
+  "imageExtractHint": "长截图会自动分片识别；多页试卷请逐张上传，重复题目自动判重回填。",
+  "confirmBulkDeleteQuestions": "确认批量删除选中的 {{count}} 道试题？",
+  "confirmBulkDeleteQuestionsDesc": "只删除本人创建（管理员不限）、且未被考试或同步练习引用的试题；删除后题目配图目录一并归档。",
+  "bulkDeleteSelectFirst": "请先勾选要删除的试题",
+  "bulkDeleteDone": "已删除 {{count}} 道试题",
+  "bulkDeletePartial": "已删除 {{deleted}} 道，跳过原因：{{detail}}",
+  "bulkDeleteNone": "没有试题被删除：{{detail}}",
+  "bulkDeleteSkipInUse": "{{count}} 道正被考试/同步练习引用（{{names}}）",
+  "bulkDeleteSkipNotOwner": "{{count}} 道不是本人创建",
+  "bulkDeleteSkipGone": "{{count}} 道已不存在",
+  "bulkDeleteSkipOther": "{{count}} 道未删除",
+  "bulkDeleteScopeTip": "只删除本人创建（管理员不限）、且未被考试或同步练习引用的试题"
 }
