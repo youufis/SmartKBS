@@ -1,7 +1,7 @@
 """
 智能点名 · 公平版 API 路由
 """
-import json, os, random, re, time
+import json, os, re, time
 from typing import Any
 
 from datetime import datetime
@@ -14,6 +14,7 @@ from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, is_admin, get_o
 from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
 from backend.logger import logger
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
+from backend import pick_engine
 from backend.permission_service import (
     get_teacher_grades,
     get_teacher_classes,
@@ -176,39 +177,23 @@ def _save_history(teacher, grade, cls, data):
                 else:
                     full_time = raw_time if raw_time else time.strftime("%Y-%m-%d %H:%M:%S")
                 c.execute(
-                    "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name, result, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (teacher, grade, cls, entry.get("student", ""), entry.get("result", ""), entry.get("points", 0), full_time),
+                    "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name,"
+                    " student_username, result, points, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (teacher, grade, cls, entry.get("student", ""), entry.get("student_username", ""),
+                     entry.get("result", ""), entry.get("points", 0), full_time),
                 )
             conn.commit()
             data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
     except Exception as e:
         logger.error(f"保存点名状态失败: {e}")
         raise
-def _weighted_pick(weights):
-    """权重越高越可能被选到，最低保底权重1"""
-    names = list(weights.keys())
-    if not names:
-        return None
-    vals = [(n, max(1, weights[n])) for n in names]
-    total = sum(w for _, w in vals)
-    r = random.random() * total
-    for name, w in vals:
-        r -= w
-        if r <= 0:
-            return name
-    return vals[-1][0]
-
-
-def _apply_decay(weights, last_time):
-    """权重自然恢复：每隔几分钟权重向10恢复，同时更新 last_time 确保持久化"""
-    if not last_time:
-        return time.time()
-    elapsed = (time.time() - last_time) / 60
-    if elapsed >= 2:
-        for s in weights:
-            weights[s] = min(10, weights[s] + elapsed * 0.3)
-        last_time = time.time()
-    return last_time
+# ── 抽人算法与状态已上收到 backend.pick_engine ──
+# 点名 / 课堂抽问 / 课堂闯关 共用同一份实现与同一份权重（班级作用域）。
+# 保留这两个原名，是为了不打断既有 import（含 class_drill / class_ladder 的跨模块引用）
+# 和测试：算法本体只有一个，杜绝"两套公平各改各的"。
+_weighted_pick = pick_engine.weighted_pick
+_apply_decay = pick_engine.apply_decay
 
 
 def _save_to_student_chat(student_name, cls, content, grade="", actor="", actor_is_admin=False):
@@ -406,44 +391,39 @@ async def api_pick(request: Request):
     if user.get("role") != ROLE_ADMIN and not _is_teacher_allowed(user["username"], grade, cls):
         return {"error": "无权操作该班级"}
 
-    state = _load_history(teacher, grade, cls)
-    students = _load_students(grade)
-    names = [s["name"] for s in students if s.get("class") == cls]
-
-    for n in names:
-        state["weights"].setdefault(n, 10)
-
-    state["last_time"] = _apply_decay(state["weights"], state.get("last_time"))
-    picked_in_round = state.setdefault("picked_in_round", [])
-
-    total_students = len(names)
-    if total_students > 0 and len(picked_in_round) / total_students >= 0.6:
-        picked_in_round.clear()
-
-    available = {n: state["weights"][n] for n in names if n not in picked_in_round}
-    if not available:
-        picked_in_round.clear()
-        available = {n: state["weights"][n] for n in names}
-
-    picked = _weighted_pick(available)
+    # 权重、本轮覆盖标记、抽人台账统一由 pick_engine 保管：
+    #   · 作用域是班级，所以这节课在抽问里被点过两次的人，点名不会当没发生过；
+    #   · 一条 UPDATE 只动被抽中那一行（旧实现是整班 DELETE+INSERT 快照写回，
+    #     同班两台大屏同时点必丢更新）；
+    #   · 每次抽人在 pick_ledger 落一行，点名管理因此能看到全部活动的抽人记录。
+    # source：调用方来源标注（智能点名页不传；AI 生成的「互动答题」资源页会传），
+    # 只进台账 note，让点名管理的抽人记录能看出这一下是在哪个页面上抽的
+    picked = pick_engine.pick_next(grade=grade, cls=cls,
+                                   activity=pick_engine.ACT_ROLLCALL, teacher=teacher,
+                                   note=str(body.get("source") or ""))
     if not picked:
         return {"error": "没有学生"}
 
-    state["weights"][picked] = max(1, state["weights"][picked] - 3)
-    picked_in_round.append(picked)
-    state["last_time"] = time.time()
-
-    _save_history(teacher, grade, cls, state)
-
-    covered = set(h.get("student") for h in state.get("history", []))
+    hist_rows = execute_query(
+        "SELECT COUNT(*) AS c, COUNT(DISTINCT student_name) AS d FROM rollcall_history"
+        " WHERE teacher_username=? AND grade=? AND class_name=?",
+        (teacher, grade, cls),
+    )
+    history_count, covered_total = (int(hist_rows[0][0]), int(hist_rows[0][1])) if hist_rows else (0, 0)
     return {
-        "student": picked,
+        "student": picked["name"],
+        "student_username": picked["username"],
+        "pick_id": picked["pick_id"],
         "grade": grade,
         "class": cls,
         "teacher": teacher,
-        "covered": len(covered),
-        "total": len(names),
-        "history_count": len(state.get("history", [])),
+        # covered 口径改为「本轮已覆盖人数」——它本来就该和 60% 自动重置对齐，
+        # 旧值取自累计历史，一节课后常年顶在 100%，看不出本轮还剩谁
+        "covered": picked["covered"],
+        "covered_total": covered_total,
+        "total": picked["total"],
+        "round_no": picked["round_no"],
+        "history_count": history_count,
     }
 
 
@@ -467,8 +447,16 @@ async def api_mark(request: Request):
     state = _load_history(teacher, grade, cls)
     points_added = 0
 
+    _pid = int(body.get("pick_id") or 0) or None
+    # 先定位"这次判定对应哪一次抽人"：同班同名两人时，学号以台账行为准，
+    # 否则答对 +1 的权重与历史里的学号都会记到另一个张三头上
+    # （AI 生成的互动答题页面就是这么调的，它只回传姓名）
+    _led = pick_engine.resolve_pick(grade, cls, pick_engine.ACT_ROLLCALL, student, pick_id=_pid)
+    _key, _uname = _led["student_key"], _led["student_username"]
+
     if result == "correct":
-        state["weights"][student] = min(10, state["weights"].get(student, 10) + 1)
+        # 答对回升权重：改走共用引擎（抽问/闯关答对加的是同一份权重）
+        pick_engine.bonus_for_correct(grade=grade, cls=cls, student=student, student_key=_key)
         if not noScore:
             scores = _load_scores(teacher)
             sk = _score_key(teacher, grade, cls, student)
@@ -508,6 +496,7 @@ async def api_mark(request: Request):
 
     state.setdefault("history", []).append({
         "student": student,
+        "student_username": _uname,
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "result": result,
         "points": points_added,
@@ -515,6 +504,15 @@ async def api_mark(request: Request):
     })
 
     _save_history(teacher, grade, cls, state)
+
+    # 回填台账那一次抽人（结果/积分）；键盘流直接标结果、没先抽人时补记一行
+    try:
+        pick_engine.finish(grade=grade, cls=cls, activity=pick_engine.ACT_ROLLCALL,
+                           student=student, result=result, points=points_added,
+                           pick_id=int(body.get("pick_id") or 0) or None,
+                           ref_table="rollcall_history", teacher=teacher)
+    except Exception as e:
+        logger.warning(f"[点名] 抽人台账回填失败 {grade}/{cls}/{student}: {e}")
 
     scores = _load_scores(teacher)
     sk = _score_key(teacher, grade, cls, student)
@@ -543,11 +541,16 @@ async def api_history(request: Request):
     names = [s["name"] for s in students if s.get("class") == cls]
     covered = set(h.get("student") for h in state.get("history", []))
     correct_count = sum(1 for h in state.get("history", []) if h.get("result") == "correct")
+    # 权重与本轮以共用引擎为准（点名页顶部的"已点人数"要和 60% 重置同一口径）
+    est = pick_engine.stats(grade=grade, cls=cls)
     return {
         "history": state.get("history", []),
-        "weights": state.get("weights", {}),
-        "covered": len(covered),
-        "total": len(names),
+        "weights": est.get("weights") or state.get("weights", {}),
+        "picked_in_round": est.get("picked_names", []),
+        "round_no": est.get("round_no", 1),
+        "covered": est.get("covered", len(covered)),
+        "covered_total": len(covered),
+        "total": est.get("total", len(names)) or len(names),
         "correct_count": correct_count,
         "updated": state.get("updated", ""),
         "teacher": teacher,
@@ -816,6 +819,108 @@ async def admin_reset_session(request: Request):
 
     total = _reset_rollcall(teacher, grade, cls)
     return {"success": True, "total": total, "teacher": teacher}
+
+
+# ── 统一抽人台账（智能点名 / 课堂抽问 / 课堂闯关 一条时间线）──
+
+
+@router.post("/admin/pick-round/next", summary="重置抽人本轮（换一轮，不清权重）")
+async def admin_pick_round_next(request: Request):
+    """三个活动共用的"本轮重新数一遍"。
+
+    只做 new_round：清掉本轮已覆盖名单、轮次 +1，**权重原封不动**。
+    旧实现里"重新开始"是清空整班权重，共享之后那么干会把点名/抽问/闯关
+    三方攒下的公平性一起抹掉，所以这里刻意不提供清权重的入口
+    （要复位权重走 /admin/reset，那是点名自己的"重置会话"）。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    body = await request.json()
+    grade, cls = _normalize_grade_class(str(body.get("grade") or ""), str(body.get("class") or ""))
+    if not grade or not cls:
+        raise HTTPException(status_code=400, detail="缺少年级/班级")
+    if not is_admin(username) and not _is_teacher_allowed(username, grade, cls):
+        raise HTTPException(status_code=403, detail="无权操作该班级")
+    round_no = pick_engine.new_round(grade=grade, cls=cls, teacher=_get_rollcall_teacher(request, user, body))
+    logger.info(f"[抽人] {username} 重置本轮 {grade}/{cls} → 第{round_no}轮")
+    return {"success": True, "round_no": round_no, "grade": grade, "class": cls}
+
+
+
+
+@router.get("/admin/pick-ledger", summary="抽人记录台账（全部活动）")
+async def admin_pick_ledger(request: Request):
+    """点名管理「抽人记录」视图的数据源：三处抽人合并成一条时间线。
+
+    权限：管理员看全部；教师默认只看自己操作过的记录，指定班级时校验任教范围。
+    明细不在这张表里——抽问的题目快照在 class_drill_records、闯关的关卡轨迹在
+    class_ladder_runs，前端按 ref_table/ref_id 跳回原活动面板看详情。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    q = request.query_params
+    activity = str(q.get("activity") or "").strip()
+    grade, cls = _normalize_grade_class(
+        str(q.get("grade") or ""), str(q.get("class") or q.get("cls") or ""))
+    start = str(q.get("start_date") or "").strip()
+    end = str(q.get("end_date") or "").strip()
+    try:
+        limit = max(1, min(500, int(q.get("limit") or 200)))
+        offset = max(0, int(q.get("offset") or 0))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="limit/offset 需为整数")
+
+    where, params = [], []
+    if activity in pick_engine.ACTIVITIES:
+        where.append("activity=?")
+        params.append(activity)
+    if grade:
+        where.append("grade=?")
+        params.append(grade)
+    if cls:
+        where.append("class_name=?")
+        params.append(cls)
+    if start:
+        where.append("created_at>=?")
+        params.append(f"{start} 00:00:00")
+    if end:
+        where.append("created_at<=?")
+        params.append(f"{end} 23:59:59")
+    if not is_admin(username):
+        if grade and cls and not _is_teacher_allowed(username, grade, cls):
+            raise HTTPException(status_code=403, detail="无权查看该班级的抽人记录")
+        where.append("teacher_username=?")
+        params.append(username)
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+
+    rows = execute_query_dict(
+        f"SELECT id, activity, teacher_username, grade, class_name, student_username,"
+        f" student_name, round_no, result, points, ref_table, ref_id, note, created_at"
+        f" FROM pick_ledger {w} ORDER BY id DESC LIMIT ? OFFSET ?",
+        tuple(params) + (limit, offset),
+    )
+    cnt = execute_query_dict(f"SELECT COUNT(*) AS c FROM pick_ledger {w}", tuple(params))
+    by_act = execute_query_dict(
+        f"SELECT activity, COUNT(*) AS c,"
+        f" SUM(CASE WHEN result IN ('correct','win') THEN 1 ELSE 0 END) AS ok,"
+        f" SUM(CASE WHEN result='pending' THEN 1 ELSE 0 END) AS pending"
+        f" FROM pick_ledger {w} GROUP BY activity ORDER BY c DESC",
+        tuple(params),
+    )
+    top = execute_query_dict(
+        f"SELECT student_name, MAX(student_username) AS student_username, COUNT(*) AS c"
+        f" FROM pick_ledger {w} GROUP BY student_name ORDER BY c DESC LIMIT 10",
+        tuple(params),
+    )
+    return {
+        "records": rows,
+        "total": int(cnt[0]["c"]) if cnt else 0,
+        "by_activity": by_act,
+        "top_students": top,
+        "limit": limit,
+        "offset": offset,
+        "activities": list(pick_engine.ACTIVITIES),
+    }
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1657,4 +1762,14 @@ def _reset_rollcall(teacher: str, grade: str, cls: str) -> int:
         "last_time": time.time(),
     }
     _save_history(teacher, grade, cls, state)
+    # 共用权重一起复位（否则点名重置了、抽问/闯关还记着旧权重）
+    pick_engine.reset_class(grade=grade, cls=cls, teacher=teacher)
+    # 点名历史被清空，那它的抽人台账也要跟着清，否则「抽人记录」里留着查无此行的幽灵
+    try:
+        execute_insert_update(
+            "DELETE FROM pick_ledger WHERE activity='rollcall' AND teacher_username=? AND grade=? AND class_name=?",
+            (teacher, grade, cls),
+        )
+    except Exception as e:
+        logger.warning(f"[点名] 清理抽人台账失败 {grade}/{cls}: {e}")
     return len(names)

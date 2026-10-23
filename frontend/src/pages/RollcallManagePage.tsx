@@ -91,6 +91,8 @@ const RollcallTool: React.FC = () => {
   const [displayName, setDisplayName] = useState<string>('🎯')
   const [displayClass, setDisplayClass] = useState<string>('')
   const [lastPicked, setLastPicked] = useState<string>('')
+  // 本次抽人在统一台账里的那一行：标记结果时带回，台账才不会靠"猜最近一条"
+  const [lastPickId, setLastPickId] = useState<number | null>(null)
   const [rolling, setRolling] = useState(false)
   const [revealed, setRevealed] = useState(false)
   const [resultType, setResultType] = useState<'correct' | 'participated' | ''>('')
@@ -151,6 +153,7 @@ const RollcallTool: React.FC = () => {
     setRevealed(false)
     setResultType('')
     setLastPicked('')
+    setLastPickId(null)
     if (!val) return
     try {
       const { data } = await apiClient.get('/api/rollcall/classes', {
@@ -168,6 +171,7 @@ const RollcallTool: React.FC = () => {
     setRevealed(false)
     setResultType('')
     setLastPicked('')
+    setLastPickId(null)
     if (!grade || !val) return
     try {
       const { data } = await apiClient.get('/api/rollcall/students', {
@@ -280,6 +284,7 @@ const RollcallTool: React.FC = () => {
         setRevealed(true)
         setResultType('')
         setLastPicked(data.student)
+        setLastPickId(Number(data.pick_id) || null)
         setPicking(false)
         setCovered(data.covered || 0)
         setTotal(data.total || 0)
@@ -316,6 +321,7 @@ const RollcallTool: React.FC = () => {
       setRevealed(true)
       setResultType('')
       setLastPicked(data.student)
+      setLastPickId(Number(data.pick_id) || null)
       setPicking(false)
       message.success(t('picked', { student: data.student }))
       refreshHistory()
@@ -353,6 +359,7 @@ const RollcallTool: React.FC = () => {
     try {
       await apiClient.post('/api/rollcall/mark', {
         grade, class: cls, student: lastPicked, result, teacher: teacherUsername,
+        pick_id: lastPickId || undefined,
       })
       if (result === 'correct') {
         setResultType('correct')
@@ -370,7 +377,7 @@ const RollcallTool: React.FC = () => {
     } catch {
       message.error(t('markFailed'))
     }
-  }, [lastPicked, grade, cls, teacherUsername, t, refreshHistory])
+  }, [lastPicked, lastPickId, grade, cls, teacherUsername, t, refreshHistory])
 
   // ── 重置 ──
   const resetCurrent = useCallback(async () => {
@@ -383,6 +390,7 @@ const RollcallTool: React.FC = () => {
     setRevealed(false)
     setResultType('')
     setLastPicked('')
+    setLastPickId(null)
     message.info(t('resetDone'))
     refreshHistory()
   }, [grade, cls, teacherUsername, t, refreshHistory])
@@ -1606,6 +1614,11 @@ const RollcallManagePage: React.FC = () => {
             children: <SessionsManager />,
           },
           {
+            key: 'picks',
+            label: <span><BarChartOutlined /> 🧾 {t('pickLedgerTab')}</span>,
+            children: <PickLedgerManager />,
+          },
+          {
             key: 'attendance',
             label: <span><UserOutlined /> 📋 {t('attendanceStats')}</span>,
             children: <AttendanceStats />,
@@ -1613,6 +1626,260 @@ const RollcallManagePage: React.FC = () => {
         ]}
       />
     </Card>
+  )
+}
+
+// ============================================================
+// 抽人记录（智能点名 / 课堂抽问 / 课堂闯关 统一台账）
+// ============================================================
+
+/** pick_ledger 的一行：一次抽人 = 一行，明细仍在各活动自己的表里 */
+interface PickLedgerRow {
+  id: number; activity: string; teacher_username: string; grade: string; class_name: string
+  student_username: string; student_name: string; round_no: number; result: string
+  points: number; ref_table: string; ref_id: number; note: string; created_at: string
+}
+
+const PICK_RESULT_KEYS: Record<string, string> = {
+  pending: 'pickResultPending',
+  correct: 'pickResultCorrect',
+  incorrect: 'pickResultIncorrect',
+  skip: 'pickResultSkip',
+  win: 'pickResultWin',
+  lost: 'pickResultLost',
+  timeout: 'pickResultTimeout',
+  helper: 'pickResultHelper',
+}
+
+const PickLedgerManager: React.FC = () => {
+  const { t } = useTranslation('interaction')
+  const user = useAuthStore((s) => s.user)
+  const [rows, setRows] = useState<PickLedgerRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [byAct, setByAct] = useState<{ activity: string; c: number; ok: number; pending: number }[]>([])
+  const [top, setTop] = useState<{ student_name: string; student_username: string; c: number }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [activity, setActivity] = useState('')
+  const [grade, setGrade] = useState('')
+  const [cls, setCls] = useState('')
+  const [grades, setGrades] = useState<string[]>([])
+  const [classes, setClasses] = useState<string[]>([])
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [roundLoading, setRoundLoading] = useState(false)
+
+  const actLabel = (key: string) => (
+    key === 'rollcall' ? t('pickActRollcall')
+      : key === 'class_drill' ? t('pickActDrill')
+        : key === 'class_ladder' ? t('pickActLadder') : key
+  )
+  const resLabel = (r: string) => (PICK_RESULT_KEYS[r] ? t(PICK_RESULT_KEYS[r]) : (r || t('pickResultUnmarked')))
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/rollcall/admin/pick-ledger', {
+        params: {
+          activity: activity || undefined,
+          grade: grade || undefined,
+          class: cls || undefined,
+          start_date: from || undefined,
+          end_date: to || undefined,
+          limit: 200,
+        },
+      })
+      setRows(data.records || [])
+      setTotal(data.total || 0)
+      setByAct(data.by_activity || [])
+      setTop(data.top_students || [])
+    } catch (err) {
+      reportLoadError(err, { key: 'RollcallManagePage.pickLedger' })
+      setRows([])
+    } finally {
+      setLoading(false)
+    }
+  }, [activity, grade, cls, from, to])
+
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    apiClient.get('/api/rollcall/grades')
+      .then(({ data }) => setGrades((Array.isArray(data) ? data : []).map(String)))
+      .catch(() => setGrades([]))
+  }, [])
+
+  useEffect(() => {
+    if (!grade) { setClasses([]); return }
+    apiClient.get('/api/rollcall/classes', { params: { grade } })
+      .then(({ data }) => setClasses((Array.isArray(data) ? data : [])
+        .map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.display_name || '')))
+        .filter(Boolean)))
+      .catch(() => setClasses([]))
+  }, [grade])
+
+  // 列表与导出共用一套筛选参数：所见即所得，导出的是"我看到的那批"
+  const filterParams = () => ({
+    activity: activity || undefined,
+    grade: grade || undefined,
+    class: cls || undefined,
+    start_date: from || undefined,
+    end_date: to || undefined,
+  })
+
+  const exportLedger = async () => {
+    setExporting(true)
+    try {
+      const resp = await apiClient.get('/api/export/pick-ledger', {
+        params: filterParams(), responseType: 'arraybuffer',
+      })
+      const disp = String(resp.headers['content-disposition'] || '')
+      const m = disp.match(/filename\*=(?:UTF-8'')?([^;\s]+)/i)
+      const name = m ? decodeURIComponent(m[1]) : 'pick_ledger.xlsx'
+      const blob = new Blob([resp.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      // 404 = 这批筛选没有记录；400 = 超上限，后端给的原因要原样说清楚
+      const detail = err?.response?.data
+      const text = detail instanceof ArrayBuffer
+        ? new TextDecoder().decode(detail)
+        : String(detail?.detail || detail || '')
+      message.error(err?.response?.status === 404 ? t('pickLedgerEmpty')
+        : (text ? t('pickLedgerExportBlocked', { reason: text }) : t('pickLedgerExportFailed')))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const nextRound = async () => {
+    if (!grade || !cls) { message.warning(t('pickRoundNeedClass')); return }
+    setRoundLoading(true)
+    try {
+      const { data } = await apiClient.post('/api/rollcall/admin/pick-round/next', { grade, class: cls })
+      message.success(t('pickRoundDone', { round: data.round_no }))
+      load()
+    } catch (err: any) {
+      message.error(String(err?.response?.data?.detail || t('pickRoundFailed')))
+    } finally {
+      setRoundLoading(false)
+    }
+  }
+
+  const columns = [
+    { title: t('pickColTime'), dataIndex: 'created_at', key: 'created_at', width: 150,
+      render: (v: string) => <span style={{ fontSize: 12 }}>{v ? v.slice(0, 16) : '-'}</span> },
+    { title: t('pickColActivity'), dataIndex: 'activity', key: 'activity', width: 96,
+      render: (a: string) => <Tag color={a === 'rollcall' ? 'blue' : a === 'class_drill' ? 'green' : 'purple'}>{actLabel(a)}</Tag> },
+    { title: t('pickColStudent'), dataIndex: 'student_name', key: 'student_name', width: 120,
+      render: (n: string, r: PickLedgerRow) => (
+        <Space size={4}>
+          <span>{n}</span>
+          {r.student_username ? <Text type="secondary" style={{ fontSize: 12 }}>{r.student_username}</Text> : null}
+        </Space>
+      ) },
+    { title: t('pickColClass'), key: 'class', width: 150,
+      render: (_: unknown, r: PickLedgerRow) => `${r.grade} · ${r.class_name}` },
+    { title: t('pickColRound'), dataIndex: 'round_no', key: 'round_no', width: 72,
+      render: (v: number) => v ? `#${v}` : '-' },
+    { title: t('pickColResult'), dataIndex: 'result', key: 'result', width: 110,
+      render: (v: string) => (
+        <Tag color={v === 'correct' || v === 'win' ? 'green' : v === 'pending' ? 'default'
+          : v === 'helper' ? 'cyan' : v === 'skip' ? 'gold' : 'red'}>{resLabel(v)}</Tag>
+      ) },
+    { title: t('pickColPoints'), dataIndex: 'points', key: 'points', width: 72,
+      render: (v: number) => v ? <Text strong>+{v}</Text> : '-' },
+    { title: t('pickColDetail'), key: 'detail', width: 120,
+      render: (_: unknown, r: PickLedgerRow) => {
+        const kind = r.ref_table === 'class_drill_records' ? t('pickRefDrill')
+          : r.ref_table === 'class_ladder_runs' ? t('pickRefLadder')
+            : r.ref_table === 'rollcall_history' ? t('pickActRollcall') : ''
+        return (
+          <Space size={4}>
+            {r.ref_id ? <Tag>{`${kind} #${r.ref_id}`}</Tag> : <Text type="secondary">-</Text>}
+            {r.note ? <Text type="secondary" style={{ fontSize: 12 }}>{r.note}</Text> : null}
+          </Space>
+        )
+      } },
+    { title: t('pickColTeacher'), dataIndex: 'teacher_username', key: 'teacher_username', width: 100,
+      render: (v: string) => v || '-' },
+  ]
+
+  return (
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+      <Text type="secondary" style={{ fontSize: 13 }}>
+        {t('pickLedgerHint')}{user?.role !== 'admin' ? ` ${t('pickLedgerTeacherTip')}` : ''}
+      </Text>
+      <Card size="small" style={{ borderRadius: 8 }}>
+        <Space wrap size={8}>
+          <Select allowClear placeholder={t('pickColActivity')} style={{ width: 130 }} value={activity || undefined}
+            onChange={(v) => { setActivity(v || ''); setCls('') }}
+            options={[
+              { value: 'rollcall', label: t('pickActRollcall') },
+              { value: 'class_drill', label: t('pickActDrill') },
+              { value: 'class_ladder', label: t('pickActLadder') },
+            ]} />
+          <Select allowClear showSearch placeholder={t('grade')} style={{ width: 130 }} value={grade || undefined}
+            onChange={(v) => { setGrade(v || ''); setCls('') }}
+            options={grades.map(g => ({ label: g, value: g }))} />
+          <Select allowClear placeholder={t('classLabel')} style={{ width: 140 }} value={cls || undefined}
+            onChange={(v) => setCls(v || '')} disabled={!grade}
+            options={classes.map(c => ({ label: c, value: c }))} />
+          <DatePicker.RangePicker onChange={(_, strings) => { setFrom(strings?.[0] || ''); setTo(strings?.[1] || '') }} />
+          <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>{t('pickLedgerRefresh')}</Button>
+          <Button icon={<DownloadOutlined />} onClick={exportLedger} loading={exporting}>{t('pickLedgerExport')}</Button>
+          <Tooltip title={t('pickRoundTip')}>
+            <Button icon={<RollbackOutlined />} disabled={!grade || !cls} loading={roundLoading} onClick={nextRound}>
+              {t('pickRoundNext')}
+            </Button>
+          </Tooltip>
+          <Text type="secondary" style={{ fontSize: 13 }}>{t('pickLedgerTotal', { count: total })}</Text>
+        </Space>
+      </Card>
+
+      {(byAct.length > 0 || top.length > 0) && (
+        <Row gutter={12}>
+          <Col xs={24} md={12}>
+            <Card size="small" title={t('pickLedgerByActivity')} style={{ borderRadius: 8 }}>
+              <Space wrap size={12}>
+                {byAct.map(a => (
+                  <Text key={a.activity} style={{ fontSize: 13 }}>
+                    {actLabel(a.activity)}：{a.c}
+                    {a.pending ? <Text type="secondary">（{t('pickLedgerPending', { count: a.pending })}）</Text> : null}
+                  </Text>
+                ))}
+              </Space>
+            </Card>
+          </Col>
+          <Col xs={24} md={12}>
+            <Card size="small" title={t('pickLedgerTop')} style={{ borderRadius: 8 }}>
+              <Space wrap size={8}>
+                {top.length === 0 ? <Text type="secondary">-</Text> : top.map(x => (
+                  <Tag key={`${x.student_name}-${x.student_username}`}>{x.student_name} ×{x.c}</Tag>
+                ))}
+              </Space>
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      <Table
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={rows}
+        columns={columns}
+        scroll={{ x: 1120 }}
+        pagination={{ pageSize: 20, showSizeChanger: true }}
+        locale={{ emptyText: <Empty description={t('pickLedgerEmpty')} /> }}
+      />
+    </Space>
   )
 }
 

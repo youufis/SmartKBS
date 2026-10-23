@@ -7,10 +7,11 @@
 
 设计口径（与 docs/class-question/00-方案建议.md 一致）
 ------------------------------------------------------
-1. **底层共用、记录独立**：抽人算法（_weighted_pick / _apply_decay）、权限判定、
-   学生名单、积分键全部复用 rollcall_router 与 score_utils；但抽问的会话与流水写
-   class_drill_sessions / class_drill_records，绝不写进 rollcall_* 表 —— 老师查看点名
-   记录时不会混进抽问，反之亦然。
+1. **底层共用、明细独立**：抽人算法与**权重状态**自 2026-10 起统一由 backend.pick_engine
+   保管（点名/抽问/闯关共用同一份班级权重与同一份本轮覆盖标记），权限判定、学生名单、
+   积分键仍复用 rollcall_router 与 score_utils。抽问的题目快照与判定明细仍写自己的
+   class_drill_records；同时每次抽人在统一台账 pick_ledger 落一行，点名管理能一条时间线
+   看完三个活动抽了谁 —— 明细不混、账能看到全。
 2. **出题只有一条路**：题库优先 → 缺口交 AI → AI 题必须先入库（backend.question_fill）。
    与随堂测验/同步练习完全相同，不另写一套抽题逻辑。
 3. **大屏课堂用**：学生不使用自己设备，本模块没有学生端接口。
@@ -38,15 +39,15 @@ from backend.database import (
 from backend.logger import logger
 from backend.score_utils import load_teacher_scores, save_teacher_scores, teacher_score_key
 
-# 抽人与权限判定复用点名（同一份实现，避免两套"公平"算法各改各的）
+# 权限判定与年级班级归一复用点名（同一份实现，避免两套口径各改各的）
 from backend.api.rollcall_router import (
-    _apply_decay,
     _get_rollcall_teacher,
     _is_teacher_allowed,
     _load_students,
     _normalize_grade_class,
-    _weighted_pick,
 )
+# 抽人：算法 + 权重 + 本轮覆盖 + 台账都在这一处（点名/抽问/闯关共用）
+from backend import pick_engine
 
 router = APIRouter()
 
@@ -58,10 +59,8 @@ POINTS_SKIP = 0
 #: 出题题型：课堂抽问只要选择题与判断题
 QUESTION_TYPES = ("single", "true_false")
 
-#: 抽中一名学生后权重下调（与点名一致）；答对再 +1（上限 10）
-WEIGHT_PICK_PENALTY = 3
-WEIGHT_CORRECT_BONUS = 1
-WEIGHT_MAX = 10
+#: 权重口径（抽中 -3、答对 +1、上限 10、覆盖 60% 开新轮）只在 pick_engine 定义一次，
+#: 三个活动共用同一份状态，就不该再有三个副本各调各的数。
 
 
 def _now() -> str:
@@ -180,8 +179,8 @@ def _session_dict(session: dict, grade: str, cls: str) -> dict:
         "SELECT student_name FROM class_drill_records WHERE session_id=?", (session["id"],)
     )
     covered = len({r[0] for r in records if r[0]})
-    weights = _decode(session.get("weights"), {})
-    picked_in_round = _decode(session.get("picked_in_round"), [])
+    # 本轮覆盖与权重人数改读共用引擎（会话表里的 weights/picked_in_round 已不再是真源）
+    est = pick_engine.stats(grade=grade, cls=cls)
     return {
         "session_id": session["id"],
         "grade": grade,
@@ -192,8 +191,10 @@ def _session_dict(session: dict, grade: str, cls: str) -> dict:
         "status": session.get("status") or "active",
         "total_students": len(names),
         "covered": covered,
-        "picked_in_round": len(picked_in_round),
-        "weights_count": len(weights),
+        "round_covered": est["covered"],
+        "round_no": est["round_no"],
+        "picked_in_round": est["covered"],
+        "weights_count": len(est["weights"]),
         "correct_count": int(session.get("correct_count") or 0),
         "incorrect_count": int(session.get("incorrect_count") or 0),
         "skip_count": int(session.get("skip_count") or 0),
@@ -398,6 +399,9 @@ async def reset_session(request: Request):
         str(body.get("topic") or (old or {}).get("topic") or "").strip(),
         bool(body.get("allow_ai")),
     )
+    # 旧实现是"清空权重"，共享之后不能那么干：那会把点名/闯关攒下的公平性一起抹掉。
+    # 老师要的其实是"本轮重新数一遍"，所以开新一轮、权重保留。
+    pick_engine.new_round(grade=grade, cls=cls)
     return _session_dict(session, grade, cls)
 
 
@@ -434,42 +438,22 @@ async def draw_question(request: Request):
     }
 
 
-@router.post("/pick", summary="公平抽取一名学生（与点名同一套权重算法）")
+@router.post("/pick", summary="公平抽取一名学生（与点名共用一份班级权重，返回 pick_id 供判定回填台账）")
 async def pick_student(request: Request):
     user = get_current_user(request)
     body = await request.json()
     teacher, grade, cls = _scope_from_request(request, user, body)
 
     session = _ensure_session(teacher, grade, cls)
-    students = _load_students(grade)
-    names = [s["name"] for s in students if s.get("class") == cls]
-    if not names:
+    if not pick_engine.roster(grade, cls):
         raise HTTPException(status_code=404, detail="该班级暂无学生名单")
 
-    weights = dict(_decode(session.get("weights"), {}))
-    for n in names:
-        weights.setdefault(n, 10)
-
-    picked_in_round = list(_decode(session.get("picked_in_round"), []))
-
-    last_time = _apply_decay(weights, session.get("last_time"))
-    if len(picked_in_round) / len(names) >= 0.6:
-        picked_in_round.clear()
-    available = {n: weights[n] for n in names if n not in picked_in_round}
-    if not available:
-        picked_in_round.clear()
-        available = {n: weights[n] for n in names}
-
-    picked = _weighted_pick(available)
+    # 与点名共用一份班级权重：这节课在点名里被抽过的人，这里抽中概率就该降低，
+    # 反过来也一样。旧实现各存一份 weights，两边互不知情。
+    picked = pick_engine.pick_next(grade=grade, cls=cls,
+                                   activity=pick_engine.ACT_DRILL, teacher=teacher)
     if not picked:
         raise HTTPException(status_code=404, detail="没有可抽取的学生")
-    weights[picked] = max(1, weights[picked] - WEIGHT_PICK_PENALTY)
-    picked_in_round.append(picked)
-
-    session["weights"] = weights
-    session["picked_in_round"] = picked_in_round
-    session["last_time"] = time.time()
-    _save_session(session)
 
     rows = execute_query(
         "SELECT student_name, result, points FROM class_drill_records "
@@ -480,9 +464,13 @@ async def pick_student(request: Request):
         "SELECT student_name FROM class_drill_records WHERE session_id=?", (session["id"],)
     )
     return {
-        "student": picked,
+        "student": picked["name"],
+        "student_username": picked["username"],
+        "pick_id": picked["pick_id"],
         "covered": len({r[0] for r in covered_rows if r[0]}),
-        "total": len(names),
+        "round_covered": picked["covered"],
+        "round_no": picked["round_no"],
+        "total": picked["total"],
         "last_record": (
             {"student": rows[0][0], "result": rows[0][1], "points": rows[0][2]} if rows else None
         ),
@@ -530,30 +518,42 @@ async def judge(request: Request):
         scores[key] = scores.get(key, 0) + points
         save_teacher_scores(scores, teacher)
 
-    weights = dict(_decode(session.get("weights"), {}))
+    _pid = int(body.get("pick_id") or 0) or None
+    # 同班同名两个人时以台账行为准，姓名只在没有 pick_id 时兜底
+    _led = pick_engine.resolve_pick(grade, cls, pick_engine.ACT_DRILL, student, pick_id=_pid)
+    _key, stu_username = _led["student_key"], _led["student_username"]
     if result == "correct":
-        weights[student] = min(WEIGHT_MAX, weights.get(student, WEIGHT_MAX) + WEIGHT_CORRECT_BONUS)
-    session["weights"] = weights
+        # 答对回升权重（与点名标对、闯关过关加的是同一份班级权重）
+        pick_engine.bonus_for_correct(grade=grade, cls=cls, student=student, student_key=_key)
 
     counter_key = {"correct": "correct_count", "incorrect": "incorrect_count",
                    "skip": "skip_count"}[result]
     session[counter_key] = int(session.get(counter_key) or 0) + 1
     _save_session(session)
 
-    execute_insert_update(
+    rec_id = execute_insert_update(
         "INSERT INTO class_drill_records "
-        "(session_id, teacher_username, grade, class_name, student_name, question_id, "
+        "(session_id, teacher_username, grade, class_name, student_name, student_username, question_id, "
         " question_text, question_type, options, correct_answer, student_answer, explanation, source, "
         " result, points, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            session["id"], teacher, grade, cls, student, question.get("id"),
+            session["id"], teacher, grade, cls, student, stu_username, question.get("id"),
             question.get("question") or "", question.get("type") or "",
             json.dumps(question.get("options") or [], ensure_ascii=False),
             question.get("answer") or "", student_answer, question.get("explanation") or "",
             question.get("source") or "bank", result, points, _now(),
         ),
     )
+    # 统一台账：把刚才那次抽人的结果与明细指针补上（同班同名靠学号区分）
+    try:
+        pick_engine.finish(grade=grade, cls=cls, activity=pick_engine.ACT_DRILL,
+                           student=student, result=result, points=points,
+                           pick_id=int(body.get("pick_id") or 0) or None,
+                           ref_table="class_drill_records", ref_id=int(rec_id or 0),
+                           teacher=teacher)
+    except Exception as e:
+        logger.warning(f"[课堂抽问] 抽人台账回填失败 {grade}/{cls}/{student}: {e}")
 
     scores = load_teacher_scores(teacher)
     return {
@@ -634,6 +634,10 @@ async def delete_session(session_id: int, request: Request):
         raise HTTPException(status_code=403, detail="无权删除该会话")
     with get_connection() as conn:
         c = conn.cursor()
+        # 台账先按"这场会话的明细"清掉，否则抽人记录里会留下指向已删明细的幽灵行
+        c.execute(
+            "DELETE FROM pick_ledger WHERE activity='class_drill' AND ref_table='class_drill_records'"
+            " AND ref_id IN (SELECT id FROM class_drill_records WHERE session_id=?)", (session_id,))
         c.execute("DELETE FROM class_drill_records WHERE session_id=?", (session_id,))
         c.execute("DELETE FROM class_drill_sessions WHERE id=?", (session_id,))
         conn.commit()

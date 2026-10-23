@@ -360,6 +360,12 @@ def _delete_user_completely(username: str):
         delete_ops.append(("DELETE FROM scores WHERE student_name=?", (student_name,)))
         delete_ops.append(("DELETE FROM rollcall_weights WHERE student_name=?", (student_name,)))
         delete_ops.append(("DELETE FROM rollcall_history WHERE student_name=?", (student_name,)))
+    # 抽人共用引擎的数据（点名/抽问/闯关同一份）：权重行、本轮占用、台账行
+    try:
+        from backend import pick_engine
+        pick_engine.purge_student(username)
+    except Exception as e:
+        logger.warning(f"清理抽人共享数据失败 username={username}: {e}")
     # 教师任教关系
     delete_ops.append(("DELETE FROM teacher_assignments WHERE teacher_username=?", (username,)))
     # 最后删除用户本身
@@ -581,6 +587,14 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
             new_class_d = _class_display_name(class_id, class_val)
             if cur_name != name_val or old_grade_d != new_grade_d or old_class_d != new_class_d:
                 try:
+                    # 共享权重按学号建键，改名/转班后把班级与姓名快照一起搬走，
+                    # 否则新班查不到这行 → 该生又变成"从没被抽过"的初始权重
+                    if old_class_d != new_class_d or cur_name != name_val:
+                        execute_insert_update(
+                            "UPDATE pick_state SET student_name=?, grade=?, class_name=?,"
+                            " updated_at=datetime('now','localtime') WHERE student_username=?",
+                            (name_val, new_grade_d, new_class_d, username),
+                        )
                     for table in ("scores", "rollcall_history", "rollcall_weights"):
                         execute_insert_update(
                             f"UPDATE {table} SET student_name=?, grade=?, grade_id=?, class_name=?, class_id=? "

@@ -424,7 +424,7 @@ const QUESTION_BANK = [
 ];
 
 /* ═══════ 全局状态 & 模拟数据（勿改） ═══════ */
-let state = {grade:'', cls:'', student:'', round:0, qIdx:0, correct:0, startTime:0, students:[], scores:[], answers:[], wrongs:[]};
+let state = {grade:'', cls:'', student:'', pickId:0, round:0, qIdx:0, correct:0, startTime:0, students:[], scores:[], answers:[], wrongs:[]};
 const GROUPS = [];
 const MOCK_STUDENTS = ['张伟','李娜','王强','刘洋','陈静','杨帆','赵敏','黄磊','周杰','吴昊'];
 const MOCK_CLASSES = ['高一(1)班','高一(2)班','高一(3)班'];
@@ -473,15 +473,18 @@ async function loadStudents(){
 }
 async function apiPick(){
   try{
-    const r=await fetch('/api/rollcall/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.cls,teacher:TEACHER})});
+    // source：让点名管理的「抽人记录」能看出这一下是在互动答题页抽的
+    const r=await fetch('/api/rollcall/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.cls,teacher:TEACHER,source:'互动答题'})});
     const d=await r.json();
-    if(d&&!d.error&&d.student)return d.student;
+    if(d&&!d.error&&d.student){state.pickId=d.pick_id||0;return d.student;}
   }catch(e){}
+  state.pickId=0;   // 走本地兜底就没有后端台账行，必须清零，别把上一次的行号回传给 mark
   const pool=state.students.length?state.students:MOCK_STUDENTS;
   return pool[Math.floor(Math.random()*pool.length)];
 }
 function apiMark(result){
-  fetch('/api/rollcall/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.cls,student:state.student,result:result,teacher:TEACHER})}).catch(()=>{});
+  // pick_id 必带：同班两个同名学生时，后端只能靠它把权重与学号记到抽中的那个人头上
+  fetch('/api/rollcall/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.cls,student:state.student,result:result,teacher:TEACHER,pick_id:state.pickId||undefined})}).catch(()=>{});
 }
 function apiSaveScore(points){
   fetch('/api/scores/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.cls,name:state.student,points:points,teacher:TEACHER})}).then(r=>{if(r.ok)showToast('💰','积分已保存');}).catch(()=>{showToast('📝','本地模式');});
@@ -805,8 +808,8 @@ initGrades();
 1. `GET /api/rollcall/grades` → 年级列表（string[]）
 2. `GET /api/rollcall/classes?grade={grade}&teacher={TEACHER}` → 班级列表（string[]）
 3. `GET /api/rollcall/students?grade={grade}&class={class}&teacher={TEACHER}` → 学生列表（[{name,...}]）
-4. `POST /api/rollcall/pick`，Body `{grade, class, teacher}` → 随机抽取学生，返回 `{student: 姓名}` 或 `{error}`
-5. `POST /api/rollcall/mark`，Body `{grade, class, student, result, teacher}`，result 取 `'correct'` / `'incorrect'` / `'skip'`
+4. `POST /api/rollcall/pick`，Body `{grade, class, teacher, source}`（source 填 `互动答题`，会显示在抽人记录里）→ 返回 `{student: 姓名, pick_id: 台账行号, student_username, covered, total, round_no}` 或 `{error}`
+5. `POST /api/rollcall/mark`，Body `{grade, class, student, result, teacher, pick_id}`，result 取 `'correct'` / `'incorrect'` / `'skip'`；**pick_id 必须把 /pick 返回的那个原样带回**
 6. `POST /api/scores/score`，Body `{grade, class, name, points, teacher}` → 保存积分
 7. `POST /api/rollcall/save-record`，Body `{grade, class, student, type, title, correctCount, totalQuestions, points, answers, teacher}` → 保存答题记录
 
@@ -818,7 +821,7 @@ initGrades();
 2. **禁止调用未定义函数**：JS 中出现的每个函数名都必须在模板中完整定义；不得删除模板中的任何函数或变量
 3. **事件绑定必须包裹**：所有按钮/下拉框绑定必须写成 `$('xxx').onclick=()=>fn()` 或 `$('xxx').onchange=()=>fn()`；禁止写成 `$('xxx').onclick=fn`（事件对象会被当作参数传入函数，导致启动即报错）
 4. **班级列表必须 API 加载**：禁止在 HTML 中硬编码班级名（班级必须由 `/api/rollcall/classes` 加载，模板已实现）
-5. **抽取必须走后端**：点名必须调用 `POST /api/rollcall/pick`（模板已实现），禁止只做本地随机
+5. **抽取必须走后端**：点名必须调用 `POST /api/rollcall/pick`（模板已实现），禁止只做本地随机；抽取与判分共用**班级级共享权重**（与智能点名、课堂闯关同一份），所以模板里的 `state.pickId` 与 `pick_id` 回传不得删改
 6. **KaTeX 必须保护**：所有公式渲染必须通过模板中的 `safeRenderMath()`（带 typeof 判断），CDN 加载失败不得中断答题流程
 7. **id 一致性**：JS 中 `$('id')` 引用的每个 id 必须在 HTML 中存在，禁止重命名模板中的任何 id
 8. **保留降级逻辑**：所有 fetch 调用必须保留模板中的 try/catch 或 .catch() 降级处理

@@ -75,6 +75,8 @@ const ClassQuestionPage: React.FC = () => {
   const [rolling, setRolling] = useState(false)
   const [picking, setPicking] = useState(false)
   const [lastPicked, setLastPicked] = useState('')
+  // 本次抽人在统一台账里的行号：判定时带回，同班同名才不会回填到别人那行
+  const [lastPickId, setLastPickId] = useState<number | null>(null)
 
   // ── 作答（学生在台上/口播选一个，老师点提交 → 服务端判对错并计分） ──
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
@@ -175,7 +177,7 @@ const ClassQuestionPage: React.FC = () => {
   const handleClassChange = (val: string) => {
     clearAllTimers()
     setCls(val)
-    setDisplayName('🎯'); setLastPicked(''); setLastPoints(null)
+    setDisplayName('🎯'); setLastPicked(''); setLastPickId(null); setLastPoints(null)
     loadStudents(grade, val)
     loadSession(grade, val)
   }
@@ -252,6 +254,7 @@ const ClassQuestionPage: React.FC = () => {
           setRolling(false)
           setDisplayName(data.student)
           setLastPicked(data.student)
+          setLastPickId(Number(data.pick_id) || null)
           setPicking(false)
           playSpeech(data.student)
           return
@@ -286,7 +289,9 @@ const ClassQuestionPage: React.FC = () => {
   ): Promise<boolean> => {
     if (!lastPicked) { message.warning(t('pickFirst')); return false }
     try {
-      const data = await judgeDrillAnswer({ grade, class: cls, student: lastPicked, ...payload })
+      const data = await judgeDrillAnswer({
+        grade, class: cls, student: lastPicked, pick_id: lastPickId || undefined, ...payload,
+      })
       setLastPoints(data.points_added)
       setRecords((prev) => [{
         id: Date.now(), student_name: lastPicked,
@@ -305,7 +310,7 @@ const ClassQuestionPage: React.FC = () => {
       message.error(String(e?.response?.data?.detail || t('judgeFailed')))
       return false
     }
-  }, [lastPicked, grade, cls, question, t])
+  }, [lastPicked, lastPickId, grade, cls, question, t])
 
   /** 提交作答：服务端判对错 → 自动公布答案并结算（答对 5 / 答错 2） */
   const submitAnswer = useCallback(async () => {
@@ -336,7 +341,7 @@ const ClassQuestionPage: React.FC = () => {
       setRecords([])
       setQuestion(null)
       setUsedIds([])
-      setDisplayName('🎯'); setLastPicked(''); setLastPoints(null)
+      setDisplayName('🎯'); setLastPicked(''); setLastPickId(null); setLastPoints(null)
       message.success(t('resetDone'))
     } catch (e: any) {
       message.error(String(e?.response?.data?.detail || t('resetFailed')))

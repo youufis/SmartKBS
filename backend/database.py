@@ -397,9 +397,67 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass
 
+            # ── 抽人共用引擎：智能点名 / 课堂抽问 / 课堂闯关 共用一份权重、一张台账 ──
+            # 作用域是班级（grade + class_name），不含 teacher：同班换老师/管理员代课
+            # 不该各有一套权重。学生主键 student_key = 学号，缺学号退化成 "NAME:姓名"。
+            c.execute("""CREATE TABLE IF NOT EXISTS pick_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                student_key TEXT NOT NULL,
+                student_username TEXT DEFAULT '',
+                student_name TEXT DEFAULT '',
+                weight REAL DEFAULT 10,
+                last_picked_at TEXT,
+                updated_at TEXT,
+                UNIQUE(grade, class_name, student_key)
+            )""")
+            # 本轮覆盖标记：三个活动读写同一行，覆盖 60% 自动 +1 轮
+            c.execute("""CREATE TABLE IF NOT EXISTS pick_round (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                round_no INTEGER DEFAULT 1,
+                picked TEXT DEFAULT '[]',
+                last_time REAL,
+                updated_at TEXT,
+                UNIQUE(grade, class_name)
+            )""")
+            # 抽人台账：一行 = 一次抽人。抽问的题目快照、闯关的关卡轨迹仍留在各自明细表，
+            # 这里只记"谁、何时、哪个活动、结果如何"，并用 ref_table/ref_id 指回明细。
+            c.execute("""CREATE TABLE IF NOT EXISTS pick_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activity TEXT NOT NULL,
+                teacher_username TEXT DEFAULT '',
+                grade TEXT DEFAULT '',
+                class_name TEXT DEFAULT '',
+                student_key TEXT DEFAULT '',
+                student_username TEXT DEFAULT '',
+                student_name TEXT DEFAULT '',
+                round_no INTEGER DEFAULT 1,
+                result TEXT DEFAULT 'pending',
+                points INTEGER DEFAULT 0,
+                ref_table TEXT DEFAULT '',
+                ref_id INTEGER DEFAULT 0,
+                note TEXT DEFAULT '',
+                created_at TEXT
+            )""")
+            for _idx in (
+                "CREATE INDEX IF NOT EXISTS idx_pick_state_class ON pick_state(grade, class_name)",
+                "CREATE INDEX IF NOT EXISTS idx_pick_ledger_class ON pick_ledger(grade, class_name, created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_pick_ledger_activity ON pick_ledger(activity, created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_pick_ledger_student ON pick_ledger(student_username, created_at)",
+            ):
+                try:
+                    c.execute(_idx)
+                except sqlite3.OperationalError:
+                    pass
+
+
             # ── 课堂抽问（随机抽问）会话表 ──
-            # 与点名同源但**各自独立**：抽人算法与计分口径复用点名，会话与流水不写进点名单，
-            # 老师查看点名记录时不会混进抽问，反之亦然。
+            # 抽人权重与本轮覆盖标记自 2026-10 起改由 backend.pick_engine 统一保管
+            # （点名/抽问/闯关共用一份），本表 weights/picked_in_round 仅作历史遗留列保留；
+            # 题目与判定流水仍在 class_drill_records，点名记录不被混入。
             c.execute("""CREATE TABLE IF NOT EXISTS class_drill_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 teacher_username TEXT NOT NULL,
@@ -529,6 +587,13 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_clr_session ON class_ladder_runs(session_id, created_at)")
             except sqlite3.OperationalError:
                 pass
+
+                        # 三张抽人记录表原本只按姓名记账，同班同名会互相顶记录；统一补学号列，
+            # 存量由 scripts/backfill_pick_shared_state.py 回填。放在这几张表建好之后，
+            # 否则新库首启会先 ALTER 一张还不存在的表。
+            _ensure_column(c, "rollcall_history", "student_username", "TEXT DEFAULT ''")
+            _ensure_column(c, "class_drill_records", "student_username", "TEXT DEFAULT ''")
+            _ensure_column(c, "class_ladder_runs", "student_username", "TEXT DEFAULT ''")
 
             # ── 任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS tasks (

@@ -4,6 +4,7 @@
 """
 import csv
 import io
+from typing import Any
 import json
 import re
 from datetime import datetime
@@ -15,7 +16,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 
 from backend.api.dependencies import get_current_user
-from backend.database import execute_query
+from backend.database import execute_query, execute_query_dict
 from backend.question_db import (
     execute_query as q_execute_query,
     execute_query_one,
@@ -472,7 +473,8 @@ def export_rollcall(
     cnt = execute_query(f"SELECT COUNT(*) FROM rollcall_history WHERE {where}", tuple(params))
     _guard_row_count(cnt[0][0] if cnt else 0, "点名记录")
     rows = execute_query(
-        f"""SELECT teacher_username, grade, class_name, student_name, result, points, created_at
+        f"""SELECT teacher_username, grade, class_name, student_name,
+                   IFNULL(student_username, ''), result, points, created_at
             FROM rollcall_history WHERE {where}
             ORDER BY created_at DESC""",
         tuple(params),
@@ -491,29 +493,202 @@ def export_rollcall(
         title += f" - {grade}"
     if cls:
         title += f" - {cls}班"
-    ws.merge_cells("A1:G1")
+    ws.merge_cells("A1:H1")
     ws.cell(1, 1, title).font = TITLE_FONT
 
-    headers = ["教师", "年级", "班级", "学生姓名", "回答结果", "积分变动", "时间"]
+    # 学号紧跟姓名：同名学生在导出的 Excel 里也能分清是谁
+    headers = ["教师", "年级", "班级", "学生姓名", "学号", "回答结果", "积分变动", "时间"]
     for i, h in enumerate(headers, 1):
         ws.cell(3, i, h)
     _style_header(ws, 3, len(headers))
 
-    result_map = {"1": "正确", "0": "错误", "": "待定"}
+    # 历史行的 result 存过 1/0 与 correct/incorrect 两种写法（看板那侧已统一，导出漏了）：
+    # 只认 "1" 时，新写的行会原样导出英文 correct 给教务
+    result_map = {"1": "正确", "0": "错误", "": "待定",
+                  "correct": "正确", "incorrect": "错误", "skip": "跳过",
+                  "picked": "已点名", "quiz": "随堂作答"}
     for idx, r in enumerate(rows):
         row = 4 + idx
         ws.cell(row, 1, r[0])
         ws.cell(row, 2, r[1])
         ws.cell(row, 3, r[2])
         ws.cell(row, 4, r[3])
-        ws.cell(row, 5, result_map.get(str(r[4] or ""), str(r[4] or "待定")))
-        ws.cell(row, 6, r[5])
-        ws.cell(row, 7, r[6] or "")
+        ws.cell(row, 5, r[4] or "")
+        ws.cell(row, 6, result_map.get(str(r[5] or ""), str(r[5] or "待定")))
+        ws.cell(row, 7, r[6])
+        ws.cell(row, 8, r[7] or "")
 
     _style_cells(ws, 4, len(rows) + 3, len(headers))
     _auto_width(ws, len(headers))
 
     filename = f"点名记录_{grade or '全部'}_{cls or '全部'}.xlsx"
+    return _excel_response(wb, filename)
+
+
+# ── 3b. 导出抽人台账（智能点名 / 课堂抽问 / 课堂闯关 合并时间线）──
+
+_LEDGER_ACT_CN = {"rollcall": "智能点名", "class_drill": "课堂抽问", "class_ladder": "课堂闯关"}
+_LEDGER_RESULT_CN = {
+    "pending": "待作答", "correct": "答对", "incorrect": "答错", "skip": "跳过",
+    "win": "通关", "lost": "答错终止", "timeout": "超时", "helper": "请军师",
+    "playing": "进行中", "ended": "已结束",
+}
+
+PICK_LEDGER_EXPORT_CAP = 20000
+
+
+@router.get("/pick-ledger", summary="导出抽人台账 (Excel)")
+def export_pick_ledger(
+    request: Request,
+    activity: str = Query("", description="活动 rollcall|class_drill|class_ladder，空为全部"),
+    teacher: str = Query("", description="教师用户名（仅管理员可用）"),
+    grade: str = Query("", description="年级"),
+    cls: str = Query("", description="班级"),
+    start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
+):
+    """导出三个活动合并后的抽人台账：明细 + 按学生汇总 + 导出说明。
+
+    筛选参数与点名管理「抽人记录」列表端点一致（所见即所得）；教师只能导出自己的记录，
+    与列表口径相同，避免界面看得到、导出却能越班拿数据。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    conds: list[str] = []
+    params: list[str] = []
+    if activity:
+        conds.append("activity = ?")
+        params.append(activity)
+    if role == 1:
+        conds.append("teacher_username = ?")
+        params.append(username)
+    elif teacher:
+        conds.append("teacher_username = ?")
+        params.append(teacher)
+    if grade:
+        conds.append("grade = ?")
+        params.append(grade)
+    if cls:
+        conds.append("class_name = ?")
+        params.append(cls)
+    if start_date:
+        conds.append("created_at >= ?")
+        params.append(start_date)
+    if end_date:
+        conds.append("created_at <= ?")
+        params.append(end_date + " 23:59:59")
+    where = " AND ".join(conds) if conds else "1=1"
+
+    cnt = execute_query(f"SELECT COUNT(*) FROM pick_ledger WHERE {where}", tuple(params))
+    total = int(cnt[0][0]) if cnt else 0
+    if total > PICK_LEDGER_EXPORT_CAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"结果超过 {PICK_LEDGER_EXPORT_CAP} 行，请缩小时间范围或加筛选条件后重试")
+    _guard_row_count(total, "抽人台账")
+    if not total:
+        raise HTTPException(status_code=404, detail="没有找到抽人记录")
+
+    rows = execute_query_dict(
+        f"""SELECT created_at, activity, teacher_username, grade, class_name,
+                   student_username, student_name, round_no, result, points,
+                   ref_table, ref_id, note
+            FROM pick_ledger WHERE {where} ORDER BY id DESC""",
+        tuple(params)) or []
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "抽人明细"
+    title = "抽人台账（点名 · 课堂抽问 · 课堂闯关）"
+    if grade:
+        title += f" - {grade}"
+    if cls:
+        title += f" - {cls}"
+    ws.merge_cells(f"A1:{get_column_letter(12)}1")
+    ws.cell(1, 1, title).font = TITLE_FONT
+    headers = ["时间", "活动", "年级", "班级", "学号", "姓名", "本轮", "结果",
+               "积分", "操作人", "明细来源", "备注"]
+    for i, h in enumerate(headers, 1):
+        ws.cell(3, i, h)
+    _style_header(ws, 3, len(headers))
+    for idx, r in enumerate(rows):
+        row = 4 + idx
+        act = str(r.get("activity") or "")
+        res = str(r.get("result") or "").strip().lower()
+        ws.cell(row, 1, r.get("created_at") or "")
+        ws.cell(row, 2, _LEDGER_ACT_CN.get(act, act))
+        ws.cell(row, 3, r.get("grade") or "")
+        ws.cell(row, 4, r.get("class_name") or "")
+        ws.cell(row, 5, r.get("student_username") or "")
+        ws.cell(row, 6, r.get("student_name") or "")
+        ws.cell(row, 7, r.get("round_no") or 1)
+        ws.cell(row, 8, _LEDGER_RESULT_CN.get(res, res or "未标记"))
+        ws.cell(row, 9, int(r.get("points") or 0))
+        ws.cell(row, 10, r.get("teacher_username") or "")
+        ref_id = int(r.get("ref_id") or 0)
+        ws.cell(row, 11, f"{r.get('ref_table') or ''} #{ref_id}".strip() if ref_id else "")
+        ws.cell(row, 12, r.get("note") or "")
+    _style_cells(ws, 4, len(rows) + 3, len(headers))
+    _auto_width(ws, len(headers))
+    ws.freeze_panes = "A4"
+
+    # 按学生汇总：老师最常问的是"这学期谁被抽了几次、答对几次"
+    agg: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        key = str(r.get("student_username") or r.get("student_name") or "")
+        a = agg.setdefault(key, {
+            "name": r.get("student_name") or "", "username": r.get("student_username") or "",
+            "class": " · ".join(x for x in (r.get("grade"), r.get("class_name")) if x),
+            "count": 0, "correct": 0, "points": 0, "by_act": {},
+        })
+        a["count"] += 1
+        if str(r.get("result") or "").lower() in ("correct", "win"):
+            a["correct"] += 1
+        a["points"] += int(r.get("points") or 0)
+        act = _LEDGER_ACT_CN.get(str(r.get("activity") or ""), str(r.get("activity") or ""))
+        a["by_act"][act] = a["by_act"].get(act, 0) + 1
+    ws2 = wb.create_sheet("按学生汇总")
+    h2 = ["序号", "学号", "姓名", "班级", "被抽次数", "答对次数", "累计积分", "活动分布"]
+    for i, h in enumerate(h2, 1):
+        ws2.cell(2, i, h)
+    _style_header(ws2, 2, len(h2))
+    for i, (key, a) in enumerate(sorted(agg.items(), key=lambda kv: (-kv[1]["count"], kv[0])), 1):
+        ws2.cell(2 + i, 1, i)
+        ws2.cell(2 + i, 2, a["username"])
+        ws2.cell(2 + i, 3, a["name"])
+        ws2.cell(2 + i, 4, a["class"])
+        ws2.cell(2 + i, 5, a["count"])
+        ws2.cell(2 + i, 6, a["correct"])
+        ws2.cell(2 + i, 7, a["points"])
+        ws2.cell(2 + i, 8, "、".join(f"{k} {v}" for k, v in sorted(a["by_act"].items())))
+    _style_cells(ws2, 3, len(agg) + 2, len(h2))
+    _auto_width(ws2, len(h2))
+    ws2.freeze_panes = "A3"
+
+    ws3 = wb.create_sheet("导出说明")
+    ws3.append(["项目", "内容"])
+    _style_header(ws3, 1, 2)
+    for line in [
+        ["导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        ["操作人", username],
+        ["筛选条件", "; ".join(f"{k}={v}" for k, v in (
+            ("活动", _LEDGER_ACT_CN.get(activity, activity)), ("年级", grade), ("班级", cls),
+            ("教师", teacher if role == 0 else username),
+            ("日期起", start_date), ("日期止", end_date)) if v) or "全部"],
+        ["记录数", str(total)],
+        ["口径说明", "一次抽人记一行；答对/通关算答对。"
+                     "点名与抽问的积分来自各自活动，未标记的行是抽到后没判定就结束的。"],
+    ]:
+        ws3.append(line)
+    _style_cells(ws3, 2, 6, 2)
+    _auto_width(ws3, 2, max_width=80)
+
+    filename = f"抽人台账_{grade or '全部'}_{cls or '全部'}.xlsx"
     return _excel_response(wb, filename)
 
 

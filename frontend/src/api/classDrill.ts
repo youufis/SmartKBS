@@ -121,7 +121,16 @@ export async function drawDrillQuestion(payload: {
 export async function pickDrillStudent(
   grade: string,
   cls: string,
-): Promise<{ student: string; covered: number; total: number }> {
+): Promise<{
+  student: string
+  /** 统一台账里这次抽人的行号：判定时带回，同名学生才不会回填错行 */
+  pick_id?: number
+  student_username?: string
+  covered: number
+  round_covered?: number
+  round_no?: number
+  total: number
+}> {
   const { data } = await apiClient.post('/api/class-drill/pick', { grade, class: cls })
   return data
 }
@@ -130,6 +139,8 @@ export async function judgeDrillAnswer(payload: {
   grade: string
   class: string
   student: string
+  /** /pick 返回的台账行号 */
+  pick_id?: number
   /** 学生所选项（字母或「对/错」）：给了就由服务端判对错 */
   selected?: string
   result?: 'correct' | 'incorrect' | 'skip'

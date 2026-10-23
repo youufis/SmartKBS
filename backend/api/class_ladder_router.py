@@ -10,10 +10,12 @@
 1. **规则同口径**：15 关阶梯分值、3 个锦囊、折减系数、答错终止，全部对齐学生端
    「知识闯关」（backend/api/quest_router.py 的 SCORE_TABLE / LIFELINE_DISCOUNT），
    不产生第二套分值口径。
-2. **复用不重写**：抽人（rollcall 权重算法）、题库召回（question_select 分层+难度）、
-   凑题策略（question_fill）、AI 题入库（question_factory）、课堂积分（score_utils）、
-   锦囊提示词（prompts/quest.py）全部复用现有实现。
-3. **记录独立**：抽人权重与流水写 class_ladder_* 三张表，不写进点名单与抽问流水。
+2. **复用不重写**：抽人（backend.pick_engine：同一套权重算法 + 同一份班级权重）、
+   题库召回（question_select 分层+难度）、凑题策略（question_fill）、AI 题入库
+   （question_factory）、课堂积分（score_utils）、锦囊提示词（prompts/quest.py）全部复用。
+3. **状态共用、明细独立**：权重与本轮覆盖标记自 2026-10 起与「智能点名」「课堂抽问」
+   共用一份（这节课在点名里被抽过两次的人，这里就该少抽到）；关卡轨迹与结算仍写
+   class_ladder_runs，另在统一台账 pick_ledger 各落一行抽人记录，点名管理一条时间线看全。
 4. **判定在服务端**：题面下发不含答案；学生所选项由服务端比对。
 5. **AI 双层开关**：系统级 CLASS_LADDER_AI_ENABLED（管理员）+ 页面级 allow_ai（老师当堂）。
 """
@@ -39,15 +41,15 @@ from backend.database import (
 from backend.logger import logger
 from backend.score_utils import load_teacher_scores, save_teacher_scores, teacher_score_key
 
-# 抽人与权限判定复用点名（同一份实现，避免两套"公平"算法各改各的）
+# 权限判定与年级班级归一复用点名（同一份实现，避免两套口径各改各的）
 from backend.api.rollcall_router import (
-    _apply_decay,
     _get_rollcall_teacher,
     _is_teacher_allowed,
     _load_students,
     _normalize_grade_class,
-    _weighted_pick,
 )
+# 抽人：算法 + 权重 + 本轮覆盖 + 台账都在这一处（点名/抽问/闯关共用）
+from backend import pick_engine
 # 题面归一化复用课堂抽问（题库/AI 两种形状统一成前端可渲染形状）
 from backend.api.class_drill_router import _normalize_client_question
 
@@ -79,10 +81,8 @@ DEFAULT_TIME_LIMIT = 0  # 0 = no countdown (default)
 DEFAULT_POOL_SIZE = 30
 SKINS = ("star", "cyber", "academy", "classic", "cloud", "sunrise", "mint")
 
-#: 抽中一名学生后权重下调（与课堂抽问一致）；答对再 +1（上限 10）
-WEIGHT_PICK_PENALTY = 3
-WEIGHT_CORRECT_BONUS = 1
-WEIGHT_MAX = 10
+#: 权重口径（抽中 -3、答对 +1、上限 10、覆盖 60% 开新轮）只在 pick_engine 定义一次，
+#: 三个活动共用同一份状态，不该再有三份副本。
 
 
 def _now() -> str:
@@ -451,30 +451,20 @@ async def _build_pool(session: dict, *, username: str, grade: str, cls: str) -> 
 # ── 一局：抽人 + 从题池取 15 题 ──
 
 
-def _pick_student_for(session: dict, names: list[str], exclude: str = "") -> str | None:
-    """按点名同一套权重抽一名学生（可排除某人，用于"请军师"）。"""
-    weights = dict(_decode(session.get("weights"), {}))
-    for n in names:
-        weights.setdefault(n, 10)
-    picked_in_round = list(_decode(session.get("picked_in_round"), []))
-    last_time = _apply_decay(weights, session.get("last_time"))
-    if len(picked_in_round) / max(1, len(names)) >= 0.6:
-        picked_in_round.clear()
-    available = {n: weights[n] for n in names if n not in picked_in_round} or {n: weights[n] for n in names}
-    if exclude and len(available) > 1:
-        trimmed = {n: w for n, w in available.items() if n != exclude}
-        if trimmed:
-            available = trimmed
-    picked = _weighted_pick(available)
-    if not picked:
-        return None
-    weights[picked] = max(1, weights[picked] - WEIGHT_PICK_PENALTY)
-    picked_in_round.append(picked)
-    session["weights"] = weights
-    session["picked_in_round"] = picked_in_round
-    session["last_time"] = last_time or time.time()
-    _save_session(session)
-    return picked
+def _pick_student_for(session: dict, names: list[str] | None = None,
+                      exclude: str = "") -> dict[str, Any] | None:
+    """按共用权重抽一名学生（可排除某人，用于"请军师"），返回引擎结果含 pick_id。
+
+    权重与本轮覆盖标记不在会话里了：闯关、点名、抽问共用班级那一份，
+    所以这里只负责"抽 + 落台账"，本局明细由调用方写 class_ladder_runs。
+    """
+    return pick_engine.pick_next(
+        grade=session.get("grade") or "",
+        cls=session.get("class_name") or "",
+        activity=pick_engine.ACT_LADDER,
+        teacher=session.get("teacher_username") or "",
+        exclude=exclude,
+    )
 
 
 def _write_student_record(run: dict, session: dict) -> None:
@@ -613,6 +603,24 @@ def _settle_run(run: dict, session: dict) -> None:
     run["ladder_score"] = ladder
     run["points_awarded"] = correct
     run["_settled"] = True
+
+    # 结算结果回填到抽人台账（points 记实际入账的课堂积分，阶梯分留在明细里）。
+    # 走 ref 指针而不是姓名：同班两个同名学生同时闯关时，按姓名反查会回填到错误那行。
+    try:
+        done = pick_engine.finish_by_ref(
+            ref_table="class_ladder_runs", ref_id=int(run.get("id") or 0),
+            result=run.get("status") or "ended", points=correct,
+            note=f"第{level}关 · 阶梯{ladder}分")
+        if not done:
+            pick_engine.finish(
+                grade=session.get("grade") or "", cls=session.get("class_name") or "",
+                activity=pick_engine.ACT_LADDER, student=run.get("student_name") or "",
+                result=run.get("status") or "ended", points=correct,
+                ref_table="class_ladder_runs", ref_id=int(run.get("id") or 0),
+                note=f"第{level}关 · 阶梯{ladder}分",
+                teacher=session.get("teacher_username") or "")
+    except Exception as e:
+        logger.warning(f"[课堂闯关] 抽人台账回填失败: {e}")
 
     if correct:
         teacher = session.get("teacher_username") or ""
@@ -853,6 +861,10 @@ async def delete_session(session_id: int, request: Request):
     if user.get("role") != ROLE_ADMIN and row.get("teacher_username") != user["username"]:
         raise HTTPException(status_code=403, detail="无权删除该场次")
     execute_insert_update("DELETE FROM class_ladder_pool WHERE session_id=?", (session_id,))
+    # 台账要跟着局走：删场次后抽人记录里不该留下指向不存在局的一行
+    execute_insert_update(
+        "DELETE FROM pick_ledger WHERE activity='class_ladder' AND ref_table='class_ladder_runs'"
+        " AND ref_id IN (SELECT id FROM class_ladder_runs WHERE session_id=?)", (session_id,))
     execute_insert_update("DELETE FROM class_ladder_runs WHERE session_id=?", (session_id,))
     execute_insert_update("DELETE FROM class_ladder_sessions WHERE id=?", (session_id,))
     logger.info(f"[课堂闯关] {user['username']} 删除场次 #{session_id}")
@@ -877,10 +889,9 @@ async def open_run(request: Request):
     if not names:
         raise HTTPException(status_code=404, detail="该班级暂无学生名单")
 
-    picked = _pick_student_for(session, names)
+    picked = _pick_student_for(session)
     if not picked:
         raise HTTPException(status_code=404, detail="没有可抽取的学生")
-    picked_in_round = list(_decode(session.get("picked_in_round"), []))
 
     snaps = _snapshot_questions(session["id"])
     if not snaps:
@@ -889,14 +900,19 @@ async def open_run(request: Request):
     now = _now()
     run_id = execute_insert_update(
         "INSERT INTO class_ladder_runs "
-        "(session_id, student_name, status, reached_level, correct_count, ladder_score, points_awarded, "
-        " lifelines_used, lifeline_by_level, questions, answers, created_at, ended_at) "
-        "VALUES (?, ?, 'playing', 0, 0, 0, 0, '[]', '{}', ?, '[]', ?, NULL)",
-        (session["id"], picked, json.dumps(snaps, ensure_ascii=False), now),
+        "(session_id, student_name, student_username, status, reached_level, correct_count, "
+        " ladder_score, points_awarded, lifelines_used, lifeline_by_level, questions, answers, "
+        " created_at, ended_at) "
+        "VALUES (?, ?, ?, 'playing', 0, 0, 0, 0, '[]', '{}', ?, '[]', ?, NULL)",
+        (session["id"], picked["name"], picked["username"],
+         json.dumps(snaps, ensure_ascii=False), now),
     )
+    # 台账那行指回本局，点名管理的抽人记录能一键跳到关卡明细
+    pick_engine.attach_ref(pick_id=picked["pick_id"], ref_table="class_ladder_runs", ref_id=int(run_id or 0))
     run = _get_run(run_id) or {}
     return {"run": _run_public(run, session),
-            "covered": len(set(picked_in_round)), "total": len(names)}
+            "covered": picked["covered"], "round_no": picked["round_no"],
+            "total": picked["total"], "pick_id": picked["pick_id"]}
 
 
 @router.get("/run/{run_id}", summary="本局状态（含当前关题面，不含答案）")
@@ -937,12 +953,12 @@ async def _apply_answer(run_id: int, user: dict, body: dict) -> dict:
 
     if ok and level < MAX_LEVELS:
         run["correct_count"] = sum(1 for a in answers if a.get("correct"))
-        weights = dict(_decode(session.get("weights"), {}))
         if run.get("student_name"):
-            weights[run["student_name"]] = min(
-                WEIGHT_MAX, weights.get(run["student_name"], WEIGHT_MAX) + WEIGHT_CORRECT_BONUS)
-        session["weights"] = weights
-        _save_session(session)
+            # 过关回升权重（与点名标对、抽问答对加的是同一份班级权重）
+            pick_engine.bonus_for_correct(grade=session.get("grade") or "",
+                                          cls=session.get("class_name") or "",
+                                          student=run["student_name"],
+                                          student_key=str(run.get("student_username") or ""))
     else:
         run["status"] = "win" if ok else ("timeout" if is_timeout else "lost")
         run["ended_at"] = _now()
@@ -1030,12 +1046,18 @@ async def use_lifeline(run_id: int, request: Request):
         result["votes"] = {k: round(v * 100 / total) for k, v in counts.items()}
         result["total_voters"] = total
     elif kind == "helper":
-        students = _load_students(session.get("grade") or "")
-        names = [s["name"] for s in students if s.get("class") == session.get("class_name")]
-        helper = _pick_student_for(session, names, exclude=run.get("student_name") or "")
+        # 名册与权重都由引擎取，这里只需要"排除本局在台学生"
+        helper = _pick_student_for(session, exclude=run.get("student_name") or "")
         if not helper:
             raise HTTPException(status_code=404, detail="该班级暂无学生名单")
-        result["student"] = helper
+        result["student"] = helper["name"]
+        result["student_username"] = helper["username"]
+        # 军师只是被叫起来帮忙，不答题：台账里当场定性，不留"待作答"的行
+        pick_engine.finish(grade=session.get("grade") or "", cls=session.get("class_name") or "",
+                           activity=pick_engine.ACT_LADDER, student=helper["name"],
+                           result="helper", points=0, pick_id=helper["pick_id"],
+                           ref_table="class_ladder_runs", ref_id=int(run.get("id") or 0),
+                           note="请军师", teacher=session.get("teacher_username") or "")
     else:
         result.update(await _ai_lifeline(kind, snap, user["username"]))
     return result

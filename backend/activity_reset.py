@@ -268,6 +268,12 @@ RESET_SCOPES: dict[str, dict[str, Any]] = {
     "class_ladder": Scope(
         "class_ladder", "课堂闯关", master="class_ladder_sessions", title_col="topic",
         targets=[
+            # 台账必须排在删局之前清：它的条件靠子查询 class_ladder_runs 找本场的局，
+            # 局先没了就一行也匹配不上，抽人记录里会留下指向不存在局的幽灵行
+            Target("pick_ledger",
+                   "activity='class_ladder' AND ref_table='class_ladder_runs'"
+                   " AND ref_id IN (SELECT id FROM class_ladder_runs WHERE session_id = :aid)",
+                   "本场学生在抽人台账里的记录"),
             Target("class_ladder_runs", "session_id = :aid", "本场所有局（含逐关明细与成绩）"),
             Target("class_ladder_pool", "session_id = :aid", "本场题池"),
         ],
