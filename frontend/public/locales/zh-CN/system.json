@@ -1388,5 +1388,9 @@
   "hwTimesUsed": "已交 {{used}} 次 · 剩余 {{left}} 次（上限 {{limit}}）",
   "hwNoTimesLeft": "提交次数已用完（上限 {{limit}} 次）",
   "hwNoTimesLeftHint": "需要再交一次，请老师在作业详情里点「回退提交」清掉本次记录。",
-  "hwPickFirstAgain": "这次没有选择新文件：要重交请先点上方区域选要上传的文件（已交过的文件不必重复上传）"
+  "hwPickFirstAgain": "这次没有选择新文件：要重交请先点上方区域选要上传的文件（已交过的文件不必重复上传）",
+  "skillNoneEnabledTitle": "当前没有任何技能生效",
+  "skillNoneEnabledDesc": "各 AI 功能仍可正常使用，但会退回基座模型的默认风格：结构化程度、示例密度、追问引导与内容安全约束都会减少。需要恢复时打开右上角「全部启用」。",
+  "skillRecommendedTag": "建议常开",
+  "skillRecommendedTip": "这项承载底线约束（如内容安全），关闭后该场景不再有此约束，功能不会报错但质量会降"
 }

@@ -14,6 +14,8 @@ export interface SkillInfo {
   tags: string[]
   compatible_with: string[]
   enabled: boolean
+  // 关掉就丢底线约束的技能（如内容安全），管理页据此打标提示
+  recommended?: boolean
   priority: number
   requires: string[]
   conflicts_with: string[]

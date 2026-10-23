@@ -725,6 +725,17 @@ const SkillManagePanel: React.FC = () => {
         )}
       </div>
 
+      {/* 一项都没启用时明确说清楚：不是坏了，是全部退回基座默认风格 */}
+      {!loading && skills.length > 0 && skills.every(s => !s.enabled) && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={t('skillNoneEnabledTitle')}
+          description={t('skillNoneEnabledDesc')}
+        />
+      )}
+
       {/* 技能列表 */}
       <Spin spinning={loading}>
         <Table
@@ -753,6 +764,13 @@ const SkillManagePanel: React.FC = () => {
                   </Tag>
                   <Text strong>{record.display_name}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>v{record.version}</Text>
+                  {record.recommended && (
+                    <Tooltip title={t('skillRecommendedTip')}>
+                      <Tag color={record.enabled ? 'green' : 'orange'} style={{ fontSize: 11, marginInlineEnd: 0 }}>
+                        {t('skillRecommendedTag')}
+                      </Tag>
+                    </Tooltip>
+                  )}
                 </Space>
               ),
             },
