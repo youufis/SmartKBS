@@ -3,6 +3,7 @@
 查询积分流水、排行榜、统计数据、称号系统
 """
 from fastapi import APIRouter, HTTPException, Request, Query
+from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.reward_engine import (
@@ -10,6 +11,10 @@ from backend.reward_engine import (
     get_student_rewards,
     get_class_ranking,
     get_activity_statistics,
+    rules_payload,
+    my_daily_status,
+    my_summary,
+    award_quality,
 )
 from backend.title_system import (
     get_full_title_info,
@@ -76,6 +81,82 @@ async def my_points(request: Request):
     return {"username": username, "total_points": total, "is_teacher": False}
 
 
+class QualityAward(BaseModel):
+    """教师认可一次具体表现（优质提问 / 优质发言 / 优质回答）"""
+    student_username: str
+    activity_type: str
+    activity_id: str
+    tier: str = "excellent"
+    activity_title: str = ""
+
+
+@router.get("/rewards/rules", summary="积分规则（学生端唯一数据源）")
+async def reward_rules(request: Request):
+    """把发分规则原样下发：活动分表、达标线、生效中的每日上限、扣分与消费口径。
+
+    学生端「积分规则」弹窗以前在前端手抄了一份数值表（RewardPage 的 RULES 数组），
+    后端改了它就漂——实测已经漂出三处：分组讨论标着有等级奖却从未发过、
+    闯关写着每次 +1 而实际每天只发一次、整套每日上限对学生只字未提。
+    现在规则只有一份，出自 backend/reward_engine.py。
+    """
+    get_current_user(request)          # 与其它端点一致的登录门槛
+    return rules_payload()
+
+
+@router.get("/rewards/my-daily-status", summary="今日额度与上限提示")
+async def my_daily_status_endpoint(request: Request):
+    """今天各池/各活动拿了多少、上限多少、以及最近一次"被上限挡住"的原因。
+
+    上限本来就会静默生效：学生做完事积分不动，界面毫无反应，只能靠猜。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    if user.get("role", 2) != 2:
+        return {"pools": [], "activities": [], "last_block_reason": "", "is_teacher": True}
+    return {**my_daily_status(username), "is_teacher": False}
+
+
+@router.get("/rewards/my-summary", summary="参与与获奖汇总")
+async def my_summary_endpoint(request: Request):
+    """参与场次 / 获奖次数 / 累计得分与消费：由后端一次聚合算准。
+
+    前端原来拿流水条数当"参与活动次数"，而流水接口只回 100 条，
+    学生的参与数会永远卡在 100，还把扣分与等级奖行也数进了"参与"。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    if user.get("role", 2) != 2:
+        return {"participation_sessions": 0, "bonus_awards": 0,
+                "points_earned": 0, "points_spent": 0, "activity_types": 0}
+    return my_summary(username)
+
+
+@router.post("/rewards/award-quality", summary="教师发放优质认可奖励")
+async def reward_quality_award(req: QualityAward, request: Request):
+    """给"答得好"而不是"答过"发分：提问、讨论发言、回答审批之外的通用认可入口。
+
+    权限与积分可见范围同源（R3：教师只能给自己任教范围内的学生加分）。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可发放认可奖励")
+    _assert_student_visible(user, req.student_username, "积分发放")
+    points = award_quality(req.student_username, req.activity_type, req.activity_id,
+                           req.tier, activity_title=req.activity_title,
+                           teacher_username=user["username"])
+    if points > 0:
+        try:
+            from backend.api.notification_router import create_notification
+            create_notification(req.student_username, "success",
+                                f"老师给了你一个「{req.tier}」认可 +{points} 分",
+                                req.activity_title or req.activity_type, user["username"])
+        except Exception:
+            pass
+    return {"awarded": points, "tier": req.tier,
+            "activity_type": req.activity_type, "activity_id": req.activity_id}
+
+
 @router.get("/rewards/my-history", summary="获取我的积分流水")
 async def my_reward_history(
     request: Request,
@@ -136,19 +217,41 @@ async def ranking(
 
 
 @router.get("/rewards/weekly-stars", summary="本周之星（学生可访问）")
-async def weekly_stars(request: Request):
-    """本周积分最高的学生 + 我自己的位置。
+async def weekly_stars(
+    request: Request,
+    grade: str = Query("", description="仅教师/管理员：指定年级"),
+    class_name: str = Query("", description="仅教师/管理员：指定班级"),
+):
+    """本周之星 + 我自己的位置（学生一律只看本班）。
 
-    此前"一周之星"只存在于教师端 dashboard（/api/dashboard/teacher-todo 里 role!=2
-    直接 403），学生侧完全没有正反馈。这里单独开一个学生可访问的只读端点：
-    - 榜单口径与教师端一致（activity_rewards 本周一起算、role=2 且未停用）
-    - 只下发 姓名/年级班/积分，不下发任何答题明细或答案数据
+    两处改动：
+    1. 口径收到本班。原来学生看到的全校前 5 名 + 全校名次：一个 40 人的班，学生
+       看到"第 47 名"却不知道分母，也永远挤不进别的班的刷分榜；还把其他年级学生的
+       姓名班级向全校公开。本班榜才可比，也只有本班谈得上公开。
+    2. 一并下发 total_students，前端能写"第 3 / 38 名"，未上榜时给诚实文案。
+
+    榜单口径与教师端一致（activity_rewards 本周一起算、role=2 且未停用），
+    只下发姓名/年级班/积分，不下发任何答题明细或答案数据。
     """
     user = get_current_user(request)
     username = user["username"]
+    role = user.get("role", 2)
     from backend.utils import week_range_str
 
     since = week_range_str()[0]   # 本周一起算，与教师端卡片同一口径
+
+    # 学生只看本班；教师/管理员可指定年级班级（都不传则全校）
+    scope_grade = ""
+    class_variants: list[str] = []
+    if role == 2:
+        me = execute_query("SELECT grade, class FROM users WHERE username=?", (username,))
+        if me:
+            scope_grade = str(me[0][0] or "").strip()
+            class_variants = _class_variants(str(me[0][1] or ""))
+    else:
+        scope_grade = (grade or "").strip()
+        class_variants = _class_variants(class_name or "")
+
     rows = execute_query(
         """SELECT ar.student_username, u.name, u.grade, u.class,
                   COALESCE(SUM(ar.points), 0) AS pts
@@ -156,43 +259,58 @@ async def weekly_stars(request: Request):
            JOIN users u ON u.username = ar.student_username
             AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
            WHERE substr(ar.created_at, 1, 10) >= ?
-           GROUP BY ar.student_username
-           ORDER BY pts DESC, u.name ASC
-           LIMIT 5""",
+           GROUP BY ar.student_username""",
         (since,),
     ) or []
+    in_scope = [r for r in rows
+                if (not scope_grade or str(r[2] or "") == scope_grade)
+                and (not class_variants or str(r[3] or "") in class_variants)]
+    in_scope.sort(key=lambda r: (-int(r[4] or 0), str(r[1] or r[0])))
     stars = [
-        {"username": r[0], "name": r[1] or r[0], "grade": r[2] or "",
-         "class": r[3] or "", "points": int(r[4] or 0)}
-        for r in rows
+        {"username": r[0], "name": r[1] or r[0], "grade": r[2] or "", "class": r[3] or "",
+         "points": int(r[4] or 0)}
+        for r in in_scope[:5]
     ]
 
-    my_points = get_student_total(username)
+    # 本班/本年级在册学生数：名次要有分母，否则"第 47 名"毫无意义
+    total_rows = execute_query(
+        """SELECT grade, class FROM users
+           WHERE role = 2 AND IFNULL(status,'active') = 'active'""", ()
+    ) or []
+    total_students = len([r for r in total_rows
+                        if (not scope_grade or str(r[0] or "") == scope_grade)
+                        and (not class_variants or str(r[1] or "") in class_variants)])
+
     my_week = execute_query(
         """SELECT COALESCE(SUM(points), 0) FROM activity_rewards
            WHERE student_username=? AND substr(created_at, 1, 10) >= ?""",
         (username, since),
     )
-    # 我的名次：本周分比我高的学生数 + 1（我自己不是学生时返回 None，不给教师刷榜位）
+    my_week_points = int((my_week[0][0] if my_week else 0) or 0)
     my_rank = None
-    if user.get("role", 2) == 2:
-        ahead = execute_query(
-            """SELECT COUNT(*) FROM (
-                 SELECT ar.student_username FROM activity_rewards ar
-                 JOIN users u ON u.username = ar.student_username
-                  AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
-                 WHERE substr(ar.created_at, 1, 10) >= ?
-                 GROUP BY ar.student_username
-                 HAVING COALESCE(SUM(ar.points), 0) > ?)""",
-            (since, int((my_week[0][0] if my_week else 0) or 0)),
-        )
-        my_rank = int(ahead[0][0] or 0) + 1 if ahead else None
+    if role == 2:
+        my_rank = next((i + 1 for i, r in enumerate(in_scope) if str(r[0]) == username), None)
     return {
         "stars": stars,
-        "my_points": int(my_points or 0),
-        "my_week_points": int((my_week[0][0] if my_week else 0) or 0),
+        "my_points": int(get_student_total(username) or 0),
+        "my_week_points": my_week_points,
         "my_rank": my_rank,
+        "ranked_count": len(in_scope),
+        "total_students": total_students,
+        "scope": {"grade": scope_grade, "class": (class_variants[0] if class_variants else "")},
     }
+
+
+def _class_variants(raw: str) -> list[str]:
+    """班级名归一成可比集合："高一1班"/"1班"/"1" 都算同一个班；空串返回 []（不按班过滤）"""
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    out = [raw]
+    if digits:
+        out += [digits, digits + "班"]
+    return list(dict.fromkeys(out))
 
 
 @router.get("/rewards/statistics", summary="获取积分统计")
@@ -331,7 +449,8 @@ async def my_badges(request: Request):
     if role != 2:
         return []
 
-    badges = get_student_badges(username)
+    # 学生本人的徽章墙：带"还差多少"的进度
+    badges = get_student_badges(username, with_progress=True)
     return badges
 
 
