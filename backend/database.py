@@ -1474,11 +1474,16 @@ def init_db():
                 student_username TEXT NOT NULL,
                 subject TEXT NOT NULL,
                 question_count INTEGER DEFAULT 0,
+                score_earned REAL DEFAULT 0,
+                score_total REAL DEFAULT 0,
                 title_level INTEGER DEFAULT 1,
                 title_name TEXT DEFAULT '入门',
                 updated_at TEXT,
                 PRIMARY KEY (student_username, subject)
             )""")
+            # 存量库补列：学科称号现在要看正确率（答得少但答对，比乱答更值得鼓励）
+            _ensure_column(c, "student_subject_titles", "score_earned", "REAL DEFAULT 0")
+            _ensure_column(c, "student_subject_titles", "score_total", "REAL DEFAULT 0")
 
             # ── 学生成就徽章表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS student_badges (

@@ -17,20 +17,29 @@ _CONFIG_FILE = Path(__file__).resolve().parent / "system_config.json"
 
 # ── 默认积分主称号配置（12 级科技探索风） ──
 
+# 阈值按「一个学期正常参与」重标定过。旧刻度（15/40/75/…/800）与真实得分能力脱节：
+# 实测 1406 名在册学生里 1390 人停在 Lv1、只有 1 人 Lv12，Lv4 与 Lv6~Lv11 整段是空的
+# —— Lv2 要 15 分（约 8 次签到）把偶尔参与的学生全挡在门外，Lv12 要 800 分又让重度
+# 使用者一两个月就封顶，之后再无成长感。
+#
+# 新刻度按现行分值反推：点名答对 5 分、随堂测验满分 11 分、一场考试满分 18 分，
+# 认真上一天课约 25~40 分。于是 Lv2=10（一节课）、Lv5=110（约一周）、Lv8=330（约一个月）、
+# Lv12=1000（一学期持续高强度才够）。称号仍只升不降：student_titles 存历史最高等级。
 DEFAULT_TITLE_CONFIG = [
-    {"level": 1,  "name": "初窥门径", "min_points": 0,   "emoji": "🥚", "color": "default",  "desc": "刚刚开启学习之旅"},
-    {"level": 2,  "name": "筑基学徒", "min_points": 15,  "emoji": "🌱", "color": "lime",     "desc": "打下了坚实的基础"},
-    {"level": 3,  "name": "勤学新人", "min_points": 40,  "emoji": "📖", "color": "green",    "desc": "勤勉好学，已然入门"},
-    {"level": 4,  "name": "知识猎人", "min_points": 75,  "emoji": "🔍", "color": "cyan",     "desc": "善于捕捉每一个知识点"},
-    {"level": 5,  "name": "解题能手", "min_points": 120, "emoji": "💡", "color": "blue",     "desc": "解题思路清晰，反应敏捷"},
-    {"level": 6,  "name": "逻辑新星", "min_points": 180, "emoji": "⚡", "color": "geekblue", "desc": "闪耀的思维新星"},
-    {"level": 7,  "name": "学业先锋", "min_points": 250, "emoji": "🚀", "color": "purple",   "desc": "走在学习的最前沿"},
-    {"level": 8,  "name": "班级学霸", "min_points": 330, "emoji": "🌟", "color": "magenta",  "desc": "班级中的学习佼佼者"},
-    {"level": 9,  "name": "创新领袖", "min_points": 420, "emoji": "🧠", "color": "gold",     "desc": "不仅会学，更会创新"},
-    {"level": 10, "name": "全能学神", "min_points": 520, "emoji": "🏆", "color": "orange",   "desc": "无所不学的学习大神"},
-    {"level": 11, "name": "传奇大师", "min_points": 640, "emoji": "👑", "color": "volcano",  "desc": "学习路上的传奇人物"},
-    {"level": 12, "name": "至高贤者", "min_points": 800, "emoji": "✨", "color": "red",      "desc": "登峰造极的至高存在"},
+    {"level": 1,  "name": "初窥门径", "min_points": 0,    "emoji": "🥚", "color": "default",  "desc": "刚刚开启学习之旅"},
+    {"level": 2,  "name": "筑基学徒", "min_points": 10,   "emoji": "🌱", "color": "lime",     "desc": "打下了坚实的基础"},
+    {"level": 3,  "name": "勤学新人", "min_points": 30,   "emoji": "📖", "color": "green",    "desc": "勤勉好学，已然入门"},
+    {"level": 4,  "name": "知识猎人", "min_points": 60,   "emoji": "🔍", "color": "cyan",     "desc": "善于捕捉每一个知识点"},
+    {"level": 5,  "name": "解题能手", "min_points": 110,  "emoji": "💡", "color": "blue",     "desc": "解题思路清晰，反应敏捷"},
+    {"level": 6,  "name": "逻辑新星", "min_points": 170,  "emoji": "⚡", "color": "geekblue", "desc": "闪耀的思维新星"},
+    {"level": 7,  "name": "学业先锋", "min_points": 240,  "emoji": "🚀", "color": "purple",   "desc": "走在学习的最前沿"},
+    {"level": 8,  "name": "班级学霸", "min_points": 330,  "emoji": "🌟", "color": "magenta",  "desc": "班级中的学习佼佼者"},
+    {"level": 9,  "name": "创新领袖", "min_points": 450,  "emoji": "🧠", "color": "gold",     "desc": "不仅会学，更会创新"},
+    {"level": 10, "name": "全能学神", "min_points": 600,  "emoji": "🏆", "color": "orange",   "desc": "无所不学的学习大神"},
+    {"level": 11, "name": "传奇大师", "min_points": 780,  "emoji": "👑", "color": "volcano",  "desc": "学习路上的传奇人物"},
+    {"level": 12, "name": "至高贤者", "min_points": 1000, "emoji": "✨", "color": "red",      "desc": "登峰造极的至高存在"},
 ]
+
 
 # ── 默认学科称号配置（按答题数，3 科共用同一套） ──
 
@@ -49,13 +58,13 @@ DEFAULT_BADGE_CONFIG = [
     {"id": "first_points",    "name": "崭露头角", "icon": "🌱", "desc": "首次获得积分", "condition_type": "first_points"},
     {"id": "full_score",      "name": "满分达人", "icon": "💯", "desc": "任何考试获得满分", "condition_type": "full_score"},
     {"id": "streak_7d",       "name": "学习之星", "icon": "⭐", "desc": "连续 7 天登录学习", "condition_type": "login_streak", "condition_value": 7},
-    {"id": "questions_100",   "name": "刷题达人", "icon": "📚", "desc": "累计完成 100 道题目", "condition_type": "total_questions", "condition_value": 100},
-    {"id": "all_rounder",     "name": "全能选手", "icon": "🏆", "desc": "参加过所有类型的活动", "condition_type": "all_activity_types"},
+    {"id": "questions_100",   "name": "刷题达人", "icon": "📚", "desc": "累计作答 100 道题", "condition_type": "total_questions", "condition_value": 100},
+    {"id": "all_rounder",     "name": "全能选手", "icon": "🏆", "desc": "参与过 8 类以上不同活动", "condition_type": "all_activity_types", "condition_value": 8},
     {"id": "ai_explorer_50",  "name": "AI 探索者", "icon": "💬", "desc": "AI 对话累计 50 次", "condition_type": "chat_count", "condition_value": 50},
     {"id": "discussion_10",   "name": "讨论之星", "icon": "👥", "desc": "参与 10 次分组讨论", "condition_type": "discussion_count", "condition_value": 10},
-    {"id": "punctual_3",      "name": "准时达人", "icon": "⏱️", "desc": "连续 3 次按时提交考试", "condition_type": "punctual_3"},
+    {"id": "punctual_3",      "name": "准时达人", "icon": "⏱️", "desc": "3 次考试都在截止时间内提交", "condition_type": "punctual_3", "condition_value": 3},
     {"id": "rollcall_ace",    "name": "点名达人", "icon": "🎯", "desc": "点名正确率≥90%（累计≥10次）", "condition_type": "rollcall_accuracy", "condition_value": 90},
-    {"id": "perfect_attendance", "name": "全勤标兵", "icon": "📅", "desc": "当月全部签到", "condition_type": "monthly_full_attendance"},
+    {"id": "perfect_attendance", "name": "月度坚持", "icon": "📅", "desc": "当月登录学习满 20 天", "condition_type": "monthly_full_attendance", "condition_value": 20},
     # ── 一站到底·闯关徽章（由 quest_router 独立管理，此处仅作展示配置） ──
     {"id": "quest_first",    "name": "初出茅庐", "icon": "🥉", "desc": "首次闯关成功", "condition_type": "quest_milestone", "condition_value": 1},
     {"id": "quest_novice",   "name": "闯关新秀", "icon": "🥈", "desc": "累计 5 次闯关成功", "condition_type": "quest_milestone", "condition_value": 5},
@@ -314,94 +323,118 @@ def _create_title_upgrade_notification(student_username: str, old_title: dict[st
 
 # ── 学科称号计算 ──
 
+#: 学科称号的正确率封顶：只刷够题、基本答错，不给高段称号（防"乱答刷级"）。
+#: 命中第一条即取该上限；accuracy=None（还一道没答）不设限。
+SUBJECT_ACCURACY_CAPS = ((0.75, 6), (0.60, 4), (0.00, 2))
 
-def get_subject_title(subject: str, question_count: int) -> dict[str, Any]:
-    """根据答题数计算学科称号
 
-    Args:
-        subject: 科目名称
-        question_count: 该科累计答题数
+def accuracy_level_cap(accuracy: float | None) -> int:
+    """按正确率给出学科称号的等级上限（1~6）"""
+    if accuracy is None:
+        return 6
+    for floor_, cap in SUBJECT_ACCURACY_CAPS:
+        if accuracy >= floor_:
+            return cap
+    return 2
 
-    Returns:
-        {"level": int, "name": str, "emoji": str, "color": str, "subject": str, "question_count": int}
+
+def _subject_title_by_level(level: int) -> dict[str, Any]:
+    """按等级取学科称号样式（emoji/颜色），等级找不到时退回第一档"""
+    config = _load_subject_title_config() or [DEFAULT_SUBJECT_TITLE_CONFIG[0]]
+    for t in config:
+        if t["level"] == level:
+            return t.copy()
+    return config[0].copy()
+
+
+def get_subject_title(subject: str, question_count: int,
+                     accuracy: float | None = None) -> dict[str, Any]:
+    """学科称号 = 按累计作答题数定档，再按正确率封顶
+
+    只看题数会被"乱答"刷到大师，所以正确率 <60% 最高"进阶"、
+    60~75% 最高"精通"、75% 以上才放开到"大师"。
 
     注意：question_count 必须一并返回。学科称号列表里“没有答题记录”的科目走的是这里
     的兜底分支，早期版本漏了该字段，前端（成长档案 / 荣誉页）会渲染出 undefined。
     """
     config = _load_subject_title_config()
+    if not config:
+        return {"subject": subject, "question_count": int(question_count or 0),
+                "level": 0, "name": "", "emoji": "", "color": "default", "accuracy": accuracy}
     result = config[0].copy()
     for t in config:
         if question_count >= t["min_questions"]:
             result = t.copy()
         else:
             break
+    cap = accuracy_level_cap(accuracy)
+    if result["level"] > cap:
+        result = _subject_title_by_level(cap)
     result["subject"] = subject
     result["question_count"] = int(question_count or 0)
+    result["accuracy"] = accuracy
     return result
 
 
-def check_subject_title_upgrade(student_username: str, subject: str, old_count: int, new_count: int) -> dict[str, Any] | None:
-    """检测学科称号是否升级
+def check_subject_title_upgrade(student_username: str, subject: str,
+                                old_level: int, new_level: int,
+                                new_count: int) -> dict[str, Any] | None:
+    """学科称号升级：只升不降（与主称号同一口径），升级才写历史与提示
 
-    Returns:
-        如果升级了，返回称号信息 dict，否则 None
+    旧签名传的是"新旧答题数"，而等级现在还要看正确率，光比题数会算错档位，
+    所以改由调用方把算好的新旧等级传进来。
     """
-    old_title = get_subject_title(subject, old_count)
-    new_title = get_subject_title(subject, new_count)
-
-    if new_title["level"] > old_title["level"]:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        execute_insert_update(
-            """INSERT OR REPLACE INTO student_subject_titles
-               (student_username, subject, question_count, title_level, title_name, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (student_username, subject, new_count, new_title["level"], new_title["name"], now),
-        )
-
-        execute_insert_update(
-            """INSERT INTO title_upgrade_history
-               (student_username, old_title, new_title, title_type, subject, created_at)
-               VALUES (?, ?, ?, 'subject', ?, ?)""",
-            (student_username, old_title["name"], new_title["name"], subject, now),
-        )
-
-        logger.info(f"学科称号升级: {student_username} {subject} {old_title['name']} → {new_title['name']}")
-        return {"old_title": old_title, "new_title": new_title, "subject": subject}
-
-    return None
+    if new_level <= (old_level or 0):
+        return None
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    old_title = _subject_title_by_level(old_level) if old_level else None
+    new_title = _subject_title_by_level(new_level)
+    execute_insert_update(
+        """INSERT INTO title_upgrade_history
+           (student_username, old_title, new_title, title_type, subject, created_at)
+           VALUES (?, ?, ?, 'subject', ?, ?)""",
+        (student_username, (old_title or {}).get("name", ""), new_title["name"], subject, now),
+    )
+    logger.info(f"学科称号升级: {student_username} {subject} Lv{(old_level or 0)} → Lv{new_level}")
+    return {"old_title": old_title or {}, "new_title": new_title, "subject": subject,
+            "level": new_level}
 
 
 def get_student_subject_titles(student_username: str) -> list[dict[str, Any]]:
-    """获取学生所有科目的称号"""
+    """获取学生所有科目的称号（等级直接读存量，不再按题数反算）
+
+    按题数反算会把"只升不降"的等级打回原形：学生靠正确率拿到 Lv4 后，
+    题数一少就显示掉级，而升级历史与徽章又不会回退，界面与台账自相矛盾。
+    """
     rows = execute_query(
-        "SELECT subject, question_count, title_level, title_name FROM student_subject_titles WHERE student_username=?",
+        """SELECT subject, question_count, title_level, title_name,
+                  IFNULL(score_earned, 0), IFNULL(score_total, 0)
+           FROM student_subject_titles WHERE student_username=?""",
         (student_username,),
     )
-    if not rows:
-        # 未初始化，返回默认
-        return [get_subject_title(s, 0) for s in get_subject_list()]
-
+    stored = {r[0]: r for r in (rows or [])}
     result = []
     for s in get_subject_list():
-        found = None
-        for r in rows:
-            if r[0] == s:
-                found = {
-                    "subject": s,
-                    "question_count": r[1],
-                    "level": r[2],
-                    "name": r[3],
-                }
-                break
-        if found:
-            # 补齐 emoji、color
-            title_info = get_subject_title(s, found["question_count"])
-            found["emoji"] = title_info["emoji"]
-            found["color"] = title_info["color"]
-            result.append(found)
+        r = stored.get(s)
+        if r:
+            earned, total = float(r[4] or 0), float(r[5] or 0)
+            level = int(r[2] or 1)
+            style = _subject_title_by_level(level)
+            result.append({
+                "subject": s,
+                "question_count": int(r[1] or 0),
+                "level": level,
+                "name": r[3] or style.get("name", ""),
+                "emoji": style.get("emoji", ""),
+                "color": style.get("color", "default"),
+                "score_earned": round(earned, 1),
+                "score_total": round(total, 1),
+                "accuracy": round(earned / total, 4) if total > 0 else None,
+            })
         else:
             result.append(get_subject_title(s, 0))
     return result
+
 
 
 # ── 成就徽章计算 ──
@@ -436,19 +469,30 @@ def _collect_badge_facts(student_username: str) -> dict[str, Any]:
     facts: dict[str, Any] = {
         "reward_rows": 0, "activity_types": 0, "total_points": 0,
         "full_score_exams": 0, "total_questions": 0, "submitted_exams": 0,
+        "punctual_exams": 0,
         "chat_count": 0, "discussion_count": 0,
         "rollcall_correct": 0, "rollcall_total": 0,
         "login_streak": 0, "month_login_days": 0,
+        # 本次补齐：这几枚徽章以前"条件类型根本没实现"，永远判 False → 永远灰
+        "news_views": 0, "discovery_views": 0, "discovery_favorites": 0,
+        "quest_success_count": 0, "quest_perfect_runs": 0, "quest_runs_10plus": 0,
     }
     try:
         row = _db_query(
-            "SELECT COUNT(*), COUNT(DISTINCT activity_type), COALESCE(SUM(points),0) FROM activity_rewards WHERE student_username=?",
+            "SELECT COUNT(*), COALESCE(SUM(points),0) FROM activity_rewards WHERE student_username=?",
             (student_username,),
         )
         if row and row[0]:
             facts["reward_rows"] = int(row[0][0] or 0)
-            facts["activity_types"] = int(row[0][1] or 0)
-            facts["total_points"] = int(row[0][2] or 0)
+            facts["total_points"] = int(row[0][1] or 0)   # 聚合从 3 列改 2 列后这里必须跟改
+        # 只数 REWARD_CONFIG 里登记过的活动：penalty/spend/refund 与历史的 share/
+        # showcase 键不能算"参与过"，否则全能选手会被无关流水凑齐
+        types_rows = _db_query(
+            "SELECT DISTINCT activity_type FROM activity_rewards WHERE student_username=?",
+            (student_username,),
+        ) or []
+        from backend.reward_engine import ACTIVITY_KEYS
+        facts["activity_types"] = len([r[0] for r in types_rows if r[0] in ACTIVITY_KEYS])
     except Exception as e:
         logger.warning(f"[badge] 奖励统计失败({student_username}): {e}")
 
@@ -477,19 +521,33 @@ def _collect_badge_facts(student_username: str) -> dict[str, Any]:
         if rows:
             facts["full_score_exams"] = int(rows[0]["COALESCE(SUM(CASE WHEN score = total_score AND total_score > 0 THEN 1 ELSE 0 END), 0)"] if isinstance(rows[0], dict) else rows[0][0])
             facts["submitted_exams"] = int(rows[0]["COUNT(*)"] if isinstance(rows[0], dict) else rows[0][1])
+        # 题数口径统一：与学科称号用同一份统计（旧写法数的是"交了几次卷"，
+        # 于是一场 20 题的考试只算 1 题，"累计作答 100 道题"实际要交 100 次卷）
+        _stats = _subject_stats(student_username)
+        facts["total_questions"] = sum(s["questions"] for s in _stats.values())
+        # 按时提交：拿 exam_attempts.submitted_at 与 exams.end_time 真比一次，
+        # 旧实现只是 submitted_exams >= 3，把"交过 3 场试"叫成"准时达人"
         rows = q_execute(
-            """SELECT (SELECT COUNT(*) FROM exam_attempts WHERE student_username=?) +
-                       (SELECT COUNT(*) FROM practice_attempts WHERE student_username=?) AS total_questions""",
-            (student_username, student_username),
+            """SELECT COUNT(*) FROM exam_attempts ea
+               JOIN exams e ON ea.exam_id = e.id
+               WHERE ea.student_username=? AND ea.status IN ('submitted','graded')
+                 AND (e.end_time IS NULL OR e.end_time = ''
+                      OR substr(ea.submitted_at, 1, 19) <= substr(e.end_time, 1, 19))""",
+            (student_username,),
         )
         if rows:
-            v = rows[0]["total_questions"] if isinstance(rows[0], dict) else rows[0][0]
-            facts["total_questions"] = int(v or 0)
+            v = rows[0]["COUNT(*)"] if isinstance(rows[0], dict) else rows[0][0]
+            facts["punctual_exams"] = int(v or 0)
     except Exception as e:
         logger.warning(f"[badge] 答题统计失败({student_username}): {e}")
 
     try:
-        row = _db_query("SELECT COUNT(*) FROM conversations WHERE username=?", (student_username,))
+        # 与积分流水同一口径数"对话次数"：conversations 存的是会话文件（一次会话一行），
+        # 而对话分是按每一次成功回答发的，用会话数判"累计 50 次"会严重低估
+        row = _db_query(
+            "SELECT COUNT(*) FROM activity_rewards WHERE student_username=? AND activity_type='chat'",
+            (student_username,),
+        )
         facts["chat_count"] = int(row[0][0]) if row and row[0] else 0
         row = _db_query(
             """SELECT COUNT(*) FROM discussion_groups dg
@@ -501,7 +559,9 @@ def _collect_badge_facts(student_username: str) -> dict[str, Any]:
         row = _db_query(
             """SELECT COALESCE(SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END), 0), COUNT(*)
                FROM rollcall_history
-               WHERE student_name = ? OR student_name = COALESCE((SELECT name FROM users WHERE username=?), '')""",
+               WHERE student_username = ?
+                  OR (IFNULL(student_username, '') = ''
+                      AND student_name = COALESCE((SELECT name FROM users WHERE username=?), ''))""",
             (student_username, student_username),
         )
         if row and row[0]:
@@ -509,6 +569,41 @@ def _collect_badge_facts(student_username: str) -> dict[str, Any]:
             facts["rollcall_total"] = int(row[0][1] or 0)
     except Exception as e:
         logger.warning(f"[badge] 对话/讨论/签到统计失败({student_username}): {e}")
+
+    # 每日精选 / 热点新闻 / 知识闯关：这三类徽章的 condition_type 以前在
+    # _check_badge_condition 里根本没有分支，一律 fallthrough 到 return False ——
+    # 6 枚徽章（知识探险家、百科达人、收藏家、时事新人、时事通、百晓生）永远点不亮。
+    # 数据一直都在（news_view_log / discovery_view_log / discovery_favorites /
+    # quest_badge_counts / quest_records），只是没人查。
+    try:
+        row = _db_query("SELECT COUNT(DISTINCT news_id) FROM news_view_log WHERE username=?",
+                        (student_username,))
+        facts["news_views"] = int(row[0][0]) if row and row[0] else 0
+        row = _db_query("SELECT COUNT(DISTINCT pool_card_id) FROM discovery_view_log WHERE username=?",
+                        (student_username,))
+        facts["discovery_views"] = int(row[0][0]) if row and row[0] else 0
+        row = _db_query("SELECT COUNT(DISTINCT pool_card_id) FROM discovery_favorites WHERE username=?",
+                        (student_username,))
+        facts["discovery_favorites"] = int(row[0][0]) if row and row[0] else 0
+    except Exception as e:
+        logger.warning(f"[badge] 精选/新闻阅读统计失败({student_username}): {e}")
+
+    try:
+        row = _db_query("SELECT IFNULL(MAX(total_success_count), 0) FROM quest_badge_counts WHERE student_username=?",
+                        (student_username,))
+        facts["quest_success_count"] = int(row[0][0]) if row and row[0] else 0
+        row = _db_query(
+            """SELECT COALESCE(SUM(CASE WHEN completed=1 AND total_questions>0
+                                         AND correct_count=total_questions THEN 1 ELSE 0 END), 0),
+                      COALESCE(SUM(CASE WHEN correct_count>=10 THEN 1 ELSE 0 END), 0)
+               FROM quest_records WHERE student_username=?""",
+            (student_username,),
+        )
+        if row and row[0]:
+            facts["quest_perfect_runs"] = int(row[0][0] or 0)
+            facts["quest_runs_10plus"] = int(row[0][1] or 0)
+    except Exception as e:
+        logger.warning(f"[badge] 闯关统计失败({student_username}): {e}")
 
     return facts
 
@@ -583,21 +678,39 @@ def _check_badge_condition(student_username: str, badge: dict[str, Any], facts: 
     if ctype == "total_questions":
         return facts["total_questions"] >= (cvalue or 100)
     if ctype == "all_activity_types":
-        total_types = len({t.get("activity_type") for t in _get_all_activity_types() if t.get("activity_type")})
-        return total_types > 0 and facts["activity_types"] >= total_types
+        # 旧判定要求集齐 ACTIVITY_TYPE_NAMES 的**每一个**键（还把扣分/退还等历史键
+        # 算进去），实测只有把全部活动刷一遍的测试账号拿得到，真实学生 0 人。
+        # 现改为"参与过 8 类以上活动"：表里 21 类活动，8 类≈一学期什么都参与一点。
+        return facts["activity_types"] >= (cvalue or 8)
     if ctype == "chat_count":
         return facts["chat_count"] >= (cvalue or 50)
     if ctype == "discussion_count":
         return facts["discussion_count"] >= (cvalue or 10)
-    if ctype == "punctual_3":
-        return facts["submitted_exams"] >= 3
     if ctype == "rollcall_accuracy":
         total = facts["rollcall_total"]
         if total < 10:
             return False
         return (facts["rollcall_correct"] / total * 100) >= (cvalue or 90)
     if ctype == "monthly_full_attendance":
-        return facts["month_login_days"] >= 20
+        # 库里没有逐日"签到"台账，能核实的口径是"当月登录学习满 20 天"，
+        # 徽章名与描述已同步改成"月度坚持"，不再自称"全勤/全部签到"
+        return facts["month_login_days"] >= (cvalue or 20)
+    if ctype == "punctual_3":
+        return facts["punctual_exams"] >= (cvalue or 3)
+    if ctype == "news_views":
+        return facts["news_views"] >= (cvalue or 30)
+    if ctype == "discovery_views":
+        return facts["discovery_views"] >= (cvalue or 50)
+    if ctype == "discovery_favorites":
+        return facts["discovery_favorites"] >= (cvalue or 30)
+    if ctype == "quest_milestone":
+        return facts["quest_success_count"] >= (cvalue or 1)
+    if ctype == "quest_honor":
+        # 两张荣誉徽章共用一个条件类型，靠 id 区分：一站到底 / 十连斩
+        if str(badge.get("id") or "") == "quest_all_15":
+            return facts["quest_perfect_runs"] > 0
+        return facts["quest_runs_10plus"] > 0
+    logger.debug(f"[badge] 未实现的条件类型 {ctype}（徽章 {badge.get('id')}），按未解锁处理")
     return False
 
 
@@ -624,8 +737,46 @@ def _create_badge_notification(student_username: str, badge: dict[str, Any]):
         logger.warning(f"创建徽章解锁通知失败: {e}")
 
 
-def get_student_badges(student_username: str) -> list[dict[str, Any]]:
-    """获取学生所有徽章状态（已解锁+未解锁）"""
+#: 可量化徽章的进度来源：condition_type → 事实字段（徽章墙据此显示"还差多少"）
+BADGE_PROGRESS_SOURCE = {
+    "login_streak": "login_streak",
+    "total_questions": "total_questions",
+    "chat_count": "chat_count",
+    "discussion_count": "discussion_count",
+    "all_activity_types": "activity_types",
+    "punctual_3": "punctual_exams",
+    "monthly_full_attendance": "month_login_days",
+    "news_views": "news_views",
+    "discovery_views": "discovery_views",
+    "discovery_favorites": "discovery_favorites",
+    "quest_milestone": "quest_success_count",
+}
+#: 没写 condition_value 时的默认目标（与 _check_badge_condition 的默认值保持一致）
+BADGE_PROGRESS_DEFAULT = {
+    "all_activity_types": 8, "punctual_3": 3, "monthly_full_attendance": 20,
+    "news_views": 30, "discovery_views": 50, "discovery_favorites": 30,
+    "quest_milestone": 1,
+}
+
+
+def _badge_progress(badge: dict[str, Any], facts: dict[str, Any]) -> dict[str, Any] | None:
+    """数量型徽章的进度；满分/首次这类布尔成就返回 None（没有"差多少"可言）"""
+    ctype = str(badge.get("condition_type") or "")
+    src = BADGE_PROGRESS_SOURCE.get(ctype)
+    if not src:
+        return None
+    target = int(badge.get("condition_value") or BADGE_PROGRESS_DEFAULT.get(ctype) or 0)
+    return {"current": int(facts.get(src) or 0), "target": target}
+
+
+def get_student_badges(student_username: str,
+                       with_progress: bool = False) -> list[dict[str, Any]]:
+    """获取学生所有徽章状态（已解锁+未解锁）
+
+    with_progress=True 时附带"还差多少"（点亮徽章墙需要它）。这会多跑一次
+    facts 采集，所以只在学生本人的荣誉页开启：教师端荣耀殿堂一屏要读几十个人的
+    徽章，全都算进度会把一次浏览放大成几百条查询。
+    """
     badge_config = _load_badge_config()
     unlocked_rows = execute_query(
         "SELECT badge_id, unlocked_at FROM student_badges WHERE student_username=?",
@@ -633,6 +784,7 @@ def get_student_badges(student_username: str) -> list[dict[str, Any]]:
     )
     unlocked_map = {r[0]: r[1] for r in unlocked_rows} if unlocked_rows else {}
 
+    facts = _collect_badge_facts(student_username) if with_progress else None
     result = []
     for badge in badge_config:
         entry = {
@@ -644,6 +796,8 @@ def get_student_badges(student_username: str) -> list[dict[str, Any]]:
         }
         if entry["unlocked"]:
             entry["unlocked_at"] = unlocked_map[badge["id"]]
+        elif with_progress:
+            entry["progress"] = _badge_progress(badge, facts or {})
         result.append(entry)
     return result
 
@@ -729,8 +883,8 @@ def get_full_title_info(student_username: str, total_points: int = -1) -> dict[s
     # 学科称号
     subject_titles = get_student_subject_titles(student_username)
 
-    # 徽章
-    badges = get_student_badges(student_username)
+    # 徽章（学生本人页面：带"还差多少"）
+    badges = get_student_badges(student_username, with_progress=True)
 
     # 最近升级历史
     recent_upgrades = get_title_upgrade_history(student_username, limit=10)
@@ -747,111 +901,110 @@ def get_full_title_info(student_username: str, total_points: int = -1) -> dict[s
 # ── 学科题目数统计与自动升级 ──
 
 
-def update_subject_question_counts(student_username: str) -> list[dict[str, Any]]:
-    """统计学生的各学科答题数，更新学科称号并检测升级
+def _subject_stats(student_username: str) -> dict[str, dict[str, float]]:
+    """各科「作答题数 / 得分 / 满分」：学科称号与「刷题达人」徽章共用这一份口径。
 
-    从 exam_attempts + practice_attempts 中按科目统计答题数，
-    对比 student_subject_titles 中的记录，如果答题数增加则触发升级检测。
-
-    Returns:
-        新升级的学科称号列表
+    只统计**能确定学科**的作答，拿不到学科的一律不计——错误归属比不计入更糟：
+      1. 考试      exams.subject × 该卷题数（答一次算一套）
+      2. 同步练习  practice_sessions.subject × 该练习卷题数
+      3. 代码练习  code_problems.subject × 提交过的题目（取最佳一次）
+      4. 课堂提问  interaction_questions.subject ×（提问数 + 回答数）
+      5. 随堂测验  题目以 JSON 快照存库、没有学科字段，只在"该教师唯一任教学科"时
+                   归属；跨学科或未填任教科目的测验不计入任何学科
+    课程练习(ai_practice_results) 挂在知识点上，而 knowledge_points 不带学科，
+    归属要跨课程结构反查，暂不计入。
     """
-    upgrades = []
+    out: dict[str, dict[str, float]] = {
+        s: {"questions": 0, "score": 0.0, "max": 0.0} for s in get_subject_list()
+    }
 
-    # 获取各科当前答题数
-    counts = _count_questions_per_subject(student_username)
-
-    for subject, new_count in counts.items():
-        # 获取旧的答题数
-        old_row = execute_query(
-            "SELECT question_count FROM student_subject_titles WHERE student_username=? AND subject=?",
-            (student_username, subject),
-        )
-        old_count = old_row[0][0] if old_row else 0
-
-        if new_count > old_count:
-            # 更新答题数
-            title_info = get_subject_title(subject, new_count)
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            execute_insert_update(
-                """INSERT OR REPLACE INTO student_subject_titles
-                   (student_username, subject, question_count, title_level, title_name, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (student_username, subject, new_count, title_info["level"], title_info["name"], now),
-            )
-
-            # 检测升级
-            upgrade = check_subject_title_upgrade(student_username, subject, old_count, new_count)
-            if upgrade:
-                upgrades.append(upgrade)
-
-    return upgrades
-
-
-def _count_questions_per_subject(student_username: str) -> dict[str, int]:
-    """统计学生在各学科的答题数
-
-    从以下来源统计：
-    1. exam_attempts → exams.subject（每次考试算一题？其实考试可能有多题）
-    2. practice_attempts → practice_sessions.subject（同上）
-
-    注意：由于 exam_attempts 没有直接记录题目数量，
-    我们用 exam_questions 表的关联来统计每场考试的题目数。
-    简化方案：按考试/练习的参与次数来算（每参加一次算一套题）。
-    """
-    counts: dict[str, int] = {s: 0 for s in get_subject_list()}
+    def bump(subject: Any, questions: int = 0, score: float = 0.0, max_: float = 0.0) -> None:
+        row = out.get(str(subject or "").strip())
+        if row is None:
+            return        # 不在科目列表里的不强行塞进去，避免学科称号多出未知科目
+        row["questions"] += int(questions or 0)
+        row["score"] += float(score or 0)
+        row["max"] += float(max_ or 0)
 
     try:
         from backend.question_db import execute_query as q_execute
-
-        # 1. 从 exam_attempts 统计各科考试数量
-        # exam_attempts 没有直接科目字段，需要通过 exam_id 关联 exams 表
-        # 简化：用 exam_questions 统计每场考试的题数
-        exam_rows = q_execute(
-            """SELECT e.subject, COUNT(eq.id) as q_count
-               FROM exam_attempts ea
-               JOIN exams e ON ea.exam_id = e.id
-               LEFT JOIN exam_questions eq ON eq.exam_id = e.id
-               WHERE ea.student_username=? AND ea.status IN ('submitted', 'graded')
-               GROUP BY e.subject""",
-            (student_username,),
-        )
-        for row in exam_rows:
-            subject = row["subject"]
-            q_count = row["q_count"] if row["q_count"] else 0
-            if subject in counts:
-                counts[subject] += q_count
     except Exception as e:
-        logger.warning(f"统计 exam_attempts 题目数失败: {e}")
+        logger.warning(f"[学科统计] 题库不可用: {e}")
+        return out
 
+    # 1+2：考试与同步练习——题数与得分分两条查询，避免 attempts × questions 的连接扇出把分算重
+    for sql_q, sql_s, table in (
+        ("""SELECT e.subject, COUNT(eq.id) AS q
+            FROM exam_attempts ea
+            JOIN exams e ON ea.exam_id = e.id
+            LEFT JOIN exam_questions eq ON eq.exam_id = e.id
+            WHERE ea.student_username=? AND ea.status IN ('submitted','graded')
+            GROUP BY e.subject""",
+         """SELECT e.subject, SUM(COALESCE(ea.score, 0)) AS s, SUM(COALESCE(ea.total_score, 0)) AS m
+            FROM exam_attempts ea JOIN exams e ON ea.exam_id = e.id
+            WHERE ea.student_username=? AND ea.status IN ('submitted','graded')
+            GROUP BY e.subject""", "exam"),
+        ("""SELECT ps.subject, COUNT(psq.id) AS q
+            FROM practice_attempts pa
+            JOIN practice_sessions ps ON pa.session_id = ps.id
+            LEFT JOIN practice_session_questions psq ON psq.session_id = ps.id
+            WHERE pa.student_username=? AND pa.status='submitted'
+            GROUP BY ps.subject""",
+         """SELECT ps.subject, SUM(COALESCE(pa.score, 0)) AS s, SUM(COALESCE(pa.total_score, 0)) AS m
+            FROM practice_attempts pa JOIN practice_sessions ps ON pa.session_id = ps.id
+            WHERE pa.student_username=? AND pa.status='submitted'
+            GROUP BY ps.subject""", "practice"),
+    ):
+        try:
+            for r in q_execute(sql_q, (student_username,)) or []:
+                bump(r["subject"], questions=r["q"])
+            for r in q_execute(sql_s, (student_username,)) or []:
+                bump(r["subject"], score=r["s"], max_=r["m"])
+        except Exception as e:
+            logger.warning(f"[学科统计] {table} 统计失败: {e}")
+
+    # 3：代码练习（每题按最佳一次提交的用例通过率计分）
     try:
-        # 2. 从 practice_attempts 统计各科练习数量
-        #    practice_sessions / practice_session_questions / practice_attempts 的真实数据
-        #    在试题库 questions.db，主库里的同名表是历史遗留空壳，用主库查会静默返回 0 行。
-        from backend.question_db import execute_query as q_execute
-
-        practice_rows = q_execute(
-            """SELECT ps.subject, COUNT(psq.id) as q_count
-               FROM practice_attempts pa
-               JOIN practice_sessions ps ON pa.session_id = ps.id
-               LEFT JOIN practice_session_questions psq ON psq.session_id = ps.id
-               WHERE pa.student_username=? AND pa.status='submitted'
-               GROUP BY ps.subject""",
+        for r in q_execute(
+            """SELECT cp.subject,
+                          COUNT(*) AS q,
+                          SUM(CASE WHEN cs.total_cases > 0
+                              THEN cs.passed_cases * 1.0 / cs.total_cases ELSE 0 END) AS s,
+                          COUNT(*) AS m
+                   FROM code_submissions cs
+                   JOIN code_problems cp ON cs.problem_id = cp.id
+                   WHERE cs.student_username=? AND IFNULL(cs.is_best, 0)=1
+                   GROUP BY cp.subject""",
             (student_username,),
-        )
-        for row in practice_rows:
-            subject = row["subject"]
-            q_count = row["q_count"] if row["q_count"] else 0
-            if subject in counts:
-                counts[subject] += q_count
+        ) or []:
+            bump(r["subject"], questions=r["q"], score=r["s"], max_=r["m"])
     except Exception as e:
-        logger.warning(f"统计 practice_attempts 题目数失败: {e}")
+        logger.warning(f"[学科统计] 代码练习统计失败: {e}")
 
-    # 3. 从 interaction_quiz_answers 统计互动测验
-    #    随堂测验没有"学科"字段（题目以 JSON 快照存库），因此按创建教师唯一的任教学科归属；
-    #    任教多门学科、或没有任教记录（如管理员）的测验不强行计入任何学科。
+    # 4：课堂提问与回答（主库，interaction_questions 自带 subject）
     try:
-        quiz_rows = execute_query(
+        for r in execute_query(
+            """SELECT subject, COUNT(*) AS q FROM interaction_questions
+               WHERE student_username=? AND IFNULL(subject, '') <> ''
+               GROUP BY subject""",
+            (student_username,),
+        ) or []:
+            bump(r[0], questions=r[1])
+        for r in execute_query(
+            """SELECT q.subject, COUNT(*) AS q_count
+               FROM interaction_question_answers a
+               JOIN interaction_questions q ON a.question_id = q.id
+               WHERE a.student_username=? AND IFNULL(q.subject, '') <> ''
+               GROUP BY q.subject""",
+            (student_username,),
+        ) or []:
+            bump(r[0], questions=r[1])
+    except Exception as e:
+        logger.warning(f"[学科统计] 课堂提问统计失败: {e}")
+
+    # 5：随堂测验——按创建教师唯一任教学科归属，答案 JSON 数组长度即题数
+    try:
+        for r in execute_query(
             """SELECT ta.subject,
                       SUM(CASE WHEN json_valid(iqa.answers)
                                THEN json_array_length(iqa.answers) ELSE 0 END) AS q_count
@@ -867,13 +1020,55 @@ def _count_questions_per_subject(student_username: str) -> dict[str, int]:
                WHERE iqa.student_username=?
                GROUP BY ta.subject""",
             (student_username,),
-        )
-        for row in quiz_rows:
-            subject = row[0]
-            q_count = row[1] if row[1] else 0
-            if subject in counts:
-                counts[subject] += q_count
+        ) or []:
+            bump(r[0], questions=r[1])
     except Exception as e:
-        logger.warning(f"统计 quiz 答题数失败: {e}")
+        logger.warning(f"[学科统计] 随堂测验统计失败: {e}")
 
-    return counts
+    return out
+
+
+def _count_questions_per_subject(student_username: str) -> dict[str, int]:
+    """各科作答题数（保留旧函数名，供外部按"题数"取用时不必改口径）"""
+    return {s: int(v["questions"]) for s, v in _subject_stats(student_username).items()}
+
+
+def update_subject_question_counts(student_username: str) -> list[dict[str, Any]]:
+    """刷新各学科答题数与正确率，等级只升不降
+
+    触发点：夜间荣誉兜底任务（log_retention）+ 学生端"刷新学科数据"按钮。
+    不在答题热路径上跑，避免每次发分都多三条统计查询。
+    """
+    upgrades: list[dict[str, Any]] = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for subject, st in _subject_stats(student_username).items():
+        new_count = int(st["questions"])
+        earned, max_ = float(st["score"] or 0), float(st["max"] or 0)
+        accuracy = (earned / max_) if max_ > 0 else None
+        title = get_subject_title(subject, new_count, accuracy)
+        old_row = execute_query(
+            """SELECT question_count, title_level, IFNULL(score_earned, 0), IFNULL(score_total, 0)
+               FROM student_subject_titles WHERE student_username=? AND subject=?""",
+            (student_username, subject),
+        )
+        old_count = int(old_row[0][0] or 0) if old_row else 0
+        old_level = int(old_row[0][1] or 1) if old_row else 0
+        new_level = int(title["level"])
+        # 等级只升不降；题数与分数照常更新（荣誉不会因一次没考好而倒退）
+        keep_level = max(new_level, old_level)
+        style = _subject_title_by_level(keep_level)
+        if old_row and old_count == new_count and old_level == keep_level \
+                and float(old_row[0][2] or 0) == earned and float(old_row[0][3] or 0) == max_:
+            continue     # 没有任何变化，别写库也别刷 updated_at
+        execute_insert_update(
+            """INSERT OR REPLACE INTO student_subject_titles
+               (student_username, subject, question_count, title_level, title_name,
+                score_earned, score_total, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (student_username, subject, new_count, keep_level, style["name"],
+             round(earned, 1), round(max_, 1), now),
+        )
+        up = check_subject_title_upgrade(student_username, subject, old_level, keep_level, new_count)
+        if up:
+            upgrades.append(up)
+    return upgrades
