@@ -902,39 +902,57 @@ Supports exporting various data to Excel/CSV:
 
 ### Points Reward System (Auto Reward Engine)
 
-Fully automated points incentive mechanism covering all classroom activities:
+The student-facing "Point rules" dialog is rendered from `GET /api/rewards/rules`.
+The single source of truth is `REWARD_CONFIG` in `backend/reward_engine.py` — this table
+is only a documentation mirror of it.
 
-- **Activities Automatically Earn Points**:
+- **Two kinds of points**: participation (awarded for taking part, regardless of correctness)
+  + grade bonus (only activities with a standard answer)
+- **Grade bonus scales with an activity weight**: base tiers use the exam scale —
+  Excellent +15 / Good +10 / Pass +5 (score rate ≥90% / ≥75% / ≥60%, one payout per tier per activity)
 
-  | Activity Type | Base Points | Grade Bonus |
-  | --- | :---: | :---: |
-  | Class Quiz | 2 | ✅ |
-  | Quick Vote | 2 | ❌ |
-  | Classroom Q&A | 2 | ✅ |
-  | Exam | 2 | ✅ |
-  | Targeted Practice | 2 | ✅ |
-  | Group Discussion | 2 | ✅ |
-  | Roll Call | 2 | ❌ |
-  | AI Chat | 2 | ❌ |
-  | Task | 2 | ✅ |
-  | Learning Progress | 2 | ❌ |
-  | Daily Login | 1 | ❌ |
-  | Code Practice | 2 | ✅ |
-  | Knowledge Challenge | 1 | ✅ |
-  | Quick-Answer Competition | 2 | ✅ |
-  | Course Exercise | 2 | ✅ |
-  | Resource View | 1 | ❌ |
-  | Daily Picks | 1 | ❌ |
-  | Trending News | 1 | ❌ |
+| Activity | Participation | Grade bonus (E / G / P) | Daily quota |
+| --- | :---: | :---: | :---: |
+| Exam | 3 | 15 / 10 / 5 | academic pool 80 |
+| Class quiz | 2 | 9 / 6 / 3 | academic pool 80 |
+| Synced / course practice | 2 | 9 / 6 / 3 | academic pool 80 |
+| Task (incl. file submissions) | 3 | 9 / 6 / 3 | academic pool 80 |
+| Code practice | 2 | 9 / 6 / 3 | academic pool 80 |
+| Knowledge challenge | 1 | 6 / 4 / 2 | academic pool 80 |
+| Roll call | 1 | correct answer adds Good +4 | class pool 40 |
+| In-class pick | 1 | correct answer adds Good +4 | class pool 40 |
+| Class ladder | 2 | 6 / 4 / 2 | class pool 40 |
+| Classroom Q&A (approved answers add a quality bonus) | 2 | 6 / 4 / 2 | class pool 40 |
+| Group discussion (joining + each message) | 2 | 6 / 4 / 2 | 10/day, inside class pool |
+| Quick vote · Learning progress · Daily login | 2 / 2 / 1 | — | class pool 40 |
+| Mistake fix | 1 | — | 5/day |
+| Quick-answer competition | 2 | rank bonus: 1st +6 / 2nd +5 / 3rd +4 / 4th-5th +3 / 6th+ correct +1 | 3 scored rounds/day |
+| AI chat (incl. companion) | 2 | — | 10/day |
+| Resource / Daily picks / News browsing | 1 | — | 5 / 5 / 3 per day |
 
-- **Grade Bonuses**: Excellent (≥90%) +15 / Good (≥75%) +10 / Pass (≥60%) +5
-- **🏅 12-Level Title System**: Novice → Foundation Apprentice → Diligent Newcomer → Knowledge Hunter → Problem-Solving Pro
-  → Logic Rising Star → Academic Pioneer → Class Scholar → Innovation Leader → Omnipotent Prodigy → Legendary Master → Supreme Sage
-- **🎖️ Achievement Badges**: Rising Star, Full Score Master, Learning Star, Practice Pro, All-Rounder, AI Explorer, Discussion Star, Punctuality Master, Roll Call Master, Full Attendance Model, Challenge Series Badges, etc.
-- **🏫 Class Ranking**: Total points ranking
-- **📊 Points Rules Page**: Displays all points sources and rules
+- **Three daily quota pools**: academic 80 / class participation 40 / light activities 30
+  (all tunable in System settings, 0 = unlimited). Farming buzzers or chat can only fill
+  its own pool and no longer swallows the grade bonus earned from a real exam
+- **Deductions vs. spending are separate ledgers**: moderation failures write `penalty`,
+  exchanging points (e.g. an extra AI portrait) writes `spend`; the ledger colour-codes
+  negatives, so "I spent points" no longer reads as "I was punished"
+- **Teacher recognition channel**: `POST /api/rewards/award-quality` grants an Excellent /
+  Good / Pass bonus for one specific question, discussion message or answer
+- **🏅 12-level titles**: Novice → Foundation Apprentice → Diligent Newcomer → Knowledge Hunter
+  → Problem-Solving Pro → Logic Rising Star → Academic Pioneer → Class Scholar
+  → Innovation Leader → Omnipotent Prodigy → Legendary Master → Supreme Sage
+  (thresholds 0 / 10 / 30 / 60 / 110 / 170 / 240 / 330 / 450 / 600 / 780 / 1000, calibrated to one active term)
+- **📚 Subject titles**: level comes from questions answered per subject, then capped by accuracy
+  (<60% tops out at "Apprentice", 60–75% at "Proficient"), levels only go up, stats refresh nightly
+- **🎖️ Achievement badges**: including All-Rounder (8 different activity types), Punctual (3 exams
+  submitted before the deadline), Monthly Persistence (20 study days in a month) and the
+  challenge / reading series — locked badges now show how much is still missing
+- **⭐ Weekly stars**: students see their **own class** board with a denominator
+  (rank N of M); grade-wide and school-wide boards stay on the teacher side
+- **🏫 Class ranking**: total points (the teacher-side "combined score" also includes manual
+  classroom marks — the two are deliberately different metrics)
 
-> **Admin/Teacher available; Student can view**
+> **Available to admins/teachers; students can view** rules, daily quotas, ledger, titles, subject titles and badges.
 
 ---
 
@@ -1183,6 +1201,17 @@ Current version **8.8.0**. Each release lists the changes a user can notice; per
 - 🖥️ **Desktop update prompt** — the desktop shell has no Git chain, so it compares “version + release build stamp” and guides you to the installer; the misleading “install Git first” error is gone
 - 📦 **Source-package update prompt** — the deployment form is now split into desktop / git / source; with no Git history the panel falls back to “detect + download the source package”, fixing the old bug where such deployments always reported “up to date”; if Git is present, one click converts the folder into a Git deployment and runs the existing fetch → reset → migrate → pip → restart → auto-rollback pipeline
 - 🔄 **Same-version rebuilds are detected** — the release build stamp is the tie-breaker, so rebuilding under the same version number still prompts an update (installs missing the field are prompted too)
+- 🎯 **Every classroom activity now awards points**: roll-call correct answers, in-class picks, class ladder, discussion messages, mistake fixes and approved answers used to land only in the teacher's manual mark sheet (zero in the student ledger); they now go through the auto reward engine, adding three activity types (in-class pick / class ladder / mistake fix)
+- ⚖️ **Grade bonuses scale with activity weight**: exam 15/10/5, quizzes and homework/practice 9/6/3, picks/ladder/discussion/questions 6/4/2. Quick quiz switched to an explicit rank bonus (1st +6, descending) — a 30-second round no longer pays like a 40-minute exam, and ranks 2-5 are no longer tied
+- 🧱 **Anti-farming quotas split into pools**: academic 80 / class participation 40 / light activities 30 (tunable, 0 = unlimited). Buzzers and AI chat can only fill their own pool and can no longer silently swallow the bonus earned from a real exam; students also see today's usage per pool
+- 📋 **One source of truth for the rules**: the student rules dialog is now served by the backend (activity table, score-rate thresholds, daily quotas, deduction and spending semantics). This also fixed three doc-vs-behaviour drifts: group discussion advertised a grade bonus that was never awarded, knowledge challenge promised +1 per run but paid once a day, and the whole quota system was invisible to students
+- 🏅 **Titles and badges re-tuned**: the 12 thresholds recalibrated for one active term (Lv2=10, Lv8=330, Lv12=1000); six permanently unattainable badges lit up (their condition types had no implementation branch at all); Punctual now really compares against the exam deadline, Perfect Attendance became Monthly Persistence (20 study days), All-Rounder asks for 8 activity types instead of every key in the table; locked badges show how much is missing
+- 📚 **Subject titles weigh accuracy**: sources extended to exams / synced practice / code practice / classroom questions / class quizzes; the level is set by questions answered and then capped by accuracy (below 60% tops out at Apprentice, so guessing cannot grind upward); a nightly sweep now refreshes it — previously only a manual button ever computed it, so the feature was effectively dead
+- 💰 **Deductions vs. spending separated**: exchanging points (e.g. an extra AI portrait) is recorded as spending, not as a deduction, and the ledger colour-codes negatives — spending points no longer reads as being punished. AI chat/companion points are awarded only after a reply is actually produced (an unconfigured API key used to still pay 2 points per failed request)
+- ⭐ **Weekly stars scoped to the class**: students no longer see a school-wide board with a denominator-less rank; they see their own class with rank N of M, and other grades' names and classes are no longer exposed school-wide
+- 🙋 **Teacher recognition channel**: a new endpoint awards an Excellent / Good / Pass bonus for one specific question, discussion message or answer — answering well now differs from merely answering
+- 🩹 **Also fixed**: raw keys (penalty/refund) leaking into the student ledger, the participation counter capping at the 100-row page limit and counting deductions as participation, questions and answers sharing one idempotency key and cancelling each other out, resource browsing colliding across resource types (the later one silently got nothing) — existing rows get their type prefix from the view log, points untouched
+- ⚙️ **Behaviour change**: the per-student daily total cap now defaults to unlimited and the three pools take over; an admin-set value still applies and would override the pools
 - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the deployment repair script
 
 ### v7.x – v8.7 (merged)
