@@ -2341,7 +2341,9 @@ async def ask_question(req: QuestionCreate, request: Request):
     # ── 积分奖励 ──
     try:
         from backend.reward_engine import award_participation
-        award_participation(username, "question", str(qid), clip(content, 30))
+        # ask_ 前缀：提问与回答过去都用裸 qid，而幂等键是
+        # (学生, 活动类型, activity_id, reward_type)，于是"提过 7 号题的学生再答 7 号题"会静默不给分
+        award_participation(username, "question", f"ask_{qid}", clip(content, 30))
     except Exception:
         pass
 
@@ -2935,7 +2937,7 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         # ── 积分奖励：参与回答 ──
         try:
             from backend.reward_engine import award_participation
-            award_participation(username, "question", str(question_id),
+            award_participation(username, "question", f"answer_{question_id}",
                                 f"回答：{clip(question_content, 30)}")
         except Exception:
             pass
@@ -3103,12 +3105,18 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
 
     # ── 积分奖励：回答被审批通过 ──
     try:
-        from backend.reward_engine import award_participation
+        from backend.reward_engine import award_participation, award_quality
         # 用 question_id + answer_id 作为唯一标识，确保不被重复发放
         award_participation(answer_username, "question",
-            f"{question_id}_{answer_id}",
+            f"answer_{question_id}_{answer_id}",
             f"回答被审批通过：{clip(question_content, 30)}",
             teacher_username=user["username"])
+        # 教师审批通过 = 认可这条回答有价值，发质量奖（课堂提问权重 0.4 → 优秀 6 分）。
+        # 以前审批通过只给 2 分参与分，与"随手答一句"完全同价，正反馈名不副实。
+        award_quality(answer_username, "question", f"answer_{question_id}_{answer_id}",
+                      "excellent",
+                      activity_title=f"回答被审批通过：{clip(question_content, 30)}",
+                      teacher_username=user["username"])
     except Exception:
         pass
 

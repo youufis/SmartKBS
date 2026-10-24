@@ -1248,6 +1248,16 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
             if existed:
                 return {"status": "ok", "id": existed[0][0], "duplicate": True}
         raise
+    # 发言计分：以前只有"加入讨论小组"给分，组内实质发言一条不算，
+    # 认真讨论与潜水在积分上看不出区别（讨论类每日上限 10 分由引擎封）
+    if role == 2 and msg_id:
+        try:
+            from backend.reward_engine import award_participation
+            award_participation(username, "discussion", f"{disc_id}_msg_{msg_id}",
+                                (disc or {}).get("title") or f"讨论#{disc_id}")
+        except Exception as e:
+            logger.debug(f"[讨论] 发言积分发放失败 {username}: {e}")
+
     # 广播新消息到 WebSocket（带上真实 ID，供前端去重）
     msg_data = {
         "type": "new_message",

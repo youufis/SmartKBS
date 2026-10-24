@@ -489,8 +489,15 @@ async def api_mark(request: Request):
                 # 旧口径 f"{grade}_{cls}_{student}" 不含日期，学生被点名一万次也只有 2 分，
                 # 而"点名达人/全勤标兵"徽章又依赖点名记录，两边口径互相打架。
                 _roll_day = time.strftime("%Y-%m-%d")   # 本模块只 import 了 time，别用 datetime
-                award_participation(student_user[0][0], "rollcall",
-                                    f"{grade}_{cls}_{student}_{_roll_day}", f"点名-{student}")
+                _roll_key = f"{grade}_{cls}_{student}_{_roll_day}"
+                _roll_title = f"点名-{student}"
+                from backend.reward_engine import award_bonus
+                award_participation(student_user[0][0], "rollcall", _roll_key, _roll_title)
+                # 答对拿"良好"档。旧口径答对答错都是同一笔参与分，教师手动账里
+                # 那 5 分学生端根本看不见，积分页上答对与答错毫无区别。
+                if result == "correct":
+                    award_bonus(student_user[0][0], "rollcall", _roll_key, "good",
+                                activity_title=_roll_title)
     except Exception as e:
         logger.warning(f"点名积分奖励发放失败 (student={student}): {e}")
 

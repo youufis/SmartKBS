@@ -632,6 +632,27 @@ def _settle_run(run: dict, session: dict) -> None:
         scores[key] = scores.get(key, 0) + correct
         save_teacher_scores(scores, teacher)
 
+        # 学生积分：课堂闯关以前也只进教师手动账，学生端看不到自己闯关的收获。
+        # 与"知识闯关(quest)"分列两种活动：前者是课堂大屏接力、后者是个人题库闯关。
+        _stu = str(run.get("student_username") or "").strip()
+        if not _stu and student:
+            _u = execute_query(
+                "SELECT username FROM users WHERE role=2 AND IFNULL(status,'active')='active' "
+                "AND name=? AND grade=? AND (class=? OR class=?)",
+                (student, grade, cls, f"{cls}班"),
+            )
+            _stu = _u[0][0] if _u else ""
+        if _stu:
+            try:
+                from backend.reward_engine import award_participation, award_grade
+                _lid = str(run.get("id") or "")
+                _ltitle = f"课堂闯关 第{level}关"
+                award_participation(_stu, "class_ladder", _lid, _ltitle, teacher_username=teacher)
+                award_grade(_stu, "class_ladder", _lid, float(correct),
+                            float(len(answers) or 1), _ltitle, teacher_username=teacher)
+            except Exception as e:
+                logger.warning(f"[课堂闯关] 积分发放失败 {_stu}: {e}")
+
     # 给学生留一条记录（ChatHistory）——写失败不影响结算与积分
     try:
         _write_student_record(run, session)

@@ -555,6 +555,21 @@ async def judge(request: Request):
     except Exception as e:
         logger.warning(f"[课堂抽问] 抽人台账回填失败 {grade}/{cls}/{student}: {e}")
 
+    # 学生积分：课堂抽问以前只进教师手动账，荣誉体系里等于没发生。
+    # 与点名同口径"每人每天计一次"，答对再拿良好档；上限由引擎按池封。
+    if stu_username and result in ("correct", "incorrect"):
+        try:
+            from backend.reward_engine import award_participation, award_bonus
+            _day = _now()[:10]
+            _key = f"{grade}_{cls}_{stu_username}_{_day}"
+            _title = f"课堂抽问-{student}"
+            award_participation(stu_username, "class_drill", _key, _title, teacher_username=teacher)
+            if result == "correct":
+                award_bonus(stu_username, "class_drill", _key, "good", activity_title=_title,
+                            teacher_username=teacher)
+        except Exception as e:
+            logger.warning(f"[课堂抽问] 积分发放失败 {stu_username}: {e}")
+
     scores = load_teacher_scores(teacher)
     return {
         "success": True,

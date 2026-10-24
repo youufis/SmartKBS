@@ -381,6 +381,14 @@ async def toggle_wrong_mastered(req: MasterToggleRequest, request: Request):
             "UPDATE wrong_book SET status='mastered', mastered_at=? WHERE id=? AND status<>'mastered'",
             (now, req.wrong_book_id),
         )
+        if updated:
+            # 把错题真正改会是有价值的学习行为，以前在积分体系里一分不算（订正类每日上限 5 分）
+            try:
+                from backend.reward_engine import award_participation
+                award_participation(owner, "wrong_book", str(req.wrong_book_id),
+                                    f"错题订正 #{req.wrong_book_id}")
+            except Exception as e:
+                logger.warning(f"[错题本] 订正积分发放失败 {owner}: {e}")
     else:
         updated = _db_write(
             "UPDATE wrong_book SET status='pending', mastered_at=NULL WHERE id=? AND status<>'pending'",
