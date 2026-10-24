@@ -350,7 +350,9 @@ def _log_resource_access(rel_path: str, username: str, role: int, path_parts: li
                 award_participation(
                     student_username=username,
                     activity_type="resource_view",
-                    activity_id=str(resource_id),
+                    # 键里带资源类型：html 与 download 的 id 各自成体系，只用裸 id 会让
+                    # "下载 #6"和"网页 #6"互相顶掉，后者静默不给分
+                    activity_id=f"{dir_type}:{resource_id}",
                     activity_title=rel_path.split("/")[-1] or "共享资源",
                 )
             except Exception:

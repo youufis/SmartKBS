@@ -2176,25 +2176,19 @@ def _award_quest_rewards(student_username: str, quest_id: int,
                           correct_count: int, total_score: int):
     """发放闯关奖励"""
     quest_id_str = str(quest_id)
-    today = _now()[:10]
 
-    # 1. 参与基础分（每天仅限一次）
-    today_rewarded = execute_query_one(
-        """SELECT id FROM activity_rewards
-           WHERE student_username=? AND activity_type='quest' AND reward_type='participation'
-           AND created_at>=? AND created_at<?""",
-        (student_username, f"{today} 00:00:00", f"{today} 23:59:59"),
-    )
-    if not today_rewarded:
-        try:
-            award_participation(
-                student_username=student_username,
-                activity_type="quest",
-                activity_id=quest_id_str,
-                activity_title=f"知识闯关 #{quest_id}",
-            )
-        except Exception as e:
-            logger.warning(f"发放闯关参与分失败: {e}")
+    # 1. 参与基础分：每轮一次，幂等键就是本轮 quest_id。
+    # 旧口径"每天只发一次"与学生端公布的规则（每次闯关 +1）自相矛盾：
+    # 学生做第二轮确实没有那 1 分，又没有任何提示。防刷改由每日额度池负责。
+    try:
+        award_participation(
+            student_username=student_username,
+            activity_type="quest",
+            activity_id=quest_id_str,
+            activity_title=f"知识闯关 #{quest_id}",
+        )
+    except Exception as e:
+        logger.warning(f"发放闯关参与分失败: {e}")
 
     # 2. 成绩等级奖励
     if correct_count > 0:

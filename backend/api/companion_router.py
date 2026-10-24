@@ -118,15 +118,7 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
             media_type="text/event-stream",
         )
 
-    # AI 对话积分奖励（与智答模式一致，仅学生）
-    if role == 2:
-        try:
-            from backend.reward_engine import award_participation
-            import datetime
-            award_participation(username, "chat", f"{username}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}", "学伴对话")
-        except Exception:
-            pass
-
+    # 积分奖励与智答模式一致：由 _chat_event_generator 在回答产出后统一发放
     dashscope_api_key, _ = get_api_keys(username)
     if not dashscope_api_key:
         return StreamingResponse(
@@ -154,6 +146,7 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
             use_agent=req.use_agent,
             memory_prompt=req.prompt,
             scene="companion",
+            award_chat_title="学伴对话",
         ),
         media_type="text/event-stream",
     )

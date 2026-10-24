@@ -18,7 +18,10 @@ from backend.database import (
     execute_insert_update, execute_batch, get_connection as smartkb_conn,
 )
 from backend.logger import logger
-from backend.reward_engine import award_participation, award_grade, batch_recompute, REWARD_CONFIG
+from backend.reward_engine import (
+    REWARD_TYPE_NAMES, QUICK_QUIZ_CONSOLATION, QUICK_QUIZ_RANK_BONUS,
+    award_bonus, award_participation, batch_recompute,
+)
 from backend.title_system import check_and_unlock_badges
 from backend.question_db import execute_query as qb_execute_query, execute_query_one as qb_execute_query_one
 from backend.async_utils import spawn_bg
@@ -2098,23 +2101,23 @@ async def _award_rewards(room_id: int, room: dict[str, Any], ranking: list[dict[
                 activity_title=title,
             )
 
-            # 排名奖励
-            if rank == 1:
-                award_grade(username, "quick_quiz", activity_id,
-                            score=100, total_score=100,  # 第一名=满分
-                            activity_title=title)
-            elif rank <= 3:
-                award_grade(username, "quick_quiz", activity_id,
-                            score=85, total_score=100,
-                            activity_title=title)
-            elif rank <= 5:
-                award_grade(username, "quick_quiz", activity_id,
-                            score=75, total_score=100,
-                            activity_title=title)
-            elif player["correct_count"] > 0 and player["total_score"] > 0:
-                award_grade(username, "quick_quiz", activity_id,
-                            score=60, total_score=100,
-                            activity_title=title)
+            # 名次奖：按名次直接发，不再硬造"得分率"去套通用档位。
+            # 旧写法有两个问题：① 明细写着「得分率100.0%」，而学生可能只答对 6/15，
+            # 逐字是假话；② 第 2~3 名(85) 与第 4~5 名(75) 同落"良好"档都是 +10，名次差
+            # 被抹平。现在 1/2/3/4-5/6+ 依次 6/5/4/3/1 分，一场 30 秒的抢答最高 8 分，
+            # 明显低于一场 40 分钟考试的 18 分（3+15），认真考试才划算。
+            bonus = QUICK_QUIZ_RANK_BONUS.get(rank)
+            answered = (player.get("correct_count") or 0) > 0 and (player.get("total_score") or 0) > 0
+            if bonus is None and answered:
+                bonus = QUICK_QUIZ_CONSOLATION      # 陪跑但答对过题：象征性 1 分
+            if bonus is not None:
+                tier, pts = bonus
+                award_bonus(
+                    username, "quick_quiz", activity_id, tier, points=pts,
+                    activity_title=title,
+                    reason=f"知识抢答「{title}」本场第 {rank} 名 · "
+                           f"{REWARD_TYPE_NAMES[tier]} +{pts}",
+                )
 
             # 徽章解锁由批尾的统一结算负责（update_student_total 内部会检测），
             # 这里不再每人多跑一遍 facts 查询

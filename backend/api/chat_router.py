@@ -357,15 +357,9 @@ async def chat_stream(req: ChatRequest, request: Request):
 
     dashscope_api_key, _ = get_api_keys(username)
 
-    # ── AI 对话积分奖励（仅学生，每次对话）── C4: 账号需真实存在且确为学生 ──
-    if role_val == 2 and get_user_role(username) == 2:
-        try:
-            from backend.reward_engine import award_participation
-            import datetime
-            award_participation(username, "chat", f"{username}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}", "AI 对话")
-        except Exception:
-            pass
-
+    # 积分奖励改到生成器里、回答真正产出之后才发（见下方 _award_chat_turn）：
+    # 原来这里在校验 API Key 之前就发分，Key 没配、请求被错误流直接挡掉的对话也照拿 2 分，
+    # 学生连刷 5 次失败请求就能吃满当日 10 分上限。
     if not dashscope_api_key:
         return StreamingResponse(
             _error_stream("API Key 未配置 | 请管理员在「系统配置」中填写 DashScope API Key，或设置环境变量 DASHSCOPE_API_KEY"),
@@ -383,6 +377,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             use_agent=req.use_agent,
             rag_enabled=req.rag_enabled,
             memory_prompt=req.prompt,
+            award_chat_title="AI 对话",
         ),
         media_type="text/event-stream",
     )
@@ -396,12 +391,26 @@ def _chat_event_generator(
     rag_enabled: bool = False,
     memory_prompt: Optional[str] = None,
     scene: str = "chat",
+    award_chat_title: str = "",
 ):
     """SSE 事件生成器（同步）
 
     memory_prompt: 写进会话记忆的"用户原句"。学伴/助手会把人设与画像拼进 prompt，
     用它传入原始提问，避免把这些前缀反复带进后续轮次上下文。
     """
+    def _award_chat_turn() -> None:
+        """回答真正产出后才计一次对话分；非学生账号由引擎守卫自动挡掉"""
+        if not award_chat_title:
+            return
+        try:
+            import datetime as _dt
+            from backend.reward_engine import award_participation
+            award_participation(username, "chat",
+                                f"{username}_{_dt.datetime.now().strftime('%Y%m%d%H%M%S')}",
+                                award_chat_title)
+        except Exception as e:
+            logger.debug(f"[chat] 对话积分发放失败 {username}: {e}")
+
     # ── V6.9 全局模式裁决：聊天链路不再接受客户端开关控制，只认系统配置 ──
     # 优先级 知识库(kb_direct) > 智能体(agent) > 大模型(direct)，与后台 19 处业务同源裁决。
     # 客户端传入的 use_agent / rag_enabled 一律忽略（旧版桌面端兼容不报错）。
@@ -616,6 +625,7 @@ def _chat_event_generator(
                         yield f"data: {json.dumps({'type': 'delta', 'content': _sep + err}, ensure_ascii=False)}\n\n"
                         full_text += _sep + err
 
+            _award_chat_turn()
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
             return
 
@@ -644,6 +654,7 @@ def _chat_event_generator(
             finally:
                 _remember_turn(mem_key if mem_active else None, username,
                                memory_prompt or prompt, _final_text, scene, _finish_status)
+            _award_chat_turn()
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
             return
 
@@ -680,6 +691,7 @@ def _chat_event_generator(
                 err = f'不支持的文件类型: {fp}'
                 combined += err
                 yield f"data: {json.dumps({'type': 'delta', 'content': err}, ensure_ascii=False)}\n\n"
+        _award_chat_turn()
         yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
 
     except Exception as e:

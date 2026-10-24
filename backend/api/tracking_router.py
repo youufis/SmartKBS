@@ -88,7 +88,7 @@ async def log_resource_view(request: Request):
                 award_participation(
                     student_username=username,
                     activity_type="resource_view",
-                    activity_id=str(resource_id),
+                    activity_id=f"{resource_type}:{resource_id}",   # 同上：键里带资源类型
                     activity_title=file_path.split("/")[-1] or "共享资源",
                 )
             except Exception as reward_err:
