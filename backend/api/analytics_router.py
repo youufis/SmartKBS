@@ -15,7 +15,7 @@ from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
 from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
 from backend.prompts import apply_skills
-from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
+from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT, TEACHING_SUGGESTIONS_PROMPT
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 from backend.prompts import build_ai_role
 # E1: 考试判分/统计的唯一实现（成绩弹窗 / 本页 / Excel 导出共用）

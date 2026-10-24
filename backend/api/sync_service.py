@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.database import execute_insert_update, execute_query
+from backend.logger import logger
 
 router = APIRouter()
 

@@ -143,6 +143,7 @@ async def update_enabled_skills(req: EnabledSkillsUpdate, request: Request):
     user = get_current_user(request)
     require_admin(user)
 
+    from backend.skill_engine import ALL_SKILLS_MARKER, get_enabled_skill_names
     # 验证所有技能都存在
     engine = _get_engine()
     engine.ensure_fresh(SKILL_CACHE_TTL)
