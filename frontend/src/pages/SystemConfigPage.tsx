@@ -264,6 +264,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 积分防刷：每日上限（0 = 不限制）
   { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
   { key: 'REWARD_DAILY_QUIZ_SESSIONS', labelKey: 'field_REWARD_DAILY_QUIZ_SESSIONS', descKey: 'field_REWARD_DAILY_QUIZ_SESSIONS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitSession' },
+  { key: 'REWARD_DAILY_ACADEMIC_POINTS', labelKey: 'field_REWARD_DAILY_ACADEMIC_POINTS', descKey: 'field_REWARD_DAILY_ACADEMIC_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
+  { key: 'REWARD_DAILY_CLASS_POINTS', labelKey: 'field_REWARD_DAILY_CLASS_POINTS', descKey: 'field_REWARD_DAILY_CLASS_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
+  { key: 'REWARD_DAILY_FUN_POINTS', labelKey: 'field_REWARD_DAILY_FUN_POINTS', descKey: 'field_REWARD_DAILY_FUN_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
   { key: 'REWARD_DAILY_TOTAL_POINTS', labelKey: 'field_REWARD_DAILY_TOTAL_POINTS', descKey: 'field_REWARD_DAILY_TOTAL_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' }, 
 
   // ══ ③ 文件与存储 ══

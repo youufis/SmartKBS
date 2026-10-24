@@ -154,9 +154,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 大屏音效总闸（前端用 WebAudio 合成，零素材零成本）
     "CLASS_LADDER_SOUND_ENABLED": True,
     # 积分防刷：每日上限（0 = 不限制）
+    # 按"分池"而非一刀切：学术 / 课堂参与 / 轻量娱乐各有额度，互不挤占。
+    # 旧版只有一条总上限 60，抢答刷满 3 场就能吃掉大半，学生再认真考一场试，
+    # 等级奖会被静默吞掉——防刷规则反过来惩罚认真学习的人。
     "REWARD_DAILY_CHAT_POINTS": 10,
     "REWARD_DAILY_QUIZ_SESSIONS": 3,
-    "REWARD_DAILY_TOTAL_POINTS": 60,
+    "REWARD_DAILY_ACADEMIC_POINTS": 80,
+    "REWARD_DAILY_CLASS_POINTS": 40,
+    "REWARD_DAILY_FUN_POINTS": 30,
+    "REWARD_DAILY_TOTAL_POINTS": 0,
     # 称号系统配置
     "ENABLE_BADGES": True,
     "ENABLE_SUBJECT_TITLES": True,
@@ -381,6 +387,9 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "SHOWCASE_AUTO_INTERVAL_MIN": (5, 1440),
     "PODCAST_MAX_SECONDS": (60, 1800),
     "REWARD_DAILY_QUIZ_SESSIONS": (0, 20),
+    "REWARD_DAILY_ACADEMIC_POINTS": (0, 500),
+    "REWARD_DAILY_CLASS_POINTS": (0, 500),
+    "REWARD_DAILY_FUN_POINTS": (0, 300),
     "REWARD_DAILY_TOTAL_POINTS": (0, 500),
     "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
     "MAX_ALLOWED_REQUESTS": (1, 10000),

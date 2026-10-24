@@ -15,6 +15,11 @@
   str(room_id)，两边永不相交 -> 删除房间从不清理流水，`student_total_points` 虚高。
   写入侧已统一为 str(room_id)，本模块给存量流水去前缀。
 
+- R-C 资源浏览 activity_id 不带资源类型：html 与 download 的 id 各自成体系，
+  裸 id 让两种资源互相顶掉（后浏览的那种静默不给分）。写入侧已改成
+  "{resource_type}:{resource_id}"，本模块给存量行补上类型，避免改键后
+  已计过分的老资源被当成"第一次浏览"再给一次分。
+
 安全约束：
 - 只改标签（activity_type / activity_id），绝不改 points，因此学生总积分、称号、
   排行榜数值均不变（"全能选手"徽章除外：course_practice 早已在 ACTIVITY_TYPE_NAMES 中
@@ -36,10 +41,12 @@ QQ_TYPE = "quick_quiz"
 QQ_LEGACY_PREFIX = "quick_quiz_"
 PRACTICE_TYPE = "practice"
 COURSE_PRACTICE_TYPE = "course_practice"
+RESOURCE_VIEW_TYPE = "resource_view"
 
 # R-A 规则的完成标记键。日后若新增/收紧归位规则，把版本号 +1 即可让存量库重跑一次。
-HYGIENE_RULE_VERSION = 1
+HYGIENE_RULE_VERSION = 2   # v2 新增 R-C：资源浏览幂等键补资源类型
 _STATE_KEY = f"reward_keys_hygiene_v{HYGIENE_RULE_VERSION}"
+_RESOURCE_VIEW_STATE_KEY = f"reward_resource_view_keyed_v{HYGIENE_RULE_VERSION}"
 _AMBIGUOUS_SAMPLE_LIMIT = 5
 
 
@@ -205,6 +212,45 @@ def _plan_practice_retype(ev: dict[str, Any]) -> tuple[list[tuple[str, tuple[Any
     return ops, stat
 
 
+# ── R-C：resource_view 幂等键补上资源类型 ──
+
+def _plan_resource_view_keying() -> tuple[list[tuple[str, tuple[Any, ...]]], int]:
+    """把 ('resource_view', '6') 这类裸 id 归位成 ('resource_view', 'html:6')。
+
+    写入侧现在用 f"{resource_type}:{resource_id}"，因为 html 与 download 的 id 各自
+    成体系，裸 id 会让两种资源互相顶掉（后者静默不给分）。但不同步归位存量行的话，
+    改键等于把"已经拿过分的资源"重新变成第一次浏览，学生再点一次就白得 1 分。
+
+    证据来自同一张埋点表 resource_view_logs：该生该 resource_id 只出现过一种
+    resource_type 才归位；两种都有（真撞号）或查不到证据，一律保留原样，绝不猜。
+    """
+    rows = execute_query(
+        "SELECT id, student_username, activity_id FROM activity_rewards"
+        " WHERE activity_type=? AND activity_id NOT LIKE '%:%'",
+        (RESOURCE_VIEW_TYPE,),
+    ) or []
+    ops: list[tuple[str, tuple[Any, ...]]] = []
+    ambiguous = 0
+    for rid, student, act_id in rows:
+        aid = str(act_id or "").strip()
+        if not aid.isdigit():
+            ambiguous += 1
+            continue
+        types = {str(r[0] or "") for r in (execute_query(
+            "SELECT DISTINCT resource_type FROM resource_view_logs"
+            " WHERE student_username=? AND resource_id=?",
+            (student, int(aid)),
+        ) or []) if str(r[0] or "")}
+        if len(types) != 1:
+            ambiguous += 1
+            continue
+        ops.append((
+            "UPDATE activity_rewards SET activity_id=? WHERE id=?",
+            (f"{next(iter(types))}:{aid}", rid),
+        ))
+    return ops, ambiguous
+
+
 # ── 入口 ──
 
 def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -> dict[str, Any]:
@@ -217,7 +263,9 @@ def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -
         "quick_quiz_prefix_fixed": 0, "quick_quiz_overlap": 0,
         "course_practice_retyped": 0, "kept_as_practice": 0,
         "conflict": 0, "unknown": 0, "ambiguous_samples": [],
-        "practice_pass": "skipped(already-marked)", "changed": False,
+        "practice_pass": "skipped(already-marked)",
+        "resource_view_keyed": 0, "resource_view_ambiguous": 0,
+        "resource_view_pass": "skipped(already-marked)", "changed": False,
     }
     try:
         # R-B: 便宜且可自愈（老节点若仍回写带前缀的 id，下次启动再修一次）
@@ -252,11 +300,27 @@ def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -
         else:
             report["practice_pass"] = "skipped(already-marked)"
 
+        # R-C: 资源浏览键归位（与 R-A 同样保守，只在有行级证据时动手）
+        if force or _state_get(_RESOURCE_VIEW_STATE_KEY) is None:
+            ops, ambiguous = _plan_resource_view_keying()
+            report["resource_view_keyed"] = len(ops)
+            report["resource_view_ambiguous"] = ambiguous
+            report["resource_view_pass"] = "dry-run" if dry_run else "ran"
+            if ops and not dry_run:
+                with get_transaction() as conn:
+                    for sql, params in ops:
+                        conn.execute(sql, params)
+        else:
+            report["resource_view_pass"] = "skipped(already-marked)"
+
         report["changed"] = bool(
             report["quick_quiz_prefix_fixed"] or report["course_practice_retyped"]
+            or report["resource_view_keyed"]
         )
         if not dry_run and report["practice_pass"] == "ran":
             _state_set(_STATE_KEY, f"ran:{report['course_practice_retyped']}")
+        if not dry_run and report["resource_view_pass"] == "ran":
+            _state_set(_RESOURCE_VIEW_STATE_KEY, f"ran:{report['resource_view_keyed']}")
         if report["conflict"] or report["unknown"]:
             logger.info(
                 f"[积分治理] practice 流水: 确属同步练习 {report['kept_as_practice']} 条,"
@@ -266,7 +330,8 @@ def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -
         if report["changed"] and not dry_run:
             logger.info(
                 f"[积分治理] 完成: 抢答去前缀 {report['quick_quiz_prefix_fixed']} 条,"
-                f" 课程练习归位 {report['course_practice_retyped']} 条（分值未变动）"
+                f" 课程练习归位 {report['course_practice_retyped']} 条,"
+                f" 资源浏览补类型键 {report['resource_view_keyed']} 条（分值未变动）"
             )
     except Exception as e:
         report["error"] = str(e)
