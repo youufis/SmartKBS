@@ -31,6 +31,17 @@ interface Student {
   total_points?: number
 }
 
+/** 教师端提示条用的规则摘要（全部来自后端，避免再写死一份会过期的分值） */
+interface RewardChips {
+  participation_min: number; participation_max: number
+  grade_exam: { excellent: number; good: number; pass: number }
+  grade_quiz: { excellent: number; good: number; pass: number }
+  grade_class: { excellent: number; good: number; pass: number }
+  rank_bonus_list: string
+  pool_academic: number; pool_class: number; pool_fun: number
+  has_grade_bonus: boolean
+}
+
 interface Stats {
   total: number
   avg: number
@@ -84,6 +95,35 @@ const ScorePage: React.FC = () => {
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'scores' | 'ranking'>('scores')
+  // 奖励积分规则摘要（后端 /api/rewards/rules 是唯一真相，这里只取提示条要用的几个数）
+  const [ruleChips, setRuleChips] = useState<RewardChips | null>(null)
+
+  useEffect(() => {
+    let ignore = false
+    apiClient.get('/api/rewards/rules')
+      .then(({ data }) => {
+        if (ignore || !Array.isArray(data?.activities)) return
+        const acts = data.activities as Array<{ type: string; participation: number; grade: null | { excellent: number; good: number; pass: number } }>
+        const grades = acts.filter((a) => a.grade).map((a) => a.grade!)
+        const pick = (type: string) => acts.find((a) => a.type === type)?.grade ?? { excellent: 0, good: 0, pass: 0 }
+        const pools = Object.fromEntries((data.pools ?? []).map((p: { key: string; cap: number }) => [p.key, p.cap]))
+        setRuleChips({
+          participation_min: Math.min(...acts.map((a) => a.participation)),
+          participation_max: Math.max(...acts.map((a) => a.participation)),
+          grade_exam: pick('exam'),
+          grade_quiz: pick('quiz'),
+          grade_class: pick('rollcall'),
+          rank_bonus_list: (Object.values(data.rank_bonus ?? {}) as Array<{ points: number }>)
+            .map((v) => v.points).join('/'),
+          pool_academic: pools.academic ?? 0,
+          pool_class: pools.class ?? 0,
+          pool_fun: pools.fun ?? 0,
+          has_grade_bonus: grades.length > 0,
+        })
+      })
+      .catch((err) => { reportLoadError(err, { key: 'score.rules' }) })
+    return () => { ignore = true }
+  }, [])
 
 
   // 加载当前教师的任教信息
@@ -724,10 +764,22 @@ const ScorePage: React.FC = () => {
           </Col>
         </Row>
 
-        {/* ── 积分规则提示 ── */}
-        {activeTab === 'scores' && (
+        {/* ── 积分规则提示 ──
+            这里以前写死"参与+2 / 优秀+15 / 良好+10 / 及格+5"，是奖励引擎之外的第二份真相：
+            等级奖改成按活动权重发放后，这排标签还在宣传旧分值（只有考试是 15/10/5，
+            测验作业 9/6/3、课堂应答 6/4/2，参与分也变成 1~3 不等）。现在统一从
+            GET /api/rewards/rules 取，教师看到的与学生看到的同源。 */}
+        {activeTab === 'scores' && ruleChips && (
           <Card size="small" style={{ marginBottom: 12, background: '#fffbe6', fontSize: 13 }}>
-            📋 {t('scoreRulesDesc')}：<Tag color="blue">{t('tagParticipation')}</Tag> <Tag color="success">{t('tagExcellent')}</Tag> <Tag color="processing">{t('tagGood')}</Tag> <Tag color="warning">{t('tagPass')}</Tag>
+            📋 {t('scoreRulesDesc')}
+            <div style={{ marginTop: 6 }}>
+              <Tag color="blue">{t('tagParticipationRange', { min: ruleChips.participation_min, max: ruleChips.participation_max })}</Tag>
+              <Tag color="success">{t('tagGradeExam', { e: ruleChips.grade_exam.excellent, g: ruleChips.grade_exam.good, p: ruleChips.grade_exam.pass })}</Tag>
+              <Tag color="processing">{t('tagGradeQuiz', { e: ruleChips.grade_quiz.excellent, g: ruleChips.grade_quiz.good, p: ruleChips.grade_quiz.pass })}</Tag>
+              <Tag color="purple">{t('tagGradeClass', { e: ruleChips.grade_class.excellent, g: ruleChips.grade_class.good, p: ruleChips.grade_class.pass })}</Tag>
+              <Tag color="orange">{t('tagRankBonus', { list: ruleChips.rank_bonus_list })}</Tag>
+              <Tag color="red">{t('tagDailyPools', { a: ruleChips.pool_academic, c: ruleChips.pool_class, f: ruleChips.pool_fun })}</Tag>
+            </div>
           </Card>
         )}
 
