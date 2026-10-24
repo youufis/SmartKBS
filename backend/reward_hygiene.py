@@ -20,6 +20,11 @@
   "{resource_type}:{resource_id}"，本模块给存量行补上类型，避免改键后
   已计过分的老资源被当成"第一次浏览"再给一次分。
 
+- R-D 点名 activity_id 用姓名：写入侧按「姓名+年级+班级」反查 users 取第一条，
+  同班两个"张三"永远查到同一个学号，而幂等键里也是姓名 -> 第二个张三当天被
+  第一个人占位，答对也静默拿不到分。写入侧已改为优先用抽人台账里的学号，
+  本模块把存量键里的姓名段替换成该行**实际入账的学号**（不猜身份、不动 points）。
+
 安全约束：
 - 只改标签（activity_type / activity_id），绝不改 points，因此学生总积分、称号、
   排行榜数值均不变（"全能选手"徽章除外：course_practice 早已在 ACTIVITY_TYPE_NAMES 中
@@ -42,11 +47,13 @@ QQ_LEGACY_PREFIX = "quick_quiz_"
 PRACTICE_TYPE = "practice"
 COURSE_PRACTICE_TYPE = "course_practice"
 RESOURCE_VIEW_TYPE = "resource_view"
+ROLLCALL_TYPE = "rollcall"
 
 # R-A 规则的完成标记键。日后若新增/收紧归位规则，把版本号 +1 即可让存量库重跑一次。
-HYGIENE_RULE_VERSION = 2   # v2 新增 R-C：资源浏览幂等键补资源类型
+HYGIENE_RULE_VERSION = 3   # v3 新增 R-D：点名幂等键里的姓名换成学号
 _STATE_KEY = f"reward_keys_hygiene_v{HYGIENE_RULE_VERSION}"
-_RESOURCE_VIEW_STATE_KEY = f"reward_resource_view_keyed_v{HYGIENE_RULE_VERSION}"
+_RESOURCE_VIEW_STATE_KEY = f"reward_resource_view_keyed_v2"
+_ROLLCALL_STATE_KEY = f"reward_rollcall_keyed_v{HYGIENE_RULE_VERSION}"
 _AMBIGUOUS_SAMPLE_LIMIT = 5
 
 
@@ -251,6 +258,49 @@ def _plan_resource_view_keying() -> tuple[list[tuple[str, tuple[Any, ...]]], int
     return ops, ambiguous
 
 
+# ── R-D：点名幂等键里的姓名换成学号 ──
+
+def _plan_rollcall_keying() -> tuple[list[tuple[str, tuple[Any, ...]]], int]:
+    """把 ('rollcall', '高一_1班_张三_2026-10-24') 归位成 ('rollcall', '高一_1班_s11048_2026-10-24')。
+
+    写入侧的键已改成以**台账学号**为主：旧写法按「姓名+年级+班级」反查 users 取第一条，
+    同班两个"张三"永远查到同一个学号，而幂等键里又是姓名 —— 第二个张三当天被第一个
+    人占位，答对也静默拿不到分。不归位存量行的话，改键后同一个人当天再被点名答对，
+    会因为新键查无旧行而多拿一次参与分。
+
+    这里不需要猜身份：每行流水本来就记着**实际入账的那个学号**（student_username），
+    把键里的姓名段替换成它即可，与写入侧新口径逐字一致。
+    目标键已被占用（历史上真发生过双发）的行保留原样并计数，绝不合并 points。
+    """
+    rows = execute_query(
+        "SELECT id, student_username, activity_id, reward_type FROM activity_rewards"
+        " WHERE activity_type=?",
+        (ROLLCALL_TYPE,),
+    ) or []
+    ops: list[tuple[str, tuple[Any, ...]]] = []
+    conflict = 0
+    for rid, stu, act_id, reward_type in rows:
+        aid = str(act_id or "").strip()
+        parts = aid.rsplit("_", 2)          # 前缀(年级_班级) _ 姓名或学号 _ 日期
+        if len(parts) != 3:
+            conflict += 1
+            continue
+        prefix, who, day = parts
+        stu = str(stu or "").strip()
+        if not stu or who == stu:
+            continue                          # 已经是学号键，或行本身没有学号
+        target = f"{prefix}_{stu}_{day}"
+        if execute_query(
+            "SELECT id FROM activity_rewards"
+            " WHERE student_username=? AND activity_type=? AND activity_id=? AND reward_type=?",
+            (stu, ROLLCALL_TYPE, target, str(reward_type or "")),
+        ):
+            conflict += 1                     # 目标键已有同档流水：不合并，保留原样
+            continue
+        ops.append(("UPDATE activity_rewards SET activity_id=? WHERE id=?", (target, rid)))
+    return ops, conflict
+
+
 # ── 入口 ──
 
 def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -> dict[str, Any]:
@@ -265,7 +315,9 @@ def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -
         "conflict": 0, "unknown": 0, "ambiguous_samples": [],
         "practice_pass": "skipped(already-marked)",
         "resource_view_keyed": 0, "resource_view_ambiguous": 0,
-        "resource_view_pass": "skipped(already-marked)", "changed": False,
+        "resource_view_pass": "skipped(already-marked)",
+        "rollcall_keyed": 0, "rollcall_conflict": 0, "rollcall_pass": "skipped(already-marked)",
+        "changed": False,
     }
     try:
         # R-B: 便宜且可自愈（老节点若仍回写带前缀的 id，下次启动再修一次）
@@ -313,14 +365,29 @@ def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -
         else:
             report["resource_view_pass"] = "skipped(already-marked)"
 
+        # R-D: 点名键里的姓名归位成学号（用行内 student_username，无需猜身份）
+        if force or _state_get(_ROLLCALL_STATE_KEY) is None:
+            ops, conflict = _plan_rollcall_keying()
+            report["rollcall_keyed"] = len(ops)
+            report["rollcall_conflict"] = conflict
+            report["rollcall_pass"] = "dry-run" if dry_run else "ran"
+            if ops and not dry_run:
+                with get_transaction() as conn:
+                    for sql, params in ops:
+                        conn.execute(sql, params)
+        else:
+            report["rollcall_pass"] = "skipped(already-marked)"
+
         report["changed"] = bool(
             report["quick_quiz_prefix_fixed"] or report["course_practice_retyped"]
-            or report["resource_view_keyed"]
+            or report["resource_view_keyed"] or report["rollcall_keyed"]
         )
         if not dry_run and report["practice_pass"] == "ran":
             _state_set(_STATE_KEY, f"ran:{report['course_practice_retyped']}")
         if not dry_run and report["resource_view_pass"] == "ran":
             _state_set(_RESOURCE_VIEW_STATE_KEY, f"ran:{report['resource_view_keyed']}")
+        if not dry_run and report["rollcall_pass"] == "ran":
+            _state_set(_ROLLCALL_STATE_KEY, f"ran:{report['rollcall_keyed']}")
         if report["conflict"] or report["unknown"]:
             logger.info(
                 f"[积分治理] practice 流水: 确属同步练习 {report['kept_as_practice']} 条,"
@@ -331,7 +398,8 @@ def normalize_reward_activity_keys(dry_run: bool = False, force: bool = False) -
             logger.info(
                 f"[积分治理] 完成: 抢答去前缀 {report['quick_quiz_prefix_fixed']} 条,"
                 f" 课程练习归位 {report['course_practice_retyped']} 条,"
-                f" 资源浏览补类型键 {report['resource_view_keyed']} 条（分值未变动）"
+                f" 资源浏览补类型键 {report['resource_view_keyed']} 条,"
+                f" 点名键姓名改学号 {report['rollcall_keyed']} 条（分值未变动）"
             )
     except Exception as e:
         report["error"] = str(e)

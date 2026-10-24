@@ -476,27 +476,32 @@ async def api_mark(request: Request):
     # ── 积分奖励（参与点名） ──
     try:
         if result in ("correct", "incorrect"):
-            from backend.reward_engine import award_participation
-            # 从 "高一1班" 提取纯数字班级号
-            import re
-            cls_num = re.sub(r'[^\d]', '', str(cls)) if cls else ""
-            student_user = execute_query(
-                "SELECT username FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND name=? AND grade=? AND (class=? OR class=?)",
-                (student, grade, cls_num, f"{cls_num}班"),
-            )
-            if student_user:
+            from backend.reward_engine import award_participation, award_bonus
+            # 学号以台账行为准 —— 上面 resolve_pick 已按 pick_id 定位到"这次抽中的是谁"。
+            # 旧写法只按「姓名 + 年级 + 班级」反查 users 取第一条，同班两个"张三"永远查到
+            # 同一个学号；幂等键里用的也是姓名，于是第二个人当天被第一个人占位，静默拿不到分。
+            # 只有台账给不出学号时（只回传姓名的旧互动答题页）才退回按姓名反查。
+            _roll_stu = str(_uname or "").strip()
+            if not _roll_stu:
+                import re
+                cls_num = re.sub(r'[^\d]', '', str(cls)) if cls else ""
+                student_user = execute_query(
+                    "SELECT username FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND name=? AND grade=? AND (class=? OR class=?)",
+                    (student, grade, cls_num, f"{cls_num}班"),
+                )
+                _roll_stu = str(student_user[0][0] or "").strip() if student_user else ""
+            if _roll_stu:
                 # activity_id 带日期 = 每人每天点名计一次分。
                 # 旧口径 f"{grade}_{cls}_{student}" 不含日期，学生被点名一万次也只有 2 分，
                 # 而"点名达人/全勤标兵"徽章又依赖点名记录，两边口径互相打架。
                 _roll_day = time.strftime("%Y-%m-%d")   # 本模块只 import 了 time，别用 datetime
-                _roll_key = f"{grade}_{cls}_{student}_{_roll_day}"
+                _roll_key = f"{grade}_{cls}_{_roll_stu}_{_roll_day}"
                 _roll_title = f"点名-{student}"
-                from backend.reward_engine import award_bonus
-                award_participation(student_user[0][0], "rollcall", _roll_key, _roll_title)
+                award_participation(_roll_stu, "rollcall", _roll_key, _roll_title)
                 # 答对拿"良好"档。旧口径答对答错都是同一笔参与分，教师手动账里
                 # 那 5 分学生端根本看不见，积分页上答对与答错毫无区别。
                 if result == "correct":
-                    award_bonus(student_user[0][0], "rollcall", _roll_key, "good",
+                    award_bonus(_roll_stu, "rollcall", _roll_key, "good",
                                 activity_title=_roll_title)
     except Exception as e:
         logger.warning(f"点名积分奖励发放失败 (student={student}): {e}")
