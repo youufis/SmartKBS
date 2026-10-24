@@ -43,13 +43,24 @@ def _prev_period(period: str, today: datetime | None = None) -> tuple[str, str]:
 
 
 def _candidates(prev_start: str, prev_end: str) -> list[str]:
-    """上一周期有活动、且还没有覆盖该周期画像的学生"""
+    """上一周期有活动、且还没有覆盖该周期画像的学生
+
+    只做学生，教职工**不**纳入自动生成（2026-10-24 决策）：自动出图是按人头烧 AI 额度，
+    全校教职工 × 每周期 1 次生图的代价远大于收益 —— 教师画像是"想要就点首页头像生成"，
+    往期那幅还能固定当头像（见 /api/portrait/avatar），没必要替他们自动烧图。
+    候选同时按 users.role=2 过滤，防止 activity_rewards 里历史遗留的非学生账号被带进来。
+    """
     from backend.database import execute_query
     try:
         rows = execute_query(
             """SELECT DISTINCT ar.student_username
                FROM activity_rewards ar
                WHERE ar.created_at BETWEEN ? AND ?
+                 AND EXISTS (
+                   SELECT 1 FROM users u
+                   WHERE u.username = ar.student_username
+                     AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
+                 )
                  AND NOT EXISTS (
                    SELECT 1 FROM student_portraits sp
                    WHERE sp.username = ar.student_username

@@ -603,7 +603,8 @@
   "activityLoadFailed": "Failed to load activity, please retry",
   "retry": "Retry",
   "banner": {
-    "portraitHint": "View my My Portrait"
+    "portraitHint": "View my My Portrait",
+    "portraitDefaultHint": "No portrait to use as your avatar yet - click to create one"
   },
   "todoCard": {
     "title": "Today's Focus",

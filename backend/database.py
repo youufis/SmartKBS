@@ -2136,6 +2136,13 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 当前头像用哪幅画像（2026-10-24）──
+            # auto  = 跟随本期画像（默认，与画像头像位上线以来的行为一致）
+            # fixed = 固定用 avatar_portrait_id 那幅 —— 往期画像也能当头像，换周期不换脸
+            # none  = 不用画像，显示角色默认头像（管理员 ⚜️ / 其余 🎓）
+            _ensure_column(c, "users", "avatar_mode", "TEXT DEFAULT 'auto'")
+            _ensure_column(c, "users", "avatar_portrait_id", "INTEGER DEFAULT 0")
+
             # ── 画像生成健康度（P-5）：每次生成/重试配图落一条，供管理员看成功率与耗时 ──
             c.execute("""CREATE TABLE IF NOT EXISTS portrait_gen_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -603,7 +603,8 @@
   "activityLoadFailed": "动态加载失败，请重试",
   "retry": "重试",
   "banner": {
-    "portraitHint": "查看我的 我的画像"
+    "portraitHint": "查看我的 我的画像",
+    "portraitDefaultHint": "还没有可用作头像的画像，点击去生成一张"
   },
   "todoCard": {
     "title": "今日要事",

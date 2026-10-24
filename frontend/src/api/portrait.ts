@@ -64,8 +64,9 @@ export interface TodayResponse {
   exists: boolean;
   portrait?: PortraitData;
   period?: PeriodInfo;
-  /** 本期已生成后，再要一次需要花多少积分（系统配置可调，别在前端写死） */
-  cost?: { extra_points: number; extra_max: number };
+  /** 本期已生成后再要一次的额度（全部由系统配置下发，前端不写死）
+   *  staff_max / used：教职工免积分但有每周期上限，前端据此隐藏"用完"后的按钮 */
+  cost?: { extra_points: number; extra_max: number; staff_max?: number; used?: number };
 }
 
 /** 画像生成健康度（管理员） */
@@ -99,6 +100,28 @@ export interface StylesResponse {
 /** 获取今日画像 */
 export async function getTodayPortrait(): Promise<TodayResponse> {
   const { data } = await apiClient.get('/api/portrait/today');
+  return data;
+}
+
+/** 当前头像：auto=最近一幅画像（默认）/ fixed=固定用某幅（可以是往期）/ none=角色默认头像 */
+export interface AvatarInfo {
+  mode: 'auto' | 'fixed' | 'none';
+  portrait_id: number;
+  image_url: string;
+  portrait_date?: string;
+  /** 固定那幅被删/无配图时，后端自动回落 auto 的标记 */
+  fallback?: boolean;
+}
+
+/** 取当前头像（轻量接口，不增加画像浏览量，首页头像位每次加载都会调） */
+export async function getAvatarInfo(): Promise<{ avatar: AvatarInfo }> {
+  const { data } = await apiClient.get('/api/portrait/avatar');
+  return data;
+}
+
+/** 设置当前头像：固定用某幅画像 / 跟随本期 / 用默认头像 */
+export async function setAvatar(mode: AvatarInfo['mode'], portraitId = 0): Promise<{ avatar: AvatarInfo }> {
+  const { data } = await apiClient.put('/api/portrait/avatar', { mode, portrait_id: portraitId });
   return data;
 }
 

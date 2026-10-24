@@ -14,6 +14,7 @@ import {
   ThunderboltOutlined, StarOutlined,
   FireOutlined, PictureOutlined, WarningOutlined,
   ExclamationCircleOutlined, ReloadOutlined,
+  IdcardOutlined, IdcardFilled,
 } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { usePortraitStore } from '../stores/portraitStore'
@@ -94,13 +95,25 @@ const PortraitPage: React.FC = () => {
   }
   const currentUser = useAuthStore((s) => s.user)
   const {
-    todayPortrait, todayExists, period, extraPoints, historyList,
+    todayPortrait, todayExists, period, extraPoints, staffMax, usedInPeriod, avatar, historyList,
     publicGallery, classGallery, hotGallery,
     styles, loading, generating, error,
-    fetchToday, fetchHistory, fetchStyles,
+    fetchToday, fetchAvatar, fetchHistory, fetchStyles,
     generate, toggleLike, share, unshare,
     deletePortrait, retryImage, fetchPublicGallery, fetchClassGallery, fetchHotGallery,
+    setAvatar: setAvatarApi,
   } = usePortraitStore()
+
+  /** 学生走积分兑换；教师/管理员免积分但有每周期硬上限（后端按角色放行）。
+   *  两套文案必须分开，否则对教职工写着"消耗 100 积分"而实际一分不扣。 */
+  const isStudentUser = currentUser?.role === 'student'
+  /** 教职工本期次数已用完：不再摆一个只会弹"已达上限"的按钮 */
+  const staffCapped = !isStudentUser && staffMax !== null && usedInPeriod >= staffMax
+
+  /** 首页头像现在显示的是不是这一幅（auto=最近一幅、fixed=固定的那幅，都算"在用"） */
+  const isAvatarOf = (id: number) => !!avatar && avatar.mode !== 'none' && avatar.portrait_id === id
+  /** 这一幅是不是被用户显式"固定"下来的（区别于恰好是最近一幅） */
+  const isPinnedAvatar = (id: number) => avatar?.mode === 'fixed' && avatar?.portrait_id === id
 
   /** 本期说法（后端按系统配置给"本周/本月"，兜底用文案键） */
   const periodLabel = period?.label || t('thisPeriod')
@@ -165,8 +178,9 @@ const PortraitPage: React.FC = () => {
   useEffect(() => {
     fetchStyles()
     fetchToday()
+    fetchAvatar()
     fetchHistory()
-  }, [fetchStyles, fetchToday, fetchHistory])
+  }, [fetchStyles, fetchToday, fetchAvatar, fetchHistory])
 
   // P-5: 管理员看生成健康度（成功率/平均耗时），普通用户不请求
   useEffect(() => {
@@ -187,17 +201,19 @@ const PortraitPage: React.FC = () => {
 
   const handleGenerate = async () => {
     if (todayExists) {
-      // 本期已生成过 → 确认是否消耗积分
+      // 本期已生成过 → 学生确认扣积分（价格随配置下发，不再写死 100），教职工确认免积分再生成
       Modal.confirm({
-        title: t('confirmRegenerate'),
+        title: isStudentUser ? t('confirmRegenerate', { points: extraPoints }) : t('confirmRegenerateStaff'),
         icon: <ExclamationCircleOutlined />,
         content: (
           <div>
-            <p>{t('regenerateDesc', { points: 100 })}</p>
-            <p style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>{t('pointsNotEnough')}</p>
+            <p>{isStudentUser ? t('regenerateDesc', { points: extraPoints }) : t('regenerateDescStaff')}</p>
+            {isStudentUser && (
+              <p style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>{t('pointsNotEnough')}</p>
+            )}
           </div>
         ),
-        okText: t('okRegenerate', { points: 100 }),
+        okText: isStudentUser ? t('okRegenerate', { points: extraPoints }) : t('okRegenerateStaff'),
         cancelText: t('cancelRegenerate'),
         onOk: async () => {
           const result = await generate(selectedStyle, true)
@@ -213,7 +229,24 @@ const PortraitPage: React.FC = () => {
     else if (result?.message) message.warning(result.message)
   }
 
-  /** P-5: 只补配图（不占额度、不扣积分） */
+  /** 设头像：fixed=固定用这幅（往期也行）/ auto=最近一幅（默认）/ none=角色默认头像 */
+  const applyAvatar = async (mode: 'auto' | 'fixed' | 'none', portrait?: PortraitData) => {
+    const err = await setAvatarApi(mode, portrait?.id ?? 0)
+    if (err) message.error(err)
+    else message.success(t('ptAvatarSetOk'))
+  }
+
+  /** 再点一次被固定的那幅 = 取消固定，回到"最近一幅" */
+  const handleSetAvatar = (portrait: PortraitData | null) => {
+    if (!portrait || isPinnedAvatar(portrait.id)) return applyAvatar('auto')
+    if (!portrait.image_url) {
+      message.warning(t('ptAvatarNoImage'))
+      return
+    }
+    return applyAvatar('fixed', portrait)
+  }
+
+  /** P-5: 只补配图（生图失败时用；不占额度、不扣积分） */
   const handleRetryImage = async () => {
     if (!todayPortrait) return
     setRetryingImage(true)
@@ -397,6 +430,17 @@ const PortraitPage: React.FC = () => {
                   >
                     {todayPortrait.is_shared ? t('ptShared') : t('ptShare')}
                   </Button>
+                  <Button
+                    type="text"
+                    icon={isAvatarOf(todayPortrait.id)
+                      ? <IdcardFilled style={{ color: '#1677ff' }} />
+                      : <IdcardOutlined />}
+                    onClick={() => handleSetAvatar(todayPortrait)}
+                  >
+                    {isPinnedAvatar(todayPortrait.id)
+                      ? t('ptAvatarCurrent')
+                      : isAvatarOf(todayPortrait.id) ? t('ptAvatarPin') : t('ptSetAvatar')}
+                  </Button>
                   {todayPortrait.image_url && (
                     <Button
                       type="text"
@@ -451,12 +495,18 @@ const PortraitPage: React.FC = () => {
         </Row>
         )}
 
-        {/* 本周已生成 → 提供积分兑换额外机会 */}
-        {todayExists && todayPortrait && !todayPortrait.deleted && (
+        {/* 本期已生成 → 学生用积分兑换额外机会；教职工免积分，次数用完只留一行说明 */}
+        {todayExists && todayPortrait && !todayPortrait.deleted && staffCapped && (
+          <div style={{ textAlign: 'center', marginTop: 24 }}>
+            <Divider />
+            <Text type="secondary">{t('staffPeriodCapHint', { n: staffMax ?? 0 })}</Text>
+          </div>
+        )}
+        {todayExists && todayPortrait && !todayPortrait.deleted && !staffCapped && (
           <div style={{ textAlign: 'center', marginTop: 24 }}>
             <Divider />
             <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-              {t('weeklyFreeHint')}
+              {isStudentUser ? t('weeklyFreeHint') : t('weeklyFreeHintStaff')}
             </Text>
             <Button
               icon={<ThunderboltOutlined />}
@@ -465,7 +515,11 @@ const PortraitPage: React.FC = () => {
               disabled={!canGenerate}
               style={{ height: 40, borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
             >
-              {generating ? '✨ ' + t('ptCreating') : `🔥 ${t('regenerateWithPoints')}`}
+              {generating
+                ? '✨ ' + t('ptCreating')
+                : isStudentUser
+                  ? `🔥 ${t('regenerateWithPoints')}`
+                  : `✨ ${t('regenerateWithPointsStaff')}`}
             </Button>
             {error && (
               <Alert type="error" title={error} showIcon closable
@@ -585,6 +639,34 @@ const PortraitPage: React.FC = () => {
           onSearch={(v) => { setHistorySearch(v); setHistoryPage(1) }}
         />
       </div>
+      {/* 当前头像：默认用最近一幅画像 / 也可固定成任意一幅（含往期）/ 或改回角色默认头像 */}
+      <div style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {t('ptAvatarModeLabel')}：
+          {avatar?.mode === 'none'
+            ? t('ptAvatarModeNone')
+            : avatar?.mode === 'fixed'
+              ? t('ptAvatarModeFixed', { date: avatar.portrait_date || `#${avatar.portrait_id}` })
+              : avatar?.portrait_date
+                ? t('ptAvatarModeAuto', { date: avatar.portrait_date })
+                : t('ptAvatarModeAutoEmpty')}
+          {avatar?.fallback ? t('ptAvatarFallback') : ''}
+        </Text>
+        <Button
+          size="small"
+          type={avatar?.mode === 'auto' && !avatar?.fallback ? 'primary' : 'default'}
+          onClick={() => applyAvatar('auto')}
+        >
+          {t('ptAvatarUseLatest')}
+        </Button>
+        <Button
+          size="small"
+          type={avatar?.mode === 'none' ? 'primary' : 'default'}
+          onClick={() => applyAvatar('none')}
+        >
+          {t('ptAvatarUseDefault')}
+        </Button>
+      </div>
       {historyList.length === 0 ? (
         <Empty description={t('ptEmptyMine')} />
       ) : (
@@ -644,6 +726,15 @@ const PortraitPage: React.FC = () => {
                     <Tooltip title={t('ptShare')}>
                       <ShareAltOutlined onClick={() => openShareModal(portrait)} style={{ color: portrait.is_shared ? '#52c41a' : undefined }} />
                     </Tooltip>,
+                    <Tooltip title={isPinnedAvatar(portrait.id)
+                      ? t('ptAvatarUnpin')
+                      : isAvatarOf(portrait.id) ? t('ptAvatarPinHint') : t('ptSetAvatar')}>
+                      <span onClick={() => handleSetAvatar(portrait)}>
+                        {isAvatarOf(portrait.id)
+                          ? <IdcardFilled style={{ color: '#1677ff' }} />
+                          : <IdcardOutlined />}
+                      </span>
+                    </Tooltip>,
                     <Tooltip title={t('ptDelete')}>
                       <DeleteOutlined onClick={() => handleDelete(portrait)} />
                     </Tooltip>,
@@ -652,6 +743,11 @@ const PortraitPage: React.FC = () => {
                   <Card.Meta
                     title={
                       <Space wrap>
+                        {isAvatarOf(portrait.id) && (
+                          <Tag color="blue" icon={<IdcardFilled />}>
+                            {isPinnedAvatar(portrait.id) ? t('ptAvatarBadge') : t('ptAvatarBadgeLatest')}
+                          </Tag>
+                        )}
                         <Tag>{portrait.created_date}</Tag>
                         {/* P-3/P-6: 历史按周期标注（旧数据没有周期字段就不显示） */}
                         {portrait.period_start && (

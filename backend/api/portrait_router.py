@@ -79,6 +79,8 @@ def _can_view_portrait(owner: str, is_shared: int, share_scope: str, viewer: str
     """
     if owner == viewer or role == 0:
         return True
+    # 2026-10-24：教职工画像**与学生的画像同等可见**（分享成公开就会出现在全校画廊），
+    # 不再按归属角色设限 —— 教师同样可以用画像当头像、被学生看见。
     if not is_shared or (share_scope or "private") in ("", "private"):
         return False
     scope = share_scope or "public"
@@ -565,8 +567,7 @@ async def get_today_portrait(request: Request):
     )
     # 额外一次要花多少积分由系统配置决定（PORTRAIT_EXTRA_POINTS），前端此前硬编码 100，
     # 管理员一调数值弹窗就说错价 —— 价格随状态一起下发
-    cost = {"extra_points": int(_cfg("PORTRAIT_EXTRA_POINTS", 100) or 0),
-            "extra_max": int(_cfg("PORTRAIT_EXTRA_MAX", 2) or 0)}
+    cost = _cost_info(username, period_start, period_end)
     if not rows:
         return {"exists": False, "period": {"type": period, "start": period_start, "end": period_end,
                                             "label": _period_label(period)}, "cost": cost}
@@ -575,8 +576,7 @@ async def get_today_portrait(request: Request):
     portrait = _enrich_with_student_info(portrait)
     period_info = {"type": period, "start": period_start, "end": period_end,
                    "label": _period_label(period)}
-    cost = {"extra_points": int(_cfg("PORTRAIT_EXTRA_POINTS", 100) or 0),
-            "extra_max": int(_cfg("PORTRAIT_EXTRA_MAX", 2) or 0)}
+    cost = _cost_info(username, period_start, period_end)
 
     # 如果已软删除，标记不可用但仍告知已生成
     if portrait.get("status") == "deleted":
@@ -630,6 +630,105 @@ async def set_theme(request: Request, body: ThemeRequest):
     return {"theme": body.theme}
 
 
+# ── 当前头像：可选任意一幅自己的画像（含往期）──
+
+class AvatarRequest(BaseModel):
+    mode: str = "auto"        # auto=最近一幅 / fixed=固定用 portrait_id / none=角色默认头像
+    portrait_id: int = 0
+
+
+def _resolve_avatar(username: str) -> dict[str, Any]:
+    """解析「当前头像」该显示哪幅画像。
+
+    auto  ：最近一幅画像（默认）。不限"本期"—— 这一周期还没生成时继续用上一期的，
+            头像位不该每逢周期第一天就集体变回默认头像。
+    fixed ：固定用 avatar_portrait_id 那幅 —— 往期画像也能当头像，换周期不换脸。
+    none  ：不用画像，前端显示角色默认头像（管理员 ⚜️ / 其余 🎓）。
+
+    固定那幅被删了或没有配图时自动回落 auto（并带 fallback 标记）。
+    只挑**有配图**的画像：配图没出来的那幅当头像会是一块空白。
+    """
+    rows = execute_query("SELECT avatar_mode, avatar_portrait_id FROM users WHERE username=?", (username,))
+    mode = str(rows[0][0] or "auto") if rows else "auto"
+    pinned = int(rows[0][1] or 0) if rows else 0
+    if mode not in ("auto", "fixed", "none"):
+        mode = "auto"
+    fallback = False
+
+    if mode == "none":
+        return {"mode": "none", "portrait_id": 0, "image_url": "", "portrait_date": "", "fallback": False}
+
+    if mode == "fixed":
+        got = execute_query(
+            """SELECT id, created_date, image_path FROM student_portraits
+               WHERE id=? AND username=? AND COALESCE(status,'active')='active'""",
+            (pinned, username),
+        ) if pinned else []
+        if got and (got[0][2] or ""):
+            return {"mode": "fixed", "portrait_id": int(got[0][0]),
+                    "image_url": _to_portrait_url("", int(got[0][0])),
+                    "portrait_date": str(got[0][1] or ""), "fallback": False}
+        mode, fallback = "auto", True
+
+    latest = execute_query(
+        """SELECT id, created_date FROM student_portraits
+           WHERE username=? AND COALESCE(status,'active')='active'
+             AND image_path IS NOT NULL AND image_path <> ''
+           ORDER BY created_date DESC, id DESC LIMIT 1""",
+        (username,),
+    )
+    if latest:
+        return {"mode": "auto", "portrait_id": int(latest[0][0]),
+                "image_url": _to_portrait_url("", int(latest[0][0])),
+                "portrait_date": str(latest[0][1] or ""), "fallback": fallback}
+    return {"mode": "auto", "portrait_id": 0, "image_url": "", "portrait_date": "", "fallback": fallback}
+
+
+@router.get("/avatar")
+async def get_avatar(request: Request):
+    """当前头像用哪幅画像 —— 轻量、不计数。
+
+    首页头像位每次进 /dashboard 都要问一次，绝不能顺手把 view_count +1
+    （/today 就会：它带自增），所以这里单独一条只读路径。
+    """
+    user = get_current_user(request)
+    return {"avatar": _resolve_avatar(user["username"])}
+
+
+@router.put("/avatar")
+async def set_avatar(request: Request, body: AvatarRequest):
+    """把某幅画像（可以是往期的）设为当前头像，或改回「跟随本期」/「用默认头像」。"""
+    user = get_current_user(request)
+    username = user["username"]
+    mode = (body.mode or "auto").strip().lower()
+    if mode not in ("auto", "fixed", "none"):
+        raise HTTPException(status_code=400, detail="头像模式只能是 auto / fixed / none")
+
+    portrait_id = 0
+    if mode == "fixed":
+        portrait_id = int(body.portrait_id or 0)
+        if not portrait_id:
+            raise HTTPException(status_code=400, detail="请先选择要用哪一幅画像")
+        got = execute_query(
+            "SELECT username, COALESCE(status,'active'), image_path FROM student_portraits WHERE id=?",
+            (portrait_id,),
+        )
+        if not got:
+            raise HTTPException(status_code=404, detail="画像不存在")
+        if got[0][0] != username and user.get("role", 2) != 0:
+            raise HTTPException(status_code=403, detail="只能把自己的画像设为头像")
+        if (got[0][1] or "active") != "active":
+            raise HTTPException(status_code=400, detail="这幅画像已删除，换一幅或改回跟随本期")
+        if not (got[0][2] or ""):
+            raise HTTPException(status_code=400, detail="这幅画像还没有配图，先补图再设为头像")
+
+    execute_insert_update(
+        "UPDATE users SET avatar_mode=?, avatar_portrait_id=? WHERE username=?",
+        (mode, portrait_id, username),
+    )
+    return {"avatar": _resolve_avatar(username)}
+
+
 def _count_period_portraits(username: str, period_start: str, period_end: str) -> int:
     """本周期已生成几张（软删除的不占额度：与旧行为一致，删掉可以再来一张）"""
     rows = execute_query(
@@ -639,6 +738,20 @@ def _count_period_portraits(username: str, period_start: str, period_end: str) -
         (username, period_start, period_end),
     )
     return int(rows[0][0]) if rows else 0
+
+
+def _cost_info(username: str, period_start: str, period_end: str) -> dict[str, Any]:
+    """`/today` 下发给前端的额度：价格与次数上限都由系统配置决定，前端一律不许写死。
+
+    staff_max / used 是给教职工用的 —— 他们不扣积分但有每周期硬上限（PORTRAIT_STAFF_MAX），
+    前端据此在"次数用完"时不再摆出一个只会报错的按钮。
+    """
+    return {
+        "extra_points": int(_cfg("PORTRAIT_EXTRA_POINTS", 100) or 0),
+        "extra_max": int(_cfg("PORTRAIT_EXTRA_MAX", 2) or 0),
+        "staff_max": int(_cfg("PORTRAIT_STAFF_MAX", 1) or 0),
+        "used": _count_period_portraits(username, period_start, period_end),
+    }
 
 
 def _log_generation(username: str, period_start: str, *, ok: bool, comment_ok: bool,
@@ -1118,7 +1231,10 @@ async def toggle_like(portrait_id: int, request: Request):
 
 @router.get("/gallery/public")
 async def get_public_gallery(request: Request):
-    """获取公开画廊（全校可见）"""
+    """获取公开画廊（全校可见）
+
+    教师/管理员分享成公开的画像同样进画廊（2026-10-24 改：教职工画像对学生可见）。
+    """
     rows = execute_query(
         """SELECT sp.id, sp.username, sp.created_date, sp.style, sp.image_path,
                   sp.ai_comment, sp.like_count, sp.view_count, sp.share_scope

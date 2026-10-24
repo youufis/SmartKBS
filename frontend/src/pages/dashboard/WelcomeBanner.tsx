@@ -1,4 +1,4 @@
-/** 欢迎横幅：学生（画像头像/称号/积分/排名/连签/考试倒计时）教师·管理员（任教范围/学科/在线） */
+/** 欢迎横幅：三种角色共用「当前头像」（本期画像或固定的往期画像，都没有则角色默认头像）；学生另显示称号/积分/排名/连签/考试倒计时，教师·管理员显示任教范围与在线 */
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -6,8 +6,8 @@ import { Button, Card, Progress, Tag, Typography } from 'antd'
 import {
   FireOutlined, TeamOutlined, TrophyOutlined,
 } from '@ant-design/icons'
-import { getTodayPortrait } from '../../api/portrait'
-import type { PortraitData } from '../../api/portrait'
+import { getAvatarInfo } from '../../api/portrait'
+import type { AvatarInfo } from '../../api/portrait'
 import TeacherScopeChips from '../../components/TeacherScopeChips'
 import { deadlineInfo } from './fmt'
 import type { DashboardSummary } from '../../api/dashboard'
@@ -33,16 +33,19 @@ interface Props {
 const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeacher, isAdmin }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
-  const [portrait, setPortrait] = useState<PortraitData | null>(null)
+  const [avatar, setAvatar] = useState<AvatarInfo | null>(null)
 
+  // 头像位走 /portrait/avatar：本期画像、用户固定的往期画像都从这一条只读接口出
+  // （不复用 /today —— 它每次调用都会给画像浏览量 +1，首页每开一次就涨一次）
   useEffect(() => {
-    if (!isStudent) return
     let cancelled = false
-    getTodayPortrait().then((res) => {
-      if (!cancelled && res.exists && res.portrait && !res.portrait.deleted) setPortrait(res.portrait)
-    }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.TodayPortrait' }) })
+    getAvatarInfo().then((res) => {
+      if (!cancelled) setAvatar(res.avatar)
+    }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.Avatar' }) })
     return () => { cancelled = true }
-  }, [isStudent])
+  }, [])
+
+  const avatarUrl = avatar?.image_url || ''
 
   const hour = new Date().getHours()
   const timeKey = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
@@ -65,24 +68,23 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
       border: 'none',
     }} styles={{ body: { padding: '12px 20px' } }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        {isStudent && (
-          <div
-            onClick={() => navigate('/portrait')}
-            title={t('banner.portraitHint')}
-            style={{
-              width: 44, height: 44, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
-              background: 'rgba(255,255,255,0.25)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: '2px solid rgba(255,255,255,0.6)',
-            }}
-          >
-            {portrait?.image_url ? (
-              <img src={portrait.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <span style={{ fontSize: 22 }}>🎓</span>
-            )}
-          </div>
-        )}
+        {/* 头像位：当前头像（本期或固定的往期画像）；没有 → 角色默认头像（管理员 ⚜️ / 其余 🎓），点击进画像页 */}
+        <div
+          onClick={() => navigate('/portrait')}
+          title={avatarUrl ? t('banner.portraitHint') : t('banner.portraitDefaultHint')}
+          style={{
+            width: 44, height: 44, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
+            background: 'rgba(255,255,255,0.25)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '2px solid rgba(255,255,255,0.6)',
+          }}
+        >
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <span style={{ fontSize: 22 }}>{isAdmin ? '⚜️' : '🎓'}</span>
+          )}
+        </div>
         <span style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', color: '#fff' }}>
           {t('welcome.greeting', { time: t(`welcome.${timeKey}`), name: displayName, role: roleSuffix })}
         </span>

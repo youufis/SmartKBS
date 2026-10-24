@@ -1,6 +1,6 @@
 /** AI 画像状态管理 (Zustand) */
 import { create } from 'zustand';
-import type { PeriodInfo, PortraitData, PortraitStyle } from '../api/portrait';
+import type { AvatarInfo, PeriodInfo, PortraitData, PortraitStyle } from '../api/portrait';
 import * as portraitApi from '../api/portrait';
 import { pollAiTask } from '../api/aiTask';
 import i18n from '../i18n';
@@ -17,6 +17,12 @@ interface PortraitStore {
   period: PeriodInfo | null;
   /** 本期已生成后再要一次的积分价（来自后端配置，前端不再硬编码 100） */
   extraPoints: number;
+  /** 教职工每周期生成上限（null=后端未下发，视为不限制，不隐藏按钮） */
+  staffMax: number | null;
+  /** 本周期已生成几张（软删除不占额度，与后端 _count_period_portraits 同口径） */
+  usedInPeriod: number;
+  /** 当前头像（哪幅画像在当头像；null=还没取到） */
+  avatar: AvatarInfo | null;
   // 历史列表
   historyList: PortraitData[];
   // 画廊
@@ -32,6 +38,9 @@ interface PortraitStore {
 
   // 动作
   fetchToday: () => Promise<void>;
+  fetchAvatar: () => Promise<void>;
+  /** 返回 null=成功，字符串=后端给的失败原因 */
+  setAvatar: (mode: AvatarInfo['mode'], portraitId?: number) => Promise<string | null>;
   fetchHistory: () => Promise<void>;
   fetchStyles: () => Promise<void>;
   generate: (style?: string, usePoints?: boolean) => Promise<{ portrait: PortraitData | null; message: string } | null>;
@@ -51,6 +60,9 @@ export const usePortraitStore = create<PortraitStore>()((set, get) => ({
   todayExists: false,
   period: null,
   extraPoints: 100,
+  staffMax: null,
+  usedInPeriod: 0,
+  avatar: null,
   historyList: [],
   publicGallery: [],
   classGallery: [],
@@ -69,10 +81,33 @@ export const usePortraitStore = create<PortraitStore>()((set, get) => ({
         todayPortrait: res.portrait || null,
         period: res.period || null,
         extraPoints: res.cost?.extra_points ?? get().extraPoints,
+        staffMax: res.cost?.staff_max ?? null,
+        usedInPeriod: res.cost?.used ?? 0,
         loading: false,
       });
     } catch (e: any) {
       set({ loading: false, error: e?.message || tt('loadPortraitFailed') });
+    }
+  },
+
+  fetchAvatar: async () => {
+    try {
+      const res = await portraitApi.getAvatarInfo();
+      set({ avatar: res.avatar });
+    } catch {
+      // 静默：头像取不到不影响画像页
+    }
+  },
+
+  setAvatar: async (mode, portraitId = 0) => {
+    try {
+      const res = await portraitApi.setAvatar(mode, portraitId);
+      set({ avatar: res.avatar });
+      return null;
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e?.message || tt('setAvatarFailed');
+      set({ error: msg });
+      return msg;
     }
   },
 
