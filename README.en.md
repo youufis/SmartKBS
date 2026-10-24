@@ -15,7 +15,7 @@
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/version-8.8.0-blue)
+![Version](https://img.shields.io/badge/version-8.9.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -35,41 +35,64 @@
 
 ---
 
-> 📌 **Highlights of V8.8.0**
+> 📌 **Highlights of V8.9.0**
 >
-> - 📎 **File submissions**: the assignment centre now accepts "files" and "files + note" — students upload Word, PDF, spreadsheets, slides or photos (camera on phones), the AI grades and the teacher publishes after review
-> - 🧾 **Configurable rubric**: custom scoring dimensions (content / structure / compliance / creativity by default), per-checkpoint verdicts quoting the original text; scans and unreadable images go to a human instead of being guessed
-> - 🔁 **Resubmission and lateness**: 3 attempts by default, only the last one is graded, earlier batches are kept; past the deadline uploads are still accepted and merely tagged
-> - 🛠️ **Grading board**: file list, extracted text and image preview, dimension scores, edit-and-review, publish, similarity check and a zip of every original
-> - 🧹 **Filled in along the way**: homework deadlines (countdown in the student to-do list), grade-level points on publish, AI drafting for both types, and automatic re-flowing of run-on requirements
-> - 🏁 **Class Ladder (big screen)** — a single-player ladder for the projector: 15 levels (415 points), safe levels, run ends on a wrong answer or timeout
-> - 💡 **Questions and lifelines** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap; three lifelines (50:50, phone a friend, ask the audience)
-> - 🏆 **Automatic rewards and big-screen feel** — levels cleared count into classroom points; live session board + full-screen result; 7 skins (light by default) and one sound switch
-> - 📚 **Question-bank analytics and governance** — new analysis page for type / difficulty / subject / knowledge point / creator / quality; knowledge points remain optional and can be selected or typed; subjects must come from the configured courses
-> - 🧑‍🏫 **Creator audit** — historical questions created by students/non-teachers can be reviewed and transferred; non-course subjects can be audited and archived with a repair script
-> - 📊 **Learning analytics** — class and time-window snapshots, corrected exam/task metrics and teacher scope; clear AI failure feedback and cached report export
-> - 🧾 **Class summary / teaching suggestions / exam analysis** — strictly class-scoped data; Word export reuses the generated report instead of calling the model again
-> - 📤 **Summary export** — corrected "submitted / pending grading" semantics, best attempt per activity, immediate filter invalidation, Blob download with visible errors
-> - 💬 **Group discussion** — list editing; real automatic/random grouping; stable WebSocket; idempotent, rate-limited optimistic messages; posting blocked after the discussion ends
-> - 🏆 **Quest admin** — bulk deletion for records and question bank, teaching-scope checks, points and badge recalculation
-> - 📰 **Daily picks / news admin** — teacher and admin consoles with health checks and single/bulk disable, restore and delete
-> - 🖥️ **Desktop update prompt** — updates are decided by “version + release build stamp” and point to the newest installer instead of the misleading “install Git first” error
-> - 📦 **Source-package update prompt** — with no Git history it prompts for the newest source package; if Git is installed, one click converts the folder into a Git deployment with in-app incremental upgrades
-> - 🎯 **Unified picking** — roll call, questioning, ladder and AI quiz pages share one set of class weights, keyed by student ID
-> - 🧾 **Pick records** — a cross-activity ledger in roll-call management: timeline, per-activity stats, most-picked, Excel export, new round
-> - 🗑️ **Question bank** — multi-select bulk deletion (foreign and in-use questions are skipped with reasons); compact rows and re-balanced columns
-> - 🩹 **Reader side & strings** — portfolio / analytics / exports now match students by ID first; fixed the always-zero roll-call accuracy and single-brace placeholders
-> - 🔧 **Skills on by default**: a fresh deployment enables every skill in all AI scenes; turning them off only falls back to the base model's style — it never breaks a feature
-> - ⚠️ **Guardrails stay visible**: the skill page warns when nothing is active, and skills that carry baseline constraints (e.g. content safety) are tagged “keep on”
-> - 💻 **Code in questions** renders as a real code block — monospace, indentation kept, scrolls sideways; lists and options collapse into a “N-line code” chip with a hover preview; the Word paper follows suit
-> - ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the repair script
+> **Points and honour system, reworked** (the biggest piece of this release)
+> - ⚖️ **Grade bonuses scale with activity weight**: exam 15/10/5, quizzes · homework · practice · code 9/6/3, picks · ladder · discussion · questions 6/4/2; polls, browsing and chat only pay participation
+> - 🎯 **Every classroom activity now awards points**: correct roll-call answers, in-class picks, class ladder, discussion messages, mistake fixes and approved answers — previously these landed only in the teacher's manual mark sheet and were invisible to students
+> - 🧱 **Anti-farming quotas split into pools**: academic 80 / class participation 40 / light activities 30 (tunable, 0 = unlimited) — maxing out buzzers and chat can no longer swallow the bonus earned from a real exam
+> - 📋 **One source of truth for the rules**: new `GET /api/rewards/rules` renders both the student rules dialog and the teacher points banner; three advertised-vs-actual mismatches and the hard-coded teacher-side numbers were retired in the same pass
+> - 🏅 **Title ladder recalibrated**: twelve thresholds re-cut for one active term (Lv2=10, Lv8=330, Lv12=1000), so occasional participants are no longer locked out of Lv2 while heavy users stop at the ceiling within weeks
+> - 🎖️ **Badges reachable, with progress**: six permanently unattainable badges lit up (their condition types had no implementation branch); Punctual now really compares against the exam deadline; Perfect Attendance became Monthly Persistence; All-Rounder asks for 8 activity types instead of every key in the table; locked badges show how much is missing
+> - 📚 **Subject titles weigh accuracy**: sources extended to exams / practice / code / questions / class quizzes; level is set by questions answered then capped by accuracy, so guessing cannot grind upward; a nightly sweep now refreshes it
+> - 💰 **Deductions vs. spending separated**: exchanging points (an extra AI portrait) is booked as spending and colour-coded in the ledger; chat points are awarded only after a reply is actually produced
+> - ⭐ **Weekly stars scoped to the class**: rank with a denominator (N of M); other grades' names and classes are no longer exposed school-wide
+> - 🙋 **Teacher recognition channel**: new `POST /api/rewards/award-quality` grants an Excellent / Good / Pass bonus for one specific question, message or answer
+> - 🧮 **Class ladder scoring tightened**: grade bonus now uses the ladder score rate (earned / 415); the old answered-correctly-over-attempted ratio hit 90% by round 10 because the mode ends on the first wrong answer
+> - ⚙️ **Two behaviour changes**: the per-student daily total cap now defaults to unlimited (pools take over; an admin-set value still wins); manual classroom marks and reward points remain **separate ledgers** — titles and badges only read the latter
 >
-> 🔄 **Upgrade notes for this release**
+> **Classroom and homework**
+> - 📎 **File-submission homework**: students upload Word · PDF · spreadsheets · PPT · images (phone camera works); extensions and content are both validated; legacy Office formats are rejected with a save-as hint
+> - 🤖 **AI grading**: the whole class goes through one long-text call; dimensions are configurable and normalised to full marks; output includes per-dimension scores, requirement verdicts, quoted evidence and improvement notes; students the model missed are marked for manual review
+> - 🔐 **Review and publish**: AI scores default to pending review, the original AI score is kept when a teacher overrides, students see results only after publishing, and the long-missing homework grade bonus is now actually awarded
+> - 🔁 **Resubmission and lateness**: three attempts by default, only the last is graded, every batch is kept; late submissions still accepted and only flagged
+> - 🧰 **Grading bench**: file list, extracted text and image preview, similarity flagging (flag only, no verdict), class-wide archive download, per-file downloads behind authorisation
+> - 🏁 **Class ladder (big-screen mode)**: teacher-projected single-player ladder — 15 levels, 415 points, safe levels, ends on a wrong answer or timeout, bank-first with AI top-up
+> - 🎨 **Big-screen experience**: seven skins (light by default), one sound switch, session leaderboard and full-screen settlement
+> - 🎲 **Unified picking**: roll call, questioning, class ladder and AI quiz pages share one set of class weights and one pick ledger keyed by student ID; same-named classmates no longer overwrite each other
+> - 🧾 **Pick records**: cross-activity timeline, per-activity stats, most-picked list, Excel export; “new round” clears only the picked list and keeps the weights
+> - 🏠 **Dashboard banner**: teaching scope degrades in three layers (range compression, overflow folding, grouping by subject) so long lists no longer break the card
 >
-> - Desktop: install the newer build over the old one (data in `%APPDATA%\SmartKBS\` is kept)
-> - Source package: **replace the source once manually**; only then does the panel show 「Check Update」 and detect later releases
-> - Git deployment: 「Check Update → Incremental Upgrade」 works as before
-> - Version stays **8.8.0**: this is a same-version re-release, clients tell builds apart by the release build stamp
+> **Question bank and UI**
+> - 🗑️ **Bulk delete in question management**: same rules as single delete, foreign and referenced items skipped with per-item reasons, up to 500 at a time
+> - 📐 **Denser list**: column widths and row heights re-cut from real data; the stem column is visibly wider
+> - 💻 **Code in question stems** renders as real code blocks (monospace, indentation preserved, horizontal scroll); lists and options collapse into a “code · N lines” badge with hover preview; Word papers and AI-generated quiz pages follow the same convention
+> - 🤖 **Generation and extraction contracts** now require fenced code with indentation; “programming questions go to code practice” narrowed to run-graded items only
+> - 🔧 **Skills on by default**: fresh installs enable everything and future skills are picked up automatically; turning them off only reverts to the base style, never breaks a feature
+> - ⚠️ **Skill management page** warns when 0 skills are in effect and marks guard-rail skills “recommended always on”
+> - 🧑‍🏫 **Course management**: knowledge-point panel collapsible and drawer-style on narrow screens; related-resource cards reordered with sorting and unbinding
+> - 🧩 **Resource management**: AI-generated HTML uses the shared knowledge-point control; four consistency issues fixed
+>
+> **Deployment and upgrades**
+> - 🖥️ **Desktop builds** compare “version + release build stamp” and guide users to the installer, instead of demanding Git that a packaged app cannot use
+> - 📦 **Source-package deployments**: deployment flavour split into desktop / git / source; without Git history the app offers to download a new package, and with Git installed it can “convert to a Git deployment and upgrade”
+> - 🧭 **Upgrade detection now trusts the GitHub API** as the authoritative source; CDN mirrors may only report that a newer version exists, never that you are up to date (they serve stale copies on same-version re-releases)
+>
+> **Fixes**
+> - 🩹 **Roll-call idempotency key**: two same-named classmates shared one key, so the second one silently got nothing; the writer now uses the student id from the pick ledger and existing rows were relabelled in place (points untouched)
+> - 🩹 **Ledger and counters**: raw penalty/refund keys shown to students, the participation counter capped at the 100-row page limit, questions and answers colliding on one key, resource browsing colliding across types
+> - 🩹 **Read side keyed by student ID** across portfolio, analytics and exports; roll-call correct count no longer stuck at 0
+> - 🩹 **Whiteboard**: AI diagram and one-click board writes always returned 500 (room_id never assigned)
+> - 🩹 **Logs**: WebSocket handshake 403 and polling 401 spam rooted out; rejection reasons now reach the front end
+>
+> - ⚠️ **Breaking changes**: none. Subjects still come only from the configured courses; the two points-side behaviour changes are listed above.
+>
+> 🔄 **What to know before upgrading**
+>
+> - Desktop: download the new installer and install over the existing one (data lives in `%APPDATA%\SmartKBS\` and is kept)
+> - Source package: **download and replace once manually**; only then does in-app update detection become available
+> - Git deployment: in-app “check for updates → incremental upgrade” works as before
+> - This is a **formal version bump 8.8.0 → 8.9.0**, so clients notice it by version number; new database columns and ledger backfills run automatically at startup and only log on failure
 
 ---
 
@@ -1161,69 +1184,61 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.8.0**. Each release lists the changes a user can notice; per-commit detail lives in the git history.
+Current version **8.9.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.8 is merged into one section below.
 
-### v8.8.0
+### v8.9.0
 
-- 📎 **File submissions**: assignments gain “file” and “file + note” modes with no new activity type and zero migration; students upload Word/PDF/Excel/PPT/text/images, checked by extension and content, legacy Office formats rejected with guidance
-- 📥 **Text and image extraction**: docx/pdf/xlsx via already-installed libraries, pptx by reading OOXML directly (no new dependency); images are transcribed and described by a vision model first; scans and unparsable files go to manual review instead of scoring 0
-- 🤖 **AI grading**: the whole class is packed into one document and graded in a single long-context call; dimensions are configurable and rescaled to the full score; output carries per-dimension scores, checkpoint verdicts, quotes and next steps; students the model missed are written as needing review
-- 🔐 **Review and publish**: AI scores stay unpublished by default, teacher edits keep the AI score for comparison; publishing is what makes results visible and awards the grade-level bonus that was never actually granted before
-- 🔁 **Submission rules**: deadline, attempt limit (3 by default, last attempt wins, history kept), lateness only tagged; both file types require at least one real file
-- 🧰 **Teacher tools**: similarity check (flag only), zip download of all originals, per-file downloads behind an authorising endpoint (other teachers cannot read them); deleting, resetting or reverting an assignment also clears the disk
-- 🧩 **Wired into the platform**: deadline and "submit files" in the student to-do list, activity monitoring reports the teacher score, export gains new columns, four settings exposed in the admin page, bilingual copy and in-app guides updated
-- 🩹 **Also fixed**: run-on AI-drafted requirements are re-flowed by section and numbering (idempotent, keeps sentence punctuation, does not split "1.5 line spacing"); the student upload dialog now closes on success; off-by-one in the remaining-attempts counter
-- 🏁 **Class Ladder (big screen)** — single-player ladder for the projector: 15 levels (415 points), safe levels, run ends on a wrong answer or timeout
-- 🎲 **Questions and pool** — a subject alone is enough; bank first with per-level difficulty, AI fills the gap and stores new questions
-- 👤 **Picking and lifelines** — shared fair picking plus voice announcement; three lifelines (50:50, phone a friend, ask the audience)
-- 🧮 **Judging and scoring** — server-side judging; settling counts levels cleared into classroom points and leaves a student record
-- 🎨 **Big-screen feel** — 7 skins (light by default), one sound switch, a live session board and a full-screen result
-- 🧩 **Fits the existing system** — classroom-activities menu, activity monitor, activity reset, system settings, bilingual strings
-- 📚 **Question-bank analytics and governance** — new analytics page (type / difficulty / subject / knowledge point / creator / quality); the shared dropdown-plus-typing knowledge-point control allows empty values; filters and drill-down by knowledge point, creator and date
-- 🧑‍🏫 **Creator and subject audit** — historical questions created by students/non-teachers can be reviewed and transferred; non-course subjects can be audited and archived; subject creation, import, AI generation and editing now require a configured course subject
-- 📊 **Learning analytics and class summary** — class/time-window snapshots and permission checks; corrected exam, task and roll-call metrics and teacher impersonation; clear AI failure/timeout feedback; reports are cached for export
-- 📤 **Summary export** — corrected exam “submitted / pending grading” status; best attempt per activity, class-aware point mapping; filter changes invalidate old previews; Blob download with visible errors
-- 💬 **Group discussion** — list editing; real class-roster pre-grouping with working automatic/random modes; no WebSocket reconnect per message; idempotent, rate-limited optimistic messages; posting, broadcasting and AI blocked after the end
-- 🏆 **Quest admin** — bulk deletion for records and bank questions; teachers are limited to their classes; cascade cleanup with points/badge recalculation; bank details no longer exposed to students
-- 🎯 **Unified picking** — roll call, questioning, ladder and AI quiz pages share one set of class weights keyed by student ID; same-name students no longer shadow each other
-- 🧾 **Pick records** — one row per pick; a new roll-call tab with cross-activity timeline, filters, per-activity stats, most-picked and Excel export
-- 🔁 **New round** — clears only this round's picked list and keeps the weights; “restart” in questioning and ladder follows the same rule
-- 🩹 **Concurrency** — a single atomic row update replaces the whole-class snapshot write, so two screens in one class no longer overwrite each other; legacy pages reporting only a name are attributed through the ledger
-- 🗑️ **Question bank bulk delete** — multi-select deletion with the same rules as single delete; others' and in-use questions are skipped with reasons, 500 per call
-- 📐 **Compact question list** — column widths and row height rebalanced from real data; the stem column gets clearly more room and a screen fits about 40% more questions
-- 🧾 **ID-first readers** — portfolio, analytics and roll-call / pick exports match students by ID first, name only as fallback; fixes the always-zero roll-call accuracy and raw English verdicts leaking into exports
-- 🔧 **Skills on by default**: every skill is active out of the box and later additions are picked up automatically (saving the full selection returns to this state)
-- ⚠️ **Degradation, not breakage**: with everything off, AI features still work in the base model's style; the page now warns when nothing is active and tags guardrail skills as “keep on”
-- 💻 **Code blocks in questions** — code in stems and explanations renders monospaced with indentation kept and horizontal scrolling; lists and options collapse into an “N-line code” chip with a hover preview; the Word paper export does the same, and AI-generated quiz pages understand fences now
-- 🤖 **Prompt rules** — generation must wrap code in fences and keep indentation, text and image extraction must copy it line by line; “programming questions go to Code Practice” now only means questions that must be run and graded, so read-the-code multiple choice questions are back
-- 🩹 **Side fixes** — homework quota messages used to render braces literally; a fresh database no longer logs a missing-table warning at startup
-- 📰 **Daily picks / news admin** — teacher/admin consoles with health checks and single/bulk disable, restore and delete
-- 🖥️ **Desktop update prompt** — the desktop shell has no Git chain, so it compares “version + release build stamp” and guides you to the installer; the misleading “install Git first” error is gone
-- 📦 **Source-package update prompt** — the deployment form is now split into desktop / git / source; with no Git history the panel falls back to “detect + download the source package”, fixing the old bug where such deployments always reported “up to date”; if Git is present, one click converts the folder into a Git deployment and runs the existing fetch → reset → migrate → pip → restart → auto-rollback pipeline
-- 🔄 **Same-version rebuilds are detected** — the release build stamp is the tie-breaker, so rebuilding under the same version number still prompts an update (installs missing the field are prompted too)
-- 🎯 **Every classroom activity now awards points**: roll-call correct answers, in-class picks, class ladder, discussion messages, mistake fixes and approved answers used to land only in the teacher's manual mark sheet (zero in the student ledger); they now go through the auto reward engine, adding three activity types (in-class pick / class ladder / mistake fix)
-- ⚖️ **Grade bonuses scale with activity weight**: exam 15/10/5, quizzes and homework/practice 9/6/3, picks/ladder/discussion/questions 6/4/2. Quick quiz switched to an explicit rank bonus (1st +6, descending) — a 30-second round no longer pays like a 40-minute exam, and ranks 2-5 are no longer tied
-- 🧱 **Anti-farming quotas split into pools**: academic 80 / class participation 40 / light activities 30 (tunable, 0 = unlimited). Buzzers and AI chat can only fill their own pool and can no longer silently swallow the bonus earned from a real exam; students also see today's usage per pool
-- 📋 **One source of truth for the rules**: the student rules dialog and the teacher "Points management" banner are both served by `GET /api/rewards/rules` (activity table, score-rate thresholds, daily quotas, deduction and spending semantics). This also fixed three doc-vs-behaviour drifts — group discussion advertised a grade bonus that was never awarded, knowledge challenge promised +1 per run but paid once a day, and the whole quota system was invisible to students — plus the teacher banner's hard-coded "participation +2 / excellent +15 / good +10 / pass +5", all stale once bonuses became weight-based
-- 🏅 **Titles and badges re-tuned**: the 12 thresholds recalibrated for one active term (Lv2=10, Lv8=330, Lv12=1000); six permanently unattainable badges lit up (their condition types had no implementation branch at all); Punctual now really compares against the exam deadline, Perfect Attendance became Monthly Persistence (20 study days), All-Rounder asks for 8 activity types instead of every key in the table; locked badges show how much is missing
-- 📚 **Subject titles weigh accuracy**: sources extended to exams / synced practice / code practice / classroom questions / class quizzes; the level is set by questions answered and then capped by accuracy (below 60% tops out at Apprentice, so guessing cannot grind upward); a nightly sweep now refreshes it — previously only a manual button ever computed it, so the feature was effectively dead
-- 💰 **Deductions vs. spending separated**: exchanging points (e.g. an extra AI portrait) is recorded as spending, not as a deduction, and the ledger colour-codes negatives — spending points no longer reads as being punished. AI chat/companion points are awarded only after a reply is actually produced (an unconfigured API key used to still pay 2 points per failed request)
-- ⭐ **Weekly stars scoped to the class**: students no longer see a school-wide board with a denominator-less rank; they see their own class with rank N of M, and other grades' names and classes are no longer exposed school-wide
-- 🙋 **Teacher recognition channel**: a new endpoint awards an Excellent / Good / Pass bonus for one specific question, discussion message or answer — answering well now differs from merely answering
-- 🩹 **Also fixed**: raw keys (penalty/refund) leaking into the student ledger, the participation counter capping at the 100-row page limit and counting deductions as participation, questions and answers sharing one idempotency key and cancelling each other out, resource browsing colliding across resource types (the later one silently got nothing), and **two same-named classmates sharing one roll-call idempotency key** (the writer now prefers the student id resolved from the pick ledger). All three historical rewrites only relabel rows — points are untouched — and run idempotently at startup
-- ⚙️ **Behaviour change**: the per-student daily total cap now defaults to unlimited and the three pools take over; an admin-set value still applies and would override the pools
-- ⚠️ **Breaking changes**: none; subjects must come from the configured courses, and historical non-course data should be handled by the deployment repair script
+**Points and honour system**
 
-### v7.x – v8.7 (merged)
+- ⚖️ Grade bonuses scale with an activity weight: exam 15/10/5, quizzes · homework · practice · code 9/6/3, picks · ladder · discussion · questions 6/4/2; polls, browsing and chat pay participation only
+- 🎯 Every classroom activity now awards points: correct roll-call answers, in-class picks, class ladder, discussion messages, mistake fixes, approved answers — previously only the teacher's manual ledger saw them
+- 🏆 Quick quiz moved to a rank bonus (+6/+5/+4/+3/+1) instead of faking a score rate, and ranks 2–5 are no longer tied
+- 🧱 Daily anti-farming quotas split into pools: academic 80 / class participation 40 / light activities 30, tunable in System settings
+- 📋 One source of truth: `GET /api/rewards/rules` now renders the student rules dialog and the teacher points banner; three advertised-vs-actual mismatches removed
+- 🏅 Title ladder recalibrated for one active term: 0 / 10 / 30 / 60 / 110 / 170 / 240 / 330 / 450 / 600 / 780 / 1000
+- 🎖️ Six permanently unattainable badges fixed (missing condition branches); Punctual compares against the exam deadline, Perfect Attendance became Monthly Persistence, All-Rounder asks for 8 activity types, locked badges show remaining progress
+- 📚 Subject titles extended to code practice, classroom questions and class quizzes, then capped by accuracy; refreshed by the nightly sweep instead of a manual button nobody pressed
+- 💰 Deductions and spending separated (`spend`), ledger colour-codes negatives, chat points awarded only after a reply is produced
+- ⭐ Weekly stars scoped to the student's own class with a rank denominator
+- 🙋 Teacher recognition endpoint `POST /api/rewards/award-quality`
+- 🧮 Class ladder grade bonus now uses the ladder score rate (earned / 415)
+- ⚙️ Behaviour changes: daily total cap defaults to unlimited (pools take over); manual marks and reward points stay separate ledgers — titles and badges read only the latter
 
-- 💬 **Classroom interaction** — idempotent classroom questions with async review, teacher filters/approval, anonymity, follow-ups and realtime updates; class drill and AI podcast
-- 🧩 **Teaching flow** — shared knowledge-point input; draft/publish lifecycle for practices and quizzes; card-based activity lists; scope-based completion; student drafts, navigation and submit safeguards
-- 🧱 **Question bank and scores** — one insertion pipeline (validate / dedupe / transaction / KP links), bank-first composing with AI fallback; unified result pages with per-question accuracy and AI analysis
-- 🎨 **Classroom and motivation** — rebuilt collaborative whiteboard, view statistics, My Portrait, automatic Hall of Glory, points recalculation and audited activity resets
-- 🔒 **Security and operations** — permission lockdown, async AI calls, paper/score semantics, online upgrades and login security, model catalogue and self-checks
-- 🎯 **Earlier releases** — AI skill system and i18n, honour wall and themes, daily picks/RSS, AI companion and lesson/paper authoring, platform-wide removal of hard-coded subjects
+**Classroom and homework**
 
----
+- 📎 File-submission homework with dual validation; 🤖 one long-text grading call per class with configurable dimensions, evidence quotes and manual fallback; 🔐 pending review, publish gate and the missing homework grade bonus; 🔁 three attempts, last-one-graded, late flag only; 🧰 similarity flagging, class archive download, authorised per-file access
+- 🏁 Class ladder (big-screen single player): 15 levels, 415 points, safe levels, ends on a wrong answer or timeout, bank-first question supply, three lifelines, seven skins, session leaderboard
+- 🎲 Unified picking: roll call, questioning, class ladder and AI quiz pages share one set of class weights and one pick ledger keyed by student ID; atomic claim fixes two boards drawing at once
+- 🧾 Pick records tab: cross-activity timeline, per-activity stats, most-picked, Excel export, “new round” clears the list but keeps the weights
+- 🏠 Dashboard banner shows the teaching scope in three degradation layers
+
+**Question bank and UI**
+
+- 🗑️ Bulk delete in question management (up to 500, foreign and referenced items skipped with reasons); 📐 denser list from measured data
+- 💻 Code in question stems renders as real code blocks with a collapsed badge in lists; Word papers and AI-generated quiz pages follow the same convention; generation and extraction prompts now require fenced, indented code
+- 🔧 Skills ship enabled by default and future skills are picked up automatically; the management page warns at “0 in effect” and marks guard-rail skills “recommended always on”
+- 🧑‍🏫 Course management: collapsible / drawer knowledge-point panel, reordered resource cards with sorting and unbinding; 🧩 AI-generated HTML uses the shared knowledge-point control
+
+**Deployment and upgrades**
+
+- 🖥️ Desktop compares “version + release build stamp” and guides to the installer; 📦 source-package deployments detect updates and can convert to a Git deployment in one click; 🧭 the GitHub API is now the authoritative source, mirrors may only announce a newer version
+
+**Fixes**
+
+- 🩹 Roll-call idempotency key shared by same-named classmates (writer now uses the ledger student id; existing rows relabelled, points untouched)
+- 🩹 Raw penalty/refund keys in the student ledger, participation counter stuck at the 100-row page limit, question/answer key collision, resource browsing colliding across types, whiteboard AI 500, WebSocket 403 and polling 401 log spam, read-side student matching now prefers student IDs
+
+### v7.x – v8.8 (merged)
+
+- 💬 **Classroom interaction**: question submission de-dup, idempotency and async review, teacher filtering, anonymity, follow-ups, popularity and live refresh; in-class picking and AI podcasts added
+- 🧩 **Teaching flow**: unified knowledge-point input across the site; draft/publish state machine for practice and quizzes; card-style activity lists; completion scoped to the activity; student answer drafts and submission guards
+- 🧱 **Question bank and results**: single ingestion path with validation, dedup, transactions and knowledge-point links; paper composition prefers the bank with AI top-up; unified result tabs with per-question accuracy and AI analysis; bank analytics (type / difficulty / subject / knowledge point / creator / quality) with subjects constrained to the configured courses
+- 📊 **Analytics and summaries**: class and time-window snapshots, corrected exam/task/roll-call semantics and teacher scoping, explicit AI failure hints, reports persisted for export reuse; summary export fixed for submitted/pending semantics and best-of repeats
+- 💬 **Group discussion**: editable list, real-student pre-grouping on start, random and automatic grouping, WebSocket no longer reconnects per message, idempotent rate-limited optimistic messages, posting locked after the end
+- 🎨 **Classroom and incentives**: collaborative whiteboard rebuilt, browsing statistics, my portrait, hall of glory auto-cards, point recomputation and activity-reset auditing, challenge records and bank bulk delete
+- 📰 **Content management**: teacher and admin consoles for daily picks and news with health checks, single and bulk disable, restore and delete
+- 🔒 **Security and operations**: authorisation and privilege scoping, async AI calls, unified paper and grade semantics, online upgrade and login hardening, model configuration and self-checks
+- 🎯 **Earlier releases**: AI skill system and bilingual UI, hall of glory and themed UI, daily picks and RSS news, AI companion and lesson prep, platform-wide removal of subject hard-coding
 
 <a id="deployment"></a>
 
