@@ -563,18 +563,25 @@ async def get_today_portrait(request: Request):
             ORDER BY created_date DESC, id DESC LIMIT 1""",
         (username, period_start, period_end),
     )
+    # 额外一次要花多少积分由系统配置决定（PORTRAIT_EXTRA_POINTS），前端此前硬编码 100，
+    # 管理员一调数值弹窗就说错价 —— 价格随状态一起下发
+    cost = {"extra_points": int(_cfg("PORTRAIT_EXTRA_POINTS", 100) or 0),
+            "extra_max": int(_cfg("PORTRAIT_EXTRA_MAX", 2) or 0)}
     if not rows:
         return {"exists": False, "period": {"type": period, "start": period_start, "end": period_end,
-                                            "label": _period_label(period)}}
+                                            "label": _period_label(period)}, "cost": cost}
 
     portrait = _format_portrait_row(rows[0])
     portrait = _enrich_with_student_info(portrait)
     period_info = {"type": period, "start": period_start, "end": period_end,
                    "label": _period_label(period)}
+    cost = {"extra_points": int(_cfg("PORTRAIT_EXTRA_POINTS", 100) or 0),
+            "extra_max": int(_cfg("PORTRAIT_EXTRA_MAX", 2) or 0)}
 
     # 如果已软删除，标记不可用但仍告知已生成
     if portrait.get("status") == "deleted":
-        return {"exists": True, "portrait": {**portrait, "deleted": True}, "period": period_info}
+        return {"exists": True, "portrait": {**portrait, "deleted": True}, "period": period_info,
+                "cost": cost}
 
     # 增加浏览次数
     execute_insert_update(
@@ -582,7 +589,7 @@ async def get_today_portrait(request: Request):
         (portrait["id"],),
     )
     portrait["liked"] = _check_liked(portrait["id"], username)
-    return {"exists": True, "portrait": portrait, "period": period_info}
+    return {"exists": True, "portrait": portrait, "period": period_info, "cost": cost}
 
 
 @router.get("/styles")
@@ -813,11 +820,14 @@ async def generate_portrait(request: Request, body: GenerateRequest):
             if used - 1 >= extra_max:
                 raise HTTPException(status_code=400,
                                     detail=f"{label}额外生成次数已达上限（{extra_max} 次）")
-            from backend.reward_engine import deduct_points, get_student_total
+            from backend.reward_engine import spend_points, get_student_total
             total = get_student_total(username)
             if total < extra_points:
                 raise HTTPException(status_code=400, detail=f"积分不足，当前仅有 {total} 积分，需要 {extra_points} 积分才能兑换额外生成机会 📉")
-            charged = deduct_points(username, f"消耗{extra_points}积分兑换画像生成", extra_points)
+            # 走"积分消费"而不是"扣分"：花 100 分兑一张画像，在明细里显示成「扣分」会被读成被罚
+            charged = spend_points(username, extra_points,
+                                   f"消耗{extra_points}积分兑换画像生成",
+                                   activity_title="额外画像生成")
             if charged <= 0:
                 raise HTTPException(status_code=400, detail="积分扣除未成功（可用积分不足），请刷新后重试")
             logger.info(f"学生 {username} 消耗 {charged} 积分兑换了{label}额外画像生成")

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card, Table, Tabs, Button, Space, Typography, Tag, message,
   Spin, Empty, Statistic, Row, Col, Select, Tooltip, Progress,
-  Collapse, Modal, Divider,
+  Collapse, Modal, Divider, Alert,
 } from 'antd'
 import {
   TrophyOutlined, HistoryOutlined, TeamOutlined,
@@ -17,6 +17,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 import { reportLoadError } from '../utils/loadError'
+import { PointsCell } from '../components/PointsCell'
 
 const { Title, Text } = Typography
 
@@ -40,6 +41,12 @@ const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   resource_view: <FolderOpenOutlined style={{ color: '#1677ff' }} />,
   daily_discovery: <StarOutlined style={{ color: '#722ed1' }} />,
   news_view: <NotificationOutlined style={{ color: '#eb2f96' }} />,
+  class_drill: <MessageOutlined style={{ color: '#fa541c' }} />,
+  class_ladder: <RiseOutlined style={{ color: '#13c2c2' }} />,
+  wrong_book: <BookOutlined style={{ color: '#faad14' }} />,
+  spend: <GiftOutlined style={{ color: '#8c8c8c' }} />,
+  penalty: <ThunderboltOutlined style={{ color: '#ff4d4f' }} />,
+  refund: <ReloadOutlined style={{ color: '#1677ff' }} />,
 }
 
 // 学科 emoji 映射（可扩展，不在列表中的科目按名称 hash 分配）
@@ -76,14 +83,53 @@ const COLOR_MAP: Record<string, string> = {
   volcano: '#fa541c', red: '#f5222d', default: '#d9d9d9',
 }
 
+interface GradeBonus { excellent: number; good: number; pass: number }
+interface RuleActivity {
+  type: string; name: string; participation: number; weight: number | null
+  grade: GradeBonus | null; pool: string; points_cap: number; session_cap: number
+}
+interface RewardRules {
+  activities: RuleActivity[]
+  grade_thresholds: Record<string, number>
+  pools: Array<{ key: string; name: string; cap: number }>
+  total_cap: number
+  session_caps: Record<string, number>
+  rank_bonus: Record<string, { reward_type: string; points: number }>
+  rank_consolation: { reward_type: string; points: number }
+  non_activity: Record<string, string>
+}
+interface DailyStatus {
+  date: string
+  pools: Array<{ key: string; name: string; cap: number; used: number }>
+  activities: Array<{ type: string; name: string; used: number; cap: number }>
+  total_used: number
+  last_block_reason?: string
+}
+interface RewardSummary {
+  participation_sessions: number; bonus_awards: number
+  points_earned: number; points_spent: number; activity_types: number
+}
 interface MainTitle { level: number; name: string; emoji: string; color: string; desc: string; min_points?: number }
 interface TitleProgress { current: MainTitle; next: MainTitle | null; progress_percent: number; points_needed: number }
 
 /** 本周之星（学生侧正反馈：过去这份榜单只在教师端可见） */
 interface WeeklyStar { username: string; name: string; grade: string; class: string | number; points: number }
-interface WeeklyStars { stars: WeeklyStar[]; my_points: number; my_week_points: number; my_rank: number | null }
-interface SubjectTitle { subject: string; question_count: number; level: number; name: string; emoji: string; color: string }
-interface BadgeItem { badge_id: string; name: string; icon: string; desc: string; unlocked: boolean; unlocked_at?: string }
+interface WeeklyStars {
+  stars: WeeklyStar[]; my_points: number; my_week_points: number; my_rank: number | null
+  /** 名次分母：本班在册学生数 / 本周有分学生数 */
+  total_students?: number; ranked_count?: number
+  scope?: { grade?: string; class?: string }
+}
+interface SubjectTitle {
+  subject: string; question_count: number; level: number; name: string; emoji: string; color: string
+  /** 正确率 = score_earned / score_total，为空表示还没作答过 */
+  accuracy?: number | null; score_earned?: number; score_total?: number
+}
+interface BadgeItem {
+  badge_id: string; name: string; icon: string; desc: string
+  unlocked: boolean; unlocked_at?: string
+  progress?: { current: number; target: number } | null
+}
 interface TitleInfo {
   main_title: MainTitle; progress: TitleProgress
   subject_titles: SubjectTitle[]; badges: BadgeItem[]
@@ -190,6 +236,11 @@ const SubjectTitleCards: React.FC<{ titles: SubjectTitle[] }> = ({ titles }) => 
                 {emoji} Lv.{st.level} {st.name}
               </Tag>
               <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.answeredQuestions', { count: st.question_count ?? 0 })}</Text>
+              {st.accuracy != null && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('reward.subjectAccuracy', { pct: Math.round(st.accuracy * 100) })}
+                </Text>
+              )}
             </Space>
           </Card>
         </Col>
@@ -222,7 +273,11 @@ const BadgeWall: React.FC<{ badges: BadgeItem[] }> = ({ badges }) => {
                 <Text strong style={{ fontSize: 12 }}>{badge.name}</Text><br />
                 {badge.unlocked
                   ? <Text style={{ fontSize: 10, color: '#52c41a' }}>{t('reward.unlocked')}</Text>
-                  : <Text style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{t('reward.locked')}</Text>}
+                  : <Text style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+                      {badge.progress?.target
+                        ? t('reward.badgeProgress', { left: Math.max(0, badge.progress.target - badge.progress.current) })
+                        : t('reward.locked')}
+                    </Text>}
               </Card>
             </Tooltip>
           </Col>
@@ -274,18 +329,20 @@ const pointsToTitle = (points: number, config: MainTitle[]): MainTitle => {
     }
     return result
   }
-  // 无配置时 fallback
-  if (points >= 800) return { level: 12, name: '至高贤者', emoji: '✨', color: 'red', desc: '' }
-  if (points >= 640) return { level: 11, name: '传奇大师', emoji: '👑', color: 'volcano', desc: '' }
-  if (points >= 520) return { level: 10, name: '全能学神', emoji: '🏆', color: 'orange', desc: '' }
-  if (points >= 420) return { level: 9, name: '创新领袖', emoji: '🧠', color: 'gold', desc: '' }
+  // 兜底：与 backend/title_system.DEFAULT_TITLE_CONFIG 的 2026-10 重标定值一致。
+  // 正常路径拿的是 /rewards/title-config，这里只在配置拉取失败时兜住渲染，
+  // 若两处都要改，请以后端为准（学生端规则已不再手抄数值表）。
+  if (points >= 1000) return { level: 12, name: '至高贤者', emoji: '✨', color: 'red', desc: '' }
+  if (points >= 780) return { level: 11, name: '传奇大师', emoji: '👑', color: 'volcano', desc: '' }
+  if (points >= 600) return { level: 10, name: '全能学神', emoji: '🏆', color: 'orange', desc: '' }
+  if (points >= 450) return { level: 9, name: '创新领袖', emoji: '🧠', color: 'gold', desc: '' }
   if (points >= 330) return { level: 8, name: '班级学霸', emoji: '🌟', color: 'magenta', desc: '' }
-  if (points >= 250) return { level: 7, name: '学业先锋', emoji: '🚀', color: 'purple', desc: '' }
-  if (points >= 180) return { level: 6, name: '逻辑新星', emoji: '⚡', color: 'geekblue', desc: '' }
-  if (points >= 120) return { level: 5, name: '解题能手', emoji: '💡', color: 'blue', desc: '' }
-  if (points >= 75) return { level: 4, name: '知识猎人', emoji: '🔍', color: 'cyan', desc: '' }
-  if (points >= 40) return { level: 3, name: '勤学新人', emoji: '📖', color: 'green', desc: '' }
-  if (points >= 15) return { level: 2, name: '筑基学徒', emoji: '🌱', color: 'lime', desc: '' }
+  if (points >= 240) return { level: 7, name: '学业先锋', emoji: '🚀', color: 'purple', desc: '' }
+  if (points >= 170) return { level: 6, name: '逻辑新星', emoji: '⚡', color: 'geekblue', desc: '' }
+  if (points >= 110) return { level: 5, name: '解题能手', emoji: '💡', color: 'blue', desc: '' }
+  if (points >= 60) return { level: 4, name: '知识猎人', emoji: '🔍', color: 'cyan', desc: '' }
+  if (points >= 30) return { level: 3, name: '勤学新人', emoji: '📖', color: 'green', desc: '' }
+  if (points >= 10) return { level: 2, name: '筑基学徒', emoji: '🌱', color: 'lime', desc: '' }
   return { level: 1, name: '初窥门径', emoji: '🥚', color: 'default', desc: '' }
 }
 
@@ -333,7 +390,7 @@ const TeacherMyPoints: React.FC = () => {
             render: (type: string, record: any) => (
               <Tag color={REWARD_TAG_COLORS[type] || 'default'}>{rewardTypeLabel(type, record.reward_type_name)}</Tag>
             ) },
-          { title: t('points'), dataIndex: 'points', width: 70, render: (p: number) => <Text strong style={{ color: '#52c41a' }}>+{p}</Text> },
+          { title: t('points'), dataIndex: 'points', width: 80, render: (p: number) => <PointsCell points={p} /> },
           { title: t('description'), dataIndex: 'reason', ellipsis: true },
         ]}
       />
@@ -357,28 +414,13 @@ const RewardPage: React.FC = () => {
   const [rulesOpen, setRulesOpen] = useState(false)
   const [weekly, setWeekly] = useState<WeeklyStars | null>(null)
 
-  // ── 积分规则（数值与 backend/reward_engine.py 的 REWARD_CONFIG 一致，改那边记得同步这里）──
-  // 活动名一律走词典 reward.activityType.*，emoji 只是装饰；graded=是否还有成绩等级奖励
-  const RULES: Array<{ type: string; emoji: string; base: number; graded: boolean }> = [
-    { type: 'quiz', emoji: '📝', base: 2, graded: true },
-    { type: 'poll', emoji: '📊', base: 2, graded: false },
-    { type: 'question', emoji: '🙋', base: 2, graded: false },
-    { type: 'exam', emoji: '📖', base: 2, graded: true },
-    { type: 'practice', emoji: '🤖', base: 2, graded: true },
-    { type: 'discussion', emoji: '💬', base: 2, graded: true },
-    { type: 'rollcall', emoji: '✅', base: 2, graded: false },
-    { type: 'chat', emoji: '💭', base: 2, graded: false },
-    { type: 'task', emoji: '📋', base: 2, graded: true },
-    { type: 'learning', emoji: '📈', base: 2, graded: false },
-    { type: 'login', emoji: '🔑', base: 1, graded: false },
-    { type: 'code', emoji: '💻', base: 2, graded: true },
-    { type: 'quest', emoji: '🎮', base: 1, graded: true },
-    { type: 'quick_quiz', emoji: '⚡', base: 2, graded: true },
-    { type: 'course_practice', emoji: '📚', base: 2, graded: true },
-    { type: 'resource_view', emoji: '🗂️', base: 1, graded: false },
-    { type: 'daily_discovery', emoji: '✨', base: 1, graded: false },
-    { type: 'news_view', emoji: '📰', base: 1, graded: false },
-  ]
+  // ── 积分规则：一律来自后端 GET /api/rewards/rules ──
+  // 这里以前手抄了一份数值表（注释还写着"改那边记得同步这里"），结果真漂了：
+  // 分组讨论标着有等级奖而代码从未发过、闯关写着每次 +1 而实际每天只发一次、
+  // 整套每日上限对学生只字未提。规则只允许有一份，出自 backend/reward_engine.py。
+  const [rules, setRules] = useState<RewardRules | null>(null)
+  const [daily, setDaily] = useState<DailyStatus | null>(null)
+  const [summary, setSummary] = useState<RewardSummary | null>(null)
 
   // ── 等级头像成长进化表（与 PortfolioPage / AppLayout 保持一致） ──
   const LEVEL_AVATARS = [
@@ -489,15 +531,19 @@ const RewardPage: React.FC = () => {
     const fetchData = async () => {
       setLoading(true)
       try {
-        const [pointsRes, historyRes, weeklyRes] = await Promise.all([
+        const [pointsRes, historyRes, weeklyRes, dailyRes, summaryRes] = await Promise.all([
           apiClient.get('/api/rewards/my-points'),
           apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
           apiClient.get('/api/rewards/weekly-stars').catch(() => null),   // 拉不到不影响主页面
+          apiClient.get('/api/rewards/my-daily-status').catch(() => null),
+          apiClient.get('/api/rewards/my-summary').catch(() => null),
         ])
         if (!ignore) {
           setMyPoints(pointsRes.data.total_points || 0)
           setMyHistory(Array.isArray(historyRes.data) ? historyRes.data : [])
           if (weeklyRes?.data?.stars) setWeekly(weeklyRes.data)
+          if (dailyRes?.data?.pools) setDaily(dailyRes.data as DailyStatus)
+          if (summaryRes?.data) setSummary(summaryRes.data as RewardSummary)
         }
       } catch (err) { reportLoadError(err, { key: 'RewardPage.fetchData', retry: () => { void fetchData() } }) }
       if (!ignore) setLoading(false)
@@ -505,6 +551,19 @@ const RewardPage: React.FC = () => {
     fetchData()
     return () => { ignore = true }
   }, [isStudent])
+  // 积分规则：后端是唯一真相，师生共用同一个弹窗
+  useEffect(() => {
+    let ignore = false
+    const loadRules = async () => {
+      try {
+        const { data } = await apiClient.get('/api/rewards/rules')
+        if (!ignore && Array.isArray(data?.activities)) setRules(data as RewardRules)
+      } catch (err) { reportLoadError(err, { key: 'RewardPage.rules', retry: () => { void loadRules() } }) }
+    }
+    void loadRules()
+    return () => { ignore = true }
+  }, [])
+
   // 称号信息加载函数（供初始化和按钮刷新使用）
   const fetchTitleInfo = useCallback(async (ignoreRef?: { current: boolean }) => {
     try {
@@ -540,30 +599,107 @@ const RewardPage: React.FC = () => {
 
   // 学生视图：称号 + 积分
   // ── 积分规则弹窗 ──
-  const renderRulesModal = () => (
-    <Modal title={t('reward.rulesTitle')} open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={640}>
-      <Table className="nowrap-cells-table" dataSource={RULES} rowKey="type" size="small" pagination={false}
-        columns={[
-          { title: t('activity'), dataIndex: 'type', width: 150,
-            render: (type: string, record: any) => (
-              <Space size={6}><span>{record.emoji}</span><span>{actLabel(type)}</span></Space>
-            ) },
-          { title: t('reward.basePoints'), dataIndex: 'base', width: 100, render: (v: number) => <Tag color="blue">+{v}</Tag> },
-          { title: t('reward.gradeReward'), dataIndex: 'graded',
-            render: (v: boolean) => v
-              ? <Text style={{ color: '#52c41a' }}>{t('reward.gradeScale')}</Text>
-              : <Text type="secondary">{t('reward.none')}</Text> },
-        ]} />
-      <Divider />
-      <Text strong style={{ fontSize: 14 }}>{t('reward.levelAvatarEvolution')}</Text>
-      <Table className="nowrap-cells-table" dataSource={LEVEL_AVATARS} rowKey="level" size="small" pagination={false} style={{ marginTop: 8 }}
-        columns={[
-          { title: t('levelLabel'), dataIndex: 'level', width: 60, render: (lvl: string) => <Tag>{lvl}</Tag> },
-          { title: t('reward.avatar'), dataIndex: 'emoji', width: 60, render: (em: string) => <span style={{ fontSize: 22 }}>{em}</span> },
-          { title: t('reward.titleRange'), key: 'range', render: (_: unknown, record: any) => <Text style={{ fontSize: 13 }}>{t(`reward.levelRange${record.level.replace('Lv.', '')}`)}</Text> },
-        ]} />
-    </Modal>
-  )
+  const renderRulesModal = () => {
+    const acts = rules?.activities ?? []
+    const ths = rules?.grade_thresholds
+    return (
+      <Modal title={t('reward.rulesTitle')} open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={760}>
+        <Spin spinning={acts.length === 0}>
+          <Table className="nowrap-cells-table" dataSource={acts} rowKey="type" size="small" pagination={false}
+            columns={[
+              { title: t('activity'), dataIndex: 'type', width: 150,
+                render: (type: string, record: RuleActivity) => (
+                  <Space size={6}>
+                    <span>{ACTIVITY_ICONS[type] ?? <StarOutlined />}</span>
+                    <span>{actLabel(type, record.name)}</span>
+                  </Space>
+                ) },
+              { title: t('reward.basePoints'), dataIndex: 'participation', width: 96,
+                render: (v: number) => <Tag color="blue">+{v}</Tag> },
+              { title: t('reward.gradeReward'), dataIndex: 'grade',
+                render: (g: GradeBonus | null, record: RuleActivity) => {
+                  if (record.type === 'quick_quiz') {
+                    // 抢答按名次发奖，不走"得分率"档位
+                    const ranks = Object.entries(rules?.rank_bonus ?? {})
+                    return <Text style={{ fontSize: 12 }}>{t('reward.rankScale')}
+                      {ranks.map(([rk, v]) => `#${rk}+${v.points}`).join(' ')} · 
+                      {t('reward.rankConsolation', { points: rules?.rank_consolation?.points ?? 1 })}</Text>
+                  }
+                  if (!g) return <Text type="secondary">{t('reward.none')}</Text>
+                  return (
+                    <Text style={{ color: '#52c41a', fontSize: 12 }}>
+                      {t('reward.gradeTiers', { excellent: g.excellent, good: g.good, pass: g.pass })}
+                    </Text>
+                  )
+                } },
+              { title: t('reward.dailyLimit'), key: 'limit', width: 130,
+                render: (_: unknown, r: RuleActivity) => {
+                  if (r.session_cap > 0) return <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.sessionsPerDay', { count: r.session_cap })}</Text>
+                  if (r.points_cap > 0) return <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.pointsPerDay', { points: r.points_cap })}</Text>
+                  const pool = rules?.pools?.find((x) => x.key === r.pool);
+                  return pool?.cap
+                    ? <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.poolPerDay', { name: pool.name, points: pool.cap })}</Text>
+                    : <Text type="secondary">—</Text>
+                } },
+            ]} />
+          {ths && (
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+              {t('reward.gradeLineNote', {
+                excellent: Math.round(ths.excellent * 100),
+                good: Math.round(ths.good * 100),
+                pass: Math.round(ths.pass * 100),
+              })}
+            </Text>
+          )}
+          <Divider style={{ margin: '14px 0' }} />
+          <Text strong style={{ fontSize: 14 }}>{t('reward.poolTitle')}</Text>
+          <div style={{ marginTop: 6 }}>
+            {(rules?.pools ?? []).map((pool) => {
+              const used = daily?.pools?.find((x) => x.key === pool.key)
+              const pct = pool.cap > 0 ? Math.min(100, Math.round(((used?.used ?? 0) / pool.cap) * 100)) : 0
+              return (
+                <div key={pool.key} style={{ marginBottom: 6 }}>
+                  <Space size={8} style={{ width: '100%', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 12 }}>{pool.name}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('reward.poolUsed', { used: used?.used ?? 0, cap: pool.cap })}
+                    </Text>
+                  </Space>
+                  <Progress percent={pct} size="small" showInfo={false} />
+                </div>
+              )
+            })}
+          </div>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+            {t('reward.poolNote')}
+          </Text>
+          <Divider style={{ margin: '14px 0' }} />
+          <Text strong style={{ fontSize: 14 }}>{t('reward.levelAvatarEvolution')}</Text>
+          <Table className="nowrap-cells-table" dataSource={LEVEL_AVATARS} rowKey="level" size="small"
+            pagination={false} style={{ marginTop: 8 }}
+            columns={[
+              { title: t('levelLabel'), dataIndex: 'level', width: 60, render: (lvl: string) => <Tag>{lvl}</Tag> },
+              { title: t('reward.avatar'), dataIndex: 'emoji', width: 60,
+                render: (em: string) => <span style={{ fontSize: 22 }}>{em}</span> },
+              { title: t('reward.titleRange'), key: 'title',
+                render: (_: unknown, record: any) => {
+                  const lv = Number(String(record.level).replace('Lv.', ''))
+                  const cfg = titleConfig.find((x) => x.level === lv)
+                  const next = titleConfig.find((x) => x.level === lv + 1);
+                  if (!cfg) return <Text type="secondary">—</Text>
+                  return (
+                    <Text style={{ fontSize: 13 }}>
+                      {cfg.emoji} {cfg.name} · 
+                      {next ? t('reward.pointsFromTo', { from: cfg.min_points ?? 0, to: (next.min_points ?? 0) - 1 })
+                        : t('reward.fromPoints', { points: cfg.min_points })}
+                    </Text>
+                  )
+                } },
+            ]} />
+        </Spin>
+      </Modal>
+    )
+  }
 
   const renderStudentView = () => (
     <Spin spinning={loading}>
@@ -591,14 +727,14 @@ const RewardPage: React.FC = () => {
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
-                        <Statistic title={t('reward.participationCount')} value={myHistory.length}
+                        <Statistic title={t('reward.participationCount')} value={summary?.participation_sessions ?? myHistory.length}
                           prefix={<ThunderboltOutlined style={{ color: '#1677ff' }} />}
                           styles={{ content: { color: '#1677ff' } }} />
                       </Card>
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
-                        <Statistic title={t('reward.rewardCount')} value={myHistory.filter(h => h.reward_type !== 'participation').length}
+                        <Statistic title={t('reward.rewardCount')} value={summary?.bonus_awards ?? 0}
                           prefix={<StarOutlined style={{ color: '#52c41a' }} />}
                           styles={{ content: { color: '#52c41a' } }} />
                       </Card>
@@ -616,9 +752,14 @@ const RewardPage: React.FC = () => {
                       title={<Space><StarOutlined /> {t('reward.weeklyStars')}</Space>}
                       extra={weekly.my_rank
                         ? <Text type="secondary" style={{ fontSize: 12 }}>
-                            {t('reward.myWeekRank', { rank: weekly.my_rank, points: weekly.my_week_points })}
+                            {weekly.total_students
+                              ? t('reward.myWeekRankOf', {
+                                  rank: weekly.my_rank, points: weekly.my_week_points, total: weekly.total_students })
+                              : t('reward.myWeekRank', { rank: weekly.my_rank, points: weekly.my_week_points })}
                           </Text>
-                        : <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.weeklyOnlyStudent')}</Text>}>
+                        : <Text type="secondary" style={{ fontSize: 12 }}>
+                            {t('reward.weeklyNoRank', { count: weekly.ranked_count ?? 0 })}
+                          </Text>}>
                       {weekly.stars.length === 0 ? (
                         <Text type="secondary">{t('reward.weeklyEmpty')}</Text>
                       ) : (
@@ -649,6 +790,11 @@ const RewardPage: React.FC = () => {
                       </Text>
                     </>
                   )}
+                  {weekly && (
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+                      {t('reward.weeklyScopeNote')}
+                    </Text>
+                  )}
                   {titleInfo?.recent_upgrades && titleInfo.recent_upgrades.length > 0 && (
                     <Card size="small" title={<Space><HistoryOutlined /> {t('reward.upgradeHistory')}</Space>} style={{ marginTop: 12 }}>
                       <UpgradeTimeline upgrades={titleInfo.recent_upgrades} />
@@ -675,6 +821,9 @@ const RewardPage: React.FC = () => {
                         }}>
                         {t('reward.refreshSubjectData')}
                       </Button>
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+                        {t('reward.subjectNightlyNote')}
+                      </Text>
                     </>
                   ) : <Empty description={t('reward.noSubjectData')} />}
                 </div>
@@ -707,6 +856,13 @@ const RewardPage: React.FC = () => {
           ]} />
       </Card>
 
+      {/* 今日额度撞顶提示：引擎静默拒发是这套体系最伤体验的地方 */}
+      {daily?.last_block_reason && (
+        <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+          message={t('reward.capHit', { reason: daily.last_block_reason })}
+          description={t('reward.capHitHint')} />
+      )}
+
       {/* 积分流水 */}
       <Card title={<Space><HistoryOutlined /> {t('reward.pointDetails')}</Space>}>
         {myHistory.length === 0 ? (
@@ -726,8 +882,8 @@ const RewardPage: React.FC = () => {
                 render: (type: string, record: any) => (
                   <Tag color={REWARD_TAG_COLORS[type] || 'default'}>{rewardTypeLabel(type, record.reward_type_name)}</Tag>
                 ) },
-              { title: t('points'), dataIndex: 'points', width: 70,
-                render: (points: number) => <Text strong style={{ color: points > 2 ? '#52c41a' : '#1677ff', fontSize: 15 }}>+{points}</Text> },
+              { title: t('points'), dataIndex: 'points', width: 80,
+                render: (points: number) => <PointsCell points={points} /> },
               { title: t('description'), dataIndex: 'reason', ellipsis: true },
             ]} />
         )}

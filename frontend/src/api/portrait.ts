@@ -64,6 +64,8 @@ export interface TodayResponse {
   exists: boolean;
   portrait?: PortraitData;
   period?: PeriodInfo;
+  /** 本期已生成后，再要一次需要花多少积分（系统配置可调，别在前端写死） */
+  cost?: { extra_points: number; extra_max: number };
 }
 
 /** 画像生成健康度（管理员） */

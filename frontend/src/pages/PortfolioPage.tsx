@@ -2,6 +2,7 @@ import React, { useState, useEffect, useReducer } from 'react'
 import { useTranslation } from 'react-i18next'
 import { classText } from '../utils/studentLabel'
 import { useRewardLabels } from '../utils/rewardLabels'
+import { PointsCell } from '../components/PointsCell'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card, Row, Col, Statistic, Typography, Spin, Tag, Space,
@@ -475,13 +476,16 @@ const PortfolioPage: React.FC = () => {
           )}
 
           {/* 奖励积分（活动自动发放） */}
-          {(reward_points > 0 || reward_history?.length > 0) && (
+          {(reward_points !== 0 || reward_history?.length > 0) && (
             <Card title={<Space><TrophyOutlined style={{ color: '#eb2f96' }} />{t('rewardPoints')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={24}>
                   <Statistic title={t('portfolio.totalRewardPoints')} value={reward_points} styles={{ content: { color: '#eb2f96' } }} prefix={<TrophyOutlined />} />
                 </Col>
               </Row>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                {t('portfolio.rewardLedgerNote')}
+              </Text>
               {reward_history?.length > 0 && (
                 <Table className="nowrap-cells-table"
                   dataSource={reward_history}
@@ -494,7 +498,8 @@ const PortfolioPage: React.FC = () => {
                     { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
                     { title: t('rewardType'), dataIndex: 'reward_type', width: 90,
                       render: (v: string, r) => <Tag>{rewardTypeLabel(v, r.reward_type_name)}</Tag> },
-                    { title: t('points'), dataIndex: 'points', width: 60 },
+                    { title: t('points'), dataIndex: 'points', width: 70,
+                      render: (v: number) => <PointsCell points={v} /> },
                     {
                       title: t('description'), dataIndex: 'reason', ellipsis: true,
                       render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text>,

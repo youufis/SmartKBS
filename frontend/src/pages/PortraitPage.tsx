@@ -94,7 +94,7 @@ const PortraitPage: React.FC = () => {
   }
   const currentUser = useAuthStore((s) => s.user)
   const {
-    todayPortrait, todayExists, period, historyList,
+    todayPortrait, todayExists, period, extraPoints, historyList,
     publicGallery, classGallery, hotGallery,
     styles, loading, generating, error,
     fetchToday, fetchHistory, fetchStyles,

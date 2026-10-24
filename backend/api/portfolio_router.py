@@ -148,12 +148,10 @@ async def get_portfolio(username: str, request: Request):
     reward_points = 0
     reward_history = []
     try:
-        reward_row = execute_query(
-            "SELECT total_points FROM student_total_points WHERE student_username=?",
-            (username,),
-        )
-        if reward_row and reward_row[0][0]:
-            reward_points = reward_row[0][0]
+        # 走引擎而不是直读 student_total_points：汇总行可能滞后（活动删除后还没重算），
+        # 那样成长档案的「累计奖励积分」会和积分中心对不上，家长以为分数被吞了
+        from backend.reward_engine import get_student_total
+        reward_points = int(get_student_total(username) or 0)
 
         reward_rows = execute_query(
             """SELECT activity_type, activity_title, reward_type, points, reason, created_at

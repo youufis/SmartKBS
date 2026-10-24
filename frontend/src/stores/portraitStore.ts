@@ -15,6 +15,8 @@ interface PortraitStore {
   todayExists: boolean;
   /** 本期是哪一段（周 / 月，后端按系统配置给出） */
   period: PeriodInfo | null;
+  /** 本期已生成后再要一次的积分价（来自后端配置，前端不再硬编码 100） */
+  extraPoints: number;
   // 历史列表
   historyList: PortraitData[];
   // 画廊
@@ -48,6 +50,7 @@ export const usePortraitStore = create<PortraitStore>()((set, get) => ({
   todayPortrait: null,
   todayExists: false,
   period: null,
+  extraPoints: 100,
   historyList: [],
   publicGallery: [],
   classGallery: [],
@@ -65,6 +68,7 @@ export const usePortraitStore = create<PortraitStore>()((set, get) => ({
         todayExists: res.exists,
         todayPortrait: res.portrait || null,
         period: res.period || null,
+        extraPoints: res.cost?.extra_points ?? get().extraPoints,
         loading: false,
       });
     } catch (e: any) {

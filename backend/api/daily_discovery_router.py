@@ -36,7 +36,10 @@ router = APIRouter()
 DAILY_CARD_COUNT = 6               # 每次展示 N 条
 POOL_REFILL_THRESHOLD = 30         # 池中活跃卡片少于此值时触发补充
 DAILY_REFRESH_LIMIT = 3            # 每人每日手动刷新上限
-DAILY_POINTS_MAX = 5               # 每日通过浏览获得积分上限
+def _daily_points_max() -> int:
+    """每日积分上限：唯一来源是积分引擎的规则表（可在系统配置覆盖），不再本地写死"""
+    from backend.reward_engine import daily_points_cap
+    return daily_points_cap("daily_discovery") or 5
 TEACHER_REFRESH_LIMIT = 10         # DC1: 教师/管理员每日刷新上限(旧实现无限制)
 REFILL_MIN_INTERVAL = 600          # DC5: 知识池补充的最小间隔(秒), 防止并发重复烧 AI
 REFRESH_CARD_KEEP_DAYS = 7         # DC7: 刷新专属卡片保留天数
@@ -669,7 +672,7 @@ class DiscoveryService:
                     return 0
 
             stats = DiscoveryService._get_daily_stats(username, today_str)
-            if stats["points_earned"] >= DAILY_POINTS_MAX:
+            if stats["points_earned"] >= _daily_points_max():
                 return 0
 
             # DC3: 先查后插并非原子, 依赖唯一索引 ux_dvl_user_card_date 做幂等
@@ -857,7 +860,7 @@ class DiscoveryService:
             ),
             "today_view_count": stats["view_count"],
             "today_points_earned": stats["points_earned"],
-            "today_points_max": DAILY_POINTS_MAX,
+            "today_points_max": _daily_points_max(),
         }
 
 
@@ -884,7 +887,7 @@ async def get_feed(request: Request):
             "refresh_remaining": 99 if role != 2 else DAILY_REFRESH_LIMIT,
             "today_view_count": 0,
             "today_points_earned": 0,
-            "today_points_max": DAILY_POINTS_MAX,
+            "today_points_max": _daily_points_max(),
         }
 
     # 非学生隐藏积分信息
@@ -938,7 +941,7 @@ async def get_stats(request: Request):
     stats = DiscoveryService._get_daily_stats(user["username"], _today())
     return {
         **stats,
-        "points_max": DAILY_POINTS_MAX,
+        "points_max": _daily_points_max(),
         "refresh_limit": DAILY_REFRESH_LIMIT,
     }
 

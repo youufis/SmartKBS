@@ -200,6 +200,15 @@ def _session_cap_of(activity_type: str) -> int:
     return _cap_int(key, table_cap)
 
 
+def daily_points_cap(activity_type: str) -> int:
+    """对外暴露"该活动每日积分上限"（含系统配置覆盖，0=不限）。
+
+    页面进度条上的"今日 x/y 分"必须和引擎判定用的是同一个数：以前 news_router /
+    daily_discovery_router 各自写死一份常量，管理员在引擎侧调上限，界面还在按旧值显示。
+    """
+    return _points_cap_of(activity_type)
+
+
 def _pool_cap_of(pool: str) -> int:
     return _cap_int(POOL_CAP_CONFIG_KEYS[pool], DAILY_POOL_CAPS.get(pool, 0))
 

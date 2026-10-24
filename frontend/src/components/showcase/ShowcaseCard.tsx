@@ -52,12 +52,15 @@ function getSubjectEmoji(subject: string): string {
   return FALLBACK_EMOJIS[hash % FALLBACK_EMOJIS.length]
 }
 
-/** 根据积分计算星级（最多 5 星） */
+/** 根据积分计算星级（最多 5 星）。
+ *  断点跟的是主称号阶梯（backend/title_system.DEFAULT_TITLE_CONFIG，2026-10 重标定）：
+ *  5★=Lv10(600) / 4★=Lv8(330) / 3★=Lv6(170) / 2★=Lv4(60)。
+ *  旧断点 800/400/200/80 是随手写的第二份标准，改称号阈值时没人记得同步这里。 */
 function getStars(points: number): { filled: number; total: number } {
-  if (points >= 800) return { filled: 5, total: 5 }
-  if (points >= 400) return { filled: 4, total: 5 }
-  if (points >= 200) return { filled: 3, total: 5 }
-  if (points >= 80) return { filled: 2, total: 5 }
+  if (points >= 600) return { filled: 5, total: 5 }
+  if (points >= 330) return { filled: 4, total: 5 }
+  if (points >= 170) return { filled: 3, total: 5 }
+  if (points >= 60) return { filled: 2, total: 5 }
   return { filled: 1, total: 5 }
 }
 

@@ -15,6 +15,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
+import { PointsCell } from '../components/PointsCell'
 import { reportLoadError } from '../utils/loadError'
 
 const { Text } = Typography
@@ -663,8 +664,8 @@ const ScorePage: React.FC = () => {
                         <Tag color={REWARD_TAG_COLORS[type] || 'default'}>{rewardTypeLabel(type, rec.reward_type_name)}</Tag>
                       ),
                     },
-                    { title: t('points'), dataIndex: 'points', key: 'points', width: 60,
-                      render: (p: number) => <Text strong style={{ color: '#52c41a', fontSize: 15 }}>+{p}</Text>,
+                    { title: t('points'), dataIndex: 'points', key: 'points', width: 70,
+                      render: (p: number) => <PointsCell points={p} />,
                     },
                     { title: t('description'), dataIndex: 'reason', key: 'reason', ellipsis: true },
                   ]}

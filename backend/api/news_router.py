@@ -44,7 +44,10 @@ EMPTY_RESULT_RETRY_MINUTES = 5      # NW12: 源可达但本轮 0 条时的重试
 FETCH_RETRY_MINUTES = 10            # NW3: 两次抓取尝试的最小间隔
 FETCH_FAIL_BACKOFF_MINUTES = 30     # NW3: 抓取失败后的退避时间
 NEWS_WINDOW_HOURS = 72              # 只保留 72 小时内新闻
-DAILY_POINTS_MAX = 3                # 每日积分上限
+def _daily_points_max() -> int:
+    """每日积分上限：唯一来源是积分引擎的规则表（可在系统配置覆盖），不再本地写死"""
+    from backend.reward_engine import daily_points_cap
+    return daily_points_cap("news_view") or 3
 POINTS_PER_VIEW = 1
 RSS_TIMEOUT = 10                    # NW10: 单源 HTTP 超时（秒），直接传给 httpx
 MAX_ARTICLES_PER_SOURCE = 15        # NW10: 单个源每轮最多取多少条
@@ -1051,7 +1054,7 @@ class NewsService:
 
         today_str = date.today().isoformat()
         stats = NewsService._get_daily_stats(username, today_str)
-        if stats["points_earned"] >= DAILY_POINTS_MAX:
+        if stats["points_earned"] >= _daily_points_max():
             return 0
 
         existing = execute_query(
@@ -1251,7 +1254,7 @@ class NewsService:
             "today_points": stats["points_earned"],
             "view_count": stats["view_count"],
             "points_earned": stats["points_earned"],
-            "points_max": DAILY_POINTS_MAX,
+            "points_max": _daily_points_max(),
             "total_views": total_rows[0][0] if total_rows else 0,
             "total_favorites": fav_rows[0][0] if fav_rows else 0,
         }
