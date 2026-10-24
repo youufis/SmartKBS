@@ -908,7 +908,7 @@ is only a documentation mirror of it.
 
 - **Two kinds of points**: participation (awarded for taking part, regardless of correctness)
   + grade bonus (only activities with a standard answer)
-- **Grade bonus scales with an activity weight**: base tiers use the exam scale —
+- **Grade bonus scales with an activity weight**: "score rate" always means earned / full marks; for class ladder it is the ladder score rate, since that mode ends on the first wrong answer and earned-over-attempted would be ~1 by construction. Base tiers use the exam scale —
   Excellent +15 / Good +10 / Pass +5 (score rate ≥90% / ≥75% / ≥60%, one payout per tier per activity)
 
 | Activity | Participation | Grade bonus (E / G / P) | Daily quota |
@@ -921,7 +921,7 @@ is only a documentation mirror of it.
 | Knowledge challenge | 1 | 6 / 4 / 2 | academic pool 80 |
 | Roll call | 1 | correct answer adds Good +4 | class pool 40 |
 | In-class pick | 1 | correct answer adds Good +4 | class pool 40 |
-| Class ladder | 2 | 6 / 4 / 2 | class pool 40 |
+| Class ladder | 2 | 6 / 4 / 2 (by **ladder score rate** = earned / 415) | class pool 40 |
 | Classroom Q&A (approved answers add a quality bonus) | 2 | 6 / 4 / 2 | class pool 40 |
 | Group discussion (joining + each message) | 2 | 6 / 4 / 2 | 10/day, inside class pool |
 | Quick vote · Learning progress · Daily login | 2 / 2 / 1 | — | class pool 40 |

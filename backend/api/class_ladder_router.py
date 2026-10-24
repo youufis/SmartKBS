@@ -648,8 +648,20 @@ def _settle_run(run: dict, session: dict) -> None:
                 _lid = str(run.get("id") or "")
                 _ltitle = f"课堂闯关 第{level}关"
                 award_participation(_stu, "class_ladder", _lid, _ltitle, teacher_username=teacher)
-                award_grade(_stu, "class_ladder", _lid, float(correct),
-                            float(len(answers) or 1), _ltitle, teacher_username=teacher)
+                # 等级奖按**阶梯得分率** = 实得阶梯分 / 满分 415，不按"答对数 / 已答数"。
+                # 后者在这个玩法里几乎恒等于 1：闯关是"答错即止"，能撑到第 N 关就意味着
+                # 前面 N-1 题全对，比率 = (N-1)/N —— 到第 10 关就有 90%，直接顶格优秀档，
+                # 和 15 关全对拿一样的分，档位形同虚设。阶梯分本身是后段更值钱
+                # （第 1 关 10 分、第 4~6 关 20 分、第 10~12 关 30 分、第 13~15 关 50 分），
+                # 拿它当分子才拉得开差距。实测档位（满分 415）：
+                #   撑到第 10 关 205/415=49%、第 11 关 235/415=57% → 无等级奖
+                #   第 12 关 265/415=64% → 及格 +2
+                #   第 13 关 315/415=76%、第 14 关 365/415=88% → 良好 +4
+                #   15 关全对 415/415=100% → 优秀 +6
+                # 经典回落（safe_mode）下 ladder 只保最近安全关之前的分，与"实际保住的分"
+                # 一致，因此这里用的是回落后的值，不是原始 full。
+                award_grade(_stu, "class_ladder", _lid, float(ladder),
+                            float(TOTAL_FULL_SCORE), _ltitle, teacher_username=teacher)
             except Exception as e:
                 logger.warning(f"[课堂闯关] 积分发放失败 {_stu}: {e}")
 
