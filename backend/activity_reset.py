@@ -266,7 +266,11 @@ RESET_SCOPES: dict[str, dict[str, Any]] = {
     # 10. 课堂闯关（大屏版）—— 大屏课堂活动：重置只回收"局与题池"，不碰课堂积分
     #     （积分记在 scores 表，回退走积分管理的撤销流水，见 notes）
     "class_ladder": Scope(
+        # 场次表用 teacher_username 记属主（全站其它活动都是 creator_username），
+        # 不写 creator_col 会走默认值，SELECT 直接 "no such column: creator_username"，
+        # 重置预览/执行全挂，而且归属校验也拿不到人。
         "class_ladder", "课堂闯关", master="class_ladder_sessions", title_col="topic",
+        creator_col="teacher_username", i18n_key="classLadder",
         targets=[
             # 台账必须排在删局之前清：它的条件靠子查询 class_ladder_runs 找本场的局，
             # 局先没了就一行也匹配不上，抽人记录里会留下指向不存在局的幽灵行

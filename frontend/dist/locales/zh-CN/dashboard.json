@@ -136,7 +136,8 @@
       "code": "代码练习",
       "discussion": "分组讨论",
       "poll": "快速投票",
-      "course": "课程练习"
+      "course": "课程练习",
+      "classLadder": "课堂闯关"
     },
     "assignedAt": "布置于",
     "scopeLabel": "统计范围",

@@ -2,7 +2,7 @@
 import apiClient from './client';
 
 /** 活动类型 */
-export type ActivityType = 'exam' | 'practice' | 'quick_quiz' | 'task' | 'quiz' | 'code' | 'discussion' | 'poll' | 'course' | 'all';
+export type ActivityType = 'exam' | 'practice' | 'quick_quiz' | 'task' | 'quiz' | 'code' | 'discussion' | 'poll' | 'course' | 'class_ladder' | 'all';
 
 /** 活动信息 */
 export interface ActivityItem {

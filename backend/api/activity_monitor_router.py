@@ -335,8 +335,11 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         (teacher_username,),
     )
     for p in ladder_rows:
+        # status != 'playing'：只算打完的局，和「完成情况」详情同一个口径，
+        # 否则列表显示"已提交 1"、点进去已完成 0，两头对不上。
         agg = db_query_dict(
-            "SELECT COUNT(*) as runs, COUNT(DISTINCT student_name) as students "
+            "SELECT COUNT(*) as runs, "
+            "COUNT(DISTINCT CASE WHEN status != 'playing' THEN student_name END) as students "
             "FROM class_ladder_runs WHERE session_id=?", (p["id"],))
         p["submitted_count"] = (agg[0]["students"] if agg else 0) or 0
         p["run_count"] = (agg[0]["runs"] if agg else 0) or 0
@@ -703,21 +706,30 @@ def _get_students_with_completion(
             }
 
     elif activity_type == "class_ladder":
-        # 局里存的是姓名（大屏口播，没有学号），按 姓名+班级 反查学号
+        # 局记录早期只按姓名记账（大屏口播用），后来才补的 student_username，
+        # 两种都要认：先按学号直查，学号空着再按 姓名+年级+班级号 反查。
+        # 班级两边必须过 _num_class：users.class 存的是数字（1），场次存的是"高一1班"，
+        # 直接字符串相等永远匹配不上，完成列表会整片空白。
         by_name = {}
         for uname, info in student_map.items():
-            by_name[(str(info.get("name") or ""), str(info.get("class") or ""))] = uname
+            by_name[(str(info.get("name") or ""), str(info.get("grade") or ""),
+                     _num_class(info.get("class")))] = uname
         rows = db_query_dict(
-            """SELECT r.student_name, s.class_name, COUNT(*) as runs,
+            """SELECT r.student_name,
+                      MAX(NULLIF(COALESCE(r.student_username, ''), '')) as student_username,
+                      s.grade, s.class_name, COUNT(*) as runs,
                       MAX(r.ladder_score) as best,
                       MAX(COALESCE(r.ended_at, r.created_at)) as submitted_at
                FROM class_ladder_runs r JOIN class_ladder_sessions s ON s.id = r.session_id
                WHERE r.session_id=? AND r.status != 'playing'
-               GROUP BY r.student_name, s.class_name""",
+               GROUP BY r.student_name, s.grade, s.class_name""",
             (activity_id,),
         )
         for a in rows:
-            uname = by_name.get((str(a.get("student_name") or ""), str(a.get("class_name") or "")))
+            uname = str(a.get("student_username") or "").strip()
+            if uname not in student_map:
+                uname = by_name.get((str(a.get("student_name") or ""), str(a.get("grade") or ""),
+                                     _num_class(a.get("class_name")))) or ""
             if not uname or uname not in student_map:
                 continue
             completed_map[uname] = {
@@ -845,6 +857,15 @@ async def list_teacher_activities(
     }
 
 
+def _unregistered_type(activity_type: str):
+    """活动类型进了 ACTIVITY_TYPE_LABELS 却没配表名：按"查不到"处理并记一条日志。
+
+    以前这里直接 KeyError → 500，界面上只剩一句"加载完成情况失败"，看不出是配置漏了。
+    """
+    logger.error(f"[活动监控] 活动类型 {activity_type} 未登记数据表，无法查询完成情况")
+    return None, None
+
+
 def _lookup_activity(activity_type: str, activity_id: int, username: str):
     """
     根据类型查找活动记录，返回 (record_dict, db_source)
@@ -861,17 +882,22 @@ def _lookup_activity(activity_type: str, activity_id: int, username: str):
         "discussion": "discussions",
         "poll": "interaction_polls",
         "course": "courses",
+        "class_ladder": "class_ladder_sessions",
     }
 
     if activity_type in qdb_types:
-        table = _QDB_TABLES[activity_type]
+        table = _QDB_TABLES.get(activity_type)
+        if not table:
+            return _unregistered_type(activity_type)
         rows = qdb_query(f"SELECT * FROM {table} WHERE id=? AND creator_username=?", (activity_id, username))
         if not rows and is_admin(username):
             rows = qdb_query(f"SELECT * FROM {table} WHERE id=?", (activity_id,))
         return rows[0] if rows else None, 'qdb'
 
     elif activity_type in db_types:
-        table = _DB_TABLES[activity_type]
+        table = _DB_TABLES.get(activity_type)
+        if not table:
+            return _unregistered_type(activity_type)
         if activity_type == "course":
             # 课程练习按 binding_id 查询，与活动列表保持一致；
             # 带上资源属主，供权限判断（教师只能看自己共享的练习，与列表/重置同口径）
@@ -892,6 +918,23 @@ def _lookup_activity(activity_type: str, activity_id: int, username: str):
             if rows and not is_admin(username) and (rows[0].get("owner_username") or "") != username:
                 # 别人共享的练习：详情一律按"不存在"处理，避免绕过列表直接查
                 return None, "db"
+        elif activity_type == "class_ladder":
+            # 闯关场次表用 teacher_username 记属主，列名也和统一口径不同
+            # （topic/subject/grade/class_name），这里按活动列表同一套别名取列，
+            # 否则"统计范围"标签和应完成名册都会失真（曾经直接 KeyError → 500）。
+            ladder_cols = """id,
+                       COALESCE(NULLIF(topic,''), NULLIF(subject,''), '课堂闯关') as title,
+                       CASE status WHEN 'ready' THEN 'active' ELSE status END as status,
+                       created_at, updated_at, COALESCE(subject,'') as subject,
+                       teacher_username as creator_username,
+                       0 as total_score, 0 as pass_score,
+                       'class' as target_scope, grade as target_grade,
+                       class_name as target_class, '' as target_users"""
+            rows = db_query_dict(f"SELECT {ladder_cols} FROM class_ladder_sessions "
+                                 f"WHERE id=? AND teacher_username=?", (activity_id, username))
+            if not rows and is_admin(username):
+                rows = db_query_dict(f"SELECT {ladder_cols} FROM class_ladder_sessions WHERE id=?",
+                                     (activity_id,))
         else:
             rows = db_query_dict(f"SELECT * FROM {table} WHERE id=? AND creator_username=?", (activity_id, username))
             if not rows and is_admin(username):
