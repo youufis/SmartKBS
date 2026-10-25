@@ -572,9 +572,12 @@ const ScorePage: React.FC = () => {
                 />
               )}
               {teacherInfo && (
-                <Typography.Text type="secondary" style={{ fontSize: 12, maxWidth: 300 }} ellipsis={{ tooltip: teacherInfo }}>
+                /* 窄屏 300px 单行装不下七个班（实测内容 388px 被截成 …，而手机上 tooltip 点不出来）
+                   改成最多两行，超出再省略并保留 tooltip。 */
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12, maxWidth: 300, marginBottom: 0 }}
+                  ellipsis={{ rows: 2, tooltip: teacherInfo }}>
                   📍 {teacherInfo}
-                </Typography.Text>
+                </Typography.Paragraph>
               )}
               <Select value={grade} onChange={(v) => { setGrade(v); setCls('') }}
                 style={{ width: 100 }} options={allowedGrades.map((g) => ({ label: g, value: g }))}
@@ -771,7 +774,13 @@ const ScorePage: React.FC = () => {
             GET /api/rewards/rules 取，教师看到的与学生看到的同源。 */}
         {activeTab === 'scores' && ruleChips && (
           <Card size="small" style={{ marginBottom: 12, background: '#fffbe6', fontSize: 13 }}>
-            📋 {t('scoreRulesDesc')}
+            📋 <Typography.Paragraph
+              style={{ display: 'inline', fontSize: 13, marginBottom: 0 }}
+              /* 桌面一行半就读完，不必折叠；手机上这段有 14 行，会把操作区整个顶出首屏，
+                 所以限制两行并给一个「展开」开关。 */
+              ellipsis={{ rows: 2, expandable: 'collapsible', symbol: (expanded) => (expanded ? t('collapse') : t('expand')) }}>
+              {t('scoreRulesDesc')}
+            </Typography.Paragraph>
             <div style={{ marginTop: 6 }}>
               <Tag color="blue">{t('tagParticipationRange', { min: ruleChips.participation_min, max: ruleChips.participation_max })}</Tag>
               <Tag color="success">{t('tagGradeExam', { e: ruleChips.grade_exam.excellent, g: ruleChips.grade_exam.good, p: ruleChips.grade_exam.pass })}</Tag>

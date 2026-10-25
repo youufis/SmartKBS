@@ -478,5 +478,7 @@
   "reward.pointsFromTo": "{{from}}~{{to}} pts",
   "reward.fromPoints": "from {{points}} pts",
   "reward.subjectAccuracy": "Accuracy {{pct}}%",
-  "reward.subjectNightlyNote": "Subject titles weigh both volume and accuracy: low accuracy caps the level, so guessing cannot grind upward. Stats refresh nightly."
+  "reward.subjectNightlyNote": "Subject titles weigh both volume and accuracy: low accuracy caps the level, so guessing cannot grind upward. Stats refresh nightly.",
+  "expand": "Expand",
+  "collapse": "Collapse"
 }

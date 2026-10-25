@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 import { reportLoadError } from '../utils/loadError'
 import { PointsCell } from '../components/PointsCell'
+import NarrowTable from '../components/NarrowTable'
 
 const { Title, Text } = Typography
 
@@ -378,7 +379,15 @@ const TeacherMyPoints: React.FC = () => {
           </Card>
         </Col>
       </Row>
-      <Table className="nowrap-cells-table" dataSource={tMyHistory} rowKey="id" size="small" pagination={{ pageSize: 15 }}
+      {/* 6 列流水表：窄屏由 NarrowTable 摊成卡片，「积分」「说明」不再掉到屏外 */}
+      <NarrowTable
+        className="nowrap-cells-table"
+        dataSource={tMyHistory}
+        rowKey="id"
+        size="small"
+        pagination={{ pageSize: 15 }}
+        cardTitleKey="activity_title"
+        cardPageSize={15}
         columns={[
           { title: t('time'), dataIndex: 'created_at', render: (val: string) => val?.slice(0, 16) || '', width: 140 },
           { title: t('activity'), dataIndex: 'activity_type', width: 96,
@@ -605,7 +614,9 @@ const RewardPage: React.FC = () => {
     return (
       <Modal title={t('reward.rulesTitle')} open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={760}>
         <Spin spinning={acts.length === 0}>
-          <Table className="nowrap-cells-table" dataSource={acts} rowKey="type" size="small" pagination={false}
+          {/* 手机上看不到「成绩等级奖 / 每日上限」等于这个弹窗白做 —— 窄屏摊成一张活动一卡 */}
+          <NarrowTable className="nowrap-cells-table" dataSource={acts} rowKey="type" size="small" pagination={false}
+            cardTitleKey="type"
             columns={[
               { title: t('activity'), dataIndex: 'type', width: 150,
                 render: (type: string, record: RuleActivity) => (
@@ -868,8 +879,10 @@ const RewardPage: React.FC = () => {
         {myHistory.length === 0 ? (
           <Empty description={t('reward.noPointRecords')} />
         ) : (
-          <Table className="nowrap-cells-table" dataSource={myHistory} rowKey="id" size="small"
+          <NarrowTable className="nowrap-cells-table" dataSource={myHistory} rowKey="id" size="small"
             pagination={{ pageSize: 15, showTotal: (total) => t('totalRecords', { count: total }) }}
+            cardTitleKey="activity_title"
+            cardPageSize={15}
             columns={[
               { title: t('time'), dataIndex: 'created_at', width: 140, render: (val: string) => val ? val.slice(0, 16) : '' },
               // 活动名走词典：原来把 activity_type 首字母大写，中英文界面显示的都是裸键名
@@ -955,11 +968,14 @@ const RewardPage: React.FC = () => {
           {ranking.length === 0 ? (
             <Empty description={selectedGrade ? t('noData') : t('reward.selectGradeFirst')} />
           ) : (
-            <Table className="nowrap-cells-table"
+            <NarrowTable className="nowrap-cells-table"
               dataSource={ranking}
               rowKey="username"
               size="small"
               pagination={{ pageSize: 30, showTotal: (total) => t('totalStudents', { count: total }) }}
+              cardTitleKey="name"
+              cardPageSize={20}
+              cardHiddenKeys={["username"]}
               columns={[
                 {
                   title: t('rank'), dataIndex: 'rank', key: 'rank', width: 60,

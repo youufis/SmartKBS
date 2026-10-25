@@ -20,6 +20,8 @@ import { getFileIcon } from '../utils/fileIcon'
 import { formatBytes, getFileKind, KIND_COLOR } from '../utils/fileKind'
 import { useAuthStore } from '../stores/authStore'
 import { reportLoadError } from '../utils/loadError'
+import NarrowTable from '../components/NarrowTable'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 interface DownloadFile {
   name: string
@@ -42,6 +44,8 @@ const DownloadsPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const username = user?.username || ''
   const isStudent = user?.role === 'student'
+  const isMobile = useIsMobile()
+
 
   // ── 我的文件（教师/管理员） ──
   const [files, setFiles] = useState<DownloadFile[]>([])
@@ -50,6 +54,13 @@ const DownloadsPage: React.FC = () => {
   const [quota, setQuota] = useState(0)
   const [usageStr, setUsageStr] = useState('')
   const [quotaStr, setQuotaStr] = useState('')
+  /** 存储用量：桌面挂在表格 footer；窄屏走卡片没有 footer，就单独渲染一行 */
+  const storageLine = (
+    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', padding: '8px 12px 0' }}>
+      {t('storageUsed')} {usageStr}
+      {quota > 0 ? ` / ${t('quota')} ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / ${t('quota')} ${quotaStr}`}
+    </Typography.Text>
+  )
   const [uploadDir, setUploadDir] = useState('')
   const dirInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -465,12 +476,16 @@ const DownloadsPage: React.FC = () => {
               )}
               styles={{ body: { padding: '0 8px 8px' } }}
             >
-              <Table
+              {/* 4 列文件表在 390px 下要横滑 457px 才能看到「操作」列，窄屏改卡片 */}
+              {isMobile && storageLine}
+              <NarrowTable
                 dataSource={ownShown}
                 columns={columns}
                 rowKey="path"
                 loading={loading}
                 size="small"
+                cardTitleKey="path"
+                cardPageSize={ownPageSize}
                 pagination={{
                   current: ownPage,
                   pageSize: ownPageSize,
@@ -490,12 +505,7 @@ const DownloadsPage: React.FC = () => {
                     />
                   ),
                 }}
-                footer={() => (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    {t('storageUsed')} {usageStr}
-                    {quota > 0 ? ` / ${t('quota')} ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / ${t('quota')} ${quotaStr}`}
-                  </Typography.Text>
-                )}
+                footer={() => storageLine}
               />
             </Card>
           </>

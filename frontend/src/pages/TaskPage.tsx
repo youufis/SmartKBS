@@ -639,6 +639,20 @@ const TaskPage: React.FC = () => {
     return i > 0 ? [columns[i], ...columns.slice(0, i), ...columns.slice(i + 1)] : columns
   })()
 
+  /**
+   * 教师窄屏卡片：只留「查看详情」一个轻操作。
+   * 编辑 / AI 批改 / 结束 / 重置 / 删除 都要横向比对多个班与批改进度，手机上误点一次的代价
+   * 比省下的时间大 —— 与手机白名单同一条口径：手机看，重操作回电脑。
+   */
+  const teacherCardColumns = cardColumns.map((col: any) => (col.key !== 'action' ? col : {
+    title: t('actions'), key: 'action',
+    render: (_: any, record: TaskInfo) => (
+      <Button size="small" icon={<EyeOutlined />} onClick={() => handleViewSubmissions(record)}>
+        {t('details')}
+      </Button>
+    ),
+  }))
+
   return (
     <div>
       <Card>
@@ -664,15 +678,23 @@ const TaskPage: React.FC = () => {
         </Space>
 
         <Spin spinning={loading}>
-          {isMobile && isStudent ? (
-            /* 窄屏：作业列表改卡片，「提交」按钮不必横向滚动才能点到（教师端保持表格） */
-            <MobileCardTable
-              dataSource={visibleTasks.slice((mPage - 1) * MOBILE_CARD_PAGE, mPage * MOBILE_CARD_PAGE)}
-              columns={cardColumns}
-              rowKey="id"
-              pagination={{ current: mPage, pageSize: MOBILE_CARD_PAGE, total: visibleTasks.length, onChange: setMPage }}
-              emptyText={<Empty description={t('noActiveTasks')} />}
-            />
+          {isMobile ? (
+            /* 窄屏：师生一律改卡片。教师端原来保持表格，实测「作业要求」长文把表撑到
+               6794px 宽（10 列），首屏只剩「作业名称 + 半个科目」，横滑也读不出来。 */
+            <>
+              <MobileCardTable
+                dataSource={visibleTasks.slice((mPage - 1) * MOBILE_CARD_PAGE, mPage * MOBILE_CARD_PAGE)}
+                columns={isStudent ? cardColumns : teacherCardColumns}
+                rowKey="id"
+                pagination={{ current: mPage, pageSize: MOBILE_CARD_PAGE, total: visibleTasks.length, onChange: setMPage }}
+                emptyText={<Empty description={t('noActiveTasks')} />}
+              />
+              {!isStudent && (
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                  {t('taskMobileReadonlyHint')}
+                </Typography.Text>
+              )}
+            </>
           ) : (
             <Table className="nowrap-cells-table"
               dataSource={visibleTasks}

@@ -237,6 +237,7 @@ const TaskTodoPage: React.FC = () => {
     return (
       <div
         key={`${item.id}-${idx}`}
+        className="todo-row"
         style={{
           display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
           borderBottom: `1px solid ${ct.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
@@ -249,7 +250,7 @@ const TaskTodoPage: React.FC = () => {
         }}>
           {cfg.icon}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="todo-main" style={{ flex: 1, minWidth: 0 }}>
           <Space size={6} wrap style={{ marginBottom: 2 }}>
             <Text strong style={{ fontSize: 14 }}>{item.title}</Text>
             <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, color: cfg.color, borderColor: cfg.color, background: 'transparent' }}>
@@ -264,11 +265,12 @@ const TaskTodoPage: React.FC = () => {
               </Text>
             )}
           </Space>
-          <Paragraph type="secondary" ellipsis={{ rows: 1 }} style={{ fontSize: 12, margin: 0 }}>
+          {/* 手机上描述换两行读（窄屏由 .todo-row 把动作按钮挪到第二行，正文才拿得到整幅宽度） */}
+          <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ fontSize: 12, margin: 0 }}>
             {item.description}
           </Paragraph>
         </div>
-        <Button size="small" type="primary" ghost icon={<RightOutlined />} style={{ flexShrink: 0 }} onClick={() => go(item.url)}>
+        <Button className="todo-action" size="small" type="primary" ghost icon={<RightOutlined />} style={{ flexShrink: 0 }} onClick={() => go(item.url)}>
           {actionLabel(item)}
         </Button>
       </div>

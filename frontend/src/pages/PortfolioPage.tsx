@@ -23,6 +23,7 @@ import * as trackingApi from '../api/tracking'
 import { useAuthStore } from '../stores/authStore'
 import { reportLoadError } from '../utils/loadError'
 import { RowList, RowItem } from '../components/RowList'
+import NarrowTable from '../components/NarrowTable'
 
 const { Title, Text } = Typography
 
@@ -368,10 +369,10 @@ const PortfolioPage: React.FC = () => {
           {exams?.results && exams.results.length > 0 && (
             <Card title={<Space><FileAddOutlined />{t('examResults')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={6}><Statistic title={t('avgScore')} value={examStats?.avg_percentage ?? 0} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
-                <Col span={6}><Statistic title={t('maxScore')} value={examStats?.max_score ?? 0} styles={{ content: { color: '#52c41a' } }} /></Col>
-                <Col span={6}><Statistic title={t('passed')} value={examStats?.passed_count ?? 0} suffix={`/ ${examStats?.total_exams ?? 0}`} styles={{ content: { color: '#52c41a' } }} /></Col>
-                <Col span={6}>
+                <Col xs={12} sm={6}><Statistic title={t('avgScore')} value={examStats?.avg_percentage ?? 0} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
+                <Col xs={12} sm={6}><Statistic title={t('maxScore')} value={examStats?.max_score ?? 0} styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col xs={12} sm={6}><Statistic title={t('passed')} value={examStats?.passed_count ?? 0} suffix={`/ ${examStats?.total_exams ?? 0}`} styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col xs={12} sm={6}>
                   <Statistic title={t('accuracy')} value={rollcall?.accuracy ?? 0} suffix="%" prefix={<AuditOutlined />} />
                 </Col>
               </Row>
@@ -389,18 +390,21 @@ const PortfolioPage: React.FC = () => {
                           borderRadius: '4px 4px 0 0',
                           transition: 'height 0.3s',
                         }} />
-                        <Text style={{ fontSize: 9, marginTop: 2 }}>{pct}%</Text>
+                        <Text className="pf-trend-label" style={{ fontSize: 9, marginTop: 2 }}>{pct}%</Text>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              <Table className="nowrap-cells-table"
+              <NarrowTable className="nowrap-cells-table"
                 dataSource={exams.results}
-                rowKey="id"
+                /* 同一场考试可以有多份成绩记录，rowKey 只写 id 会撞 key（React 实测告警） */
+                rowKey={(r: any, i?: number) => `exam-${r.id}-${i}`}
                 size="small"
                 pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
+                cardTitleKey="title"
+                cardPageSize={10}
                 columns={[
                   { title: t('exam'), dataIndex: 'title', ellipsis: true },
                   {
@@ -433,9 +437,9 @@ const PortfolioPage: React.FC = () => {
           {scores?.records && scores.records.length > 0 && (
             <Card title={<Space><TrophyOutlined />{t('classScore')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={8}><Statistic title={t('totalScore')} value={scores.total_score} styles={{ content: { color: '#faad14' } }} prefix={<TrophyOutlined />} /></Col>
-                <Col span={8}><Statistic title={t('teacherCount')} value={scores.teacher_count} suffix={t('portfolio.peopleSuffix')} /></Col>
-                <Col span={8}><Statistic title={t('classCount')} value={scores.class_count} suffix={t('portfolio.classesSuffix')} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('totalScore')} value={scores.total_score} styles={{ content: { color: '#faad14' } }} prefix={<TrophyOutlined />} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('teacherCount')} value={scores.teacher_count} suffix={t('portfolio.peopleSuffix')} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('classCount')} value={scores.class_count} suffix={t('portfolio.classesSuffix')} /></Col>
               </Row>
 
               {/* 积分趋势 */}
@@ -451,7 +455,7 @@ const PortfolioPage: React.FC = () => {
                             width: '100%', height: `${(point.score / maxVal) * 100}%`, minHeight: 4,
                             background: '#faad14', borderRadius: '4px 4px 0 0',
                           }} />
-                          <Text style={{ fontSize: 8, marginTop: 1 }}>{point.date.slice(5)}</Text>
+                          <Text className="pf-trend-label" style={{ fontSize: 8, marginTop: 1 }}>{point.date.slice(5)}</Text>
                         </div>
                       )
                     })}
@@ -459,11 +463,12 @@ const PortfolioPage: React.FC = () => {
                 </div>
               )}
 
-              <Table className="nowrap-cells-table"
+              <NarrowTable className="nowrap-cells-table"
                 dataSource={scores.records}
                 rowKey={(_, i) => String(i)}
                 size="small"
                 pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
+                cardPageSize={10}
                 columns={[
                   { title: t('portfolio.teacher'), dataIndex: 'teacher', width: 80 },
                   { title: t('grade'), dataIndex: 'grade', width: 60 },
@@ -487,11 +492,13 @@ const PortfolioPage: React.FC = () => {
                 {t('portfolio.rewardLedgerNote')}
               </Text>
               {reward_history?.length > 0 && (
-                <Table className="nowrap-cells-table"
+                <NarrowTable className="nowrap-cells-table"
                   dataSource={reward_history}
                   rowKey={(_, i) => String(i)}
                   size="small"
                   pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
+                  cardTitleKey="activity_title"
+                  cardPageSize={10}
                   columns={[
                     { title: t('portfolio.activityType'), dataIndex: 'activity_type', width: 90,
                       render: (v: string, r) => <Tag>{actLabel(v, r.activity_type_name)}</Tag> },
@@ -538,9 +545,9 @@ const PortfolioPage: React.FC = () => {
           {chats?.total_days != null && (
             <Card title={<Space><MessageOutlined />{t('aiChatActivity')}</Space>} size="small">
               <Row gutter={16}>
-                <Col span={8}><Statistic title={t('chatDays')} value={chats.total_days} suffix={t('portfolio.daysSuffix')} /></Col>
-                <Col span={8}><Statistic title={t('portfolio.totalChats')} value={chats.total_chats} suffix={t('portfolio.timesSuffix')} /></Col>
-                <Col span={8}><Statistic title={t('portfolio.dailyAvg')} value={chats.avg_daily} suffix={t('portfolio.timesSuffix')} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('chatDays')} value={chats.total_days} suffix={t('portfolio.daysSuffix')} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('portfolio.totalChats')} value={chats.total_chats} suffix={t('portfolio.timesSuffix')} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('portfolio.dailyAvg')} value={chats.avg_daily} suffix={t('portfolio.timesSuffix')} /></Col>
               </Row>
             </Card>
           )}
@@ -549,15 +556,18 @@ const PortfolioPage: React.FC = () => {
           {course_practice?.records && course_practice.records.length > 0 && (
             <Card title={<Space><ExperimentOutlined style={{ color: '#52c41a' }} />{t('coursePractice')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={8}><Statistic title={t('portfolio.completedCount')} value={course_practice.total_count} suffix={t('portfolio.knowledgePointsSuffix')} styles={{ content: { color: '#52c41a' } }} /></Col>
-                <Col span={8}><Statistic title={t('portfolio.avgAccuracy')} value={course_practice.avg_accuracy} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
-                <Col span={8}><Statistic title={t('totalScore')} value={course_practice.total_score} styles={{ content: { color: '#faad14' } }} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('portfolio.completedCount')} value={course_practice.total_count} suffix={t('portfolio.knowledgePointsSuffix')} styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('portfolio.avgAccuracy')} value={course_practice.avg_accuracy} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
+                <Col xs={12} sm={8}><Statistic title={t('totalScore')} value={course_practice.total_score} styles={{ content: { color: '#faad14' } }} /></Col>
               </Row>
-              <Table className="nowrap-cells-table"
+              <NarrowTable className="nowrap-cells-table"
                 dataSource={course_practice.records}
-                rowKey="id"
+                /* 同一知识点练多次也会撞 key，同上 */
+                rowKey={(r: any, i?: number) => `kp-${r.id}-${i}`}
                 size="small"
                 pagination={{ pageSize: 10, showTotal: (total) => t('totalRecords', { count: total }) }}
+                cardTitleKey="kp_name"
+                cardPageSize={10}
                 columns={[
                   { title: t('portfolio.knowledgePoint'), dataIndex: 'kp_name', ellipsis: true },
                   {
@@ -648,10 +658,10 @@ const PortfolioPage: React.FC = () => {
           <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
             {reportData.data && (
               <Row gutter={12} style={{ marginBottom: 16 }}>
-                <Col span={6}><Statistic title={t('portfolio.examCount')} value={reportData.data.exams} suffix={t('portfolio.timesSuffix')} /></Col>
-                <Col span={6}><Statistic title={t('totalScore')} value={reportData.data.total_score} /></Col>
-                <Col span={6}><Statistic title={t('portfolio.rollcallRate')} value={reportData.data.rollcall_rate} suffix="%" /></Col>
-                <Col span={6}><Statistic title={t('chatDays')} value={reportData.data.chat_days} suffix={t('portfolio.daysSuffix')} /></Col>
+                <Col xs={12} sm={6}><Statistic title={t('portfolio.examCount')} value={reportData.data.exams} suffix={t('portfolio.timesSuffix')} /></Col>
+                <Col xs={12} sm={6}><Statistic title={t('totalScore')} value={reportData.data.total_score} /></Col>
+                <Col xs={12} sm={6}><Statistic title={t('portfolio.rollcallRate')} value={reportData.data.rollcall_rate} suffix="%" /></Col>
+                <Col xs={12} sm={6}><Statistic title={t('chatDays')} value={reportData.data.chat_days} suffix={t('portfolio.daysSuffix')} /></Col>
               </Row>
             )}
             <div className="markdown-content">

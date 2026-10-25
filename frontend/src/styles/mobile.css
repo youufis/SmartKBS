@@ -10,11 +10,17 @@
   .ant-modal .ant-modal-content {
     padding: 16px;
   }
-  /* iOS Safari 聚焦自动缩放兜底：原生可编辑控件字号不小于 16px */
+  /* iOS Safari 聚焦自动缩放兜底：原生可编辑控件字号不小于 16px。
+     注意：选择器列表里每一条单独算权重。原先只有 input 那条带一串 :not() 提权，
+     textarea / select 两条仍是裸元素选择器（0,0,1），被 antd 的 .ant-input（0,1,0）压过，
+     提问框在手机上实测还是 14px → 一聚焦页面就被整体放大。这里逐条补权重并兜住。 */
   input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']):not([type='file']),
+  textarea.ant-input,
   textarea,
-  select {
-    font-size: 16px;
+  select,
+  .ant-input,
+  .ant-input-affix-wrapper > input {
+    font-size: 16px !important;
   }
   /* 抽屉/弹层滚动更顺手 */
   .ant-drawer-body {
@@ -119,6 +125,20 @@
     gap: 4px 10px;
     justify-content: flex-start !important;
   }
+
+  /* 成长档案的纯 CSS 走势图：390px 下十几根柱子每根只有 ~20px，柱底标签（"70%"、"10-24"）
+     必然互相叠字（实测叠成「70% 60% 50% %」）。窄屏只留柱子本身——高低起伏才是这张图要说的
+     事，具体数值上面的统计卡与下面的明细表里都有。 */
+  .pf-trend-label { display: none; }
+
+  /* 任务清单行（TaskTodoPage）：390px 下图标 38 + 间距 + 右侧动作按钮吃掉 144px，
+     描述只剩 110px ≈ 9 个汉字，等于把作业要求整段丢掉。窄屏让正文独占首行、
+     动作按钮换到第二行并与正文左缘对齐（图标宽 38 + 间距 12 = 50）。 */
+  .todo-row { flex-wrap: wrap; row-gap: 6px; }
+  /* 行内 style={{ flex: 1 }} 的优先级比这里高，不加 !important 就还是 basis:0%，
+     结果按钮根本换不了行、正文被压到 60px（实测标题被挤成三字一行）。 */
+  .todo-row .todo-main { flex: 1 1 calc(100% - 62px) !important; }
+  .todo-row .todo-action { margin-inline-start: 50px; }
 
   /* 汇总导出（教师窄屏）：Card 头部「当前范围 + 统计值」在 390px 挤成一行难读，让统计值换到第二行；
      四个标签页收紧标签内边距，避免最后一个标签被挤出视口 */
