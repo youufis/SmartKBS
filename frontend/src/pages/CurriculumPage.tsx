@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
-  Collapse, Segmented, Drawer, Grid,
+  Collapse, Segmented, Drawer, Grid, Alert, Switch,
 } from 'antd'
 
 const { Sider, Content } = Layout
@@ -18,6 +18,7 @@ import {
   RightOutlined, DownOutlined, SettingOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
   EyeOutlined, BulbOutlined, SoundOutlined, ThunderboltOutlined,
+  RestOutlined, InboxOutlined, StopOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import * as curriculumApi from '../api/curriculum'
@@ -610,6 +611,17 @@ const CurriculumPage: React.FC = () => {
     } catch { return [] }
   })
 
+  // ── 已停用课程（回收站）：默认不加载，教师/管理员显式打开开关才拉 ──
+  // 停用课程既不在学生端也不在 /api/curriculum/tree 里，没有这个开关就等于"看不见的死数据"，
+  // 只能靠 API 或改库处理；这里把它们连同恢复 / 彻底删除两个出口一起摆进管理页。
+  const [showInactive, setShowInactive] = useState<boolean>(() => {
+    try { return !!JSON.parse(localStorage.getItem('curriculum_show_inactive') || 'false') } catch { return false }
+  })
+  const [inactiveCourses, setInactiveCourses] = useState<Course[]>([])
+  const [inactiveLoading, setInactiveLoading] = useState(false)
+  // 正在恢复 / 彻底删除的课程 id：按钮 loading，顺带防重复点击
+  const [courseBusyId, setCourseBusyId] = useState<number | null>(null)
+
   // 持久化侧栏折叠状态
   useEffect(() => {
     localStorage.setItem('curriculum_sider_collapsed', JSON.stringify(siderCollapsed))
@@ -619,6 +631,69 @@ const CurriculumPage: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('curriculum_expanded_subjects', JSON.stringify(expandedSubjects))
   }, [expandedSubjects])
+
+  // 持久化「显示已停用课程」开关
+  useEffect(() => {
+    localStorage.setItem('curriculum_show_inactive', JSON.stringify(showInactive))
+  }, [showInactive])
+
+  // 拉取已停用课程：列表接口不带章节树，逐条取详情 hydrate。
+  // 停用记录一般是改名重建留下的零星课程（个位数），并行取详情代价可忽略，
+  // 但侧栏的章节/知识点统计和右侧课程树渲染都依赖这份 chapters 数据。
+  const loadInactiveCourses = useCallback(async () => {
+    setInactiveLoading(true)
+    try {
+      const { courses: rows } = await curriculumApi.listCourses({ status: 'inactive' })
+      const hydrated = await Promise.all(
+        rows.map(async (c) => {
+          try { return await curriculumApi.getCourse(c.id) } catch { return c }
+        }),
+      )
+      setInactiveCourses(hydrated)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || t('loadInactiveCoursesFailed'))
+      setInactiveCourses([])
+    } finally {
+      setInactiveLoading(false)
+    }
+  }, [t])
+
+  useEffect(() => {
+    if (isTeacherOrAdmin && showInactive) {
+      loadInactiveCourses()
+    } else {
+      setInactiveCourses([])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showInactive, isTeacherOrAdmin])
+
+  // 在「在用 + （开关打开时的）已停用」两个列表里找课程：树区标题、拖拽排序、上移下移都要用，
+  // 否则选中停用课程时这些逻辑会找不到课程而静默失效。
+  const findCourseById = useCallback((courseId: number | null | undefined): Course | undefined => {
+    if (courseId == null) return undefined
+    return courses.find((c) => c.id === courseId)
+      ?? (showInactive ? inactiveCourses.find((c) => c.id === courseId) : undefined)
+  }, [courses, inactiveCourses, showInactive])
+
+  // 统计一门课下的章节数 / 知识点数 / 挂接资源数：停用与彻底删除的确认框都要写清"会连带影响什么"
+  const countCourseNodes = (course?: Course) => {
+    let chapters = 0
+    let kps = 0
+    let resources = 0
+    const walk = (list?: ChapterTreeNode[]) => {
+      for (const node of list || []) {
+        chapters += 1
+        for (const kp of node.knowledge_points || []) {
+          kps += 1
+          resources += kp.resource_count || 0
+        }
+        if (node.children?.length) walk(node.children)
+      }
+    }
+    walk(course?.chapters)
+    return { chapters, kps, resources }
+  }
 
   // 用户手动点击课程时保存到 localStorage
   const handleSelectCourse = (courseId: number) => {
@@ -651,7 +726,7 @@ const CurriculumPage: React.FC = () => {
   // 当选中的课程变化时，自动展开其所属分类
   useEffect(() => {
     if (!activeCourseId) return
-    const course = courses.find((c) => c.id === activeCourseId)
+    const course = findCourseById(activeCourseId)
     if (!course) return
     const subj = course.subject || getCourseSubject(course) || t('uncategorized')
     if (!expandedSubjects.includes(subj)) {
@@ -666,13 +741,15 @@ const CurriculumPage: React.FC = () => {
     try {
       const data = await curriculumApi.getCurriculumTree()
       setCourses(data)
+      // 开关开着时一起刷新：否则编辑停用课程的章节/知识点后，侧栏与统计不会跟进
+      if (showInactive && isTeacherOrAdmin) await loadInactiveCourses()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(detail || t('loadCourseDataFailed'))
     } finally {
       setLoading(false)
     }
-  }, [t])
+  }, [t, showInactive, isTeacherOrAdmin, loadInactiveCourses])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -682,13 +759,14 @@ const CurriculumPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 当课程列表变化时，确保有选中课程
+  // 当课程列表变化时，确保有选中课程（兜底优先落在在用课程上，停用课程只在手动点选时选中；
+  // 关掉开关或彻底删除当前选中的停用课程时，也会由这里回落到第一门在用课程）
   useEffect(() => {
-    if (courses.length === 0) return
-    if (!activeCourseId || !courses.find((c) => c.id === activeCourseId)) {
-      setTimeout(() => setActiveCourseId(courses[0].id), 0)
+    if (courses.length === 0 && inactiveCourses.length === 0) return
+    if (!findCourseById(activeCourseId)) {
+      setTimeout(() => setActiveCourseId(courses[0]?.id ?? inactiveCourses[0]?.id ?? null), 0)
     }
-  }, [courses, activeCourseId])
+  }, [courses, inactiveCourses, activeCourseId, findCourseById])
 
   // 切换课程时收起右侧详情面板，避免上一门课的知识点残留在面板里
   useEffect(() => {
@@ -759,15 +837,77 @@ const CurriculumPage: React.FC = () => {
     }
   }
 
-  const handleDeleteCourse = async (courseId: number) => {
+  // ── 已停用课程：恢复为在用 ──
+  const handleRestoreCourse = async (course: Course) => {
+    setCourseBusyId(course.id)
     try {
-      await curriculumApi.deleteCourse(courseId)
-      message.success(t('courseDeleted'))
-      loadTree()
+      await curriculumApi.updateCourse(course.id, { status: 'active' })
+      message.success(t('courseRestored'))
+      setInactiveCourses((prev) => prev.filter((c) => c.id !== course.id))
+      await loadTree()   // 恢复后它出现在在用列表里，选中状态保持不变
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || t('deleteFailed'))
+      message.error(detail || t('operationFailed'))
+    } finally {
+      setCourseBusyId(null)
     }
+  }
+
+  // ── 停用课程（软下架）：改名重建、临时下线都走这里，而不是删掉再重建、留下一堆看不见的孤儿记录 ──
+  const handleDisableCourse = (course: Course) => {
+    Modal.confirm({
+      title: t('confirmDisableCourse'),
+      content: t('confirmDisableCourseDesc', { name: course.name }),
+      okText: t('disableCourse'),
+      cancelText: t('cancel'),
+      maskClosable: false,
+      onOk: async () => {
+        setCourseBusyId(course.id)
+        try {
+          await curriculumApi.updateCourse(course.id, { status: 'inactive' })
+          // 开关开着时它会就地挪进「已停用课程」分组；关着时要提醒一句去哪儿找回来
+          message.success(showInactive ? t('courseDisabled') : t('courseDisabledHidden'))
+          await loadTree()
+        } catch (err: unknown) {
+          const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          message.error(detail || t('operationFailed'))
+        } finally {
+          setCourseBusyId(null)
+        }
+      },
+    })
+  }
+
+  // ── 彻底删除（后端硬删除，级联章节/知识点/资源挂接，不可撤销）：停用课程与在用课程共用 ──
+  const handleHardDeleteCourse = (course: Course) => {
+    const { chapters, kps, resources } = countCourseNodes(course)
+    const vars = { name: course.name, chapters, kps, resources }
+    Modal.confirm({
+      title: t('confirmHardDeleteCourse'),
+      // 在用课程额外提示一句"只是不想让学生看到就用停用"，防止把误删当清理
+      content: course.status === 'inactive'
+        ? t('confirmHardDeleteCourseDesc', vars)
+        : t('confirmHardDeleteCourseDescActive', vars),
+      okText: t('hardDeleteCourse'),
+      okButtonProps: { danger: true },
+      cancelText: t('cancel'),
+      maskClosable: false,
+      onOk: async () => {
+        setCourseBusyId(course.id)
+        try {
+          await curriculumApi.deleteCourse(course.id)
+          message.success(t('courseDeleted'))
+          setInactiveCourses((prev) => prev.filter((c) => c.id !== course.id))
+          if (activeCourseId === course.id) setActiveCourseId(null)
+          await loadTree()   // 删在用课程时刷新树；删停用课程时顺带同步侧栏统计
+        } catch (err: unknown) {
+          const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          message.error(detail || t('deleteFailed'))
+        } finally {
+          setCourseBusyId(null)
+        }
+      },
+    })
   }
 
   // ── 章节 CRUD ──
@@ -903,7 +1043,7 @@ const CurriculumPage: React.FC = () => {
 
   /** 上移 / 下移：不依赖拖拽，触屏与键盘也能精确定位 */
   const moveSibling = async (kind: 'ch' | 'kp', node: any, dir: -1 | 1) => {
-    const course = courses.find((c) => c.id === activeCourseId)
+    const course = findCourseById(activeCourseId)
     if (!course) return
     const container = findContainer(course.chapters || [], `${kind}_${node.id}`)
     if (!container) return
@@ -926,7 +1066,7 @@ const CurriculumPage: React.FC = () => {
     const [dragPrefix] = dragKey.split('_')
     const [dropPrefix] = dropKey.split('_')
     const dragId = parseInt(dragKey.split('_')[1], 10)
-    const course = courses.find((c) => c.id === activeCourseId)
+    const course = findCourseById(activeCourseId)
     if (!course) return
     const roots = course.chapters || []
     const isCh = dragPrefix === 'ch'
@@ -1244,7 +1384,9 @@ const CurriculumPage: React.FC = () => {
   )
 
   // ── 当前课程 ──
-  const activeCourse = courses.find((c) => c.id === activeCourseId)
+  const activeCourse = findCourseById(activeCourseId)
+  // 停用提示条要用这份统计，别再对同一棵树遍历两遍
+  const activeCourseCounts = countCourseNodes(activeCourse)
 
   // Suppress unused warnings for bank/mixed practice mode (reserved for future use)
   void [practiceHtmlUrl, practiceMode, bankKeyword, bankQuestions, bankLoading, selectedBankIds, mixedAiQuestions, mixedBankIds, mixedAiCount, mixedGenLoading, mixedBankSearch, mixedBankResults, mixedBankLoading, setBankKeyword, setBankQuestions, setBankLoading, setSelectedBankIds, setMixedAiQuestions, setMixedBankIds, setMixedAiCount, setMixedGenLoading, setMixedBankSearch, setMixedBankResults, setMixedBankLoading, searchBankQuestions, toggleBankQuestion, generateFromBank, generateMixedAi, searchMixedBank, toggleMixedBank, removeMixedQuestion, generateMixedPractice, handleSmartPractice];
@@ -1301,7 +1443,7 @@ const CurriculumPage: React.FC = () => {
         </div>
       )}
 
-      {!loading && courses.length === 0 && (
+      {!loading && courses.length === 0 && inactiveCourses.length === 0 && (
         <Card>
           <Empty
             description={
@@ -1334,7 +1476,7 @@ const CurriculumPage: React.FC = () => {
         </Card>
       )}
 
-      {!loading && courses.length > 0 && (
+      {!loading && (courses.length > 0 || inactiveCourses.length > 0) && (
         <Layout style={{ height: 'calc(100vh - 64px)', background: 'var(--bg-layout)', overflow: 'hidden' }}>
           {/* ── 左侧：课程分类导航（可折叠） ── */}
           <Sider
@@ -1388,6 +1530,26 @@ const CurriculumPage: React.FC = () => {
                         {t('aiImport')}
                       </Button>
                     </Space>
+                  )}
+                  {isTeacherOrAdmin && (
+                    <Tooltip title={t('showInactiveCoursesHint')}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Switch
+                          size="small"
+                          checked={showInactive}
+                          loading={inactiveLoading}
+                          onChange={setShowInactive}
+                        />
+                        <Typography.Text
+                          type="secondary"
+                          style={{ fontSize: 12, cursor: 'pointer' }}
+                          onClick={() => setShowInactive((v) => !v)}
+                        >
+                          {t('showInactiveCourses')}
+                          {inactiveCourses.length > 0 ? `（${inactiveCourses.length}）` : ''}
+                        </Typography.Text>
+                      </div>
+                    </Tooltip>
                   )}
                 </div>
 
@@ -1476,6 +1638,71 @@ const CurriculumPage: React.FC = () => {
                       </div>
                     )
                   })}
+
+                  {/* ── 已停用课程：学生端不可见，只在开关打开时出现，不参与学科分组计数 ── */}
+                  {isTeacherOrAdmin && showInactive && (
+                    <div style={{ marginTop: 10, borderTop: '1px dashed var(--border-color)', paddingTop: 6 }}>
+                      <div
+                        style={{
+                          padding: '6px 16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--text-tertiary)',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <InboxOutlined />
+                        <span style={{ flex: 1 }}>{t('inactiveCoursesGroup')}</span>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {inactiveCourses.length}
+                        </Typography.Text>
+                      </div>
+                      {inactiveCourses.length === 0 && (
+                        <div style={{ padding: '2px 16px 8px 48px' }}>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {inactiveLoading ? t('loadingData') : t('inactiveCoursesEmpty')}
+                          </Typography.Text>
+                        </div>
+                      )}
+                      {inactiveCourses.map((course) => (
+                        <Tooltip key={`inactive_${course.id}`} title={t('inactiveCourseTooltip')} placement="right">
+                          <div
+                            onClick={() => handleSelectCourse(course.id)}
+                            style={{
+                              padding: '9px 16px 9px 48px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              fontSize: 14,
+                              opacity: 0.75,
+                              color: activeCourseId === course.id ? '#1677ff' : 'var(--text-secondary)',
+                              background: activeCourseId === course.id ? '#e6f4ff' : 'transparent',
+                              borderRight: activeCourseId === course.id ? '3px solid #1677ff' : '3px solid transparent',
+                              transition: 'all 0.2s',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (activeCourseId !== course.id) e.currentTarget.style.background = 'var(--bg-layout)'
+                            }}
+                            onMouseLeave={(e) => {
+                              if (activeCourseId !== course.id) e.currentTarget.style.background = 'transparent'
+                            }}
+                          >
+                            <BookOutlined style={{ fontSize: 14 }} />
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {course.name}
+                            </span>
+                            <Tag color="default" style={{ marginInlineEnd: 0, fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>
+                              {t('inactiveCourseTag')}
+                            </Tag>
+                          </div>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -1542,11 +1769,49 @@ const CurriculumPage: React.FC = () => {
               <Row gutter={16}>
                 {/* ── 课程树区域 ── */}
                 <Col xs={24} xxl={selectedKp ? 14 : 24}>
+                  {/* 停用课程：先说清楚"学生看不到"，再就地给恢复 / 彻底删除两个出口 */}
+                  {activeCourse.status === 'inactive' && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={t('inactiveCourseBannerTitle')}
+                      description={t('inactiveCourseBannerDesc', {
+                        ...activeCourseCounts,
+                        updatedAt: activeCourse.updated_at || '-',
+                      })}
+                      action={
+                        <Space orientation="vertical" size={4}>
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<RestOutlined />}
+                            loading={courseBusyId === activeCourse.id}
+                            onClick={() => handleRestoreCourse(activeCourse)}
+                          >
+                            {t('restoreCourse')}
+                          </Button>
+                          <Button
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            disabled={courseBusyId === activeCourse.id}
+                            onClick={() => handleHardDeleteCourse(activeCourse)}
+                          >
+                            {t('hardDeleteCourse')}
+                          </Button>
+                        </Space>
+                      }
+                    />
+                  )}
                   <Card
                     title={
                       <Space>
                         <BookOutlined />
                         <span>{activeCourse.name}</span>
+                        {activeCourse.status === 'inactive' && (
+                          <Tag color="default">{t('inactiveCourseTag')}</Tag>
+                        )}
                         {isStudent && activeCourse.progress && activeCourse.progress.total > 0 && (
                           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
                             ({activeCourse.progress.completed}/{activeCourse.progress.total})
@@ -1555,17 +1820,32 @@ const CurriculumPage: React.FC = () => {
                       </Space>
                     }
                     extra={
-                      <Space>
+                      <Space wrap>
                         {isTeacherOrAdmin && (
                           <>
                             <Button size="small" icon={<EditOutlined />} onClick={() => handleEditCourse(activeCourse)}>
                               {t('edit')}
                             </Button>
-                            <Popconfirm title={t('confirmDeleteCourse')} onConfirm={() => handleDeleteCourse(activeCourse.id)} okText={t('confirm')} cancelText={t('cancel')}>
-                              <Button size="small" danger icon={<DeleteOutlined />}>
-                                {t('delete')}
+                            <Tooltip title={t('disableCourseTooltip')}>
+                              <Button
+                                size="small"
+                                icon={<StopOutlined />}
+                                disabled={activeCourse.status === 'inactive'}
+                                loading={courseBusyId === activeCourse.id}
+                                onClick={() => handleDisableCourse(activeCourse)}
+                              >
+                                {t('disableCourse')}
                               </Button>
-                            </Popconfirm>
+                            </Tooltip>
+                            <Button
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              disabled={courseBusyId === activeCourse.id}
+                              onClick={() => handleHardDeleteCourse(activeCourse)}
+                            >
+                              {t('delete')}
+                            </Button>
                             <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(activeCourse.id)}>
                               {t('addChapterSection')}
                             </Button>

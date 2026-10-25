@@ -3,6 +3,7 @@ import apiClient from './client';
 import type {
   Course,
   CourseCreateRequest,
+  CourseUpdateRequest,
   ChapterCreateRequest,
   KnowledgePointCreateRequest,
   KnowledgePoint,
@@ -38,8 +39,8 @@ export async function createCourse(req: CourseCreateRequest): Promise<{ message:
   return data;
 }
 
-/** 更新课程 */
-export async function updateCourse(courseId: number, updates: Partial<CourseCreateRequest>): Promise<{ message: string }> {
+/** 更新课程（含停用 / 恢复：updates.status = 'inactive' | 'active'） */
+export async function updateCourse(courseId: number, updates: CourseUpdateRequest): Promise<{ message: string }> {
   const { data } = await apiClient.put(`/api/curriculum/courses/${courseId}`, updates);
   return data;
 }

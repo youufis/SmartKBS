@@ -547,6 +547,11 @@ export interface CourseCreateRequest {
   subject?: string;
 }
 
+/** 课程更新请求：比创建多一个 status，停用（inactive）后课程在学生端与 /api/curriculum/tree 中都不再出现 */
+export interface CourseUpdateRequest extends Partial<CourseCreateRequest> {
+  status?: 'active' | 'inactive';
+}
+
 export interface ChapterCreateRequest {
   course_id: number;
   parent_id?: number | null;
