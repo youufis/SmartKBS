@@ -1398,5 +1398,6 @@
   "skillNoneEnabledTitle": "No skill is currently active",
   "skillNoneEnabledDesc": "AI features still work, but fall back to the base model's default style: less structure, fewer examples, weaker follow-up guidance and no content-safety layer. Use \"Enable all\" at the top right to restore it.",
   "skillRecommendedTag": "Keep on",
-  "skillRecommendedTip": "Carries a baseline guardrail (e.g. content safety). Turning it off won't break the feature but removes that constraint"
+  "skillRecommendedTip": "Carries a baseline guardrail (e.g. content safety). Turning it off won't break the feature but removes that constraint",
+  "taskMobileReadonlyHint": "Mobile is view-only: edit, AI grading, ending and deleting tasks need the desktop app."
 }

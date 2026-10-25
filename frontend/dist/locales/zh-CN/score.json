@@ -478,5 +478,7 @@
   "reward.pointsFromTo": "{{from}}~{{to}} 分",
   "reward.fromPoints": "{{points}} 分起",
   "reward.subjectAccuracy": "正确率 {{pct}}%",
-  "reward.subjectNightlyNote": "学科称号看「答了多少题 + 答得对不对」：正确率不足会压低等级，乱答刷不出高段；统计每天夜间更新。"
+  "reward.subjectNightlyNote": "学科称号看「答了多少题 + 答得对不对」：正确率不足会压低等级，乱答刷不出高段；统计每天夜间更新。",
+  "expand": "展开",
+  "collapse": "收起"
 }

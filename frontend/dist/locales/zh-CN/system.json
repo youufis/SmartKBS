@@ -1398,5 +1398,6 @@
   "skillNoneEnabledTitle": "当前没有任何技能生效",
   "skillNoneEnabledDesc": "各 AI 功能仍可正常使用，但会退回基座模型的默认风格：结构化程度、示例密度、追问引导与内容安全约束都会减少。需要恢复时打开右上角「全部启用」。",
   "skillRecommendedTag": "建议常开",
-  "skillRecommendedTip": "这项承载底线约束（如内容安全），关闭后该场景不再有此约束，功能不会报错但质量会降"
+  "skillRecommendedTip": "这项承载底线约束（如内容安全），关闭后该场景不再有此约束，功能不会报错但质量会降",
+  "taskMobileReadonlyHint": "手机上只做查看：编辑、AI 批改、结束与删除请到电脑端操作。"
 }
