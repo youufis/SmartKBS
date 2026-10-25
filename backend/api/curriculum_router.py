@@ -964,9 +964,17 @@ async def get_curriculum_tree(request: Request):
 async def list_courses(
     request: Request,
     grade: str = Query(None, description="筛选年级"),
-    status: str = Query(None, description="筛选状态"),
+    status: str = Query(
+        "active",
+        description="筛选状态：默认 active（仅在用课程）；传 all 返回全部（含已停用课程）；也可传 inactive 等具体值",
+    ),
 ):
-    """获取课程列表，支持按年级和状态筛选"""
+    """获取课程列表，支持按年级和状态筛选
+
+    默认只返回 status='active' 的课程：改名重建后遗留的旧记录（status='inactive'）
+    不该出现在统计、进度这类业务下拉框里，否则会看到重名的"多出来一门课"。
+    确需查看全部（含已停用）时显式传 status=all。
+    """
     user = get_current_user(request)
     conditions = []
     params = []
@@ -974,9 +982,10 @@ async def list_courses(
     if grade:
         conditions.append("grade LIKE ?")
         params.append(f"%{grade}%")
-    if status:
+    status_filter = (status or "active").strip().lower()
+    if status_filter != "all":
         conditions.append("status = ?")
-        params.append(status)
+        params.append(status_filter)
 
     where = " AND ".join(conditions) if conditions else "1=1"
     rows = execute_query(
