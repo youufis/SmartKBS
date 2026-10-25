@@ -19,6 +19,7 @@ import {
 import { useAuthStore } from '../stores/authStore'
 import { usePortraitStore } from '../stores/portraitStore'
 import type { PortraitData } from '../api/portrait'
+import { authedFileUrl } from '../api/client'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -374,7 +375,7 @@ const PortraitPage: React.FC = () => {
                 todayPortrait.image_url ? (
                   <img
                     alt={t('ptTodayPortrait')}
-                    src={todayPortrait.image_url}
+                    src={authedFileUrl(todayPortrait.image_url)}
                     style={{ width: '100%', maxHeight: 400, objectFit: 'contain', background: theme.bgTint }}
                   />
                 ) : (
@@ -445,7 +446,7 @@ const PortraitPage: React.FC = () => {
                     <Button
                       type="text"
                       icon={<DownloadOutlined />}
-                      href={todayPortrait.image_url}
+                      href={authedFileUrl(todayPortrait.image_url)}
                       target="_blank"
                       download
                     >
@@ -693,7 +694,7 @@ const PortraitPage: React.FC = () => {
                       <div
                         style={{
                           height: 200,
-                          background: `url(${portrait.image_url}) center/cover`,
+                          background: `url(${authedFileUrl(portrait.image_url)}) center/cover`,
                           cursor: 'pointer',
                         }}
                         onClick={() => openDetail(portrait)}
@@ -854,7 +855,7 @@ const PortraitPage: React.FC = () => {
                       <div
                         style={{
                           height: 200,
-                          background: `url(${portrait.image_url}) center/cover`,
+                          background: `url(${authedFileUrl(portrait.image_url)}) center/cover`,
                           cursor: 'pointer',
                         }}
                         onClick={() => openDetail(portrait)}
@@ -955,7 +956,7 @@ const PortraitPage: React.FC = () => {
               {detailPortrait.image_url ? (
                 <img
                   alt={t('ptPortrait')}
-                  src={detailPortrait.image_url}
+                  src={authedFileUrl(detailPortrait.image_url)}
                   style={{ width: '100%', borderRadius: 8 }}
                 />
               ) : (
@@ -1055,7 +1056,7 @@ const PortraitPage: React.FC = () => {
                   {detailPortrait.image_url && (
                     <Button
                       icon={<DownloadOutlined />}
-                      href={detailPortrait.image_url}
+                      href={authedFileUrl(detailPortrait.image_url)}
                       target="_blank"
                       download
                     >
@@ -1103,7 +1104,7 @@ const PortraitPage: React.FC = () => {
           }}>
             {sharingPortrait.image_url ? (
               <img
-                src={sharingPortrait.image_url}
+                src={authedFileUrl(sharingPortrait.image_url)}
                 alt={t('ptPreview')}
                 style={{ width: 80, height: 80, borderRadius: 8, objectFit: 'cover' }}
               />

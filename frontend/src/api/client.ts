@@ -66,6 +66,23 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY);
 }
 
+/**
+ * 给「需要登录才能取到的文件/图片 URL」补上令牌。
+ *
+ * `<img>` / `<a download>` / CSS `background: url()` 都不会带 Authorization 头，
+ * 而画像配图是按人做权限校验的接口（portrait_router 的 /api/portrait/image/{id}），
+ * 直接挂 src 必然 401 —— 首页头像与画像页因此整片破图。
+ * 后端中间件支持 ?token= 回落（与各 WebSocket 同一口径），故在此统一拼接。
+ * 空值、已带 token 的地址原样返回。
+ */
+export function authedFileUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  const token = getToken();
+  if (!token || /[?&]token=/.test(url)) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
+
 function readHeader(headers: unknown, name: string): string | undefined {
   if (!headers) return undefined;
   const carrier = headers as { get?: (key: string) => unknown };

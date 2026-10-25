@@ -7,6 +7,7 @@ import {
   FireOutlined, TeamOutlined, TrophyOutlined,
 } from '@ant-design/icons'
 import { getAvatarInfo } from '../../api/portrait'
+import { authedFileUrl } from '../../api/client'
 import type { AvatarInfo } from '../../api/portrait'
 import TeacherScopeChips from '../../components/TeacherScopeChips'
 import { deadlineInfo } from './fmt'
@@ -80,7 +81,7 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
           }}
         >
           {avatarUrl ? (
-            <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={authedFileUrl(avatarUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           ) : (
             <span style={{ fontSize: 22 }}>{isAdmin ? '⚜️' : '🎓'}</span>
           )}
