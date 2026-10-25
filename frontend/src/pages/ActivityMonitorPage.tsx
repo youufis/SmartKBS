@@ -9,7 +9,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, BarChartOutlined,
   ExperimentOutlined, ThunderboltOutlined,
   CheckSquareOutlined, QuestionCircleOutlined, CodeOutlined,
-  TeamOutlined, HighlightOutlined, BookOutlined, EyeOutlined,
+  TeamOutlined, HighlightOutlined, BookOutlined, EyeOutlined, RiseOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as activityMonitorApi from '../api/activityMonitor';
@@ -36,6 +36,7 @@ const getActivityTypeOptions = (t: (key: string) => string) => [
   { value: 'discussion', label: t('activityMonitor.activityType.discussion') },
   { value: 'poll', label: t('activityMonitor.activityType.poll') },
   { value: 'course', label: t('activityMonitor.activityType.course') },
+  { value: 'class_ladder', label: t('activityMonitor.activityType.classLadder') },
 ];
 
 const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -48,6 +49,7 @@ const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
   discussion: <TeamOutlined />,
   poll: <HighlightOutlined />,
   course: <BookOutlined />,
+  class_ladder: <RiseOutlined />,
 };
 
 const ACTIVITY_TYPE_COLORS: Record<string, string> = {
@@ -60,6 +62,7 @@ const ACTIVITY_TYPE_COLORS: Record<string, string> = {
   discussion: 'geekblue',
   poll: 'gold',
   course: 'lime',
+  class_ladder: 'volcano',
 };
 
 const getStatusLabels = (t: (key: string) => string): Record<string, string> => ({

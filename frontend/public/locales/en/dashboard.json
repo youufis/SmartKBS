@@ -136,7 +136,8 @@
       "code": "Code",
       "discussion": "Discussion",
       "poll": "Poll",
-      "course": "Course"
+      "course": "Course",
+      "classLadder": "Class Ladder"
     },
     "assignedAt": "Assigned",
     "scopeLabel": "Scope",
