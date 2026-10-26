@@ -65,8 +65,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/resources/nav",
             "/api/downloads/",
             "/static/",
-            "/docs",
-            "/openapi.json",
+            # S1: 原 "/docs" 与 "/openapi.json" 两条已删 —— 接口文档现在默认不注册路由
+            # （backend/main.py 里 SMARTKB_DOCS_ENABLED=1 才打开）。开发机打开时这两个路径
+            # 不带 /api/ 前缀，由下面"前端路由一律放行"那条规则覆盖，行为不变。
             "/uploads/",
         ]
         request_path = request.url.path

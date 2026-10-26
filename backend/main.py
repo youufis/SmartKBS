@@ -178,13 +178,29 @@ async def lifespan(app: FastAPI):
 
 
 # 创建 FastAPI 应用
+#
+# S1: 交互式 API 文档默认关闭。/docs 与 /openapi.json 都不带 /api/ 前缀，中间件把
+# 「非 /api/ 前缀」一律判为公开路径，于是任何人都能在未登录状态下拉走整份接口结构
+# （2026-10-26 实测：GET /openapi.json -> 200 / 455,493 字节，全部端点、参数与模型字段
+# 名一次性公开），等于把攻击面清单挂在大门口。
+# 需要看文档时显式打开：设环境变量 SMARTKB_DOCS_ENABLED=1 再重启。建议只在开发机开，
+# 校内/公网可访问的部署保持默认关闭。
+_DOCS_ENABLED = os.environ.get("SMARTKB_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
     version=APP_VERSION,
-    docs_url="/docs",
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
     lifespan=lifespan,
 )
+
+if not _DOCS_ENABLED:
+    logger.info(
+        "API 文档(/docs、/redoc、/openapi.json)已关闭; 开发机需查看请设 SMARTKB_DOCS_ENABLED=1 后重启"
+    )
 
 # AI 后台任务并发上限: 统一转 429, 避免在每个端点各写一遍 try/except
 from backend.ai_task_manager import TooManyAITasks
@@ -341,22 +357,56 @@ if _frontend_dist.exists() and _frontend_dist.is_dir():
     #: 浏览器仍跑旧包，管理员看到的是"下拉和新文案都没生效"。
     _INDEX_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
 
+    # S2: 静态根目录的可读边界。uvicorn 会先把 URL 百分号解码再交给路由，于是
+    #   /%2e%2e%2f%2e%2e%2fbackend/smartkb.db     -> full_path = "../../backend/smartkb.db"
+    #   /..%5c..%5cbackend%5csystem_config.json   -> full_path = "..\..\backend\system_config.json"
+    # 这类写法直接落到下面。而 pathlib 的 "/" 拼接不做归一化：
+    #   Path(<dist>) / "../../backend/smartkb.db"  -> 词法上就在 dist 外面，is_file() 一判即通过；
+    #   Path(<dist>) / "C:/Windows/win.ini"        -> 绝对路径整体替换基目录，连 .. 都不必带。
+    # 旧写法只有那一个 is_file() 判断，结果是不登录就能拖走 13 MB 的 smartkb.db
+    # （1410 个账号的密码哈希）、system_config.json（AI Key），还能读源码与 .git/config。
+    # 现在两层拦截：① 形态判黑（反斜杠/盘符/点段/空段一律不当文件路径）；
+    # ② resolve() 归一化后必须仍在 dist 内（顺带收敛符号链接与词法穿越）。
+    # 越界与"文件不存在"回同一份 SPA 外壳：不给探测者区分信号，也不抛 500。
+    _DIST_ROOT = _frontend_dist.resolve()
+    _UNSAFE_PATH_CHARS = set('\\:*?"<>|')
+
+    def _spa_index() -> FileResponse:
+        """SPA 外壳：未知前端路由、越界路径、不存在的文件统一回这里"""
+        return FileResponse(str(_DIST_ROOT / "index.html"), headers=_INDEX_HEADERS)
+
+    def _resolve_dist_file(full_path: str):
+        """把 URL 路径段解析成 dist 内的真实文件；非法/越界/不存在一律返回 None"""
+        if not full_path or any(c in _UNSAFE_PATH_CHARS for c in full_path):
+            return None
+        # 空段与点段（//、./、../）正是穿越的载体，合法前端路由里不会出现
+        if any(seg in ("", ".", "..") for seg in full_path.split("/")):
+            return None
+        try:
+            requested = (_DIST_ROOT / full_path).resolve()
+            # Windows 下比较大小写不敏感，不会误伤 assets 里的 hash 文件名
+            if not requested.is_relative_to(_DIST_ROOT) or not requested.is_file():
+                return None
+        except (OSError, ValueError):
+            # 超长路径、非法字符、符号链接环等：按"不存在"处理即可，不值得抛 500
+            return None
+        return requested
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        file_path = _frontend_dist / full_path
-        if file_path.is_file():
-            headers = {}
-            if _HASHED_FILE_RE.match(full_path):
-                # 带 hash 的静态资源（assets/*.xxx.js/css 等）设置一年强缓存
-                headers["Cache-Control"] = "public, max-age=31536000, immutable"
-            elif full_path.endswith('.json'):
-                # locale JSON 文件不缓存，确保翻译更新即时生效
-                headers["Cache-Control"] = "no-cache, must-revalidate"
-            elif full_path == "index.html":
-                headers.update(_INDEX_HEADERS)
-            return FileResponse(str(file_path), headers=headers)
-        # SPA fallback: 所有非 API、非文件路径返回 index.html（含站点根路径）
-        return FileResponse(str(_frontend_dist / "index.html"), headers=_INDEX_HEADERS)
+        file_path = _resolve_dist_file(full_path)
+        if file_path is None:
+            return _spa_index()
+        headers = {}
+        if _HASHED_FILE_RE.match(full_path):
+            # 带 hash 的静态资源（assets/*.xxx.js/css 等）设置一年强缓存
+            headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif full_path.endswith('.json'):
+            # locale JSON 文件不缓存，确保翻译更新即时生效
+            headers["Cache-Control"] = "no-cache, must-revalidate"
+        elif full_path == "index.html":
+            headers.update(_INDEX_HEADERS)
+        return FileResponse(str(file_path), headers=headers)
 else:
     logger.warning(f"前端构建目录不存在: {_frontend_dist}，请先执行 npm run build")
 
