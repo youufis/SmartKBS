@@ -34,7 +34,7 @@ import AnswerNav from '../components/AnswerNav'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import { draftKey, loadDraft, clearDraft, useDebouncedDraft, countAnswered } from '../utils/answerDraft'
 import { toPercent, percentStatus, percentColor, percentLevelKey } from '../utils/score'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -186,6 +186,8 @@ const SessionRoster: React.FC<{
 const StudentView: React.FC = () => {
   const { t } = useTranslation('practice')
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const openedRef = useRef(false)
   const [loading, setLoading] = useState(true)
   const [sessions, setSessions] = useState<any[]>([])
   const [activeSession, setActiveSession] = useState<any>(null)
@@ -243,6 +245,17 @@ const StudentView: React.FC = () => {
       }
     } catch { message.error(t('loadPracticeFailed')) }
   }
+
+  // 从课程导学「绑定资源」点进来：/practice?open=<练习id> 直接开始这份练习
+  useEffect(() => {
+    const target = searchParams.get('open')
+    if (!target || openedRef.current || loading) return
+    openedRef.current = true
+    setSearchParams({}, { replace: true })
+    const sid = Number(target)
+    if (Number.isFinite(sid)) void startPractice(sid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, loading])
 
   // A1: 作答防抖落盘（草稿提示还挂着时先别写，否则会把旧草稿覆盖成空）
   useDebouncedDraft(practiceDraftKey, answers,
@@ -676,6 +689,8 @@ const StudentView: React.FC = () => {
 // ════════════════════════════════════════
 const TeacherView: React.FC = () => {
   const { t } = useTranslation('practice')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const openedRef = useRef(false)
   const [tab, setTab] = useState<'generate' | 'sessions'>('generate')
   const [kpInput, setKpInput] = useState('')
   const [subject, setSubject] = useState('')
@@ -800,6 +815,18 @@ const TeacherView: React.FC = () => {
     } catch { message.error(t('loadDetailFailed')) }
     finally { setDetailLoading(false) }
   }
+
+  // 从课程导学「绑定资源」点进来：/practice?open=<练习id> 直接看这场练习的详情
+  useEffect(() => {
+    const target = searchParams.get('open')
+    if (!target || openedRef.current) return
+    openedRef.current = true
+    setSearchParams({}, { replace: true })
+    setTab('sessions')
+    const sid = Number(target)
+    if (Number.isFinite(sid)) void viewSessionDetail(sid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   /** R1: 详情页 AI 学情分析(异步任务 → 轮询), 结果按练习 id 缓存 24h */
   const runDetailAiAnalysis = async (force = false) => {

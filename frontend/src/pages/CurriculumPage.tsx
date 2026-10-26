@@ -248,7 +248,8 @@ const CurriculumPage: React.FC = () => {
       await curriculumApi.bindResource({
         knowledge_point_id: selectedKp.id,
         resource_type: resourceType,
-        resource_id: resourceId,
+        // 绑定表主键已统一为字符串（作业的主键本来就是 TEXT）
+        resource_id: String(resourceId),
       })
       message.success(t('resourceBound'))
       // 刷新资源列表

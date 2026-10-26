@@ -459,7 +459,8 @@ export interface CurriculumResource {
   binding_id: number;
   knowledge_point_id: number;
   resource_type: string;
-  resource_id: number;
+  /** 主键按字符串：作业（tasks.id）是 TEXT 复合主键，数字类型也统一存字符串 */
+  resource_id: string;
   resource_name: string;
   resource_url: string;
   sort_order: number;
@@ -573,7 +574,7 @@ export interface KnowledgePointCreateRequest {
 export interface BindingCreateRequest {
   knowledge_point_id: number;
   resource_type: string;
-  resource_id: number;
+  resource_id: string;
   sort_order?: number;
 }
 
