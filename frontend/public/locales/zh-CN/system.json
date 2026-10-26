@@ -661,6 +661,7 @@
   "field_auto_pull_enabled": "自动同步新版本",
   "field_auto_pull_enabled_desc": "开启后，后台每 6 小时检测一次：工作区干净且可以快进时，直接同步运行代码（同步会写入升级历史）。涉及数据库迁移或依赖变更时不会自动同步，仍需手动升级。",
   "loadTaskListFailed": "加载作业列表失败",
+  "openTaskGone": "这份作业已删除或不在你的作业列表里",
   "enterTaskName": "请输入作业名称",
   "createFailed": "创建失败",
   "endFailed": "结束失败",

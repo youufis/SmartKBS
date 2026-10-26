@@ -1,5 +1,5 @@
 import { studentLabel } from '../utils/studentLabel'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox, Alert, Radio,
   Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select, Empty,
@@ -134,6 +134,8 @@ const TaskPage: React.FC = () => {
   }>({ task_name: '', task_status: '', submissions: [], count: 0 })
   const [submissionsLoading, setSubmissionsLoading] = useState(false)
   const [viewTask, setViewTask] = useState<TaskInfo | null>(null)
+  // 深链 ?open=<作业id> 只处理一次（列表是异步来的，effect 会跑到第二遍）
+  const deepLinkOpened = useRef(false)
 
   // 查看学生提交内容
   const [contentDrawer, setContentDrawer] = useState(false)
@@ -406,6 +408,27 @@ const TaskPage: React.FC = () => {
       setSubmissionsLoading(false)
     }
   }
+
+  // 从课程导学「绑定资源」卡片跳进来：/tasks?open=<作业id> 直接展开这份作业。
+  // 以前后端给的深链参数（?highlight=）全站没人消费，绑完点开只是跳到列表第一屏。
+  useEffect(() => {
+    const target = searchParams.get('open')
+    if (!target || deepLinkOpened.current || !tasks.length) return
+    deepLinkOpened.current = true
+    const next = new URLSearchParams(searchParams)
+    next.delete('open')
+    setSearchParams(next, { replace: true })
+    const task = tasks.find((x) => String(x.id) === target)
+    if (!task) { message.warning(t('openTaskGone')); return }
+    if (isStudent) {
+      setSelectedTask(task)
+      if (task.submit_mode && task.submit_mode !== 'conversation') setFileSubmitOpen(true)
+      else setSubmitModal(true)
+    } else {
+      void handleViewSubmissions(task)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, tasks])
 
   // ── 学生查看自己的批改结果 ──
   const handleViewMyGrade = async (task: TaskInfo) => {

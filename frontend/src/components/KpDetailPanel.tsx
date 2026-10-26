@@ -10,8 +10,12 @@
  *
  * 操作条放在内容顶部而不是 Card.extra：窄栏时 extra 会折到标题下方并左对齐，
  * 看起来像排版坏了；放在内容里换行始终整齐。
+ *
+ * 关联资源列表**不自带滚动条**：宽屏时本面板在 <Content overflow:auto> 的右栏里、
+ * 窄屏时在 Drawer 里，外层已经在滚；再套一层内滚就是双滚动条打架（滚轮卡在子列表）。
+ * 条数多时教师端改为折叠 + 「展开全部」，学生端一律全量显示（不能藏学习材料）。
  */
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, Space, Tag, Tooltip, Typography, Button, Dropdown, Empty, message } from 'antd'
 import {
@@ -57,6 +61,9 @@ interface KpDetailPanelProps {
   onResourcesChanged: () => void
 }
 
+/** 教师端关联资源超过几条先折叠（约一屏高度，再多就该去「管理绑定资源」里看） */
+const RES_COLLAPSE_AT = 6
+
 const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
   kp, resources, loading, isTeacherOrAdmin, isStudent, lessonPlanLoading, podcastDisabled,
   variant = 'card',
@@ -65,6 +72,12 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
   const { t } = useTranslation('curriculum')
   const navigate = useNavigate()
   const [movingId, setMovingId] = useState<number | null>(null)
+  const [resExpanded, setResExpanded] = useState(false)
+  // 换知识点要回到折叠态：否则上一个知识点展开的状态会被带过来
+  useEffect(() => { setResExpanded(false) }, [kp.id])
+  // 学生端不折叠：关联资源就是他要学的材料，藏起来等于少留作业
+  const resCollapsed = isTeacherOrAdmin && !resExpanded && resources.length > RES_COLLAPSE_AT
+  const shownResources = resCollapsed ? resources.slice(0, RES_COLLAPSE_AT) : resources
 
   // 打开资源：文件类开新标签；站内活动（考试/讨论/测验/任务）走 SPA 路由，避免跳出课程页
   const openResource = (r: CurriculumResource) => {
@@ -74,7 +87,8 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
       import('../api/tracking').then((mod) => {
         mod.logResourceView({
           resource_type: r.resource_type,
-          resource_id: r.resource_id,
+          // 浏览留痕表按数字主键存，这里只有 html/download 会进来
+          resource_id: Number(r.resource_id),
           knowledge_point_id: kp.id,
           binding_id: r.binding_id,
           source: 'curriculum',
@@ -214,7 +228,7 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
         )
       ) : (
         <Space orientation="vertical" size={8} style={{ width: '100%' }}>
-          {resources.map((r, idx) => (
+          {shownResources.map((r, idx) => (
             <KpResourceCard
               key={r.binding_id}
               resource={r}
@@ -229,6 +243,17 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
               onResetSuccess={onResourcesChanged}
             />
           ))}
+          {isTeacherOrAdmin && resources.length > RES_COLLAPSE_AT && (
+            <Button
+              type="link" block size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => setResExpanded((v) => !v)}
+            >
+              {resExpanded
+                ? t('kpResCollapse')
+                : t('kpResExpand', { shown: RES_COLLAPSE_AT, count: resources.length })}
+            </Button>
+          )}
         </Space>
       )}
 

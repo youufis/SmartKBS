@@ -6,11 +6,12 @@
 import asyncio
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from backend.database import (
     execute_query_dict as execute_query,
@@ -19,6 +20,7 @@ from backend.database import (
     get_transaction,
 )
 from backend.question_db import execute_query as q_execute_query
+from backend import resource_registry as rr
 from backend.question_media import (SOURCE_BANK, ensure_media_dir, normalize_media_files)
 from backend.svg_safety import is_usable_svg, sanitize_svg
 from backend.api.config_router import get_config_value
@@ -130,8 +132,34 @@ class KnowledgePointUpdate(BaseModel):
 class BindingCreate(BaseModel):
     knowledge_point_id: int
     resource_type: str
-    resource_id: int
+    # 主键统一按字符串：作业（tasks.id）本来就是 TEXT 复合主键
+    # （形如 root_xxx_1792666468_100b7b43），旧声明 int 让「作业」从上线起就绑不上——
+    # 候选列表能列出来，提交必 422。数字类型也按字符串存，绑定表已同步迁为 TEXT。
+    resource_id: str
     sort_order: int = 0
+
+    @field_validator("resource_id", mode="before")
+    @classmethod
+    def _rid_to_str(cls, v):
+        return rr.normalize_id(v)
+
+
+class BindingBatchItem(BaseModel):
+    resource_type: str
+    resource_id: str
+    sort_order: int = 0
+
+    @field_validator("resource_id", mode="before")
+    @classmethod
+    def _rid_to_str(cls, v):
+        return rr.normalize_id(v)
+
+
+class BindingBatchRequest(BaseModel):
+    """批量绑定：一次提交多条、可跨类型（替代前端 N 次串行 POST）。"""
+    knowledge_point_id: int
+    items: list[BindingBatchItem]
+
 
 class BindingReorderItem(BaseModel):
     binding_id: int
@@ -155,42 +183,30 @@ def _can_manage(user: dict[str, Any]) -> bool:
     return role in (0, 1)
 
 
-def _check_resource_ownership(resource_type: str, resource_id: int, username: str) -> bool:
-    """校验指定资源是否属于该用户"""
+def _check_resource_ownership(resource_type: str, resource_id: str, username: str) -> bool:
+    """校验指定资源是否属于该用户（注册表驱动：加类型不用再改这里）。"""
+    spec = rr.spec_of(resource_type)
+    if not spec or not spec.bindable:
+        return False
+    rid = rr.normalize_id(resource_id)
+    if not rid:
+        return False
     try:
         if resource_type in ("html", "download"):
             row = execute_query_one(
-                "SELECT 1 FROM shared_resources WHERE id=? AND owner_username=?",
-                (resource_id, username),
+                "SELECT 1 AS ok FROM shared_resources WHERE id=? AND resource_type=? AND owner_username=?",
+                (rid, resource_type, username),
             )
             return row is not None
-        elif resource_type == "exam":
-            row = q_execute_query(
-                "SELECT 1 FROM exams WHERE id=? AND creator_username=?",
-                (resource_id, username),
-            )
-            return len(row) > 0
-        elif resource_type == "discussion":
-            row = execute_query_one(
-                "SELECT 1 FROM discussions WHERE id=? AND creator_username=?",
-                (resource_id, username),
-            )
-            return row is not None
-        elif resource_type == "interaction_quiz":
-            row = execute_query_one(
-                "SELECT 1 FROM interaction_quizzes WHERE id=? AND creator_username=?",
-                (resource_id, username),
-            )
-            return row is not None
-        elif resource_type == "task":
-            row = execute_query_one(
-                "SELECT 1 FROM tasks WHERE id=? AND creator_username=?",
-                (str(resource_id), username),
-            )
-            return row is not None
+        rows = rr.query_fn(spec)(
+            f"SELECT 1 AS ok FROM {spec.table} WHERE {spec.id_col}=? AND {spec.owner_col}=?",
+            (rid, username),
+        )
+        return bool(rows)
     except Exception as e:
         logger.warning(f"资源所有权校验异常 (type={resource_type}, id={resource_id}): {e}")
     return False
+
 
 
 def _now() -> str:
@@ -459,47 +475,19 @@ def _get_resource_info(resource_type: str, resource_id: int, include_stats: bool
                             }
                     except Exception:
                         result["view_stats"] = {"total_views": 0, "unique_viewers": 0}
-        elif resource_type == "question":
-            rows = q_execute_query(
-                "SELECT question_text FROM question_bank WHERE id=? AND status='active'",
-                (resource_id,),
-            )
-            if rows:
-                text = rows[0]["question_text"]
-                result["name"] = text[:60] + ("..." if len(text) > 60 else "")
-                result["url"] = f"/questions?highlight={resource_id}"
-        elif resource_type == "exam":
-            rows = q_execute_query(
-                "SELECT title FROM exams WHERE id=?",
-                (resource_id,),
-            )
-            if rows:
-                result["name"] = rows[0]["title"]
-                result["url"] = f"/exam?highlight={resource_id}"
-        elif resource_type == "discussion":
-            rows = execute_query(
-                "SELECT title FROM discussions WHERE id=?",
-                (resource_id,),
-            )
-            if rows:
-                result["name"] = rows[0]["title"]
-                result["url"] = f"/discussion?highlight={resource_id}"
-        elif resource_type == "interaction_quiz":
-            rows = execute_query(
-                "SELECT title FROM interaction_quizzes WHERE id=?",
-                (resource_id,),
-            )
-            if rows:
-                result["name"] = rows[0]["title"]
-                result["url"] = f"/interaction?highlight={resource_id}"
-        elif resource_type == "task":
-            rows = execute_query(
-                "SELECT name FROM tasks WHERE id=?",
-                (str(resource_id),),
-            )
-            if rows:
-                result["name"] = rows[0]["name"]
-                result["url"] = f"/tasks?highlight={resource_id}"
+        else:
+            # 其余类型（考试/讨论/随堂测验/作业/同步练习/试题）一律走注册表：
+            # 加一个类型只改 backend/resource_registry.py，不再回来添 elif 分支。
+            spec = rr.spec_of(resource_type)
+            if spec:
+                rows = rr.query_fn(spec)(
+                    f"SELECT {spec.name_col} AS name FROM {spec.table} WHERE {spec.id_col}=?",
+                    (rr.normalize_id(resource_id),),
+                )
+                if rows:
+                    result["name"] = rr.display_name(spec, rows[0]["name"])
+                    result["url"] = rr.open_url(spec, resource_id)
+
     except Exception as e:
         logger.warning(f"解析资源绑定失败 (type={resource_type}, id={resource_id}): {e}")
     if not result["name"]:
@@ -1586,9 +1574,140 @@ async def get_kp_resources(kp_id: int, request: Request):
     return {"resources": resources, "total": len(resources)}
 
 
+def _course_grade_names(kp_id: int) -> list[str]:
+    """知识点所属课程的年级名（课程可能是多年级共用，逗号分隔）。"""
+    rows = execute_query(
+        """SELECT c.grade FROM knowledge_points kp
+           JOIN chapters ch ON ch.id = kp.chapter_id
+           JOIN courses c ON c.id = ch.course_id
+           WHERE kp.id=?""",
+        (kp_id,),
+    )
+    if not rows:
+        return []
+    return [g.strip() for g in str(rows[0]["grade"] or "").split(",") if g.strip()]
+
+
+def _auto_open_file_share(username: str, kp_id: int, resource_type: str, resource_id: str) -> None:
+    """绑定个人文件后自动放开共享范围：已有年级 ∪ 课程年级 ∪ 教师任教年级。
+
+    （多年级教师不会只放开课程所在年级；重复绑定到其它年级课程时自动并入新年级）
+    只处理「自动登记的私有资源」与「已按年级共享的资源」，且不动别人的文件。
+    """
+    try:
+        sr_row = execute_query(
+            "SELECT owner_username, share_scope, target_grade, target_class FROM shared_resources WHERE id=?",
+            (resource_id,),
+        )
+        if not sr_row:
+            return
+        sr0 = sr_row[0]
+        if str(sr0["owner_username"] or "") != username:
+            return
+        _tclass = str(sr0["target_class"] or "").strip()
+        _tgrade = str(sr0["target_grade"] or "").strip()
+        private_auto = sr0["share_scope"] == "teacher" and not _tgrade   # 自动登记的私有资源
+        grade_shared = sr0["share_scope"] == "class" and not _tclass     # 已按年级共享的资源
+        if not (private_auto or grade_shared):
+            return
+        grades: list[str] = [g.strip() for g in _tgrade.split(",") if g.strip()]
+        grades += _course_grade_names(kp_id)
+        grades += [g["name"] for g in get_teacher_grades(username) if g.get("name")]
+        merged = list(dict.fromkeys(grades))
+        if merged:
+            execute_insert_update(
+                "UPDATE shared_resources SET share_scope='class', target_users='', target_grade=?, updated_at=? WHERE id=?",
+                (",".join(merged), _now(), resource_id),
+            )
+            logger.info(f"绑定 {resource_type}:{resource_id} 后自动放开共享年级: {','.join(merged)}")
+    except Exception as e:
+        logger.warning(f"绑定后更新文件共享范围失败: {e}")
+
+
+def _auto_open_activity_scope(username: str, kp_id: int, spec, resource_id: str) -> None:
+    """活动类资源（作业/同步练习/随堂测验/考试/讨论）绑定后，把可见范围收敛到课程年级。
+
+    只处理「什么都没设」的情况：知识点页 AI 生成的练习 target_grade/target_scope 都是空串，
+    按 practice_router 的可见性判定等于全校学生都能看到 —— 而绑定到某课程知识点的本意是
+    给这个课程年级用。已在创建页设过范围的一律不动，避免把老师自己的设定改掉。
+    """
+    if not spec or not spec.grade_col or not spec.subject_col:
+        return
+    try:
+        rows = rr.query_fn(spec)(
+            f"SELECT {spec.owner_col} AS owner, {spec.grade_col} AS grade,"
+            f" COALESCE({spec.scope_col or chr(39)*2},'') AS scope"
+            f" FROM {spec.table} WHERE {spec.id_col}=?",
+            (rr.normalize_id(resource_id),),
+        )
+        if not rows:
+            return
+        r0 = rows[0]
+        if str(r0.get("owner") or "") != username:
+            return                                    # 管理员绑别人的资源：不改人家的可见范围
+        if str(r0.get("grade") or "").strip() or str(r0.get("scope") or "").strip():
+            return                                    # 已经设过范围，不动
+        grades = list(dict.fromkeys(
+            _course_grade_names(kp_id)
+            + [g["name"] for g in get_teacher_grades(username) if g.get("name")]
+        ))
+        if not grades:
+            return
+        rr.update_fn(spec)(
+            f"UPDATE {spec.table} SET {spec.grade_col}=?, updated_at=? WHERE {spec.id_col}=?",
+            (",".join(grades), _now(), rr.normalize_id(resource_id)),
+        )
+        logger.info(f"绑定 {spec.key}:{resource_id} 后自动放开目标年级: {','.join(grades)}")
+    except Exception as e:
+        logger.warning(f"绑定后更新活动可见范围失败 ({spec.key}): {e}")
+
+
+def _validate_bind(user: dict[str, Any], kp_id: int, resource_type: str, resource_id: str) -> tuple[str, str, str]:
+    """校验一条绑定请求 → (status, 规范化 id, 失败原因)。
+
+    status: created=可绑定 / duplicated=已绑过 / rejected=不合法
+    """
+    spec = rr.spec_of(resource_type)
+    if not spec or not spec.bindable:
+        return "rejected", "", f"无效的资源类型：{resource_type}（可选: {', '.join(sorted(rr.BINDABLE_KEYS))}）"
+    rid = rr.normalize_id(resource_id)
+    if not rid:
+        return "rejected", "", "资源 ID 为空"
+    username = user["username"]
+    # 教师只能绑自己创建的资源；管理员不限（候选范围对管理员本来就是全部）
+    if not is_admin(username) and not _check_resource_ownership(resource_type, rid, username):
+        logger.warning(f"用户 {username} 尝试绑定非自己的资源 {resource_type}:{rid}")
+        return "rejected", rid, "只能绑定自己的资源"
+    if execute_query_one(
+        "SELECT id FROM curriculum_bindings WHERE knowledge_point_id=? AND resource_type=? AND resource_id=?",
+        (kp_id, resource_type, rid),
+    ):
+        return "duplicated", rid, "该资源已绑定到此知识点"
+    return "created", rid, ""
+
+
+def _after_bind_side_effects(username: str, kp_id: int, plans: list[tuple[str, str]]) -> None:
+    """绑定成功后的两件事（都是 best-effort，失败不回滚绑定）：放开可见范围、清理重绑练习的旧成绩。"""
+    for rtype, rid in plans:
+        try:
+            if rtype in ("html", "download"):
+                _auto_open_file_share(username, kp_id, rtype, rid)
+            else:
+                _auto_open_activity_scope(username, kp_id, rr.spec_of(rtype), rid)
+        except Exception as e:
+            logger.warning(f"绑定后处理可见范围失败 ({rtype}:{rid}): {e}")
+    if any(t == "html" for t, _ in plans):
+        # 重新绑定练习资源时清空学生作答记录
+        try:
+            from backend.question_db import execute_insert as q_clear
+            q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
+        except Exception:
+            pass
+
+
 @router.post("/bindings", summary="绑定资源到知识点")
 async def create_binding(req: BindingCreate, request: Request):
-    """将已有资源绑定到知识点（教师/管理员）"""
+    """将已有资源绑定到知识点（教师/管理员）。一次绑多条请用 /bindings/batch。"""
     user = get_current_user(request)
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="权限不足")
@@ -1599,78 +1718,77 @@ async def create_binding(req: BindingCreate, request: Request):
         raise HTTPException(status_code=404, detail="知识点不存在")
     _assert_can_edit_course(user, _course_of_kp(req.knowledge_point_id), "绑定资源")
 
-    valid_types = {"html", "download", "exam", "discussion", "interaction_quiz", "task"}
-    if req.resource_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"无效的资源类型，可选: {', '.join(sorted(valid_types))}")
+    status, rid, reason = _validate_bind(user, req.knowledge_point_id, req.resource_type, req.resource_id)
+    if status == "rejected":
+        raise HTTPException(status_code=403 if reason == "只能绑定自己的资源" else 400, detail=reason)
+    if status == "duplicated":
+        raise HTTPException(status_code=409, detail=reason)
 
-    # 校验资源所有权：教师只能绑定自己的资源
-    username = user["username"]
-    ownership_ok = _check_resource_ownership(req.resource_type, req.resource_id, username)
-    if not ownership_ok:
-        logger.warning(f"用户 {username} 尝试绑定非自己的资源 {req.resource_type}:{req.resource_id}")
-        raise HTTPException(status_code=403, detail="只能绑定自己的资源")
-
-    # 绑定个人资源后自动放开共享范围：课程年级 ∪ 教师任教年级 ∪ 已有年级
-    # （多年级教师不会只放开课程所在年级；重复绑定到其它年级课程时自动并入新年级）
-    if req.resource_type in ("html", "download") and not is_admin(username):
-        try:
-            sr_row = execute_query(
-                "SELECT share_scope, target_grade, target_class FROM shared_resources WHERE id=?",
-                (req.resource_id,),
-            )
-            if sr_row:
-                sr0 = sr_row[0]
-                _tclass = str(sr0["target_class"] or "").strip()
-                _tgrade = str(sr0["target_grade"] or "").strip()
-                private_auto = sr0["share_scope"] == "teacher" and not _tgrade   # 自动登记的私有资源
-                grade_shared = sr0["share_scope"] == "class" and not _tclass     # 已按年级共享的资源
-                if private_auto or grade_shared:
-                    course_row = execute_query(
-                        """SELECT c.grade FROM knowledge_points kp
-                           JOIN chapters ch ON ch.id = kp.chapter_id
-                           JOIN courses c ON c.id = ch.course_id
-                           WHERE kp.id=?""",
-                        (req.knowledge_point_id,),
-                    )
-                    grades: list[str] = [g.strip() for g in _tgrade.split(",") if g.strip()]
-                    course_grade = str((course_row[0]["grade"] if course_row else "") or "").strip()
-                    if course_grade:
-                        grades += [g.strip() for g in course_grade.split(",") if g.strip()]
-                    from backend.permission_service import get_teacher_grades
-                    grades += [g["name"] for g in get_teacher_grades(username) if g.get("name")]
-                    merged = list(dict.fromkeys(grades))
-                    if merged:
-                        execute_insert_update(
-                            "UPDATE shared_resources SET share_scope='class', target_users='', target_grade=?, updated_at=? WHERE id=?",
-                            (",".join(merged), _now(), req.resource_id),
-                        )
-                        logger.info(f"绑定 {req.resource_type}:{req.resource_id} 后自动放开共享年级: {','.join(merged)}")
-        except Exception as e:
-            logger.warning(f"绑定后更新共享范围失败: {e}")
-
-    # 检查是否已绑定
-    existing = execute_query_one(
-        "SELECT id FROM curriculum_bindings WHERE knowledge_point_id=? AND resource_type=? AND resource_id=?",
-        (req.knowledge_point_id, req.resource_type, req.resource_id),
-    )
-    if existing:
-        raise HTTPException(status_code=409, detail="该资源已绑定到此知识点")
-
-    now = _now()
     binding_id = execute_insert_update(
         """INSERT INTO curriculum_bindings (knowledge_point_id, resource_type, resource_id, sort_order, created_at)
            VALUES (?, ?, ?, ?, ?)""",
-        (req.knowledge_point_id, req.resource_type, req.resource_id, req.sort_order, now),
+        (req.knowledge_point_id, req.resource_type, rid, req.sort_order, _now()),
     )
-    # 重新绑定练习资源时清空学生作答记录
-    if req.resource_type == "html":
-        try:
-            from backend.question_db import execute_insert as q_clear
-            q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (req.knowledge_point_id,))
-        except Exception:
-            pass
-    logger.info(f"用户 {user['username']} 绑定资源 {req.resource_type}:{req.resource_id} 到知识点 {req.knowledge_point_id}")
+    _after_bind_side_effects(user["username"], req.knowledge_point_id, [(req.resource_type, rid)])
+    logger.info(f"用户 {user['username']} 绑定资源 {req.resource_type}:{rid} 到知识点 {req.knowledge_point_id}")
     return {"message": "资源绑定成功", "binding_id": binding_id}
+
+
+@router.post("/bindings/batch", summary="批量绑定资源到知识点（可跨类型）")
+async def create_bindings_batch(req: BindingBatchRequest, request: Request):
+    """一次提交多条绑定：逐条校验、一个事务落库，重复项静默跳过而不是整批报错。
+
+    旧做法是前端 for 循环串行 POST N 次：慢、中途失败留下半套结果、
+    422/403 的错误体（detail 是数组）还会被拼成 [object Object] 弹给老师。
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+    if not req.items:
+        raise HTTPException(status_code=400, detail="绑定列表为空")
+    kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (req.knowledge_point_id,))
+    if not kp:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    _assert_can_edit_course(user, _course_of_kp(req.knowledge_point_id), "绑定资源")
+
+    plans: list[tuple[str, str, int]] = []
+    failed: list[dict[str, Any]] = []
+    duplicated = 0
+    seen: set[tuple[str, str]] = set()
+    for idx, item in enumerate(req.items):
+        status, rid, reason = _validate_bind(user, req.knowledge_point_id, item.resource_type, item.resource_id)
+        if status == "duplicated" or (item.resource_type, rid) in seen:
+            duplicated += 1                     # 库里有 / 本次请求里重复出现，都算重复
+            continue
+        if status != "created":
+            failed.append({"resource_type": item.resource_type, "resource_id": item.resource_id,
+                           "reason": reason})
+            continue
+        seen.add((item.resource_type, rid))
+        plans.append((item.resource_type, rid, item.sort_order or idx))
+
+    created = 0
+    if plans:
+        now = _now()
+        with get_transaction() as conn:
+            cur = conn.cursor()
+            for rtype, rid, sort_order in plans:
+                cur.execute(
+                    """INSERT INTO curriculum_bindings
+                       (knowledge_point_id, resource_type, resource_id, sort_order, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (req.knowledge_point_id, rtype, rid, sort_order, now),
+                )
+                created += 1
+        _after_bind_side_effects(
+            user["username"], req.knowledge_point_id, [(t, r) for t, r, _ in plans])
+
+    logger.info(
+        f"用户 {user['username']} 批量绑定知识点 {req.knowledge_point_id}: "
+        f"新增 {created} · 重复 {duplicated} · 失败 {len(failed)}")
+    return {"message": f"成功绑定 {created} 个资源", "created": created,
+            "duplicated": duplicated, "failed": failed}
+
 
 
 @router.delete("/bindings/{binding_id}", summary="解绑资源")
@@ -1801,95 +1919,222 @@ def _register_personal_resources(username: str, resource_type: str) -> None:
         logger.info(f"教师 {username} 自动登记个人资源 {created} 条 (type={resource_type})")
 
 
-@router.get("/bindings/available", summary="获取可绑定的候选资源")
-async def get_available_resources(
-    request: Request,
-    resource_type: str = Query(..., description="资源类型"),
-    keyword: str = Query("", description="搜索关键词"),
-    kp_id: int = Query(None, description="知识点 ID（排除已绑定的）"),
-):
-    """获取指定类型的可选资源列表（用于绑定界面选择，仅返回当前教师自己的资源）"""
-    user = get_current_user(request)
-    username = user["username"]
+def _candidate_where(spec, username: str, admin_all: bool) -> tuple[str, list]:
+    """候选范围：教师只看自己创建的，管理员看全部（2026-10-26 确认的口径）。"""
+    conds: list[str] = []
+    params: list[Any] = []
+    if spec.key in ("html", "download"):
+        conds.append("resource_type=?")
+        params.append(spec.key)
+    if not admin_all:
+        conds.append(f"{spec.owner_col}=?")
+        params.append(username)
+    frag, sparams = rr.status_filter(spec)
+    if frag:
+        conds.append(frag.strip().removeprefix("AND "))
+        params.extend(sparams)
+    return (" AND " + " AND ".join(conds) if conds else ""), params
 
-    valid_types = {"html", "download", "exam", "discussion", "interaction_quiz", "task"}
-    if resource_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"无效的资源类型")
 
-    results = []
-
+def _count_candidates(spec, username: str, admin_all: bool) -> int:
+    where, params = _candidate_where(spec, username, admin_all)
     try:
-        if resource_type == "html":
-            # 管理员同样要登记：以前这里排除了 admin，导致 root 生成的 AI 练习/课件
-            # 永远进不了 shared_resources，绑定候选列表里查不到（磁盘上有、库里没有）。
-            # 登记为 share_scope='teacher' + target_users=本人，仅自己可见，绑定时才放开到课程年级
-            _register_personal_resources(username, "html")
-            sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='html' AND owner_username=?"
-            params = [username]
-            if keyword:
-                sql += " AND file_name LIKE ?"
-                params.append(f"%{keyword}%")
-            sql += " ORDER BY id DESC LIMIT 200"
-            results = execute_query(sql, tuple(params))
-
-        elif resource_type == "download":
-            _register_personal_resources(username, "download")
-            sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='download' AND owner_username=?"
-            params = [username]
-            if keyword:
-                sql += " AND file_name LIKE ?"
-                params.append(f"%{keyword}%")
-            sql += " ORDER BY id DESC LIMIT 200"
-            results = execute_query(sql, tuple(params))
-
-        elif resource_type == "exam":
-            sql = "SELECT id, title as name FROM exams WHERE status='published' AND creator_username=?"
-            params = [username]
-            if keyword:
-                sql += " AND title LIKE ?"
-                params.append(f"%{keyword}%")
-            sql += " ORDER BY id DESC LIMIT 200"
-            results = q_execute_query(sql, tuple(params))
-
-        elif resource_type == "discussion":
-            sql = "SELECT id, title as name FROM discussions WHERE (status='pending' OR status='active') AND creator_username=?"
-            params = [username]
-            if keyword:
-                sql += " AND title LIKE ?"
-                params.append(f"%{keyword}%")
-            sql += " ORDER BY id DESC LIMIT 200"
-            results = execute_query(sql, tuple(params))
-
-        elif resource_type == "interaction_quiz":
-            sql = "SELECT id, title as name FROM interaction_quizzes WHERE status='active' AND creator_username=?"
-            params = [username]
-            if keyword:
-                sql += " AND title LIKE ?"
-                params.append(f"%{keyword}%")
-            sql += " ORDER BY id DESC LIMIT 200"
-            results = execute_query(sql, tuple(params))
-
-        elif resource_type == "task":
-            sql = "SELECT id, name FROM tasks WHERE status='active' AND creator_username=?"
-            params = [username]
-            if keyword:
-                sql += " AND name LIKE ?"
-                params.append(f"%{keyword}%")
-            sql += " ORDER BY id DESC LIMIT 200"
-            results = execute_query(sql, tuple(params))
+        rows = rr.query_fn(spec)(
+            f"SELECT COUNT(*) AS n FROM {spec.table} WHERE 1=1{where}", tuple(params))
+        return int(rows[0]["n"]) if rows else 0
     except Exception as e:
-        logger.warning(f"查询候选资源失败 (type={resource_type}): {e}")
+        logger.warning(f"统计候选资源失败 (type={spec.key}): {e}")
+        return 0
 
-    # 排除已绑定到该知识点的资源
-    if kp_id and results:
-        bound = execute_query(
-            "SELECT resource_id FROM curriculum_bindings WHERE knowledge_point_id=? AND resource_type=?",
-            (kp_id, resource_type),
-        )
-        bound_ids = set(r["resource_id"] for r in bound)
-        results = [r for r in results if r["id"] not in bound_ids]
 
-    return {"resources": results, "total": len(results)}
+def _fetch_candidates(spec, username: str, admin_all: bool) -> list[dict[str, Any]]:
+    """按注册表拉一类候选（列名全部来自 spec，不再有六段 if/elif 手写 SQL）。"""
+    sel = [f"{spec.id_col} AS id", f"{spec.name_col} AS name", f"{spec.owner_col} AS owner"]
+    for alias, col in (("subject", spec.subject_col), ("grade", spec.grade_col),
+                       ("classes", spec.class_col), ("scope", spec.scope_col),
+                       ("status", spec.status_col), ("created_at", spec.created_col),
+                       ("source", spec.source_col), ("kp_text", spec.kp_col)):
+        if col:
+            sel.append(f"{col} AS {alias}")
+    for alias, expr in spec.meta_exprs:
+        sel.append(f"{expr} AS {alias}")
+    where, params = _candidate_where(spec, username, admin_all)
+    sql = (f"SELECT {', '.join(sel)} FROM {spec.table} WHERE 1=1{where}"
+           f" ORDER BY {spec.created_col} DESC, {spec.id_col} DESC LIMIT ?")
+    try:
+        return rr.query_fn(spec)(sql, (*params, rr.CANDIDATE_LIMIT)) or []
+    except Exception as e:
+        logger.warning(f"查询候选资源失败 (type={spec.key}): {e}")
+        return []
+
+
+def _kp_match_context(kp_id: int | None) -> dict[str, Any] | None:
+    """当前知识点 + 同章节兄弟知识点名：候选资源靠它算「是不是给这个知识点做的」。"""
+    if not kp_id:
+        return None
+    kp = execute_query_one("SELECT id, name, chapter_id FROM knowledge_points WHERE id=?", (kp_id,))
+    if not kp:
+        return None
+    siblings: list[str] = []
+    if kp.get("chapter_id"):
+        siblings = [str(r["name"] or "") for r in execute_query(
+            "SELECT name FROM knowledge_points WHERE chapter_id=? AND id<>?",
+            (kp["chapter_id"], kp_id)) or []]
+    return {"kp_id": int(kp["id"]), "name": str(kp["name"] or ""), "siblings": siblings}
+
+
+def _kp_match(spec, row: dict[str, Any], name: str, ctx: dict[str, Any] | None) -> str:
+    """知识点匹配档：exact 就是本知识点 > contains 提到本知识点 > chapter 属于同章节 > none。
+
+    依据都是现成字段：活动类资源的 knowledge_points、AI 产物文件名前缀 {kp_id}_、
+    以及标题里的知识点名。这一维是「资源一多就没法选」的正解 —— 老师九成想找的
+    就是这个知识点配套的那一份。
+    """
+    if not ctx:
+        return "none"
+    text = " ".join([name, str(row.get("kp_text") or "")])
+    if spec.key in ("html", "download") and name.startswith(f"{ctx['kp_id']}_"):
+        return "exact"
+    tokens = [t for t in re.split(r"[、,，/;；|\s]+", text) if t]
+    kp_name = ctx["name"]
+    if kp_name and (kp_name in tokens or kp_name == text.strip()):
+        return "exact"
+    if kp_name and kp_name in text:
+        return "contains"
+    for s in ctx["siblings"]:
+        if s and (s in tokens or s in text):
+            return "chapter"
+    return "none"
+
+
+def _binding_index(resource_type: str, kp_id: int | None) -> dict[str, tuple[bool, int]]:
+    """该类型现有绑定 → {资源id: (是否已绑到本知识点, 已绑其它知识点数)}，供候选列表打标。"""
+    out: dict[str, tuple[bool, int]] = {}
+    try:
+        rows = execute_query(
+            "SELECT knowledge_point_id, resource_id FROM curriculum_bindings WHERE resource_type=?",
+            (resource_type,)) or []
+    except Exception as e:
+        logger.warning(f"查询已绑定资源失败 (type={resource_type}): {e}")
+        return out
+    for r in rows:
+        rid = rr.normalize_id(r["resource_id"])
+        here, other = out.get(rid, (False, 0))
+        if kp_id and int(r["knowledge_point_id"] or 0) == int(kp_id):
+            here = True
+        else:
+            other += 1
+        out[rid] = (here, other)
+    return out
+
+
+@router.get("/resource-types", summary="可绑定的资源类型清单（含每类可用条数）")
+async def list_bindable_resource_types(request: Request):
+    """绑定框的类型清单 + 每类可绑条数：前端下拉/chips/分组/图标/标签全由它驱动。
+
+    以前类型清单在前端与后端各硬编码一份（还各用一套 i18n 键），
+    改名/加类必漏 —— 「任务」没跟着全站改成「作业」、同步练习一直没上架就是这么来的。
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+    username = user["username"]
+    admin_all = is_admin(username)
+    out = []
+    for key in rr.SHELF_KEYS:
+        spec = rr.spec_of(key)
+        out.append({
+            "key": spec.key, "label_key": spec.label_key, "group": spec.group,
+            "icon": spec.icon, "order": spec.order,
+            "count": _count_candidates(spec, username, admin_all),
+        })
+    return {"types": out, "groups": [{"key": g} for g in rr.GROUP_ORDER]}
+
+
+@router.get("/resources/candidates", summary="绑定资源候选清单（带分类字段与真实总数）")
+async def list_bindable_candidates(
+    request: Request,
+    types: str = Query("", description="逗号分隔的类型键，空 = 全部上架类型"),
+    kp_id: int = Query(None, description="知识点 ID（用于推荐匹配与已绑标记）"),
+):
+    """把选中类型的候选资源一次性拉全（含分类/推荐所需字段），前端本地分类与翻页。
+
+    与旧的 /bindings/available 的区别，都是「资源一多就没法选」逼出来的：
+    1. 不再 `ORDER BY id DESC LIMIT 200` 静默截断 —— 有硬顶，但如实返回 total/truncated；
+    2. 一次可取多类型，跨类型多选一次提交；
+    3. 每条带学科/年级班级/状态/时间/来源/知识点/已绑情况，供左侧分类栏与推荐排序使用。
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+    username = user["username"]
+    admin_all = is_admin(username)
+
+    wanted = [t.strip() for t in types.split(",") if t.strip()] or list(rr.SHELF_KEYS)
+    specs = [rr.spec_of(t) for t in wanted]
+    specs = [s for s in specs if s and s.on_shelf and s.bindable]
+
+    # 网页课件/下载文件：先把个人目录里没入库的文件补登记（磁盘上有、库里没有的 AI 产物）
+    for spec in specs:
+        if spec.key in ("html", "download"):
+            try:
+                _register_personal_resources(username, spec.key)
+            except Exception as e:
+                logger.warning(f"自动登记个人资源失败 ({username}/{spec.key}): {e}")
+
+    ctx = _kp_match_context(kp_id)
+    items: list[dict[str, Any]] = []
+    totals: dict[str, int] = {}
+    truncated: dict[str, bool] = {}
+    for spec in specs:
+        rows = _fetch_candidates(spec, username, admin_all)
+        totals[spec.key] = _count_candidates(spec, username, admin_all)
+        truncated[spec.key] = totals[spec.key] > len(rows)
+        bound = _binding_index(spec.key, kp_id)
+        meta_keys = [alias for alias, _ in spec.meta_exprs]
+        for row in rows:
+            rid = rr.normalize_id(row.get("id"))
+            name = rr.display_name(spec, row.get("name"))
+            here, other = bound.get(rid, (False, 0))
+            owner = str(row.get("owner") or "")
+            items.append({
+                "type": spec.key,
+                "id": rid,
+                "name": name,
+                # 创建者：管理员看全部时，这是判断"这是谁的资源"的关键一维
+                "owner": owner,
+                "owner_name": owner,          # 下面统一替换成真实姓名
+                "mine": owner == username,
+                "subject": str(row.get("subject") or ""),
+                "grade": str(row.get("grade") or ""),
+                "classes": str(row.get("classes") or ""),
+                "scope": str(row.get("scope") or ""),
+                "status": str(row.get("status") or ""),
+                "created_at": str(row.get("created_at") or ""),
+                "source": str(row.get("source") or ""),
+                "kp_text": str(row.get("kp_text") or ""),
+                "sub_kind": rr.sub_kind_of(name) if spec.key in ("html", "download") else "",
+                "kp_match": _kp_match(spec, row, name, ctx),
+                "bound_here": here,
+                "bound_other": other,
+                "meta": {k: row.get(k) for k in meta_keys},
+                "open_url": rr.open_url(spec, rid),
+            })
+    # 创建者姓名：一次 IN 查询补齐（绑定框里最多几百条，别逐条查）
+    owners = {str(i.get("owner") or "") for i in items} - {""}
+    if owners:
+        ph = ",".join("?" for _ in owners)
+        name_map = {
+            str(r["username"]): str(r["name"] or r["username"])
+            for r in execute_query(
+                f"SELECT username, name FROM users WHERE username IN ({ph})", tuple(owners)) or []
+        }
+        for it in items:
+            it["owner_name"] = name_map.get(it["owner"], it["owner"] or "-")
+
+    return {"items": items, "totals": totals, "truncated": truncated,
+            "kp": {"id": kp_id or 0, "name": ctx["name"] if ctx else ""}}
+
 
 
 # ═══════════════════════════════════════════════════════════

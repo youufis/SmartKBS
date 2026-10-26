@@ -444,7 +444,8 @@ async def share_resource(request: Request, body: ShareRequest):
                 f"SELECT resource_id FROM curriculum_bindings WHERE resource_type=? AND resource_id IN ({_ph}) ORDER BY id",
                 (body.resource_type, *_ids),
             )
-            primary_id = _bound[0][0] if _bound else _ids[0]
+            # 绑定表的 resource_id 已迁为 TEXT，这里统一转回 int 再用作 shared_resources 主键
+            primary_id = int(_bound[0][0]) if _bound else _ids[0]
             execute_insert_update(
                 """UPDATE shared_resources SET file_path=?, file_name=?, share_scope=?,
                           target_users=?, target_grade=?, target_class=?, updated_at=?
@@ -1168,6 +1169,59 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
                     return True
 
     return False
+
+
+def is_file_bound_to_course(file_rel_path: str, resource_type: str, owner_username: str) -> bool:
+    """该文件（或其父目录型共享）是否已被绑定到某个知识点。
+
+    用途：教师打开「同事绑到课程上的资源」。知识点绑定的资源对全体教师可见是既定口径
+    （课程导学面板所有人都能看到名字与链接），学生也按绑定时的自动放开年级能打开；
+    结果同事点开是 403 —— 看得到打不开。绑定这个动作本身就是把资源交付给这门课，
+    所以对教师放开只读；学生侧一律不变，仍走共享范围判定。
+    """
+    if not owner_username or not file_rel_path:
+        return False
+    candidates = [file_rel_path]
+    if file_rel_path.endswith("/"):
+        candidates.append(file_rel_path.rstrip("/"))
+    else:
+        candidates.append(file_rel_path + "/")
+    # 目录型共享被绑定时，目录里的文件同样算已绑定
+    parts = str(file_rel_path).strip("/").split("/")
+    for i in range(len(parts) - 1, 0, -1):
+        d = "/".join(parts[:i])
+        candidates.extend([d, d + "/"])
+    ph = ",".join("?" for _ in candidates)
+    try:
+        rows = execute_query(
+            f"""SELECT 1 AS ok FROM curriculum_bindings cb
+                JOIN shared_resources sr
+                      ON sr.id = cb.resource_id AND sr.resource_type = cb.resource_type
+                WHERE sr.owner_username=? AND sr.resource_type=? AND sr.file_path IN ({ph})
+                LIMIT 1""",
+            (owner_username, resource_type, *candidates),
+        )
+    except Exception as e:
+        logger.warning(f"已绑定资源判定查询失败 ({owner_username}/{file_rel_path}): {e}")
+        return False
+    return bool(rows)
+
+
+def bound_resource_ids(owner_username: str, resource_type: str = "html") -> set[str]:
+    """某人名下「已绑定到知识点」的 shared_resources id 集合（供素材放行批量判定用）。"""
+    try:
+        rows = execute_query(
+            """SELECT DISTINCT cb.resource_id FROM curriculum_bindings cb
+               JOIN shared_resources sr
+                     ON sr.id = cb.resource_id AND sr.resource_type = cb.resource_type
+               WHERE sr.owner_username=? AND cb.resource_type=?""",
+            (owner_username, resource_type),
+        )
+    except Exception as e:
+        logger.warning(f"已绑定 id 集合查询失败 ({owner_username}): {e}")
+        return set()
+    # 本模块的 execute_query 返回元组行（不是 dict），取下标 0
+    return {str(r[0]) for r in rows or []}
 
 
 def _check_share_scope(row, viewer_username: str) -> bool:

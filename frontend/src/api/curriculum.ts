@@ -125,13 +125,82 @@ export async function reorderBindings(
   return data;
 }
 
-/** 获取可绑定的候选资源 */
-export async function getAvailableResources(params: {
-  resource_type: string;
-  keyword?: string;
+/** 可绑定的资源类型（含每类可用条数）—— 类型清单的唯一真源是后端 resource_registry.py */
+export interface BindableResourceType {
+  key: string;
+  label_key: string;
+  group: string;
+  icon: string;
+  order?: number;
+  count?: number;
+}
+
+export async function getBindableResourceTypes(): Promise<BindableResourceType[]> {
+  const { data } = await apiClient.get('/api/curriculum/resource-types');
+  return data.types || [];
+}
+
+/** 候选资源条目：带分类栏与推荐排序所需的元信息 */
+export interface ResourceCandidate {
+  type: string;
+  /** 主键统一按字符串（作业的主键本来就是 TEXT 复合键） */
+  id: string;
+  name: string;
+  /** 创建者用户名 / 姓名；mine=是不是当前用户自己建的（管理员看全部时特别有用） */
+  owner: string;
+  owner_name: string;
+  mine: boolean;
+  subject: string;
+  grade: string;
+  classes: string;
+  scope: string;
+  status: string;
+  created_at: string;
+  source: string;
+  kp_text: string;
+  sub_kind: string;
+  /** exact=就是本知识点 / contains=提到本知识点 / chapter=同章节 / none=无关 */
+  kp_match: 'exact' | 'contains' | 'chapter' | 'none' | string;
+  bound_here: boolean;
+  bound_other: number;
+  meta: Record<string, string | number | null>;
+  open_url: string;
+}
+
+export interface ResourceCandidatesResp {
+  items: ResourceCandidate[];
+  /** 每类真实总数（不再被 LIMIT 静默截断） */
+  totals: Record<string, number>;
+  /** 每类是否因硬顶被截断（前端要如实提示） */
+  truncated: Record<string, boolean>;
+  kp: { id: number; name: string };
+}
+
+/** 拉候选资源：一次可取多类型，前端本地分类与翻页 */
+export async function getResourceCandidates(params: {
+  types?: string[];
   kp_id?: number;
-}): Promise<{ resources: { id: number; name: string }[]; total: number }> {
-  const { data } = await apiClient.get('/api/curriculum/bindings/available', { params });
+}): Promise<ResourceCandidatesResp> {
+  const { data } = await apiClient.get('/api/curriculum/resources/candidates', {
+    params: {
+      types: params.types && params.types.length ? params.types.join(',') : '',
+      kp_id: params.kp_id,
+    },
+  });
+  return data;
+}
+
+/** 批量绑定到知识点（可跨类型，一个事务落库） */
+export async function bindResourcesBatch(req: {
+  knowledge_point_id: number;
+  items: { resource_type: string; resource_id: string; sort_order?: number }[];
+}): Promise<{
+  message: string;
+  created: number;
+  duplicated: number;
+  failed: { resource_type: string; resource_id: string; reason: string }[];
+}> {
+  const { data } = await apiClient.post('/api/curriculum/bindings/batch', req);
   return data;
 }
 

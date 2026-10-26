@@ -653,6 +653,7 @@
   "field_auto_pull_enabled": "Auto-sync new releases",
   "field_auto_pull_enabled_desc": "When on, the server checks every 6 hours and fast-forwards the running code if the working tree is clean and a fast-forward is possible (the sync is written to the upgrade history). Releases that involve database migrations or dependency changes are never auto-synced - upgrade them manually.",
   "loadTaskListFailed": "Failed to load homework list",
+  "openTaskGone": "This assignment was deleted or is not in your list",
   "enterTaskName": "Please enter the homework title",
   "createFailed": "Create failed",
   "endFailed": "End failed",

@@ -1282,6 +1282,38 @@ def init_db():
                 UNIQUE(knowledge_point_id, resource_type, resource_id)
             )""")
 
+            # ── 迁移：curriculum_bindings.resource_id INTEGER → TEXT ──
+            # 「作业」的主键本来就是 TEXT（tasks.id 形如 root_xxx_1792666468_100b7b43），
+            # 旧声明 INTEGER 让作业从上线起就绑不上：候选列表能列出来，提交必 422。
+            # 现在所有类型统一按字符串主键存取，历史数字行 CAST 成文本一次迁完。
+            # 重建手法与上面 shared_resources 的「带旧 CHECK 就重建」一致：
+            # rename → create → copy → drop，索引由后面的 CREATE INDEX IF NOT EXISTS 补回。
+            _cb_ddl = str((c.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='curriculum_bindings'"
+            ).fetchone() or [""])[0])
+            if "resource_id INTEGER" in _cb_ddl:
+                try:
+                    c.execute("DROP TABLE IF EXISTS curriculum_bindings_old")
+                    c.execute("ALTER TABLE curriculum_bindings RENAME TO curriculum_bindings_old")
+                    c.execute("""CREATE TABLE curriculum_bindings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        knowledge_point_id INTEGER NOT NULL REFERENCES knowledge_points(id),
+                        resource_type TEXT NOT NULL,
+                        resource_id TEXT NOT NULL,
+                        sort_order INTEGER DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        UNIQUE(knowledge_point_id, resource_type, resource_id)
+                    )""")
+                    c.execute(
+                        """INSERT INTO curriculum_bindings
+                           (id, knowledge_point_id, resource_type, resource_id, sort_order, created_at)
+                           SELECT id, knowledge_point_id, resource_type,
+                                  CAST(resource_id AS TEXT), sort_order, created_at
+                           FROM curriculum_bindings_old""")
+                    c.execute("DROP TABLE curriculum_bindings_old")
+                except sqlite3.OperationalError:
+                    pass  # 首次创建或已迁移
+
             # ── 学生学习进度表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS learning_progress (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

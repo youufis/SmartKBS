@@ -17,7 +17,7 @@ from backend.auth import is_admin
 from backend.config import BASE_DIR
 from backend.api.config_router import get_config_value
 from backend.config import ROOT_DIR, STU_DIR
-from backend.api.sharing_router import is_file_shared_with_user
+from backend.api.sharing_router import is_file_bound_to_course, is_file_shared_with_user
 from backend import shared_assets
 from backend.database import execute_insert_update
 from backend.logger import logger
@@ -223,11 +223,20 @@ async def serve_static_file(path: str, request: Request):
                 allowed = True
             elif is_file_shared_with_user(rel_path, res_type, owner, username):
                 allowed = True
+            # 教师：同事绑到课程知识点上的资源，课程面板里人人可见，就该人人打得开
+            elif role == 1 and (
+                is_file_bound_to_course(file_rel, res_type, owner)
+                or is_file_bound_to_course(rel_path, res_type, owner)
+            ):
+                allowed = True
     
         # 依赖文件跟随：共享页面自己引用的 ruffle.js / *.wasm / *.swf / 图片等素材
         # 在 shared_resources 里没有独立记录，若不放行，学生打开互动课件就会白屏(403)
         if not allowed and owner:
             allowed = shared_assets.is_asset_of_shared_page(rel_path, owner, username)
+        # 已绑定页面的依赖素材：同上，教师侧放开，否则同事打开是白屏
+        if not allowed and owner and role == 1:
+            allowed = shared_assets.is_asset_of_bound_page(rel_path, owner)
     
     if not allowed:
         raise HTTPException(

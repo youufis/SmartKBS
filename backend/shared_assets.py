@@ -221,26 +221,25 @@ def _row_to_page_rels(owner: str, file_path: str) -> list[str]:
     return [c for c in dict.fromkeys(cands) if "/" in c]
 
 
-def _visible_shared_pages(rel_path: str, owner: str, viewer_username: str) -> list[str]:
-    """列出"共享给该用户"且与请求素材同属一棵所有者树的 HTML 页面。
+def _page_candidates(rel_path: str, owner: str, cache_key, keep) -> list[str]:
+    """所有者名下、与请求素材同属一棵目录树、且 keep(row) 为真的 HTML 页面清单。
 
-    清单按 (owner, viewer) 缓存 _CANDIDATE_TTL 秒：一次页面加载会并发请求
+    清单按 cache_key 缓存 _CANDIDATE_TTL 秒：一次页面加载会并发请求
     loader/分包/wasm/swf 等好几个素材，不缓存的话每个请求都要重跑一遍
-    shared_resources 查询 + 逐条可见性判断(每条还可能查库)，实测 0.8s 起跳。
+    shared_resources 查询 + 逐条判断(每条还可能查库)，实测 0.8s 起跳。
     共享关系变更时由 sharing_router 调用 invalidate_cache() 立即失效。
     """
-    key = (owner, viewer_username)
     now = time.time()
     with _LOCK:
-        hit = _CANDIDATE_CACHE.get(key)
+        hit = _CANDIDATE_CACHE.get(cache_key)
         if hit and now - hit[0] < _CANDIDATE_TTL:
-            _CANDIDATE_CACHE.move_to_end(key)
+            _CANDIDATE_CACHE.move_to_end(cache_key)
             return hit[1]
 
     pages: list[str] = []
     try:
         rows = execute_query(
-            """SELECT file_path, share_scope, target_users, target_grade, target_class
+            """SELECT id, file_path, share_scope, target_users, target_grade, target_class
                FROM shared_resources
                WHERE owner_username=? AND resource_type='html'""",
             (owner,),
@@ -250,15 +249,8 @@ def _visible_shared_pages(rel_path: str, owner: str, viewer_username: str) -> li
         return []
 
     for row in rows:
-        file_path, share_scope, users, grade, cls = row[0], row[1], row[2], row[3], row[4]
-        # scope='all' 先短路，省掉逐条查查看者身份的开销
-        if share_scope != "all" and not check_share_visibility(
-            viewer_username=viewer_username,
-            share_scope=share_scope,
-            target_users_csv=users or "",
-            target_grade_csv=grade or "",
-            target_class_csv=cls or "",
-        ):
+        file_path = row[1]
+        if not keep(row):
             continue
         for page_rel in _row_to_page_rels(owner, file_path):
             if _ext_of(page_rel) not in (".html", ".htm"):
@@ -273,11 +265,44 @@ def _visible_shared_pages(rel_path: str, owner: str, viewer_username: str) -> li
     pages.sort(key=lambda r: -r.count("/"))
     pages = pages[:_MAX_PAGES_PER_REQUEST]
     with _LOCK:
-        _CANDIDATE_CACHE[key] = (now, pages)
-        _CANDIDATE_CACHE.move_to_end(key)
+        _CANDIDATE_CACHE[cache_key] = (now, pages)
+        _CANDIDATE_CACHE.move_to_end(cache_key)
         while len(_CANDIDATE_CACHE) > 256:
             _CANDIDATE_CACHE.popitem(last=False)
     return pages
+
+
+def _visible_shared_pages(rel_path: str, owner: str, viewer_username: str) -> list[str]:
+    """「共享给该用户」的页面清单（学生/同事能否看到这份课件，由共享范围决定）。"""
+
+    def keep(row) -> bool:
+        # scope='all' 先短路，省掉逐条查查看者身份的开销
+        return row[2] == "all" or check_share_visibility(
+            viewer_username=viewer_username,
+            share_scope=row[2],
+            target_users_csv=row[3] or "",
+            target_grade_csv=row[4] or "",
+            target_class_csv=row[5] or "",
+        )
+
+    return _page_candidates(rel_path, owner, ("share", owner, viewer_username), keep)
+
+
+def _bound_course_pages(rel_path: str, owner: str) -> list[str]:
+    """「已绑定到课程知识点」的页面清单。
+
+    知识点绑定的资源对全体教师可见（课程导学所有人都能看到并点开），
+    那么这些页面引用的 ruffle.js / wasm / 图片也得跟着放开，
+    否则同事打开别人绑的互动课件就是白屏 —— 与学生侧的素材放行同一套道理。
+    """
+    from backend.api.sharing_router import bound_resource_ids
+
+    bound = bound_resource_ids(owner, "html")
+
+    def keep(row) -> bool:
+        return str(row[0]) in bound
+
+    return _page_candidates(rel_path, owner, ("bound", owner), keep)
 
 
 def is_asset_of_shared_page(rel_path: str, owner: str, viewer_username: str) -> bool:
@@ -301,6 +326,26 @@ def is_asset_of_shared_page(rel_path: str, owner: str, viewer_username: str) -> 
         files, dirs = _page_closure(page_abs, page_rel)
         if rel_path in files or posixpath.dirname(rel_path) in dirs:
             _log_allow(rel_path, page_rel, viewer_username)
+            return True
+    return False
+
+
+def is_asset_of_bound_page(rel_path: str, owner: str) -> bool:
+    """rel_path 是「已绑定到课程知识点的页面」运行所依赖的素材时返回 True（教师侧只读放行）。"""
+    if not owner or not _BASE_DIR:
+        return False
+    ext = _ext_of(rel_path)
+    if ext not in ASSET_EXTS:
+        return False
+    candidates = _bound_course_pages(rel_path, owner)
+    if not candidates:
+        return False
+
+    for page_rel in candidates:
+        page_abs = os.path.join(_BASE_DIR, page_rel.replace("/", os.sep))
+        files, dirs = _page_closure(page_abs, page_rel)
+        if rel_path in files or posixpath.dirname(rel_path) in dirs:
+            _log_allow(rel_path, page_rel, f"bound:{owner}")
             return True
     return False
 
