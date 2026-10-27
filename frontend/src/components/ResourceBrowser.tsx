@@ -343,6 +343,7 @@ const ResourceBrowser: React.FC<{
         {it.shareScope && (
           <Tooltip title={scopeTag(it).tip}>
             <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
+              {it.shareScope === 'teacher' && <UserOutlined style={{ marginRight: 3 }} />}
               {scopeTag(it).short}
             </Tag>
           </Tooltip>

@@ -117,16 +117,25 @@ const HtmlFilesPage: React.FC = () => {
 
   const isFileShared = (nodeKey: string) => myShares.some(s => s.file_path === nodeKey)
 
-  const openShare = (filePath: string, fileName: string, type: 'html' | 'download' = 'html', owner?: string) => {
+  /**
+   * 打开共享弹窗。existing = 要编辑的那条共享记录（自带属主），不传就是新建共享。
+   * 三个入口各自喂自己名下 / 同事名下的记录，弹窗据此区分「管理共享」「代管共享」「再共享」。
+   */
+  const openShare = (
+    filePath: string,
+    fileName: string,
+    type: 'html' | 'download' = 'html',
+    existing?: sharingApi.ShareItem | null,
+  ) => {
     setShareFile({ path: filePath, name: fileName })
     setShareType(type)
-    // 必须连属主一起认：管理员的 /my-shares 返回全站所有行，只按路径匹配会把
-    // "同事共享的那一行"当成"我的共享"来编辑（旧实现因此改不动、还报 404）。
-    const rec = myShares.find(s => s.file_path === filePath
-      && (owner ? s.owner_username === owner : s.owner_username === user?.username)) || null
-    setShareExisting(rec)
+    setShareExisting(existing || null)
     setShareDialogOpen(true)
   }
+
+  /** 我名下、指向这个文件的那条共享记录（「我的资源」卡片用） */
+  const myShareFor = (filePath: string) =>
+    myShares.find((s) => s.file_path === filePath && s.owner_username === user?.username) || null
 
   // ── 分组路径集合（后端已统一为「相对项目根」的路径，与 files.url_path 同格式） ──
   const fileKeyOf = (f: ResourceFile) => f.url_path || f.name
@@ -323,7 +332,7 @@ const HtmlFilesPage: React.FC = () => {
               <Tooltip title={isFileShared(urlPath) ? t('sharedClickToCancel') : t('clickToShare')}>
                 <ShareAltOutlined
                   style={{ color: isFileShared(urlPath) ? '#ff4d4f' : '#999', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openShare(urlPath, name, 'html', user?.username); }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openShare(urlPath, name, 'html', myShareFor(urlPath)); }}
                 />
               </Tooltip>
             )}
@@ -578,10 +587,8 @@ const HtmlFilesPage: React.FC = () => {
             {
               key: 'mine-shared',
               label: (
-                <Tooltip title={isAdmin ? t('allSharesTip') : t('mySharesTip')}>
-                  <span>
-                    <ShareAltOutlined /> {isAdmin ? t('allSharesTab') : t('mySharesTab')} ({myShareItems.length})
-                  </span>
+                <Tooltip title={t('mySharesTip')}>
+                  <span><ShareAltOutlined /> {t('mySharesTab')} ({myShareItems.length})</span>
                 </Tooltip>
               ),
               children: (
@@ -592,7 +599,9 @@ const HtmlFilesPage: React.FC = () => {
                   showStatus={false}
                   shareTooltip={t('rb.manageShare')}
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
-                  onReshare={(it) => openShare(it.filePath, it.name, it.resourceType === 'download' ? 'download' : 'html', it.ownerUsername)}
+                  onReshare={(it) => openShare(it.filePath, it.name,
+                    it.resourceType === 'download' ? 'download' : 'html',
+                    myShares.find((s) => s.id === it.id))}
                   onRefresh={loadData}
                 />
               ),
@@ -610,7 +619,9 @@ const HtmlFilesPage: React.FC = () => {
                   items={browserItems}
                   loading={loading}
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
-                  onReshare={(it) => openShare(it.filePath, it.name, it.resourceType === 'download' ? 'download' : 'html', it.ownerUsername)}
+                  onReshare={(it) => openShare(it.filePath, it.name,
+                    it.resourceType === 'download' ? 'download' : 'html',
+                    receivedShares.find((s) => s.id === it.id))}
                   onRefresh={loadData}
                 />
               ),

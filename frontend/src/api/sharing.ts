@@ -82,9 +82,12 @@ export async function unshareResource(id: number): Promise<{ message: string }> 
   return data;
 }
 
-/** 获取我创建的共享 */
-export async function getMyShares(): Promise<{ shares: ShareItem[] }> {
-  const { data } = await apiClient.get('/api/sharing/my-shares');
+/**
+ * 获取我创建的共享（默认只含我自己名下的行）。
+ * @param allShares 仅管理员排障用：要全站清单时显式打开，界面默认不传
+ */
+export async function getMyShares(allShares = false): Promise<{ shares: ShareItem[] }> {
+  const { data } = await apiClient.get('/api/sharing/my-shares', { params: { all_shares: allShares } });
   return data;
 }
 

@@ -1113,8 +1113,13 @@ def _build_share_items(rows, username: str) -> list[dict[str, Any]]:
 # ── 我创建的共享 ──
 
 @router.get("/my-shares")
-async def my_shares(request: Request):
-    """我创建的共享（管理员：全站所有共享，用于总览与代管）。
+async def my_shares(request: Request, all_shares: bool = False):
+    """我创建的共享 —— 只返回当前用户名下的行（管理员同理）。
+
+    资源中心第三个标签页「我共享的」用的就是它。这一栏的语义是"我共享出去的"，
+    把别人创建的记录混进来会让人以为自己的共享有几百条（管理员此前看到的就是全站 203 条）。
+    全站清单退到 all_shares=true（仅管理员、界面默认不调用）；
+    要看/改同事创建的共享，走「同事共享的」卡片上的代管入口。
 
     字段与 /received 同一套装配逻辑（内容小类 / 绑定 / 浏览量 / 目录信息 / 同文件合并），
     资源中心第三个标签页直接复用同一个浏览器组件。
@@ -1123,8 +1128,8 @@ async def my_shares(request: Request):
     username = user["username"]
     role = user.get("role", 2)
 
-    if role == 0:
-        # 管理员：查看全部共享资源
+    if role == ROLE_ADMIN and all_shares:
+        # 只有显式要求时才给全站清单（管理员排障用，界面不走这条）
         rows = execute_query(
             """SELECT id, owner_username, file_path, file_name, resource_type,
                       share_scope, target_users, target_grade, target_class, created_at
@@ -1132,7 +1137,7 @@ async def my_shares(request: Request):
                ORDER BY created_at DESC""",
         )
     else:
-        # 教师/学生：仅查看自己的
+        # 默认：只给我自己创建的（管理员也不例外）
         rows = execute_query(
             """SELECT id, owner_username, file_path, file_name, resource_type,
                       share_scope, target_users, target_grade, target_class, created_at
