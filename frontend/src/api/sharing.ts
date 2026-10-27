@@ -9,6 +9,8 @@ export interface ShareItem {
   resource_type: 'html' | 'download';
   share_scope: 'all' | 'teacher' | 'staff' | 'class';
   target_users: string;
+  /** 指定教师/管理员共享时，target_users 解析出来的姓名（卡片直接列出是谁） */
+  target_user_names?: string[];
   target_grade: string;
   target_class: string;
   created_at: string;
@@ -21,6 +23,8 @@ export interface ShareItem {
   viewed_at?: string | null;
   /** 该资源被查看总次数 */
   view_count?: number;
+  /** 所有人合计的浏览次数（「我共享的」这一栏关心的是有多少学生看过这份） */
+  total_view_count?: number;
   /** 绑定的课程名（取第一个绑定） */
   course_name?: string;
   /** 绑定的知识点名（取第一个绑定） */

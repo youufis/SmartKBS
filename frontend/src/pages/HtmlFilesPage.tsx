@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, theme } from 'antd'
-import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, UserOutlined } from '@ant-design/icons'
+import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
@@ -16,8 +16,6 @@ const HtmlFilesPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const isAdmin = user?.role === 'admin'
-  // 「共享给我的」默认只看别人共享的；管理员要总览时可临时含自己共享出去的
-  const [includeMine, setIncludeMine] = useState(false)
   const [files, setFiles] = useState<ResourceFile[]>([])
   const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
   const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
@@ -95,7 +93,7 @@ const HtmlFilesPage: React.FC = () => {
       if (isAdminOrTeacher) {
         const [res, shareRes, myRes, groupsRes] = await Promise.all([
           resourcesApi.listResources(),
-          sharingApi.getReceivedShares(includeMine),
+          sharingApi.getReceivedShares(),
           sharingApi.getMyShares(),
           resourcesApi.listGroups(),
         ])
@@ -105,7 +103,7 @@ const HtmlFilesPage: React.FC = () => {
         setGroups(groupsRes.groups)
       } else {
         setFiles([])
-        const shareRes = await sharingApi.getReceivedShares(includeMine)
+        const shareRes = await sharingApi.getReceivedShares()
         setReceivedShares(shareRes.shares.filter(s => s.resource_type === 'html'))
       }
     } catch {
@@ -115,8 +113,7 @@ const HtmlFilesPage: React.FC = () => {
     }
   }
 
-  // includeMine 变化要重新拉列表（管理员总览开关）
-  useEffect(() => { loadData() }, [isAdminOrTeacher, includeMine])
+  useEffect(() => { loadData() }, [isAdminOrTeacher])
 
   const isFileShared = (nodeKey: string) => myShares.some(s => s.file_path === nodeKey)
 
@@ -350,6 +347,33 @@ const HtmlFilesPage: React.FC = () => {
     </Card>
   )
 
+  // 「我共享的」（教师）/「全部共享」（管理员）：与「共享给我的」共用同一个浏览器组件，
+  // 字段由后端 _build_share_items 统一装配，两个标签页的标签与计数不会各说各话。
+  const myShareItems: BrowserItem[] = myShares
+    .filter((s) => s.resource_type === 'html')
+    .map((s) => ({
+      id: s.id,
+      name: s.file_name,
+      urlPath: s.url_path || s.file_path,
+      filePath: s.file_path,
+      resourceType: s.resource_type,
+      ownerUsername: s.owner_username,
+      ownerName: s.owner_name,
+      ownerRole: s.owner_role,
+      shareScope: s.share_scope,
+      targetGrade: s.target_grade,
+      targetClass: s.target_class,
+      targetUserNames: s.target_user_names,
+      createdAt: s.created_at,
+      viewCount: s.total_view_count,
+      courseName: s.course_name,
+      kpName: s.kp_name,
+      bindingCount: s.binding_count,
+      subKind: s.sub_kind,
+      shareCount: s.share_count,
+      sharedBy: s.shared_by,
+    }))
+
   const browserItems: BrowserItem[] = receivedShares.map((s) => ({
     id: s.id,
     name: s.file_name,
@@ -362,6 +386,7 @@ const HtmlFilesPage: React.FC = () => {
     shareScope: s.share_scope,
     targetGrade: s.target_grade,
     targetClass: s.target_class,
+    targetUserNames: s.target_user_names,
     createdAt: s.created_at,
     viewedAt: s.viewed_at,
     viewCount: s.view_count,
@@ -389,18 +414,6 @@ const HtmlFilesPage: React.FC = () => {
               allowClear
               style={{ width: 220 }}
             />
-            {isAdmin && (
-              <Tooltip title={t('rb.includeMineTip')}>
-                <Button
-                  size="small"
-                  type={includeMine ? 'primary' : 'default'}
-                  icon={<UserOutlined />}
-                  onClick={() => setIncludeMine((v) => !v)}
-                >
-                  {t('rb.includeMine')}
-                </Button>
-              </Tooltip>
-            )}
             <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
           </Space>
         </div>
@@ -563,8 +576,34 @@ const HtmlFilesPage: React.FC = () => {
               ),
             },
             {
+              key: 'mine-shared',
+              label: (
+                <Tooltip title={isAdmin ? t('allSharesTip') : t('mySharesTip')}>
+                  <span>
+                    <ShareAltOutlined /> {isAdmin ? t('allSharesTab') : t('mySharesTab')} ({myShareItems.length})
+                  </span>
+                </Tooltip>
+              ),
+              children: (
+                <ResourceBrowser
+                  mode="teacher"
+                  items={myShareItems}
+                  loading={loading}
+                  showStatus={false}
+                  shareTooltip={t('rb.manageShare')}
+                  onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
+                  onReshare={(it) => openShare(it.filePath, it.name, it.resourceType === 'download' ? 'download' : 'html', it.ownerUsername)}
+                  onRefresh={loadData}
+                />
+              ),
+            },
+            {
               key: 'shared',
-              label: <span><ShareAltOutlined /> {t('sharedToMe')} ({browserItems.length})</span>,
+              label: (
+                <Tooltip title={isAdmin ? t('sharedFromOthersTipAdmin') : t('sharedFromOthersTip')}>
+                  <span><ShareAltOutlined /> {t('sharedFromOthers')} ({browserItems.length})</span>
+                </Tooltip>
+              ),
               children: (
                 <ResourceBrowser
                   mode="teacher"

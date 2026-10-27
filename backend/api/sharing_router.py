@@ -947,11 +947,178 @@ def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
         logger.warning(f"发送取消共享通知失败: {e}")
 
 
+# ── 共享列表的统一装配：补展示字段 + 合并同一物理文件的多条共享行 ──
+
+def _build_share_items(rows, username: str) -> list[dict[str, Any]]:
+    """把 shared_resources 行补成前端要展示的条目。
+
+    /received（共享给我的）与 /my-shares（我共享的 / 全部共享）共用，
+    保证两个标签页字段一致、同一套浏览器渲染不用各写一遍口径。
+    """
+    # ── 批量补全展示字段（共享者姓名/角色、当前用户已读态、课程与知识点绑定）──
+    # 统一用一次 IN 查询补，避免往三种角色的 SQL 分支里各加一遍 JOIN
+    owner_map: dict[str, dict[str, Any]] = {}
+    owners = {str(r[1] or "") for r in rows} - {""}
+    if owners:
+        _ph = ",".join("?" for _ in owners)
+        for row in execute_query(
+            f"SELECT username, name, role FROM users WHERE username IN ({_ph})", tuple(owners)
+        ) or []:
+            owner_map[str(row[0])] = {
+                "name": str(row[1] or row[0]),
+                "role": int(row[2]) if row[2] is not None else None,
+            }
+
+    # 指定教师/管理员共享：卡片上要直接写出是谁，不能只写「指定个人」。
+    # 一次把出现过的账号全查出来，避免逐行查。
+    user_names: dict[str, str] = {}
+    _accounts: set[str] = set()
+    for r in rows:
+        _accounts.update(u.strip() for u in str(r[6] or "").split(",") if u.strip())
+    if _accounts:
+        _ph = ",".join("?" for _ in _accounts)
+        for row in execute_query(
+            f"SELECT username, name FROM users WHERE username IN ({_ph})", tuple(_accounts)
+        ) or []:
+            user_names[str(row[0])] = str(row[1] or row[0])
+
+    def _names_of(csv: str) -> list[str]:
+        return [user_names.get(u, u) for u in _uniq_keep_order(str(csv or "").split(","))]
+
+    ids = [int(r[0]) for r in rows if r[0] is not None]
+    view_map: dict[int, dict[str, Any]] = {}
+    total_view_map: dict[int, int] = {}
+    if ids:
+        _ph = ",".join("?" for _ in ids)
+        for row in execute_query(
+            f"""SELECT resource_id, MAX(viewed_at), COUNT(*)
+                FROM resource_view_logs
+                WHERE student_username=? AND resource_id IN ({_ph})
+                GROUP BY resource_id""",
+            (username, *ids),
+        ) or []:
+            view_map[int(row[0])] = {"viewed_at": row[1], "view_count": int(row[2] or 0)}
+        # 所有人合计的浏览次数：「我共享的」这一栏真正关心的是"有多少学生看过这份"
+        for row in execute_query(
+            f"""SELECT resource_id, COUNT(*) FROM resource_view_logs
+                WHERE resource_id IN ({_ph}) GROUP BY resource_id""",
+            tuple(ids),
+        ) or []:
+            total_view_map[int(row[0])] = int(row[1] or 0)
+
+    bind_map: dict[int, dict[str, Any]] = {}
+    if ids:
+        _ph = ",".join("?" for _ in ids)
+        for row in execute_query(
+            f"""SELECT cb.resource_id, MIN(c.name), MIN(kp.name), COUNT(*)
+                FROM curriculum_bindings cb
+                JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                JOIN chapters ch ON kp.chapter_id = ch.id
+                JOIN courses c ON ch.course_id = c.id
+                WHERE cb.resource_id IN ({_ph})
+                GROUP BY cb.resource_id""",
+            tuple(ids),
+        ) or []:
+            bind_map[int(row[0])] = {
+                "course_name": str(row[1] or ""),
+                "kp_name": str(row[2] or ""),
+                "binding_count": int(row[3] or 0),
+            }
+
+    # 共享文件条目：补「是不是目录 / 几个文件 / 总共多大」，前端据此渲染文件夹与文件卡片
+    dir_map: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        if r[0] is not None and str(r[4] or "") == "download":
+            dir_map[int(r[0])] = download_share_stats(str(r[1] or ""), str(r[2] or ""), "download")
+
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        _rid = int(r[0] or 0)
+        items.append({
+            "id": r[0],
+            "owner_username": r[1],
+            "file_path": r[2],
+            "file_name": r[3],
+            "resource_type": r[4],
+            "share_scope": r[5],
+            "target_users": r[6] or "",
+            "target_user_names": _names_of(r[6]),
+            "target_grade": r[7] or "",
+            "target_class": r[8] or "",
+            "created_at": r[9],
+            "url_path": _build_url_path(r[1], r[4], r[2]),
+            # 展示增强字段：共享者姓名/角色、当前用户已读态、课程与知识点绑定
+            "owner_name": (owner_map.get(str(r[1] or "")) or {}).get("name") or str(r[1] or ""),
+            "owner_role": (owner_map.get(str(r[1] or "")) or {}).get("role"),
+            "viewed_at": (view_map.get(_rid) or {}).get("viewed_at"),
+            "view_count": (view_map.get(_rid) or {}).get("view_count", 0),
+            "total_view_count": total_view_map.get(_rid, 0),
+            "course_name": (bind_map.get(_rid) or {}).get("course_name", ""),
+            "kp_name": (bind_map.get(_rid) or {}).get("kp_name", ""),
+            "binding_count": (bind_map.get(_rid) or {}).get("binding_count", 0),
+            # 目录型共享（一个共享指向整个文件夹）：前端显示为文件夹条目并保留目录浏览
+            "is_dir": bool((dir_map.get(_rid) or {}).get("is_dir")),
+            "file_count": (dir_map.get(_rid) or {}).get("file_count", 0),
+            "total_size": (dir_map.get(_rid) or {}).get("total_size", 0),
+            # 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径，
+            # 卡片不再只显示笼统的"网页课件"
+            "sub_kind": rr.sub_kind_of(r[3]) if str(r[4] or "") == "html" else "",
+            # 同一物理文件被多人各共享一次时的合并信息（「再共享」会产生这种行）
+            "share_count": 1,
+            "shared_by": [],
+        })
+
+    # 同一物理文件的多条共享行合并成一条卡片。
+    # 「再共享」会让同一个文件多出一行 owner != 文件属主的记录，列表里就是两张一模一样的卡片、
+    # 计数也跟着虚高。数据行保持不动（课程绑定与已读日志各挂各行），只按物理路径合并展示，
+    # 并把"还有谁共享了这份"如实标出来。
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for it in items:
+        _key = (str(it["resource_type"]) + "|" + _share_physical_path(
+            str(it["owner_username"] or ""), str(it["file_path"] or ""), str(it["resource_type"] or "")))
+        grouped.setdefault(_key, []).append(it)
+
+    merged: list[dict[str, Any]] = []
+    for group in grouped.values():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        # 保留行：有课程绑定的优先，其次浏览量高的，再取最早那条（id 稳定，绑定不会悬挂）
+        group.sort(key=lambda x: (-int(x["binding_count"] or 0),
+                                  -int(x["total_view_count"] or 0), int(x["id"] or 0)))
+        keep = group[0]
+        keep["share_count"] = len(group)
+        keep["shared_by"] = [str(x["owner_name"] or x["owner_username"]) for x in group[1:]]
+        keep["target_grade"] = _list_to_csv(_normalize_grades(
+            [g for x in group for g in str(x["target_grade"] or "").split(",")]))
+        keep["target_class"] = _list_to_csv(_normalize_classes(
+            [c for x in group for c in str(x["target_class"] or "").split(",")]))
+        keep["target_users"] = _list_to_csv(sorted(
+            {u for x in group for u in str(x["target_users"] or "").split(",") if u.strip()}))
+        keep["target_user_names"] = _names_of(keep["target_users"])
+        for x in group[1:]:
+            if not keep["course_name"] and x["course_name"]:
+                keep["course_name"] = x["course_name"]
+                keep["kp_name"] = x["kp_name"]
+            if str(x["viewed_at"] or "") > str(keep["viewed_at"] or ""):
+                keep["viewed_at"] = x["viewed_at"]
+            keep["view_count"] = int(keep["view_count"] or 0) + int(x["view_count"] or 0)
+            keep["total_view_count"] = int(keep["total_view_count"] or 0) + int(x["total_view_count"] or 0)
+        merged.append(keep)
+
+    merged.sort(key=lambda x: str(x["created_at"] or ""), reverse=True)
+    return merged
+
+
 # ── 我创建的共享 ──
 
 @router.get("/my-shares")
 async def my_shares(request: Request):
-    """获取我的共享列表（管理员可查看全部）"""
+    """我创建的共享（管理员：全站所有共享，用于总览与代管）。
+
+    字段与 /received 同一套装配逻辑（内容小类 / 绑定 / 浏览量 / 目录信息 / 同文件合并），
+    资源中心第三个标签页直接复用同一个浏览器组件。
+    total_view_count = 所有人合计浏览次数；view_count = 当前用户自己的浏览次数。"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -974,24 +1141,7 @@ async def my_shares(request: Request):
             (username,),
         )
 
-    return {
-        "shares": [
-            {
-                "id": r[0],
-                "owner_username": r[1],
-                "file_path": r[2],
-                "file_name": r[3],
-                "resource_type": r[4],
-                "share_scope": r[5],
-                "target_users": r[6] or "",
-                "target_grade": r[7] or "",
-                "target_class": r[8] or "",
-                "created_at": r[9],
-                "url_path": _build_url_path(r[1], r[4], r[2]),
-            }
-            for r in rows
-        ]
-    }
+    return {"shares": _build_share_items(rows, username)}
 
 
 # ── 收到的共享（给当前用户可见的共享） ──
@@ -1000,8 +1150,9 @@ async def my_shares(request: Request):
 async def received_shares(request: Request, include_self: bool = False):
     """获取共享给当前用户的资源（按角色、年级、班级、指定用户过滤）
 
-    include_self=False（默认）：隐藏"仅共享给自己"的记录（含个人目录自动登记的私有资源），
-    自己拥有且只共享给自己的资源属于个人资源，无需出现在"共享给我的"列表。"""
+    「共享给我的」= 别人共享给我的：自己名下的行一律不出现（管理员同理），
+    自己共享出去的在 /my-shares（资源中心「我共享的 / 全部共享」标签页）里管理。
+    include_self=true 只退回旧口径（隐藏"仅共享给自己"的私有行），留给要看全量的场景。"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)   # JWT 缺字段时不应 500
@@ -1133,131 +1284,7 @@ async def received_shares(request: Request, include_self: bool = False):
         filtered.append(r)
     rows = filtered
 
-    # ── 批量补全展示字段（共享者姓名/角色、当前用户已读态、课程与知识点绑定）──
-    # 统一用一次 IN 查询补，避免往三种角色的 SQL 分支里各加一遍 JOIN
-    owner_map: dict[str, dict[str, Any]] = {}
-    owners = {str(r[1] or "") for r in rows} - {""}
-    if owners:
-        _ph = ",".join("?" for _ in owners)
-        for row in execute_query(
-            f"SELECT username, name, role FROM users WHERE username IN ({_ph})", tuple(owners)
-        ) or []:
-            owner_map[str(row[0])] = {
-                "name": str(row[1] or row[0]),
-                "role": int(row[2]) if row[2] is not None else None,
-            }
-
-    view_map: dict[int, dict[str, Any]] = {}
-    ids = [int(r[0]) for r in rows if r[0] is not None]
-    if ids:
-        _ph = ",".join("?" for _ in ids)
-        for row in execute_query(
-            f"""SELECT resource_id, MAX(viewed_at), COUNT(*)
-                FROM resource_view_logs
-                WHERE student_username=? AND resource_id IN ({_ph})
-                GROUP BY resource_id""",
-            (username, *ids),
-        ) or []:
-            view_map[int(row[0])] = {"viewed_at": row[1], "view_count": int(row[2] or 0)}
-
-    bind_map: dict[int, dict[str, Any]] = {}
-    if ids:
-        _ph = ",".join("?" for _ in ids)
-        for row in execute_query(
-            f"""SELECT cb.resource_id, MIN(c.name), MIN(kp.name), COUNT(*)
-                FROM curriculum_bindings cb
-                JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
-                JOIN chapters ch ON kp.chapter_id = ch.id
-                JOIN courses c ON ch.course_id = c.id
-                WHERE cb.resource_id IN ({_ph})
-                GROUP BY cb.resource_id""",
-            tuple(ids),
-        ) or []:
-            bind_map[int(row[0])] = {
-                "course_name": str(row[1] or ""),
-                "kp_name": str(row[2] or ""),
-                "binding_count": int(row[3] or 0),
-            }
-
-    # 共享文件条目：补「是不是目录 / 几个文件 / 总共多大」，前端据此渲染文件夹与文件卡片
-    dir_map: dict[int, dict[str, Any]] = {}
-    for r in rows:
-        if r[0] is not None and str(r[4] or "") == "download":
-            dir_map[int(r[0])] = download_share_stats(str(r[1] or ""), str(r[2] or ""), "download")
-
-    items: list[dict[str, Any]] = []
-    for r in rows:
-        _rid = int(r[0] or 0)
-        items.append({
-            "id": r[0],
-            "owner_username": r[1],
-            "file_path": r[2],
-            "file_name": r[3],
-            "resource_type": r[4],
-            "share_scope": r[5],
-            "target_users": r[6] or "",
-            "target_grade": r[7] or "",
-            "target_class": r[8] or "",
-            "created_at": r[9],
-            "url_path": _build_url_path(r[1], r[4], r[2]),
-            # 展示增强字段：共享者姓名/角色、当前用户已读态、课程与知识点绑定
-            "owner_name": (owner_map.get(str(r[1] or "")) or {}).get("name") or str(r[1] or ""),
-            "owner_role": (owner_map.get(str(r[1] or "")) or {}).get("role"),
-            "viewed_at": (view_map.get(_rid) or {}).get("viewed_at"),
-            "view_count": (view_map.get(_rid) or {}).get("view_count", 0),
-            "course_name": (bind_map.get(_rid) or {}).get("course_name", ""),
-            "kp_name": (bind_map.get(_rid) or {}).get("kp_name", ""),
-            "binding_count": (bind_map.get(_rid) or {}).get("binding_count", 0),
-            # 目录型共享（一个共享指向整个文件夹）：前端显示为文件夹条目并保留目录浏览
-            "is_dir": bool((dir_map.get(_rid) or {}).get("is_dir")),
-            "file_count": (dir_map.get(_rid) or {}).get("file_count", 0),
-            "total_size": (dir_map.get(_rid) or {}).get("total_size", 0),
-            # 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径，
-            # 卡片不再只显示笼统的"网页课件"
-            "sub_kind": rr.sub_kind_of(r[3]) if str(r[4] or "") == "html" else "",
-            # 同一物理文件被多人各共享一次时的合并信息（「再共享」会产生这种行）
-            "share_count": 1,
-            "shared_by": [],
-        })
-
-    # 同一物理文件的多条共享行合并成一条卡片。
-    # 「再共享」会让同一个文件多出一行 owner != 文件属主的记录，列表里就是两张一模一样的卡片、
-    # 未读计数也跟着虚高。数据行保持不动（课程绑定与已读日志各挂各行），只按物理路径合并展示，
-    # 并把"还有谁共享了这份"如实标出来。
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for it in items:
-        _key = (str(it["resource_type"]) + "|" + _share_physical_path(
-            str(it["owner_username"] or ""), str(it["file_path"] or ""), str(it["resource_type"] or "")))
-        grouped.setdefault(_key, []).append(it)
-
-    merged: list[dict[str, Any]] = []
-    for group in grouped.values():
-        if len(group) == 1:
-            merged.append(group[0])
-            continue
-        # 保留行：有课程绑定的优先，其次浏览量高的，再取最早那条（id 稳定，绑定不会悬挂）
-        group.sort(key=lambda x: (-int(x["binding_count"] or 0),
-                                  -int(x["view_count"] or 0), int(x["id"] or 0)))
-        keep = group[0]
-        keep["share_count"] = len(group)
-        keep["shared_by"] = [str(x["owner_name"] or x["owner_username"]) for x in group[1:]]
-        keep["target_grade"] = _list_to_csv(_normalize_grades(
-            [g for x in group for g in str(x["target_grade"] or "").split(",")]))
-        keep["target_class"] = _list_to_csv(_normalize_classes(
-            [c for x in group for c in str(x["target_class"] or "").split(",")]))
-        keep["target_users"] = _list_to_csv(sorted(
-            {u for x in group for u in str(x["target_users"] or "").split(",") if u.strip()}))
-        for x in group[1:]:
-            if not keep["course_name"] and x["course_name"]:
-                keep["course_name"] = x["course_name"]
-                keep["kp_name"] = x["kp_name"]
-            if str(x["viewed_at"] or "") > str(keep["viewed_at"] or ""):
-                keep["viewed_at"] = x["viewed_at"]
-            keep["view_count"] = int(keep["view_count"] or 0) + int(x["view_count"] or 0)
-        merged.append(keep)
-
-    merged.sort(key=lambda x: str(x["created_at"] or ""), reverse=True)
-    return {"shares": merged}
+    return {"shares": _build_share_items(rows, username)}
 
 
 # ── 通用：检查文件是否对用户可见（供 serve_static_file 调用） ──

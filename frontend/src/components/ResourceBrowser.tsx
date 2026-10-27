@@ -43,6 +43,8 @@ export interface BrowserItem {
   entryType?: 'file' | 'dir'
   /** 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径 */
   subKind?: string
+  /** 指定教师/管理员共享时的目标姓名（后端按 target_users 解析，卡片上直接列出来） */
+  targetUserNames?: string[]
   /** 同一物理文件被多人各共享一次时合并进来的行数（>1 表示还有别人也共享了这份） */
   shareCount?: number
   /** 除保留行之外，还共享了这份文件的人（显示名） */
@@ -68,13 +70,15 @@ const ResourceBrowser: React.FC<{
   onReshare?: (item: BrowserItem) => void
   /** 逐条目判断能否「再共享」：文件中心里只有自己名下也有同一份时才值得再共享 */
   canReshare?: (item: BrowserItem) => boolean
+  /** 覆盖共享按钮的提示：接收侧是「再共享给学生」，我共享的那一栏应该是「管理共享」 */
+  shareTooltip?: string
   /** 覆盖条目主操作按钮的文案与图标（文件版是「下载」/「浏览」） */
   openLabel?: string
   openIcon?: React.ReactNode
   /** 是否显示「阅读状态」维度。教师端浏览文件不留痕，默认给关掉免得永远「未读」 */
   showStatus?: boolean
   onRefresh?: () => void
-}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, openLabel, openIcon, showStatus, onRefresh }) => {
+}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, shareTooltip, openLabel, openIcon, showStatus, onRefresh }) => {
   const { t } = useTranslation(['menu', 'curriculum'])
   const { token } = theme.useToken()
   const isDark = useThemeStore((s) => s.current) === 'midnight'
@@ -292,6 +296,26 @@ const ResourceBrowser: React.FC<{
     return `${g ? `${g} · ` : ''}${list.map((c) => (g && c.startsWith(g) ? c.slice(g.length) : c)).join('、')}`
   }
 
+  /** 共享范围标签：class 列年级/班级、teacher 直接列教师姓名、staff/all 用固定文案。
+   *  以前 scope=all 干脆不出标签、teacher 只写「指定个人」，看不出到底共享给了谁。 */
+  const scopeTag = (it: BrowserItem): { short: string; tip: string } => {
+    const names = it.targetUserNames || []
+    if (it.shareScope === 'class') {
+      const full = fullScope(it)
+      return { short: full || t('rb.scopeClass'), tip: full + t('rb.scopeClassTipSuffix') }
+    }
+    if (it.shareScope === 'teacher') {
+      const short = names.length === 0
+        ? t('rb.scopeUser')
+        : names.length <= 2
+          ? names.join('、')
+          : `${names[0]} ${t('rb.scopeUserMore', { count: names.length })}`
+      return { short, tip: names.length ? `${t('rb.scopeUserTip')}：${names.join('、')}` : t('rb.scopeUser') }
+    }
+    if (it.shareScope === 'staff') return { short: t('rb.scopeStaff'), tip: t('rb.scopeStaffTip') }
+    return { short: t('rb.scopeAll'), tip: t('rb.scopeAllTip') }
+  }
+
   const metaTags = (it: BrowserItem) => {
     const kind = kindOf(it)
     return (
@@ -316,12 +340,10 @@ const ResourceBrowser: React.FC<{
             </Tag>
           </Tooltip>
         )}
-        {it.shareScope && it.shareScope !== 'all' && (
-          <Tooltip title={it.shareScope === 'class' ? fullScope(it) : undefined}>
+        {it.shareScope && (
+          <Tooltip title={scopeTag(it).tip}>
             <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-              {it.shareScope === 'class'
-                ? compactClassScope(it.targetGrade || '', it.targetClass || '') || t('rb.scopeClass')
-                : it.shareScope === 'staff' ? t('rb.scopeStaff') : t('rb.scopeUser')}
+              {scopeTag(it).short}
             </Tag>
           </Tooltip>
         )}
@@ -572,7 +594,7 @@ const ResourceBrowser: React.FC<{
                             <Text type="secondary" style={{ fontSize: 11 }}><EyeOutlined /> {it.viewCount}</Text>
                           )}
                           {onReshare && canShare(it) && (
-                            <Tooltip title={t('rb.reshare')}>
+                            <Tooltip title={shareTooltip || t('rb.reshare')}>
                               <Button size="small" type="text" icon={<ShareAltOutlined style={{ fontSize: 13 }} />}
                                 onClick={(e) => { e.stopPropagation(); onReshare(it) }} />
                             </Tooltip>
@@ -619,7 +641,7 @@ const ResourceBrowser: React.FC<{
                       <Text type="secondary" style={{ fontSize: 12 }}>{relTime(it.createdAt)}</Text>
                       <Space size={4}>
                         {onReshare && canShare(it) && (
-                          <Tooltip title={t('rb.reshare')}>
+                          <Tooltip title={shareTooltip || t('rb.reshare')}>
                             <Button size="small" type="text" icon={<ShareAltOutlined />} onClick={(e) => { e.stopPropagation(); onReshare(it) }} />
                           </Tooltip>
                         )}
