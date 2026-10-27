@@ -304,7 +304,7 @@ def _log_resource_access(rel_path: str, username: str, role: int, path_parts: li
                    WHERE resource_type=? AND (file_path=? OR file_path LIKE ?)
                    ORDER BY CASE WHEN owner_username=? THEN 0 ELSE 1 END, id
                    LIMIT 1""",
-                (dir_type, fp, f"%/{fp}", owner_username, owner_username),
+                (dir_type, fp, f"%/{fp}", owner_username),
             )
 
         share = _find_share(file_rel) if file_rel else None
@@ -322,7 +322,9 @@ def _log_resource_access(rel_path: str, username: str, role: int, path_parts: li
             resource_id = share["id"]
             owner_username = share["owner_username"]
     except Exception:
-        pass
+        # 兜底查询失败只影响 resource_id 关联，不阻断文件访问；但必须留痕——
+        # 否则像「占位符与参数个数不符」这类低级错误会永远静默（2026-10-27 就踩了）
+        logger.debug("共享资源浏览日志关联失败: %s", rel_path, exc_info=True)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     client_ip = request.client.host if request.client else ""
