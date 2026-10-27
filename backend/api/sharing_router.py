@@ -5,6 +5,7 @@
 """
 import asyncio
 import os
+import re
 import time
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,7 @@ from backend.logger import logger
 from backend.api.config_router import get_config_value
 from backend.config import STU_DIR, ROOT_DIR, DATA_DIR
 from backend.permission_service import check_share_visibility
+from backend import resource_registry as rr
 from backend import shared_assets
 
 router = APIRouter()
@@ -33,12 +35,77 @@ class ShareRequest(BaseModel):
     target_grades: list[str] = []
     target_classes: list[str] = []
     mode: str = "replace"  # 'replace' 覆盖 / 'append' 追加 / 'remove' 移除
+    # 2026-10-27：管理员在「共享给我的」里代管同事的共享时，必须用主键点名要改哪一行。
+    # 旧实现一律按「当前登录名 + 路径模糊匹配」定位，管理员改别人创建的共享必然匹配不到 -> 404。
+    share_id: int | None = None
 
 
 
 def _list_to_csv(items: list[str]) -> str:
     """将列表转为逗号分隔字符串"""
     return ",".join(items)
+
+
+def _uniq_keep_order(items) -> list[str]:
+    """去重、去空白，保持首次出现顺序"""
+    return [x for x in dict.fromkeys(str(i).strip() for i in items) if x]
+
+
+_grade_rank_cache: dict[str, int] | None = None
+
+
+def _grade_rank() -> dict[str, int]:
+    """年级名称 -> 排序权重（grades.id：一年级…高三 的自然顺序）；读不到就退回按名称排。"""
+    global _grade_rank_cache
+    if _grade_rank_cache is None:
+        try:
+            _grade_rank_cache = {str(r[0]): int(r[1]) for r in execute_query("SELECT name, id FROM grades")}
+        except Exception as e:
+            logger.warning(f"读取年级顺序失败，年级改按名称排序: {e}")
+            _grade_rank_cache = {}
+    return _grade_rank_cache
+
+
+def _normalize_grades(items) -> list[str]:
+    """年级去重 + 固定排序。
+
+    历史上「高一,高二」与「高二,高一」两种写法并存（取决于点击顺序），同一份共享在卡片上
+    和在共享弹窗里会显示成两个不一样的范围。
+    """
+    rank = _grade_rank()
+    return sorted(_uniq_keep_order(items), key=lambda g: (rank.get(g, 9999), g))
+
+
+def _normalize_classes(items) -> list[str]:
+    """班级去重 + 按「年级顺序 -> 班号数字」排序（高一2班 排在 高一10班 前面）。"""
+    rank = _grade_rank()
+
+    def key(c: str):
+        g = next((name for name in rank if c.startswith(name)), "")
+        m = re.search(r"(\d+)", c)
+        return (rank.get(g, 9999), int(m.group(1)) if m else 9999, c)
+
+    return sorted(_uniq_keep_order(items), key=key)
+
+
+def _share_physical_path(row_owner: str, file_path: str, resource_type: str) -> str:
+    """共享行里的路径 -> 相对项目根的物理路径（判断两行是不是同一个文件的唯一口径）。
+
+    入库形态混着 `x.html` / `html/x.html` / `<owner>/html/x.html` / `stu/<owner>/html/x.html`，
+    再共享还会出现「行 owner=root、路径却是 youufis/html/x.html」这种 owner 与文件属主不一致的行，
+    所以必须看这段路径自己是否已带 <谁>/html/ 前缀，不能一律再拼一遍 owner。
+    """
+    _dir = "html" if resource_type == "html" else "downloads"
+    p = str(file_path or "").replace("\\", "/").strip().lstrip("/")
+    if not p:
+        return f"{row_owner}/{_dir}/"
+    if p.startswith(f"{STU_DIR}/"):
+        return p
+    if p.startswith(f"{_dir}/"):
+        return f"{row_owner}/{p}"
+    if f"/{_dir}/" in f"/{p}":       # 已带 <某账号>/html|downloads/ 前缀 -> 本身就是物理路径
+        return p
+    return f"{row_owner}/{_dir}/{p}"
 
 
 def _teacher_allowed_grades(username: str) -> list[str]:
@@ -64,11 +131,12 @@ def _teacher_allowed_grades(username: str) -> list[str]:
 
 
 def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
-    """构建完整的 /api/files/ 访问路径（相对于 BASE_DIR）"""
-    dir_name = "html" if resource_type == "html" else "downloads"
-    if file_path.startswith(f"{owner}/{dir_name}/") or file_path.startswith(f"{STU_DIR}/{owner}/{dir_name}/"):
-        return file_path
-    return f"{owner}/{dir_name}/{file_path}"
+    """构建完整的 /api/files/ 访问路径（相对于 BASE_DIR）。
+
+    2026-10-27：再共享会产生 owner≠文件属主的行（owner=root、path=youufis/html/x.html），
+    旧实现无条件再拼一次 owner 前缀 -> url_path 变成 root/html/youufis/html/x.html，点开 404。
+    """
+    return _share_physical_path(owner, file_path, resource_type)
 
 
 # ── 目录型共享：条目类型与内容统计（「共享文件」浏览器要区分目录/文件两种条目）──
@@ -343,9 +411,9 @@ async def share_resource(request: Request, body: ShareRequest):
                     )
 
     # 将数组转为逗号分隔字符串存储
-    target_users_csv = _list_to_csv(body.target_users)
-    target_grades_csv = _list_to_csv(body.target_grades)
-    target_classes_csv = _list_to_csv(body.target_classes)
+    target_users_csv = _list_to_csv(sorted(set(_uniq_keep_order(body.target_users))))
+    target_grades_csv = _list_to_csv(_normalize_grades(body.target_grades))
+    target_classes_csv = _list_to_csv(_normalize_classes(body.target_classes))
 
     # 如果是教师 scope='class' 但未指定，自动填充教师任教的年级/班级
     if role == ROLE_TEACHER and body.share_scope == 'class' and not target_grades_csv and not target_classes_csv:
@@ -356,16 +424,33 @@ async def share_resource(request: Request, body: ShareRequest):
             tas = []
         if tas:
             grades = list(dict.fromkeys(t["grade_name"] for t in tas if t.get("grade_name")))
-            target_grades_csv = _list_to_csv(grades)
+            target_grades_csv = _list_to_csv(_normalize_grades(grades))
             classes = list(dict.fromkeys(t["class_display_name"] for t in tas if t.get("class_display_name")))
-            target_classes_csv = _list_to_csv(classes)
+            target_classes_csv = _list_to_csv(_normalize_classes(classes))
         else:
-            target_grades_csv = _list_to_csv(_teacher_allowed_grades(username))
+            target_grades_csv = _list_to_csv(_normalize_grades(_teacher_allowed_grades(username)))
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 现有共享行（多格式匹配）：命中则原行 UPDATE 保持 id 稳定，避免重新共享"换 id"导致课程绑定悬挂
-    share_rows_all = _find_share_rows_multi_format(username, body.resource_type, body.file_path)
+    # 给了 share_id 就按主键点名（管理员代管同事的共享走这条路），否则沿用旧口径。
+    if body.share_id:
+        _row = execute_query(
+            "SELECT owner_username, file_path, resource_type FROM shared_resources WHERE id=?",
+            (body.share_id,),
+        )
+        if not _row:
+            raise HTTPException(status_code=404, detail="共享记录不存在或已被取消，请刷新后重试")
+        target_owner = _row[0][0] or ""
+        if (_row[0][2] or "") != body.resource_type:
+            raise HTTPException(status_code=400, detail="共享记录的资源类型与请求不一致，请刷新后重试")
+        if target_owner != username and role != ROLE_ADMIN:
+            raise HTTPException(status_code=403, detail="无权修改他人创建的共享记录")
+        share_rows_all = _find_share_rows_multi_format(
+            target_owner, body.resource_type, _row[0][1] or body.file_path)
+    else:
+        target_owner = username
+        share_rows_all = _find_share_rows_multi_format(username, body.resource_type, body.file_path)
 
     try:
         if body.mode == "append":
@@ -387,13 +472,13 @@ async def share_resource(request: Request, body: ShareRequest):
                 merged_grades = set(exist_grades.split(",")) if exist_grades else set()
                 merged_grades.update(body.target_grades)
                 merged_grades.discard("")
-                target_grades_csv = _list_to_csv(sorted(merged_grades))
+                target_grades_csv = _list_to_csv(_normalize_grades(merged_grades))
 
                 # 合并班级
                 merged_classes = set(exist_classes.split(",")) if exist_classes else set()
                 merged_classes.update(body.target_classes)
                 merged_classes.discard("")
-                target_classes_csv = _list_to_csv(sorted(merged_classes))
+                target_classes_csv = _list_to_csv(_normalize_classes(merged_classes))
 
                 # 保留原来的 scope（追加不改变 scope）
                 actual_scope = exist_scope
@@ -403,7 +488,8 @@ async def share_resource(request: Request, body: ShareRequest):
             # 移除模式：从现有目标中移除指定项
             existing = share_rows_all
             if not existing:
-                raise HTTPException(status_code=404, detail="未找到现有共享记录，无法移除")
+                raise HTTPException(
+                    status_code=404, detail="未找到要修改的共享记录（可能已被取消），请刷新后重试")
 
             exist_users = set(existing[0][1].split(",")) if existing[0][1] else set()
             exist_grades = set(existing[0][2].split(",")) if existing[0][2] else set()
@@ -423,8 +509,8 @@ async def share_resource(request: Request, body: ShareRequest):
             merged_classes.discard("")
 
             target_users_csv = _list_to_csv(sorted(merged_users))
-            target_grades_csv = _list_to_csv(sorted(merged_grades))
-            target_classes_csv = _list_to_csv(sorted(merged_classes))
+            target_grades_csv = _list_to_csv(_normalize_grades(merged_grades))
+            target_classes_csv = _list_to_csv(_normalize_classes(merged_classes))
 
             # 如果所有目标都被移除了，自动删除共享记录
             if not merged_users and not merged_grades and not merged_classes:
@@ -456,7 +542,8 @@ async def share_resource(request: Request, body: ShareRequest):
             for _r in share_rows_all:
                 if _r[0] != primary_id:
                     _merge_share_row(_r[0], primary_id, body.resource_type)
-            logger.info(f"共享更新成功(保持id): {username} -> {body.file_path} (scope={actual_scope}, id={primary_id})")
+            logger.info(f"共享更新成功(保持id): {target_owner} -> {body.file_path} "
+                        f"(by={username}, scope={actual_scope}, id={primary_id})")
         else:
             execute_insert_update(
                 """INSERT INTO shared_resources
@@ -475,7 +562,9 @@ async def share_resource(request: Request, body: ShareRequest):
         cleanup_empty_dir_shares(username)
 
         # ── 后台批量发送通知（仅 replace/新建时发送，追加/移除模式跳过） ──
-        if body.mode != "append" and body.mode != "remove":
+        # 管理员代管同事的共享（target_owner != 本人）不群发通知：改的是别人的资源，
+        # 以学生收到的「root 分享了…」推送只会造成困扰。
+        if body.mode not in ("append", "remove") and target_owner == username:
             def _send_notifications_sync():
                 """同步执行通知发送，在后台线程中运行"""
                 try:
@@ -569,6 +658,10 @@ async def share_resource(request: Request, body: ShareRequest):
             loop.run_in_executor(None, _send_notifications_sync)
 
         return {"message": "共享成功", "file_path": body.file_path}
+    except HTTPException:
+        # 参数/权限/记录不存在这类明确错误原样返回。旧实现连 HTTPException 一起吞进
+        # 下面的通用分支，前端只看到被降级成 500 的「共享失败: 404: 未找到现有共享记录…」
+        raise
     except Exception as e:
         logger.error(f"共享创建失败: {e}")
         raise HTTPException(status_code=500, detail=f"共享失败: {str(e)}")
@@ -1026,7 +1119,12 @@ async def received_shares(request: Request, include_self: bool = False):
         if not _check_share_scope(row_data, username):
             continue
         # 默认过滤"仅共享给自己"的记录：owner=本人 且 目标用户只有本人（或为空）且未指定年级/班级
-        if not include_self and (r[1] or "") == username:
+        # 2026-10-27 定口径：「共享给我的」= 别人共享给我的，自己名下的一律不出现（管理员同理）。
+        # 自己共享的资源在「我的资源」里管理；出现在这里会让人以为列表算错了。
+        # include_self=true 才退回旧口径（只隐藏"仅共享给自己"的私有行），留给要看全量的场景。
+        if (r[1] or "") == username:
+            if not include_self:
+                continue
             _tu = {u.strip() for u in str(r[6] or "").split(",") if u.strip()}
             _tg = str(r[7] or "").strip()
             _tc = str(r[8] or "").strip()
@@ -1087,36 +1185,79 @@ async def received_shares(request: Request, include_self: bool = False):
         if r[0] is not None and str(r[4] or "") == "download":
             dir_map[int(r[0])] = download_share_stats(str(r[1] or ""), str(r[2] or ""), "download")
 
-    return {
-        "shares": [
-            {
-                "id": r[0],
-                "owner_username": r[1],
-                "file_path": r[2],
-                "file_name": r[3],
-                "resource_type": r[4],
-                "share_scope": r[5],
-                "target_users": r[6] or "",
-                "target_grade": r[7] or "",
-                "target_class": r[8] or "",
-                "created_at": r[9],
-                "url_path": _build_url_path(r[1], r[4], r[2]),
-                # 展示增强字段：共享者姓名/角色、当前用户已读态、课程与知识点绑定
-                "owner_name": (owner_map.get(str(r[1] or "")) or {}).get("name") or str(r[1] or ""),
-                "owner_role": (owner_map.get(str(r[1] or "")) or {}).get("role"),
-                "viewed_at": (view_map.get(int(r[0])) or {}).get("viewed_at"),
-                "view_count": (view_map.get(int(r[0])) or {}).get("view_count", 0),
-                "course_name": (bind_map.get(int(r[0])) or {}).get("course_name", ""),
-                "kp_name": (bind_map.get(int(r[0])) or {}).get("kp_name", ""),
-                "binding_count": (bind_map.get(int(r[0])) or {}).get("binding_count", 0),
-                # 目录型共享（一个共享指向整个文件夹）：前端显示为文件夹条目并保留目录浏览
-                "is_dir": bool((dir_map.get(int(r[0])) or {}).get("is_dir")),
-                "file_count": (dir_map.get(int(r[0])) or {}).get("file_count", 0),
-                "total_size": (dir_map.get(int(r[0])) or {}).get("total_size", 0),
-            }
-            for r in rows
-        ]
-    }
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        _rid = int(r[0] or 0)
+        items.append({
+            "id": r[0],
+            "owner_username": r[1],
+            "file_path": r[2],
+            "file_name": r[3],
+            "resource_type": r[4],
+            "share_scope": r[5],
+            "target_users": r[6] or "",
+            "target_grade": r[7] or "",
+            "target_class": r[8] or "",
+            "created_at": r[9],
+            "url_path": _build_url_path(r[1], r[4], r[2]),
+            # 展示增强字段：共享者姓名/角色、当前用户已读态、课程与知识点绑定
+            "owner_name": (owner_map.get(str(r[1] or "")) or {}).get("name") or str(r[1] or ""),
+            "owner_role": (owner_map.get(str(r[1] or "")) or {}).get("role"),
+            "viewed_at": (view_map.get(_rid) or {}).get("viewed_at"),
+            "view_count": (view_map.get(_rid) or {}).get("view_count", 0),
+            "course_name": (bind_map.get(_rid) or {}).get("course_name", ""),
+            "kp_name": (bind_map.get(_rid) or {}).get("kp_name", ""),
+            "binding_count": (bind_map.get(_rid) or {}).get("binding_count", 0),
+            # 目录型共享（一个共享指向整个文件夹）：前端显示为文件夹条目并保留目录浏览
+            "is_dir": bool((dir_map.get(_rid) or {}).get("is_dir")),
+            "file_count": (dir_map.get(_rid) or {}).get("file_count", 0),
+            "total_size": (dir_map.get(_rid) or {}).get("total_size", 0),
+            # 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径，
+            # 卡片不再只显示笼统的"网页课件"
+            "sub_kind": rr.sub_kind_of(r[3]) if str(r[4] or "") == "html" else "",
+            # 同一物理文件被多人各共享一次时的合并信息（「再共享」会产生这种行）
+            "share_count": 1,
+            "shared_by": [],
+        })
+
+    # 同一物理文件的多条共享行合并成一条卡片。
+    # 「再共享」会让同一个文件多出一行 owner != 文件属主的记录，列表里就是两张一模一样的卡片、
+    # 未读计数也跟着虚高。数据行保持不动（课程绑定与已读日志各挂各行），只按物理路径合并展示，
+    # 并把"还有谁共享了这份"如实标出来。
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for it in items:
+        _key = (str(it["resource_type"]) + "|" + _share_physical_path(
+            str(it["owner_username"] or ""), str(it["file_path"] or ""), str(it["resource_type"] or "")))
+        grouped.setdefault(_key, []).append(it)
+
+    merged: list[dict[str, Any]] = []
+    for group in grouped.values():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        # 保留行：有课程绑定的优先，其次浏览量高的，再取最早那条（id 稳定，绑定不会悬挂）
+        group.sort(key=lambda x: (-int(x["binding_count"] or 0),
+                                  -int(x["view_count"] or 0), int(x["id"] or 0)))
+        keep = group[0]
+        keep["share_count"] = len(group)
+        keep["shared_by"] = [str(x["owner_name"] or x["owner_username"]) for x in group[1:]]
+        keep["target_grade"] = _list_to_csv(_normalize_grades(
+            [g for x in group for g in str(x["target_grade"] or "").split(",")]))
+        keep["target_class"] = _list_to_csv(_normalize_classes(
+            [c for x in group for c in str(x["target_class"] or "").split(",")]))
+        keep["target_users"] = _list_to_csv(sorted(
+            {u for x in group for u in str(x["target_users"] or "").split(",") if u.strip()}))
+        for x in group[1:]:
+            if not keep["course_name"] and x["course_name"]:
+                keep["course_name"] = x["course_name"]
+                keep["kp_name"] = x["kp_name"]
+            if str(x["viewed_at"] or "") > str(keep["viewed_at"] or ""):
+                keep["viewed_at"] = x["viewed_at"]
+            keep["view_count"] = int(keep["view_count"] or 0) + int(x["view_count"] or 0)
+        merged.append(keep)
+
+    merged.sort(key=lambda x: str(x["created_at"] or ""), reverse=True)
+    return {"shares": merged}
 
 
 # ── 通用：检查文件是否对用户可见（供 serve_static_file 调用） ──
@@ -1167,6 +1308,24 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
             if rows:
                 if _check_share_scope(rows[0], viewer_username):
                     return True
+
+    # 再共享（2026-10-27）：同事/管理员把同一份文件以他自己的名义又共享了一次，
+    # 这种行 owner != 文件属主，上面按属主查的两个分支永远命中不到 ——
+    # 结果「再共享给我班」只多了一张卡片、学生照样 403。这里补一次跨 owner 判定。
+    phys = _share_physical_path(owner_username, file_rel_path, resource_type)
+    bn = phys.split("/")[-1]
+    if bn:
+        for r in execute_query(
+            """SELECT owner_username, file_path, share_scope, target_users, target_grade, target_class
+               FROM shared_resources WHERE resource_type=? AND file_path LIKE ?""",
+            (resource_type, f"%{bn}"),
+        ):
+            if str(r[0] or "") == str(owner_username or ""):
+                continue
+            if _share_physical_path(str(r[0] or ""), str(r[1] or ""), resource_type) != phys:
+                continue
+            if _check_share_scope((r[2], r[3] or "", r[4] or "", r[5] or ""), viewer_username):
+                return True
 
     return False
 

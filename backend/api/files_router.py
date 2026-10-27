@@ -297,10 +297,14 @@ def _log_resource_access(rel_path: str, username: str, role: int, path_parts: li
         from backend.database import execute_query_one
 
         def _find_share(fp: str):
+            # 同一个文件可能被多人各存一行共享（「再共享」会产生 owner != 文件属主的行）。
+            # 已读态/浏览量必须稳定挂到文件属主那一行，否则和资源中心卡片用的 id 对不上。
             return execute_query_one(
-                "SELECT id, owner_username FROM shared_resources "
-                "WHERE resource_type=? AND (file_path=? OR file_path LIKE ?) LIMIT 1",
-                (dir_type, fp, f"%/{fp}"),
+                """SELECT id, owner_username FROM shared_resources
+                   WHERE resource_type=? AND (file_path=? OR file_path LIKE ?)
+                   ORDER BY CASE WHEN owner_username=? THEN 0 ELSE 1 END, id
+                   LIMIT 1""",
+                (dir_type, fp, f"%/{fp}", owner_username, owner_username),
             )
 
         share = _find_share(file_rel) if file_rel else None

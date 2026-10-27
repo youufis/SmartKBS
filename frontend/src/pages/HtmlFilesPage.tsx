@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, theme } from 'antd'
-import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
+import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, UserOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
@@ -15,6 +15,9 @@ const HtmlFilesPage: React.FC = () => {
   const { token } = theme.useToken()
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
+  const isAdmin = user?.role === 'admin'
+  // 「共享给我的」默认只看别人共享的；管理员要总览时可临时含自己共享出去的
+  const [includeMine, setIncludeMine] = useState(false)
   const [files, setFiles] = useState<ResourceFile[]>([])
   const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
   const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
@@ -92,7 +95,7 @@ const HtmlFilesPage: React.FC = () => {
       if (isAdminOrTeacher) {
         const [res, shareRes, myRes, groupsRes] = await Promise.all([
           resourcesApi.listResources(),
-          sharingApi.getReceivedShares(),
+          sharingApi.getReceivedShares(includeMine),
           sharingApi.getMyShares(),
           resourcesApi.listGroups(),
         ])
@@ -102,7 +105,7 @@ const HtmlFilesPage: React.FC = () => {
         setGroups(groupsRes.groups)
       } else {
         setFiles([])
-        const shareRes = await sharingApi.getReceivedShares()
+        const shareRes = await sharingApi.getReceivedShares(includeMine)
         setReceivedShares(shareRes.shares.filter(s => s.resource_type === 'html'))
       }
     } catch {
@@ -112,14 +115,19 @@ const HtmlFilesPage: React.FC = () => {
     }
   }
 
-  useEffect(() => { loadData() }, [isAdminOrTeacher])
+  // includeMine 变化要重新拉列表（管理员总览开关）
+  useEffect(() => { loadData() }, [isAdminOrTeacher, includeMine])
 
   const isFileShared = (nodeKey: string) => myShares.some(s => s.file_path === nodeKey)
 
-  const openShare = (filePath: string, fileName: string, type: 'html' | 'download' = 'html') => {
+  const openShare = (filePath: string, fileName: string, type: 'html' | 'download' = 'html', owner?: string) => {
     setShareFile({ path: filePath, name: fileName })
     setShareType(type)
-    setShareExisting(myShares.find(s => s.file_path === filePath) || null)
+    // 必须连属主一起认：管理员的 /my-shares 返回全站所有行，只按路径匹配会把
+    // "同事共享的那一行"当成"我的共享"来编辑（旧实现因此改不动、还报 404）。
+    const rec = myShares.find(s => s.file_path === filePath
+      && (owner ? s.owner_username === owner : s.owner_username === user?.username)) || null
+    setShareExisting(rec)
     setShareDialogOpen(true)
   }
 
@@ -318,7 +326,7 @@ const HtmlFilesPage: React.FC = () => {
               <Tooltip title={isFileShared(urlPath) ? t('sharedClickToCancel') : t('clickToShare')}>
                 <ShareAltOutlined
                   style={{ color: isFileShared(urlPath) ? '#ff4d4f' : '#999', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openShare(urlPath, name); }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openShare(urlPath, name, 'html', user?.username); }}
                 />
               </Tooltip>
             )}
@@ -360,6 +368,9 @@ const HtmlFilesPage: React.FC = () => {
     courseName: s.course_name,
     kpName: s.kp_name,
     bindingCount: s.binding_count,
+    subKind: s.sub_kind,
+    shareCount: s.share_count,
+    sharedBy: s.shared_by,
   }))
 
   return (
@@ -378,6 +389,18 @@ const HtmlFilesPage: React.FC = () => {
               allowClear
               style={{ width: 220 }}
             />
+            {isAdmin && (
+              <Tooltip title={t('rb.includeMineTip')}>
+                <Button
+                  size="small"
+                  type={includeMine ? 'primary' : 'default'}
+                  icon={<UserOutlined />}
+                  onClick={() => setIncludeMine((v) => !v)}
+                >
+                  {t('rb.includeMine')}
+                </Button>
+              </Tooltip>
+            )}
             <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
           </Space>
         </div>
@@ -516,6 +539,7 @@ const HtmlFilesPage: React.FC = () => {
                       )}
                     </div>
                     {(() => {
+                      if (filteredFiles.length === 0) return null
                       const currentPage = getGroupPage(activeGroup)
                       return (
                         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
@@ -523,7 +547,7 @@ const HtmlFilesPage: React.FC = () => {
                             current={currentPage}
                             total={filteredFiles.length}
                             pageSize={pageSize}
-                            pageSizeOptions={['10', '20', '50']}
+                            pageSizeOptions={['12', '24', '48', '96']}
                             showSizeChanger
                             onChange={(p, ps) => {
                               if (ps && ps !== pageSize) { setPageSize(ps); setGroupPages({}) }
@@ -547,7 +571,7 @@ const HtmlFilesPage: React.FC = () => {
                   items={browserItems}
                   loading={loading}
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
-                  onReshare={(it) => openShare(it.filePath, it.name, it.resourceType === 'download' ? 'download' : 'html')}
+                  onReshare={(it) => openShare(it.filePath, it.name, it.resourceType === 'download' ? 'download' : 'html', it.ownerUsername)}
                   onRefresh={loadData}
                 />
               ),

@@ -331,6 +331,9 @@ const DownloadsPage: React.FC = () => {
       courseName: s.course_name,
       kpName: s.kp_name,
       bindingCount: s.binding_count,
+      subKind: s.sub_kind,
+      shareCount: s.share_count,
+      sharedBy: s.shared_by,
     }
   }), [receivedShares, t])
 
