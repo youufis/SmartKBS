@@ -88,6 +88,23 @@ def _normalize_classes(items) -> list[str]:
     return sorted(_uniq_keep_order(items), key=key)
 
 
+def _is_shared_only_to_self(row_owner: str, share_scope: str,
+                            target_users: str, target_grade: str, target_class: str) -> bool:
+    """这条共享是不是"只给自己看"的私有登记。
+
+    个人目录自动登记的资源、AI 产物的默认共享行都是这种：scope='teacher'、
+    目标只有本人（或干脆为空），没指定年级/班级。它们没共享给任何人，
+    不该出现在「我共享的」里淹没真正的共享；文件本身在「我的资源」就能看到、
+    也能在那里改共享范围。判据与 /received 隐藏自有行的口径一致。
+    """
+    if str(target_grade or "").strip() or str(target_class or "").strip():
+        return False                       # 指定了年级/班级 -> 是共享出去的
+    if str(share_scope or "") in ("all", "staff"):
+        return False                       # 面向所有人 / 全体教职工
+    users = {u.strip() for u in str(target_users or "").split(",") if u.strip()}
+    return not users or users == {str(row_owner or "")}
+
+
 def _share_physical_path(row_owner: str, file_path: str, resource_type: str) -> str:
     """共享行里的路径 -> 相对项目根的物理路径（判断两行是不是同一个文件的唯一口径）。
 
@@ -1116,8 +1133,10 @@ def _build_share_items(rows, username: str) -> list[dict[str, Any]]:
 async def my_shares(request: Request, all_shares: bool = False):
     """我创建的共享 —— 只返回当前用户名下的行（管理员同理）。
 
-    资源中心第三个标签页「我共享的」用的就是它。这一栏的语义是"我共享出去的"，
-    把别人创建的记录混进来会让人以为自己的共享有几百条（管理员此前看到的就是全站 203 条）。
+    资源中心第三个标签页「我共享的」用的就是它。这一栏的语义是"我共享出去的"：
+    一是只给本人的行（个人目录自动登记、AI 产物默认行）不算共享出去，默认剔除；
+    二是别人创建的记录不在这个标签页（管理员此前看到的就是全站 203 条）。
+    需要那份原始全量台账时用 all_shares=true（仅管理员，不做任何剔除）。
     全站清单退到 all_shares=true（仅管理员、界面默认不调用）；
     要看/改同事创建的共享，走「同事共享的」卡片上的代管入口。
 
@@ -1145,6 +1164,9 @@ async def my_shares(request: Request, all_shares: bool = False):
                ORDER BY created_at DESC""",
             (username,),
         )
+        # 「我共享的」= 我真正共享出去的：剔除"只共享给自己"的私有登记行
+        rows = [r for r in rows
+                if not _is_shared_only_to_self(username, r[5], r[6] or "", r[7] or "", r[8] or "")]
 
     return {"shares": _build_share_items(rows, username)}
 

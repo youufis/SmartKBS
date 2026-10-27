@@ -105,7 +105,7 @@
   "sharedFromOthers": "From colleagues",
   "sharedFromOthersTip": "Shares created by other teachers: for the grades/classes you teach, or to all staff / everyone. The target is a grade, a class or a teacher scope, not an individual recipient.",
   "sharedFromOthersTipAdmin": "Share records created by everyone else on the site (by grade / class / teacher scope). Shares you created are managed under All shares.",
-  "mySharesTip": "Share records I created: change scope, append or remove targets, or unshare. Colleagues resources live in From colleagues.",
+  "mySharesTip": "Shares I actually published: change scope, append or remove targets, or unshare. Records shared only to myself are not listed here - the files themselves live in My Resources, where the scope can also be set.",
   "resourceGroups": "Resource Groups",
   "expandGroups": "Expand groups",
   "collapseGroups": "Collapse groups",
