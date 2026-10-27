@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import React, { useState, useEffect, useMemo } from 'react'
-import { Modal, message, Space, Typography, Button, Radio, Select, Divider, Tag, Checkbox } from 'antd'
+import { Modal, message, Space, Typography, Button, Radio, Select, Divider, Tag, Checkbox, Popconfirm } from 'antd'
 import {
   ShareAltOutlined, StopOutlined, TeamOutlined, GlobalOutlined,
   BookOutlined, UserOutlined, FolderOutlined, CheckCircleFilled,
@@ -39,7 +39,17 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
   const isAdmin = user?.role === 'admin'
   const isTeacher = user?.role === 'teacher'
   const [loading, setLoading] = useState(false)
-  const isShared = !!existingShare
+  // 2026-10-27：同一个按钮以前混着三件事 —— 改我自己的共享 / 管理员改同事的共享 /
+  // 把同事的资源再共享给我自己的班。三者写入的行完全不同，旧实现却都叫「管理共享」，
+  // 于是管理员改别人的共享会 404（后端按"当前登录名"当属主找行）。
+  const ownerLabel = existingShare?.owner_name || existingShare?.owner_username || ''
+  const foreign = !!existingShare && existingShare.owner_username !== user?.username
+  // 规则：教师只能改自己的共享，管理员可以代管任何人的共享（后端 share_id 分支同样按这条校验）。
+  // 非管理员即便因为别的原因拿到别人那一行，也只会被当成「以我的名义再共享」。
+  const managed = foreign && isAdmin
+  // 代管时允许切换成「以我的名义再共享」（= 另建一行，不动原作者的记录）
+  const [forceReshare, setForceReshare] = useState(false)
+  const editing = !!existingShare && (foreign ? managed && !forceReshare : true)
 
   const [scope, setScope] = useState<ShareScope>('all')
   const [selectedTeachers, setSelectedTeachers] = useState<string[]>([])
@@ -191,7 +201,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
   const handleShare = async () => {
     setLoading(true)
     try {
-      if (existingShare) {
+      if (editing) {
         // ── 编辑已有共享：根据变更类型选择模式 ──
         const changes = computeChanges
         if (!changes) {
@@ -211,6 +221,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             target_grades: scope === 'class' ? selectedGrades : [],
             target_classes: scope === 'class' ? selectedClasses : [],
             mode: 'replace',
+            share_id: existingShare.id,
           })
           message.success(t('sdScopeUpdated'))
         } else if (changes.mode === 'append') {
@@ -224,6 +235,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             target_grades: changes.addGrades,
             target_classes: changes.addClasses,
             mode: 'append',
+            share_id: existingShare.id,
           })
           message.success(t('sdAppended'))
         } else if (changes.mode === 'remove') {
@@ -237,6 +249,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             target_grades: changes.removeGrades,
             target_classes: changes.removeClasses,
             mode: 'remove',
+            share_id: existingShare.id,
           })
           message.success(t('sdRemovedTargets'))
         } else {
@@ -250,6 +263,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             target_grades: scope === 'class' ? selectedGrades : [],
             target_classes: scope === 'class' ? selectedClasses : [],
             mode: 'replace',
+            share_id: existingShare.id,
           })
           message.success(t('sdUpdated'))
         }
@@ -293,7 +307,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
 
   // ── 计算需要追加/移除的目标（用于编辑已有共享时优化请求） ──
   const computeChanges = useMemo(() => {
-    if (!existingShare) return null
+    if (!editing) return null
     const origUsers = parseCSV(existingShare.target_users)
     const origGrades = parseCSV(existingShare.target_grade)
     const origClasses = parseCSV(existingShare.target_class)
@@ -321,7 +335,50 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
     }
 
     return { addUsers, removeUsers, addGrades, removeGrades, addClasses, removeClasses, mode, scopeChanged }
-  }, [existingShare, selectedTeachers, selectedGrades, selectedClasses, scope])
+  }, [editing, existingShare, selectedTeachers, selectedGrades, selectedClasses, scope])
+
+  // ── 「当前共享目标」标签：受控渲染 ──
+  // 标签显示的是服务端真值（existingShare），× 只把目标标记为「待移除」，不会让标签自己消失。
+  // 旧实现没调 preventDefault，antd Tag 一点就在本地隐藏，请求失败（例如管理员改他人共享的 404）
+  // 之后弹窗显示"高一"、卡片还显示"高一,高二"，两边各说各话。
+  const selectedOf = (kind: 'users' | 'grades' | 'classes') =>
+    (kind === 'users' ? selectedTeachers : kind === 'grades' ? selectedGrades : selectedClasses)
+  const origUsers = parseCSV(existingShare?.target_users || '')
+  const origGrades = parseCSV(existingShare?.target_grade || '')
+  const origClasses = parseCSV(existingShare?.target_class || '')
+  const targetLabel = (kind: 'users' | 'grades' | 'classes', v: string) => {
+    if (kind !== 'users') return v
+    const teacher = teachers.find((x) => x.username === v)
+    return teacher ? `${teacher.name}(${v})` : v
+  }
+  const renderTargets = (kind: 'users' | 'grades' | 'classes', values: string[], color: string) =>
+    values.map((v) => {
+      const setter = kind === 'users' ? setSelectedTeachers : kind === 'grades' ? setSelectedGrades : setSelectedClasses
+      const pending = !selectedOf(kind).includes(v)
+      return (
+        <Tag
+          key={`${kind}:${v}`}
+          closable
+          color={pending ? undefined : color}
+          onClose={(e) => {
+            e.preventDefault()
+            setter((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))
+          }}
+          style={{ margin: 0, ...(pending ? { borderStyle: 'dashed', color: 'var(--text-tertiary)' } : {}) }}
+        >
+          {kind === 'users' ? <UserOutlined /> : kind === 'grades' ? <BookOutlined /> : null}{' '}
+          {targetLabel(kind, v)}
+          {pending ? ` · ${t('sdPendingRemove')}` : ''}
+        </Tag>
+      )
+    })
+  const pendingAdds: string[] = editing
+    ? [
+        ...selectedTeachers.filter((u) => !origUsers.includes(u)).map((u) => targetLabel('users', u)),
+        ...selectedGrades.filter((g) => !origGrades.includes(g)),
+        ...selectedClasses.filter((c) => !origClasses.includes(c)),
+      ]
+    : []
 
   // ── 验证是否可以共享 ──
   const canShare = useMemo(() => {
@@ -331,7 +388,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
   }, [scope, selectedTeachers, selectedGrades])
 
   // B2: 动过共享范围再关闭要二次确认；什么都没动就直接关
-  const dirty = existingShare
+  const dirty = editing
     ? Boolean(computeChanges && (computeChanges.scopeChanged
         || computeChanges.addUsers.length || computeChanges.removeUsers.length
         || computeChanges.addGrades.length || computeChanges.removeGrades.length
@@ -341,6 +398,8 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
 
   // ── 确定共享按钮文案 ──
   const shareButtonText = useMemo(() => {
+    // 「以我的名义再共享」= 新建一行，文案要区别于「保存对原记录的修改」
+    if (existingShare && forceReshare) return t('sdReshareConfirm')
     if (!existingShare) return t('sdConfirm')
     const changes = computeChanges
     if (!changes) return t('sdConfirm')
@@ -348,7 +407,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
     if (changes.mode === 'remove') return t('sdRemoveSel')
     if (changes.scopeChanged) return t('sdUpdateScope')
     return t('sdConfirm')
-  }, [existingShare, computeChanges])
+  }, [existingShare, forceReshare, computeChanges])
 
   // ── 渲染年级/班级选择器（带全选） ──
   const renderGradeClassSelector = () => {
@@ -497,16 +556,33 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
   return (
     <Modal
       maskClosable={false}
-      title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> {isShared ? t('sdManage') : t('sdShareRes')}</>}
+      title={
+        <Space size={6}>
+          <ShareAltOutlined style={{ color: '#ff4d4f' }} />
+          {editing ? (managed ? t('sdManageOther') : t('sdManage')) : existingShare ? t('sdReshare') : t('sdShareRes')}
+          {managed && <Tag color="orange" style={{ margin: 0 }}>{t('sdManagedTag')}</Tag>}
+        </Space>
+      }
       open={open}
       onCancel={requestClose}
       footer={
         <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
           <div>
-            {isShared && !inheritedFromDir && (
-              <Button danger type="text" icon={<StopOutlined />} onClick={handleUnshare} loading={loading}>
-                {t('sdUnshare')}
-              </Button>
+            {editing && !inheritedFromDir && (
+              <Popconfirm
+                title={t('sdUnshareConfirmTitle')}
+                description={t('sdUnshareConfirmBody', {
+                  bindings: existingShare?.binding_count
+                    ? t('sdUnshareBindings', { count: existingShare.binding_count })
+                    : '',
+                })}
+                okText={t('sdUnshare')}
+                okButtonProps={{ danger: true, loading }}
+                cancelText={t('sdClose')}
+                onConfirm={handleUnshare}
+              >
+                <Button danger type="text" icon={<StopOutlined />}>{t('sdUnshare')}</Button>
+              </Popconfirm>
             )}
           </div>
           <Space>
@@ -531,6 +607,21 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
         <Typography.Text ellipsis style={{ maxWidth: 520 }}>
           <strong>{t('sdFileLabel')}</strong>{fileName}
         </Typography.Text>
+        {foreign && (
+          <>
+            <Typography.Text type="secondary" style={{ fontSize: 13, display: 'block' }}>
+              {managed && !forceReshare
+                ? t('sdManagedHint', { owner: ownerLabel })
+                : t('sdReshareHint', { owner: ownerLabel })}
+            </Typography.Text>
+            {managed && (
+              <Button type="link" size="small" style={{ padding: 0, marginTop: 2 }}
+                onClick={() => setForceReshare(!forceReshare)}>
+                {forceReshare ? t('sdSwitchManage') : t('sdSwitchReshare')}
+              </Button>
+            )}
+          </>
+        )}
 
         {inheritedFromDir ? (
           <>
@@ -544,13 +635,13 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
               {t('sdOwnHint')}
             </Typography.Text>
           </>
-        ) : isShared ? (
+        ) : editing ? (
           <>
             <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
               {t('sdAlreadyShared')}
             </Typography.Text>
 
-            {/* ── 当前共享目标概览（可移除） ── */}
+            {/* ── 当前共享目标（服务端真值 + 待移除/待新增标记）── */}
             <div style={{ border: '1px solid var(--border-color-secondary)', borderRadius: 8, padding: '10px 14px', background: 'var(--bg-layout)', marginBottom: 12 }}>
               <Typography.Text strong style={{ fontSize: 13 }}>{t('sdCurrentTargets')}</Typography.Text>
               <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -561,58 +652,24 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
                    existingShare.share_scope === 'teacher' ? t('sdScopeTeacher') : t('sdScopeClass')}
                 </Tag>
 
-                {/* 目标用户 */}
-                {parseCSV(existingShare.target_users).map(u => {
-                  const teacher = teachers.find(t => t.username === u)
-                  return (
-                    <Tag
-                      key={`u:${u}`}
-                      closable
-                      onClose={() => {
-                        setSelectedTeachers(prev => prev.filter(t => t !== u))
-                      }}
-                      color="blue"
-                      style={{ margin: 0 }}
-                    >
-                      <UserOutlined /> {teacher ? `${teacher.name}(${u})` : u}
-                    </Tag>
-                  )
-                })}
+                {renderTargets('users', origUsers, 'blue')}
+                {renderTargets('grades', origGrades, 'green')}
+                {renderTargets('classes', origClasses, 'cyan')}
 
-                {/* 目标年级 */}
-                {parseCSV(existingShare.target_grade).map(g => (
-                  <Tag
-                    key={`g:${g}`}
-                    closable
-                    onClose={() => {
-                      setSelectedGrades(prev => prev.filter(v => v !== g))
-                    }}
-                    color="green"
-                    style={{ margin: 0 }}
-                  >
-                    <BookOutlined /> {g}
-                  </Tag>
-                ))}
-
-                {/* 目标班级 */}
-                {parseCSV(existingShare.target_class).map(c => (
-                  <Tag
-                    key={`c:${c}`}
-                    closable
-                    onClose={() => {
-                      setSelectedClasses(prev => prev.filter(v => v !== c))
-                    }}
-                    color="cyan"
-                    style={{ margin: 0 }}
-                  >
-                    {c}
-                  </Tag>
-                ))}
-
-                {!existingShare.target_users && !existingShare.target_grade && !existingShare.target_class && (
+                {!origUsers.length && !origGrades.length && !origClasses.length && (
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('sdAllUsers')}</Typography.Text>
                 )}
               </div>
+
+              {pendingAdds.length > 0 && (
+                <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('sdPendingAdd')}：</Typography.Text>
+                  {pendingAdds.map((a) => (
+                    <Tag key={`add:${a}`} style={{ margin: 0, borderColor: '#52c41a', color: '#52c41a' }}>{a}</Tag>
+                  ))}
+                </div>
+              )}
+
               <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
                 {t('sdRemoveHint')}
               </Typography.Text>

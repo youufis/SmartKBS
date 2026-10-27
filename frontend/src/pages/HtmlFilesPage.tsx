@@ -15,6 +15,7 @@ const HtmlFilesPage: React.FC = () => {
   const { token } = theme.useToken()
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
+  const isAdmin = user?.role === 'admin'
   const [files, setFiles] = useState<ResourceFile[]>([])
   const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
   const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
@@ -116,12 +117,25 @@ const HtmlFilesPage: React.FC = () => {
 
   const isFileShared = (nodeKey: string) => myShares.some(s => s.file_path === nodeKey)
 
-  const openShare = (filePath: string, fileName: string, type: 'html' | 'download' = 'html') => {
+  /**
+   * 打开共享弹窗。existing = 要编辑的那条共享记录（自带属主），不传就是新建共享。
+   * 三个入口各自喂自己名下 / 同事名下的记录，弹窗据此区分「管理共享」「代管共享」「再共享」。
+   */
+  const openShare = (
+    filePath: string,
+    fileName: string,
+    type: 'html' | 'download' = 'html',
+    existing?: sharingApi.ShareItem | null,
+  ) => {
     setShareFile({ path: filePath, name: fileName })
     setShareType(type)
-    setShareExisting(myShares.find(s => s.file_path === filePath) || null)
+    setShareExisting(existing || null)
     setShareDialogOpen(true)
   }
+
+  /** 我名下、指向这个文件的那条共享记录（「我的资源」卡片用） */
+  const myShareFor = (filePath: string) =>
+    myShares.find((s) => s.file_path === filePath && s.owner_username === user?.username) || null
 
   // ── 分组路径集合（后端已统一为「相对项目根」的路径，与 files.url_path 同格式） ──
   const fileKeyOf = (f: ResourceFile) => f.url_path || f.name
@@ -318,7 +332,7 @@ const HtmlFilesPage: React.FC = () => {
               <Tooltip title={isFileShared(urlPath) ? t('sharedClickToCancel') : t('clickToShare')}>
                 <ShareAltOutlined
                   style={{ color: isFileShared(urlPath) ? '#ff4d4f' : '#999', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openShare(urlPath, name); }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openShare(urlPath, name, 'html', myShareFor(urlPath)); }}
                 />
               </Tooltip>
             )}
@@ -342,6 +356,33 @@ const HtmlFilesPage: React.FC = () => {
     </Card>
   )
 
+  // 「我共享的」（教师）/「全部共享」（管理员）：与「共享给我的」共用同一个浏览器组件，
+  // 字段由后端 _build_share_items 统一装配，两个标签页的标签与计数不会各说各话。
+  const myShareItems: BrowserItem[] = myShares
+    .filter((s) => s.resource_type === 'html')
+    .map((s) => ({
+      id: s.id,
+      name: s.file_name,
+      urlPath: s.url_path || s.file_path,
+      filePath: s.file_path,
+      resourceType: s.resource_type,
+      ownerUsername: s.owner_username,
+      ownerName: s.owner_name,
+      ownerRole: s.owner_role,
+      shareScope: s.share_scope,
+      targetGrade: s.target_grade,
+      targetClass: s.target_class,
+      targetUserNames: s.target_user_names,
+      createdAt: s.created_at,
+      viewCount: s.total_view_count,
+      courseName: s.course_name,
+      kpName: s.kp_name,
+      bindingCount: s.binding_count,
+      subKind: s.sub_kind,
+      shareCount: s.share_count,
+      sharedBy: s.shared_by,
+    }))
+
   const browserItems: BrowserItem[] = receivedShares.map((s) => ({
     id: s.id,
     name: s.file_name,
@@ -354,12 +395,16 @@ const HtmlFilesPage: React.FC = () => {
     shareScope: s.share_scope,
     targetGrade: s.target_grade,
     targetClass: s.target_class,
+    targetUserNames: s.target_user_names,
     createdAt: s.created_at,
     viewedAt: s.viewed_at,
     viewCount: s.view_count,
     courseName: s.course_name,
     kpName: s.kp_name,
     bindingCount: s.binding_count,
+    subKind: s.sub_kind,
+    shareCount: s.share_count,
+    sharedBy: s.shared_by,
   }))
 
   return (
@@ -516,6 +561,7 @@ const HtmlFilesPage: React.FC = () => {
                       )}
                     </div>
                     {(() => {
+                      if (filteredFiles.length === 0) return null
                       const currentPage = getGroupPage(activeGroup)
                       return (
                         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
@@ -523,7 +569,7 @@ const HtmlFilesPage: React.FC = () => {
                             current={currentPage}
                             total={filteredFiles.length}
                             pageSize={pageSize}
-                            pageSizeOptions={['10', '20', '50']}
+                            pageSizeOptions={['12', '24', '48', '96']}
                             showSizeChanger
                             onChange={(p, ps) => {
                               if (ps && ps !== pageSize) { setPageSize(ps); setGroupPages({}) }
@@ -539,15 +585,43 @@ const HtmlFilesPage: React.FC = () => {
               ),
             },
             {
+              key: 'mine-shared',
+              label: (
+                <Tooltip title={t('mySharesTip')}>
+                  <span><ShareAltOutlined /> {t('mySharesTab')} ({myShareItems.length})</span>
+                </Tooltip>
+              ),
+              children: (
+                <ResourceBrowser
+                  mode="teacher"
+                  items={myShareItems}
+                  loading={loading}
+                  showStatus={false}
+                  shareTooltip={t('rb.manageShare')}
+                  onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
+                  onReshare={(it) => openShare(it.filePath, it.name,
+                    it.resourceType === 'download' ? 'download' : 'html',
+                    myShares.find((s) => s.id === it.id))}
+                  onRefresh={loadData}
+                />
+              ),
+            },
+            {
               key: 'shared',
-              label: <span><ShareAltOutlined /> {t('sharedToMe')} ({browserItems.length})</span>,
+              label: (
+                <Tooltip title={isAdmin ? t('sharedFromOthersTipAdmin') : t('sharedFromOthersTip')}>
+                  <span><ShareAltOutlined /> {t('sharedFromOthers')} ({browserItems.length})</span>
+                </Tooltip>
+              ),
               children: (
                 <ResourceBrowser
                   mode="teacher"
                   items={browserItems}
                   loading={loading}
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
-                  onReshare={(it) => openShare(it.filePath, it.name, it.resourceType === 'download' ? 'download' : 'html')}
+                  onReshare={(it) => openShare(it.filePath, it.name,
+                    it.resourceType === 'download' ? 'download' : 'html',
+                    receivedShares.find((s) => s.id === it.id))}
                   onRefresh={loadData}
                 />
               ),

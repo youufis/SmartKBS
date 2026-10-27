@@ -814,7 +814,7 @@
   "fromUser": "From {{name}}",
   "noSharedFiles": "No shared files",
   "myFiles": "My Files",
-  "receivedFiles": "Files Shared With Me",
+  "receivedFiles": "Files from colleagues",
   "noOwnFiles": "No files yet — use Upload Files / Upload Folder above",
   "noMatchFiles": "No matching files",
   "dirStat": "{{count}} files · {{size}}",

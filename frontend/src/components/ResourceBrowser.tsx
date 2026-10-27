@@ -41,6 +41,14 @@ export interface BrowserItem {
   bindingCount?: number
   /** 条目类型：dir=目录型共享（点开是浏览文件夹），其余按单个文件处理 */
   entryType?: 'file' | 'dir'
+  /** 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径 */
+  subKind?: string
+  /** 指定教师/管理员共享时的目标姓名（后端按 target_users 解析，卡片上直接列出来） */
+  targetUserNames?: string[]
+  /** 同一物理文件被多人各共享一次时合并进来的行数（>1 表示还有别人也共享了这份） */
+  shareCount?: number
+  /** 除保留行之外，还共享了这份文件的人（显示名） */
+  sharedBy?: string[]
   /** 名称后面的补充信息（文件大小、目录内文件数），只展示不参与分类 */
   sub?: string
 }
@@ -62,14 +70,16 @@ const ResourceBrowser: React.FC<{
   onReshare?: (item: BrowserItem) => void
   /** 逐条目判断能否「再共享」：文件中心里只有自己名下也有同一份时才值得再共享 */
   canReshare?: (item: BrowserItem) => boolean
+  /** 覆盖共享按钮的提示：接收侧是「再共享给学生」，我共享的那一栏应该是「管理共享」 */
+  shareTooltip?: string
   /** 覆盖条目主操作按钮的文案与图标（文件版是「下载」/「浏览」） */
   openLabel?: string
   openIcon?: React.ReactNode
   /** 是否显示「阅读状态」维度。教师端浏览文件不留痕，默认给关掉免得永远「未读」 */
   showStatus?: boolean
   onRefresh?: () => void
-}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, openLabel, openIcon, showStatus, onRefresh }) => {
-  const { t } = useTranslation('menu')
+}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, shareTooltip, openLabel, openIcon, showStatus, onRefresh }) => {
+  const { t } = useTranslation(['menu', 'curriculum'])
   const { token } = theme.useToken()
   const isDark = useThemeStore((s) => s.current) === 'midnight'
   const isFiles = variant === 'files'
@@ -113,6 +123,15 @@ const ResourceBrowser: React.FC<{
 
   const kindOf = (it: BrowserItem) =>
     it.entryType === 'dir' ? 'dir' : getFileKind(it.filePath || it.name || '')
+  /** 内容类型：网页资源按小类分（动画讲解/章节练习/…），共享文件按扩展名分 */
+  const contentTypeOf = (it: BrowserItem) => (isFiles ? kindOf(it) : (it.subKind || 'other'))
+  const contentTypeLabel = (v: string) => {
+    if (isFiles) return t(`kind.${v}` as never)
+    const key = `curriculum:subKind.${v}`
+    const label = t(key as never)
+    // 统计条里的「网页资源/文档/视频音频」是按扩展名筛的，这些值没有小类文案，回落到扩展名文案
+    return label === key ? t(`kind.${v}` as never) : label
+  }
   /** 是否给这条目摆「再共享」按钮（外部可逐条判断） */
   const canShare = (it: BrowserItem) => (canReshare ? canReshare(it) : !!onReshare)
   /** 目录条目统一用「打开的文件夹」图标，不跟扩展名猜 */
@@ -158,7 +177,8 @@ const ResourceBrowser: React.FC<{
         if (sel.value === 'week') return inWeek(it.createdAt)
         if (sel.value === 'month') return inMonth(it.createdAt) && !inWeek(it.createdAt)
         return !inMonth(it.createdAt)
-      case 'kind': return kindOf(it) === sel.value
+      // 统计条里的「网页资源/文档/…」按扩展名筛，左侧分类按内容类型筛，两种值都要认
+      case 'kind': return kindOf(it) === sel.value || contentTypeOf(it) === sel.value
       case 'course': return (it.courseName || UNGROUPED) === sel.value
       case 'owner': return (it.ownerName || it.ownerUsername) === sel.value
       case 'scope': return (it.shareScope || '') === sel.value
@@ -191,9 +211,10 @@ const ResourceBrowser: React.FC<{
   const facet = (pred: (it: BrowserItem) => boolean) => searched.filter(pred).length
   const kindOptions = useMemo(() => {
     const m = new Map<string, number>()
-    for (const i of searched) m.set(kindOf(i), (m.get(kindOf(i)) || 0) + 1)
+    for (const i of searched) { const k = contentTypeOf(i); m.set(k, (m.get(k) || 0) + 1) }
     return [...m.entries()].sort((a, b) => b[1] - a[1])
-      .map(([v, n]) => ({ value: v, label: t(`kind.${v}`), n }))
+      .map(([v, n]) => ({ value: v, label: contentTypeLabel(v), n }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searched, t])
   const courseOptions = useMemo(() => {
     const m = new Map<string, number>()
@@ -244,7 +265,7 @@ const ResourceBrowser: React.FC<{
     },
     {
       key: 'kind',
-      label: isFiles ? t('rb.dimKindFiles') : t('rb.dimKind'),
+      label: isFiles ? t('rb.dimKindFiles') : t('rb.dimKindHtml'),
       icon: <AppstoreOutlined />,
       options: kindOptions,
     },
@@ -275,6 +296,26 @@ const ResourceBrowser: React.FC<{
     return `${g ? `${g} · ` : ''}${list.map((c) => (g && c.startsWith(g) ? c.slice(g.length) : c)).join('、')}`
   }
 
+  /** 共享范围标签：class 列年级/班级、teacher 直接列教师姓名、staff/all 用固定文案。
+   *  以前 scope=all 干脆不出标签、teacher 只写「指定个人」，看不出到底共享给了谁。 */
+  const scopeTag = (it: BrowserItem): { short: string; tip: string } => {
+    const names = it.targetUserNames || []
+    if (it.shareScope === 'class') {
+      const full = fullScope(it)
+      return { short: full || t('rb.scopeClass'), tip: full + t('rb.scopeClassTipSuffix') }
+    }
+    if (it.shareScope === 'teacher') {
+      const short = names.length === 0
+        ? t('rb.scopeUser')
+        : names.length <= 2
+          ? names.join('、')
+          : `${names[0]} ${t('rb.scopeUserMore', { count: names.length })}`
+      return { short, tip: names.length ? `${t('rb.scopeUserTip')}：${names.join('、')}` : t('rb.scopeUser') }
+    }
+    if (it.shareScope === 'staff') return { short: t('rb.scopeStaff'), tip: t('rb.scopeStaffTip') }
+    return { short: t('rb.scopeAll'), tip: t('rb.scopeAllTip') }
+  }
+
   const metaTags = (it: BrowserItem) => {
     const kind = kindOf(it)
     return (
@@ -287,12 +328,23 @@ const ResourceBrowser: React.FC<{
         <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, color: KIND_COLOR[kind], borderColor: KIND_COLOR[kind], background: 'transparent' }}>
           {t(`kind.${kind}`)}
         </Tag>
-        {it.shareScope && it.shareScope !== 'all' && (
-          <Tooltip title={it.shareScope === 'class' ? fullScope(it) : undefined}>
+        {it.subKind && (
+          <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0 }}>
+            {t(`curriculum:subKind.${it.subKind}`)}
+          </Tag>
+        )}
+        {(it.shareCount ?? 1) > 1 && (
+          <Tooltip title={t('rb.alsoSharedBy', { names: (it.sharedBy || []).join('、') })}>
+            <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0 }}>
+              ×{it.shareCount}
+            </Tag>
+          </Tooltip>
+        )}
+        {it.shareScope && (
+          <Tooltip title={scopeTag(it).tip}>
             <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-              {it.shareScope === 'class'
-                ? compactClassScope(it.targetGrade || '', it.targetClass || '') || t('rb.scopeClass')
-                : it.shareScope === 'staff' ? t('rb.scopeStaff') : t('rb.scopeUser')}
+              {it.shareScope === 'teacher' && <UserOutlined style={{ marginRight: 3 }} />}
+              {scopeTag(it).short}
             </Tag>
           </Tooltip>
         )}
@@ -341,7 +393,7 @@ const ResourceBrowser: React.FC<{
   /** 已选分类的展示文案（避免把 unseen/week/class 这类代码直接丢到界面上） */
   const valueLabel = (sl: Sel): string => {
     if (!sl.dim) return ''
-    if (sl.dim === 'kind') return t(`kind.${sl.value}` as never)
+    if (sl.dim === 'kind') return contentTypeLabel(sl.value)
     if (sl.dim === 'status') {
       if (sl.value === 'unseen') return mode === 'teacher' ? t('rb.unread') : t('rb.unseen')
       return mode === 'teacher' ? t('rb.read') : t('rb.seen')
@@ -543,7 +595,7 @@ const ResourceBrowser: React.FC<{
                             <Text type="secondary" style={{ fontSize: 11 }}><EyeOutlined /> {it.viewCount}</Text>
                           )}
                           {onReshare && canShare(it) && (
-                            <Tooltip title={t('rb.reshare')}>
+                            <Tooltip title={shareTooltip || t('rb.reshare')}>
                               <Button size="small" type="text" icon={<ShareAltOutlined style={{ fontSize: 13 }} />}
                                 onClick={(e) => { e.stopPropagation(); onReshare(it) }} />
                             </Tooltip>
@@ -580,12 +632,17 @@ const ResourceBrowser: React.FC<{
                         )}
                       </div>
                       <Text type="secondary" style={{ fontSize: 12 }} ellipsis>{it.kpName || it.courseName || '—'}</Text>
-                      <Tag style={{ fontSize: 10, marginInlineEnd: 0, color: KIND_COLOR[kind], borderColor: KIND_COLOR[kind], background: 'transparent' }}>{t(`kind.${kind}`)}</Tag>
+                      <Space size={2} wrap>
+                        <Tag style={{ fontSize: 10, marginInlineEnd: 0, color: KIND_COLOR[kind], borderColor: KIND_COLOR[kind], background: 'transparent' }}>{t(`kind.${kind}`)}</Tag>
+                        {it.subKind && (
+                          <Tag style={{ fontSize: 10, marginInlineEnd: 0 }}>{t(`curriculum:subKind.${it.subKind}`)}</Tag>
+                        )}
+                      </Space>
                       <Text type="secondary" style={{ fontSize: 12 }} ellipsis>{it.ownerName || it.ownerUsername}</Text>
                       <Text type="secondary" style={{ fontSize: 12 }}>{relTime(it.createdAt)}</Text>
                       <Space size={4}>
                         {onReshare && canShare(it) && (
-                          <Tooltip title={t('rb.reshare')}>
+                          <Tooltip title={shareTooltip || t('rb.reshare')}>
                             <Button size="small" type="text" icon={<ShareAltOutlined />} onClick={(e) => { e.stopPropagation(); onReshare(it) }} />
                           </Tooltip>
                         )}
@@ -600,8 +657,8 @@ const ResourceBrowser: React.FC<{
             )}
           </Spin>
 
-          {/* 文件版条目普遍少，一页装得下也保留这一行：总数与「每页条数」要能看见、能改 */}
-          {shown.length > 0 && (shown.length > pageSize || isFiles) && (
+          {/* 一页装得下也保留这一行：总数与「每页条数」要能看见、能改（与「我的资源」口径一致） */}
+          {shown.length > 0 && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
               <Pagination
                 size="small"
