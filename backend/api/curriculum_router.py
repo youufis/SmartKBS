@@ -128,6 +128,9 @@ class KnowledgePointUpdate(BaseModel):
     estimated_minutes: int | None = None
     sort_order: int | None = None
     status: str | None = None
+    # 改了所属章节 = 把知识点移到新章节。此前不声明这个字段，
+    # 编辑弹窗里换了章节保存后 Pydantic 直接丢弃，知识点原地不动。
+    chapter_id: int | None = None
 
 class BindingCreate(BaseModel):
     knowledge_point_id: int
@@ -1453,13 +1456,28 @@ async def update_knowledge_point(kp_id: int, req: KnowledgePointUpdate, request:
     kp = execute_query_one("SELECT * FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
-    _assert_can_edit_course(user, _course_of_kp(kp_id), "更新知识点")
+    course = _course_of_kp(kp_id)
+    _assert_can_edit_course(user, course, "更新知识点")
 
     updates = {}
     for field in ["name", "description", "learning_objectives", "difficulty", "estimated_minutes", "sort_order", "status"]:
         val = getattr(req, field, None)
         if val is not None:
             updates[field] = val
+
+    # 换所属章节：只在真改了时处理，并兜住"目标章节不存在/已删/跨课程"三种脏请求
+    if req.chapter_id is not None and req.chapter_id != kp["chapter_id"]:
+        target = execute_query_one(
+            "SELECT id, course_id, status FROM chapters WHERE id=?", (req.chapter_id,))
+        if not target or (target["status"] or "active") != "active":
+            raise HTTPException(status_code=400, detail="目标章节不存在或已被删除")
+        if not course or int(target["course_id"]) != int(course["id"]):
+            raise HTTPException(status_code=400, detail="只能在同一门课程内移动知识点")
+        updates["chapter_id"] = req.chapter_id
+        # 没显式给序号时排到新章节末尾，避免和本章已有知识点撞号（与创建知识点同口径）
+        if req.sort_order is None:
+            updates["sort_order"] = _next_sort_order(
+                "knowledge_points", "chapter_id=? AND status='active'", (req.chapter_id,))
 
     if not updates:
         return {"message": "无更新内容"}

@@ -58,6 +58,29 @@ const STATUS_COLORS: Record<string, string> = {
   completed: 'success',
 }
 
+// ── 章节下拉选项 ──
+// 把章节树拍平成「父章 / 子节」，让每一级章节都进得了下拉、显示得出名字。
+// 此前只列顶层章节：知识点挂在子章节（如「第一章 / 一、技术的发展」）下时，
+// 选项里根本没有对应的 value，antd 只能退回显示裸 chapter_id 数字。
+interface ChapterOption { value: number; label: string }
+
+const flattenChapterOptions = (
+  list: ChapterTreeNode[] | undefined,
+  trail: string[] = [],
+  out: ChapterOption[] = [],
+): ChapterOption[] => {
+  for (const ch of list || []) {
+    const path = [...trail, ch.name]
+    out.push({ value: ch.id, label: path.join(' / ') })
+    if (ch.children?.length) flattenChapterOptions(ch.children, path, out)
+  }
+  return out
+}
+
+// 章节自身 + 其全部后代 id：改父章节时要排除，否则能把章节挂进自己的子树
+const collectChapterIds = (ch: ChapterTreeNode | null | undefined): number[] =>
+  ch ? [ch.id, ...(ch.children || []).flatMap(collectChapterIds)] : []
+
 const CurriculumPage: React.FC = () => {
   const { t } = useTranslation('curriculum')
   const navigate = useNavigate()
@@ -1389,6 +1412,12 @@ const CurriculumPage: React.FC = () => {
   // 停用提示条要用这份统计，别再对同一棵树遍历两遍
   const activeCourseCounts = countCourseNodes(activeCourse)
 
+  // 章节下拉：所属章节、父章节都用拍平后的整棵树，保证任何 chapter_id 都能显示成名字而不是数字
+  const chapterOptions = flattenChapterOptions(activeCourse?.chapters)
+  // 父章节要排除自己和自己往下挂的分支（后端同样会拒，这里是不给选错的机会）
+  const excludedAsParent = new Set(collectChapterIds(editingChapter))
+  const parentChapterOptions = chapterOptions.filter((o) => !excludedAsParent.has(o.value))
+
   // Suppress unused warnings for bank/mixed practice mode (reserved for future use)
   void [practiceHtmlUrl, practiceMode, bankKeyword, bankQuestions, bankLoading, selectedBankIds, mixedAiQuestions, mixedBankIds, mixedAiCount, mixedGenLoading, mixedBankSearch, mixedBankResults, mixedBankLoading, setBankKeyword, setBankQuestions, setBankLoading, setSelectedBankIds, setMixedAiQuestions, setMixedBankIds, setMixedAiCount, setMixedGenLoading, setMixedBankSearch, setMixedBankResults, setMixedBankLoading, searchBankQuestions, toggleBankQuestion, generateFromBank, generateMixedAi, searchMixedBank, toggleMixedBank, removeMixedQuestion, generateMixedPractice, handleSmartPractice];
 
@@ -2037,11 +2066,9 @@ const CurriculumPage: React.FC = () => {
             <Select
               allowClear
               placeholder={t('parentChapterPlaceholder')}
-            >
-              {activeCourse?.chapters?.map((ch) => (
-                <Option key={ch.id} value={ch.id}>{ch.name}</Option>
-              ))}
-            </Select>
+              showSearch={{ optionFilterProp: 'label' }}
+              options={parentChapterOptions}
+            />
           </Form.Item>
           <Form.Item name="name" label={t('name')} rules={[{ required: true, message: t('nameRequired') }]}>
             <Input placeholder={t('chapterNamePlaceholder')} />
@@ -2075,11 +2102,11 @@ const CurriculumPage: React.FC = () => {
       >
         <Form form={kpForm} layout="vertical">
           <Form.Item name="chapter_id" label={t('belongingChapter')} rules={[{ required: true }]}>
-            <Select placeholder={t('selectChapter')}>
-              {activeCourse?.chapters?.map((ch) => (
-                <Option key={ch.id} value={ch.id}>{ch.name}</Option>
-              ))}
-            </Select>
+            <Select
+              placeholder={t('selectChapter')}
+              showSearch={{ optionFilterProp: 'label' }}
+              options={chapterOptions}
+            />
           </Form.Item>
           <Form.Item name="name" label={t('kpName')} rules={[{ required: true, message: t('kpNameRequired') }]}>
             <Input placeholder={t('kpNamePlaceholder')} />
