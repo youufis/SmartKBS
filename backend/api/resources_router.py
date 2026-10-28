@@ -645,6 +645,7 @@ import time
 from backend.database import (
     execute_query, execute_insert_update, execute_batch, get_connection, get_transaction,
 )
+from backend.resource_registry import sub_kind_of
 
 
 # ── 分组内资源路径统一（收敛为 url_path 格式）+ 残留清理 ──
@@ -864,6 +865,148 @@ async def create_group(request: Request):
         raise HTTPException(status_code=409, detail=f"分组 '{group_name}' 已存在，请换一个名称")
     logger.info(f"资源分组创建: {username}/{group_name}")
     return {"message": f"分组 '{group_name}' 已创建", "id": gid, "group_name": group_name}
+
+
+# ── 自动归类：把「未分组」的资源按内容小类 / 章节前缀批量建组 ──────────────
+
+# 内容小类 -> 分组名。分组名是**落库的数据**而不是界面文案，所以在这里固定中文，
+# 与前端 curriculum:subKind.* 同口径；other（未归类网页）不建组 —— 硬造一个
+# 「未归类」组只会把「未分组」这个数字变好看，资源照样得自己翻。
+_SUBKIND_GROUP_NAMES: dict[str, str] = {
+    "courseware": "课件",
+    "animation": "动画讲解",
+    "quiz": "互动答题",
+    "practice": "章节练习",
+    "podcast": "播客",
+    "interactive": "实验交互",
+    "custom": "自定义页面",
+}
+
+# 章节前缀必须写成「数字.数字」才算章节号：AI 产物的文件名是
+# `{知识点id}_{知识点名}_课件.html`，前导数字是知识点 ID（如 14_正等轴测图），
+# 按第一段取号会把几十个知识点拆成几十个假"章"。
+_CHAPTER_PREFIX_RE = re.compile(r"^\s*(\d+(?:\.\d+)+)")
+_CHAPTER_CN_RE = re.compile(r"^\s*第\s*([0-9一二三四五六七八九十]+)\s*章")
+
+AUTO_CLASSIFY_BY: tuple[str, ...] = ("subkind", "chapter", "section")
+
+
+def _auto_group_name(fname: str, by: str) -> str:
+    """算一个资源该进哪个分组；返回空串 = 这条规则不覆盖它，继续留在未分组。"""
+    stem = os.path.splitext(fname)[0]
+    if by == "subkind":
+        return _SUBKIND_GROUP_NAMES.get(sub_kind_of(stem), "")
+    cn = _CHAPTER_CN_RE.match(stem)
+    if cn:
+        return f"第{cn.group(1)}章"
+    m = _CHAPTER_PREFIX_RE.match(stem)
+    if not m:
+        return ""
+    parts = m.group(1).split(".")
+    if by == "chapter":
+        return f"第{int(parts[0])}章"
+    return f"{parts[0]}.{parts[1]}" if len(parts) > 1 else f"{parts[0]}.0"
+
+
+@router.post("/groups/auto-classify")
+async def auto_classify_groups(request: Request):
+    """按内容小类或章节前缀，把「未分组」的资源自动归进分组。
+
+    入参：`by` = subkind | chapter | section；`apply` = false(默认，只预览) | true(写库)。
+    只动未分组的资源：已经在任何分组里的文件一律不碰，教师手工归好的不会被覆盖。
+    同名分组直接复用（root 手工建的「动画讲解」「章节练习」正是这些名字），不产生重复组。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    try:
+        body = await request.json()
+    except Exception:  # 允许空 body，按默认口径预览
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    by = str(body.get("by") or "subkind").strip()
+    apply_it = bool(body.get("apply"))
+    if by not in AUTO_CLASSIFY_BY:
+        raise HTTPException(status_code=400, detail=f"by 只能是 {' / '.join(AUTO_CLASSIFY_BY)}")
+
+    html_dir = os.path.abspath(get_account_html_dir(username))
+    root_rel = _html_root_rel(username)
+    # 与 /list 完全同一套扫描口径：该目录下的顶层文件，跳过 .json/.js 附属文件
+    try:
+        names = [f for f in sorted(os.listdir(html_dir), key=str.lower)
+                 if os.path.isfile(os.path.join(html_dir, f)) and not f.endswith((".json", ".js"))]
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"资源目录读取失败: {e}")
+
+    grouped: set[str] = set()
+    for paths in _group_existing_paths(username).values():
+        grouped.update(paths)
+    candidates = [f for f in names if f"{root_rel}/{f}" not in grouped]
+
+    buckets: dict[str, list[str]] = {}
+    for fname in candidates:
+        gname = _auto_group_name(fname, by)
+        if gname:
+            buckets.setdefault(gname, []).append(f"{root_rel}/{fname}")
+
+    existing = {gname: gid for gid, gname in execute_query(
+        "SELECT id, group_name FROM resource_groups WHERE username=?", (username,)
+    )}
+    groups_out = [
+        {
+            "group_name": gname,
+            "count": len(paths),
+            "samples": [os.path.basename(p) for p in paths[:5]],
+            "reused": gname in existing,
+        }
+        for gname, paths in sorted(buckets.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    ]
+    matched = sum(len(v) for v in buckets.values())
+    base = {
+        "by": by, "apply": apply_it, "scanned": len(names),
+        "candidates": len(candidates), "matched": matched,
+        "unmatched": len(candidates) - matched, "groups": groups_out,
+    }
+    if not apply_it:
+        return base
+
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    ops: list[tuple[str, tuple]] = []
+    created = reused = 0
+    for gname, paths in sorted(buckets.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        gid = existing.get(gname)
+        if gid is None:
+            try:
+                gid = execute_insert_update(
+                    "INSERT INTO resource_groups (username, group_name, sort_order, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (username, gname, 0, now),
+                )
+                created += 1
+            except sqlite3.IntegrityError:
+                conflict = _find_group_name_conflict(username, gname)
+                if not conflict:
+                    raise
+                gid = conflict[0]
+        if gid is None:
+            continue
+        reused += int(gname in existing)
+        for idx, canon in enumerate(paths):
+            ops.append((
+                "INSERT OR IGNORE INTO resource_group_items "
+                "(group_id, file_path, sort_order, created_at) VALUES (?, ?, ?, ?)",
+                (gid, canon, idx, now),
+            ))
+    if ops:
+        execute_batch(ops)
+    logger.info(
+        f"资源自动归类: {username} by={by} 新建分组={created} 归类={len(ops)} 候选={len(candidates)}"
+    )
+    base.update({
+        "added": len(ops), "created_groups": created,
+        "message": f"已归类 {len(ops)} 份资源，新建 {created} 个分组",
+    })
+    return base
 
 
 @router.put("/groups/reorder")

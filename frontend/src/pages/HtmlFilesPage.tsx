@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, theme } from 'antd'
-import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
+import { Alert, Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, Radio, Spin, theme } from 'antd'
+import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
@@ -66,6 +66,13 @@ const HtmlFilesPage: React.FC = () => {
   // 窄屏默认折叠分组栏：200px 面板在 390px 屏上会把文件卡片挤出屏幕，文件名与发布者看不见。
   // 桌面(>=768px)仍为 false，行为不变。
   const [groupCollapsed, setGroupCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768) // 分组列表折叠
+
+  // ── 自动归类（只处理「未分组」，先预览再落库）──
+  const [classifyOpen, setClassifyOpen] = useState(false)
+  const [classifyBy, setClassifyBy] = useState<resourcesApi.AutoClassifyBy>('subkind')
+  const [classifyData, setClassifyData] = useState<resourcesApi.AutoClassifyResult | null>(null)
+  const [classifyLoading, setClassifyLoading] = useState(false)
+  const [classifyApplying, setClassifyApplying] = useState(false)
 
   // ── 拖拽状态 ──
   const [draggedFile, setDraggedFile] = useState<string | null>(null)
@@ -203,6 +210,40 @@ const HtmlFilesPage: React.FC = () => {
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
       message.error(err?.response?.data?.detail || err?.message || t('deleteFailed'))
+    }
+  }
+
+  // ── 自动归类：换口径就重新预览，确认后才写库 ──
+  const previewClassify = useCallback(async (by: resourcesApi.AutoClassifyBy) => {
+    setClassifyLoading(true)
+    try {
+      setClassifyData(await resourcesApi.autoClassify(by, false))
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      message.error(err?.response?.data?.detail || err?.message || t('operationFailed'))
+      setClassifyData(null)
+    } finally {
+      setClassifyLoading(false)
+    }
+  }, [t])
+
+  const openClassify = () => {
+    setClassifyOpen(true)
+    void previewClassify(classifyBy)
+  }
+
+  const applyClassify = async () => {
+    setClassifyApplying(true)
+    try {
+      const res = await resourcesApi.autoClassify(classifyBy, true)
+      message.success(res.message || t('autoClassifyDone', { count: res.added ?? 0 }))
+      setClassifyOpen(false)
+      await loadData()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      message.error(err?.response?.data?.detail || err?.message || t('operationFailed'))
+    } finally {
+      setClassifyApplying(false)
     }
   }
 
@@ -439,7 +480,12 @@ const HtmlFilesPage: React.FC = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       {!groupCollapsed && <Typography.Text strong style={{ fontSize: 13 }}>{t('resourceGroups')}</Typography.Text>}
                       <Space size={2}>
-                        {!groupCollapsed && <Button type="link" size="small" icon={<PlusOutlined />} onClick={openCreateGroup} />}
+                        {!groupCollapsed && (
+                          <Tooltip title={t('autoClassify')}>
+                            <Button type="link" size="small" icon={<ThunderboltOutlined />} onClick={openClassify} />
+                          </Tooltip>
+                        )}
+                        {!groupCollapsed && <Button type="link" size="small" icon={<PlusOutlined />} onClick={openCreateGroup} title={t('newGroup')} />}
                         <Button type="text" size="small"
                           icon={groupCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
                           onClick={() => setGroupCollapsed(!groupCollapsed)}
@@ -597,6 +643,7 @@ const HtmlFilesPage: React.FC = () => {
                   items={myShareItems}
                   loading={loading}
                   showStatus={false}
+                  prefScope="mine"
                   shareTooltip={t('rb.manageShare')}
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
                   onReshare={(it) => openShare(it.filePath, it.name,
@@ -618,6 +665,7 @@ const HtmlFilesPage: React.FC = () => {
                   mode="teacher"
                   items={browserItems}
                   loading={loading}
+                  prefScope="received"
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
                   onReshare={(it) => openShare(it.filePath, it.name,
                     it.resourceType === 'download' ? 'download' : 'html',
@@ -664,6 +712,68 @@ const HtmlFilesPage: React.FC = () => {
             placeholder={t('enterGroupName')}
             autoFocus
           />
+        </Modal>
+
+        {/* 自动归类：先看清要建哪些组、各收多少份，确认后才写库 */}
+        <Modal maskClosable={false}
+          title={<span><ThunderboltOutlined /> {t('autoClassify')}</span>}
+          open={classifyOpen}
+          onCancel={() => setClassifyOpen(false)}
+          onOk={applyClassify}
+          okText={t('autoClassifyApply', { count: classifyData?.matched ?? 0 })}
+          okButtonProps={{ disabled: classifyLoading || (classifyData?.matched ?? 0) === 0 }}
+          confirmLoading={classifyApplying}
+          cancelText={t('cancel')}
+          width={620}
+        >
+          <Alert
+            type="info" showIcon style={{ marginBottom: 12 }}
+            message={t('autoClassifyTip', { count: classifyData?.candidates ?? 0 })}
+            description={t('autoClassifyScopeTip')}
+          />
+          <Radio.Group
+            optionType="button"
+            style={{ marginBottom: 12 }}
+            value={classifyBy}
+            onChange={(e) => {
+              const by = e.target.value as resourcesApi.AutoClassifyBy
+              setClassifyBy(by)
+              void previewClassify(by)
+            }}
+            options={[
+              { value: 'subkind', label: t('autoClassifyBySubkind') },
+              { value: 'chapter', label: t('autoClassifyByChapter') },
+              { value: 'section', label: t('autoClassifyBySection') },
+            ]}
+          />
+          {classifyLoading ? (
+            <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
+          ) : (classifyData?.groups.length ?? 0) > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+              {classifyData!.groups.map(g => (
+                <div key={g.group_name} style={{ padding: '8px 10px', borderRadius: 6, background: token.colorFillQuaternary }}>
+                  <Space size={6} wrap>
+                    <FolderOutlined style={{ color: token.colorPrimary }} />
+                    <Typography.Text strong>{g.group_name}</Typography.Text>
+                    <Tag color={g.reused ? 'blue' : 'green'} style={{ marginInlineEnd: 0 }}>
+                      {g.reused ? t('autoClassifyReuse') : t('autoClassifyNew')}
+                    </Tag>
+                    <Typography.Text type="secondary">{t('autoClassifyCount', { count: g.count })}</Typography.Text>
+                  </Space>
+                  <div>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>{g.samples.join('、')}</Typography.Text>
+                  </div>
+                </div>
+              ))}
+              {(classifyData?.unmatched ?? 0) > 0 && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('autoClassifyUnmatched', { count: classifyData!.unmatched })}
+                </Typography.Text>
+              )}
+            </div>
+          ) : (
+            <Typography.Text type="secondary">{t('autoClassifyEmpty')}</Typography.Text>
+          )}
         </Modal>
       </Space>
 

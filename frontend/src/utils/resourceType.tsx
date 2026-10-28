@@ -87,6 +87,7 @@ export function prettyResourceName(name: string): string {
 
 /** 网页课件的内容小类（后端从 AI 产物文件名后缀判断，与 resource_registry 同口径） */
 export const SUB_KIND_KEYS: Record<string, string> = {
+  courseware: 'subKind.courseware',
   animation: 'subKind.animation',
   quiz: 'subKind.quiz',
   practice: 'subKind.practice',

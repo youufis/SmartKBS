@@ -7,7 +7,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Alert, Button, Card, Col, DatePicker, Empty, Input, Row, Select,
-  Space, Spin, Statistic, Table, Tag, Typography, message, Modal,
+  Space, Spin, Statistic, Table, Tag, Tooltip, Typography, message, Modal,
 } from 'antd'
 import {
   ArrowLeftOutlined, BarChartOutlined, DownloadOutlined, ReloadOutlined,
@@ -254,6 +254,44 @@ const QuestionBankAnalyticsPage: React.FC = () => {
     })
   }
 
+  /**
+   * 创建者行内的分布芯片：完整列出该创建者的全部题型 / 学科。
+   * 以前这里只取题量前 5 的题型、前 3 的学科，题量最少的学科（例如刚加进来的物理）
+   * 会被静默截掉，看起来就像"这个学科没显示、题也没了"。
+   * 点击芯片等于把该条件加进顶部筛选，再点一次取消。
+   */
+  const renderDistribution = (
+    map: Record<string, number> | undefined,
+    field: 'type' | 'subject',
+    labelOf: (key: string) => string,
+    color: string,
+  ) => {
+    const entries = Object.entries(map || {}).sort((a, b) => b[1] - a[1])
+    if (!entries.length) return <Text type="secondary">-</Text>
+    return (
+      <Space wrap size={[4, 4]}>
+        {entries.map(([key, count]) => {
+          const active = filters[field] === key
+          return (
+            <Tooltip key={key} title={active ? t('analyticsChipClearTip') : t('analyticsChipFilterTip')}>
+              <Tag
+                color={color}
+                style={{ cursor: 'pointer', marginInlineEnd: 0, fontWeight: active ? 700 : 400 }}
+                onClick={() => setFilters(f => (
+                  field === 'type'
+                    ? { ...f, type: active ? '' : key }
+                    : { ...f, subject: active ? '' : key }
+                ))}
+              >
+                {labelOf(key)} {count}
+              </Tag>
+            </Tooltip>
+          )
+        })}
+      </Space>
+    )
+  }
+
   const summary = data?.summary
   const creatorColumns = [
     {
@@ -275,19 +313,13 @@ const QuestionBankAnalyticsPage: React.FC = () => {
     {
       title: t('questionType'), key: 'types',
       render: (_: any, r: questionsApi.QuestionAnalyticsCreator) => (
-        <Space wrap size={2}>
-          {Object.entries(r.types).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => (
-            <Tag key={k} color="blue">{TYPE_LABELS[k] || k} {v}</Tag>
-          ))}
-        </Space>
+        renderDistribution(r.types, 'type', k => TYPE_LABELS[k] || k, 'blue')
       ),
     },
     {
-      title: t('subject'), key: 'subjects', width: 180,
+      title: t('subject'), key: 'subjects', width: 240,
       render: (_: any, r: questionsApi.QuestionAnalyticsCreator) => (
-        <Text type="secondary">
-          {Object.entries(r.subjects).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(' · ') || '-'}
-        </Text>
+        renderDistribution(r.subjects, 'subject', k => k, 'green')
       ),
     },
     {
@@ -470,7 +502,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
             <Table
               size="small" rowKey="username" columns={creatorColumns as any}
               dataSource={data.by_creator} pagination={{ pageSize: 10, showSizeChanger: true }}
-              scroll={{ x: 850 }}
+              scroll={{ x: 980 }}
             />
           </Card>
 

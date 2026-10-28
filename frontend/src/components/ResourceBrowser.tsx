@@ -77,8 +77,11 @@ const ResourceBrowser: React.FC<{
   openIcon?: React.ReactNode
   /** 是否显示「阅读状态」维度。教师端浏览文件不留痕，默认给关掉免得永远「未读」 */
   showStatus?: boolean
+  /** 同一 variant/mode 下并列多个浏览器时（如「我共享的」与「同事共享的」）区分偏好存储；
+   *  不分键会共用同一份 view/sort/pageSize，把 A 栏的排序值带进选项集不同的 B 栏。 */
+  prefScope?: string
   onRefresh?: () => void
-}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, shareTooltip, openLabel, openIcon, showStatus, onRefresh }) => {
+}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, shareTooltip, openLabel, openIcon, showStatus, prefScope, onRefresh }) => {
   const { t } = useTranslation(['menu', 'curriculum'])
   const { token } = theme.useToken()
   const isDark = useThemeStore((s) => s.current) === 'midnight'
@@ -86,11 +89,18 @@ const ResourceBrowser: React.FC<{
   // 阅读状态：HTML 侧维持原样；文件侧只有学生有浏览留痕
   const showStatusOn = showStatus ?? !(isFiles && mode === 'teacher')
   // 偏好分开存，避免「共享文件」把「共享资源」的视图/排序/每页条数覆盖掉
-  const prefKey = isFiles ? `smartkb_rb_files_${mode}` : `smartkb_rb_${mode}`
+  const prefKey = `${isFiles ? 'smartkb_rb_files_' : 'smartkb_rb_'}${mode}${prefScope ? `_${prefScope}` : ''}`
+  const sortOptions = useMemo(() => [
+    ...(showStatusOn ? [{ value: 'unseen', label: t('rb.sortUnseen') }] : []),
+    { value: 'new', label: t('rb.sortNew') },
+    { value: 'name', label: t('rb.sortName') },
+    { value: 'owner', label: t('rb.sortOwner') },
+  ], [showStatusOn, t])
+  const defaultSort = showStatusOn ? 'unseen' : 'new'
 
   const [kw, setKw] = useState('')
   const [sel, setSel] = useState<Sel>({ dim: null, value: '' })
-  const [sort, setSort] = useState(showStatusOn ? 'unseen' : 'new')
+  const [sort, setSort] = useState(defaultSort)
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(24)
@@ -98,6 +108,11 @@ const ResourceBrowser: React.FC<{
   // 文件名与发布者完全看不到。桌面(>=768px)仍为 false，行为与之前一致。
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
   const [nowMs, setNowMs] = useState(0)
+
+  /** 存量偏好里可能存着本实例压根没有的排序项（典型：与「同事共享的」共用过键，
+   *  读到 unseen 而这一栏没有阅读状态维度）。裸值交给 Select 会直接显示 "unseen"，
+   *  排序也会静默走到 default 分支，所以一律回落到本栏默认值。 */
+  const effSort = sortOptions.some((o) => o.value === sort) ? sort : defaultSort
 
   // 时间基准放进 state：渲染期不取时间，倒计时/相对时间随数据刷新推进
   useEffect(() => { setNowMs(Date.now()) }, [items])
@@ -109,17 +124,19 @@ const ResourceBrowser: React.FC<{
       if (raw) {
         const p = JSON.parse(raw) as { view?: string; sort?: string; pageSize?: number }
         if (p.view === 'grid' || p.view === 'list') setView(p.view)
-        if (p.sort) setSort(p.sort)
+        if (p.sort && sortOptions.some((o) => o.value === p.sort)) setSort(p.sort)
         if (p.pageSize) setPageSize(p.pageSize)
       }
     } catch { /* 隐私模式忽略 */ }
+    // 只在换存储键时读一次；sortOptions 由 showStatusOn/t 决定，实例生命周期内不变
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefKey])
 
   useEffect(() => {
-    try { localStorage.setItem(prefKey, JSON.stringify({ view, sort, pageSize })) } catch { /* 忽略 */ }
-  }, [prefKey, view, sort, pageSize])
+    try { localStorage.setItem(prefKey, JSON.stringify({ view, sort: effSort, pageSize })) } catch { /* 忽略 */ }
+  }, [prefKey, view, effSort, pageSize])
 
-  useEffect(() => { setPage(1) }, [kw, sel, sort, mode])
+  useEffect(() => { setPage(1) }, [kw, sel, effSort, mode])
 
   const kindOf = (it: BrowserItem) =>
     it.entryType === 'dir' ? 'dir' : getFileKind(it.filePath || it.name || '')
@@ -189,7 +206,7 @@ const ResourceBrowser: React.FC<{
   const shown = useMemo(() => {
     const arr = searched.filter(matchSel)
     const cmp = (a: BrowserItem, b: BrowserItem) => {
-      switch (sort) {
+      switch (effSort) {
         case 'new': return String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
         case 'name': return a.name.localeCompare(b.name, 'zh-Hans-CN')
         case 'owner': return String(a.ownerName || a.ownerUsername).localeCompare(String(b.ownerName || b.ownerUsername), 'zh-Hans-CN')
@@ -203,7 +220,7 @@ const ResourceBrowser: React.FC<{
     }
     return [...arr].sort(cmp)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searched, sel, sort, nowMs])
+  }, [searched, sel, effSort, nowMs])
 
   const paged = useMemo(() => shown.slice((page - 1) * pageSize, page * pageSize), [shown, page, pageSize])
 
@@ -423,13 +440,8 @@ const ResourceBrowser: React.FC<{
             value={kw} onChange={(e) => setKw(e.target.value)}
           />
           <Select
-            size="small" style={{ width: 120 }} value={sort} onChange={setSort}
-            options={[
-              ...(showStatusOn ? [{ value: 'unseen', label: t('rb.sortUnseen') }] : []),
-              { value: 'new', label: t('rb.sortNew') },
-              { value: 'name', label: t('rb.sortName') },
-              { value: 'owner', label: t('rb.sortOwner') },
-            ]}
+            size="small" style={{ width: 120 }} value={effSort} onChange={setSort}
+            options={sortOptions}
           />
         </Space>
         <Space size={6}>

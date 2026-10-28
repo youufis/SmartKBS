@@ -929,13 +929,18 @@ async def question_analytics(
     conds = ["status='active'"]
     params: list[Any] = []
     if subject:
-        members = family_members(subject)
-        if members:
-            conds.append(f"subject IN ({','.join('?' for _ in members)})")
-            params.extend(members)
+        if subject == "未分类":
+            # 统计侧把空学科（含历史脏数据里的纯数字 subject）归到"未分类"，
+            # 筛选时必须按同一口径召回，否则点它会查出 0 道题。
+            conds.append("(subject IS NULL OR TRIM(subject)='' OR subject GLOB '[0-9]*')")
         else:
-            conds.append("subject=?")
-            params.append(subject)
+            members = family_members(subject)
+            if members:
+                conds.append(f"subject IN ({','.join('?' for _ in members)})")
+                params.extend(members)
+            else:
+                conds.append("subject=?")
+                params.append(subject)
     if type:
         conds.append("type=?")
         params.append(type)
