@@ -143,7 +143,10 @@ SHELF_KEYS: tuple[str, ...] = tuple(
 GROUP_ORDER: tuple[str, ...] = ("courseware", "practice", "assessment", "interaction")
 
 # 网页课件的内容小类：AI 产物文件名后缀 → 小类键（与 resources_router 的 type_labels 同口径）
+# 「_课件」排在最前：它是 AI 课件产物的固定后缀（{知识点id}_{知识点名}_课件.html），
+# 而知识点名本身可能带「练习」等字样，先判它才不会把课件错认成章节练习。
 HTML_SUBKINDS: tuple[tuple[str, str], ...] = (
+    ("_课件", "courseware"),
     ("_动画讲解", "animation"),
     ("_互动答题", "quiz"),
     ("_练习", "practice"),

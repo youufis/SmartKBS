@@ -76,6 +76,36 @@ export async function removeFromGroup(group_id: number, file_path: string): Prom
   return data;
 }
 
+/** 自动归类口径：内容小类 / 章节（第N章）/ 小节（N.M） */
+export type AutoClassifyBy = 'subkind' | 'chapter' | 'section';
+
+export interface AutoClassifyGroup {
+  group_name: string;
+  count: number;
+  samples: string[];
+  /** true = 已有同名分组，资源并入其中；false = 本次新建 */
+  reused: boolean;
+}
+
+export interface AutoClassifyResult {
+  by: AutoClassifyBy;
+  apply: boolean;
+  scanned: number;
+  candidates: number;
+  matched: number;
+  unmatched: number;
+  groups: AutoClassifyGroup[];
+  added?: number;
+  created_groups?: number;
+  message?: string;
+}
+
+/** 自动归类「未分组」的资源：apply=false 只返回预览，true 才写库。 */
+export async function autoClassify(by: AutoClassifyBy, apply = false): Promise<AutoClassifyResult> {
+  const { data } = await apiClient.post('/api/resources/groups/auto-classify', { by, apply });
+  return data;
+}
+
 export async function reorderGroups(group_ids: number[]): Promise<{ message: string }> {
   const { data } = await apiClient.put('/api/resources/groups/reorder', { group_ids });
   return data;
