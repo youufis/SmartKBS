@@ -26,6 +26,8 @@
   "analyticsKpTop": "Top 15 knowledge points",
   "analyticsKpTable": "Knowledge point stats",
   "analyticsCreatorTable": "Creator stats",
+  "analyticsChipFilterTip": "Click to filter by this value",
+  "analyticsChipClearTip": "Click to clear this filter",
   "analyticsQuality": "Bank info & quality checks",
   "analyticsNoKp": "No KP (allowed)",
   "analyticsKpAllowedHint": "Knowledge points may be free-form or empty and do not have to come from a course. Missing KPs do not affect question usage; use AI tagging only if you want to fill them.",

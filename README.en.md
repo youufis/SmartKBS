@@ -53,6 +53,12 @@
 > **My portrait**
 > - 🖼️ **All three roles can use a portrait as their avatar**, and any portrait (past periods included) can be pinned; staff portraits are as visible as students’
 >
+> **Resource centre and bank analytics** (added in this build)
+> - 🗂️ **One-click grouping for ungrouped resources**: three rules — content type / chapter / section — each with a preview of which groups will be created and how many items they take; only ungrouped files are touched and a group with the same name is reused
+> - 🏷️ **A "Courseware" content type**: AI courseware pages used to fall into the catch-all bucket labelled "Other page", now renamed "Unclassified page"
+> - 📊 **Bank analytics no longer truncate**: per-creator type and subject breakdowns list everything, so a newly added subject is no longer silently dropped; click a chip to filter by it
+> - 🩹 **The "My shares" sort box no longer leaks the raw `unseen`**: the two share tabs stopped overwriting each other's view, sort and page-size preferences
+>
 > **Question bank, UI and deployment**
 > - 🗑️ **Question management**: multi-select bulk delete; a denser list shows about 40% more items per screen
 > - 💻 **Code in question stems** renders as real code blocks, same convention in Word papers and AI-generated quiz pages
@@ -1160,7 +1166,7 @@ Current version **8.9.0**. Only changes a reader can notice are listed; per-comm
 
 **Points and honour system**
 
-- ⚖️ **Scoring re-weighted**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice · code 9/6/3, picks · ladder · discussion 6/4/2); buzzers pay by placing; the ladder pays by ladder score rate; polls, browsing and chat only pay participation
+- ⚖️ **Scoring re-weighted**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice 9/6/3, classroom answers 6/4/2); buzzers pay by placing; the ladder pays by score rate; polls, browsing and chat only pay participation
 - 🧱 **Anti-farming quotas split into pools**: academic 80 / class participation 40 / light activities 30, tunable, 0 = unlimited
 - 🎯 **Every classroom activity awards points**, and the rules now have one source of truth served by the backend — three advertised-vs-actual mismatches fixed in the same pass
 - 🏅 **Titles and badges recalibrated**: twelve thresholds re-cut, six permanently locked badges lit up, subject titles weigh accuracy, locked badges show what is missing
@@ -1171,7 +1177,7 @@ Current version **8.9.0**. Only changes a reader can notice are listed; per-comm
 
 - 📎 **File-submission homework**: upload Word · PDF · spreadsheets · PPT · images, extensions and content both validated; three attempts, only the last graded, lateness flagged only
 - 🤖 **AI grading and publishing**: one long-text call per class returns dimension scores, requirement verdicts, quoted evidence and improvement notes; results stay pending review until the teacher publishes; grading bench with previews, similarity flagging and class-wide archive download
-- 🏁 **Class ladder (big screen)**: 15 levels, safe levels, ends on a wrong answer or timeout; seven skins, one sound switch, leaderboard and full-screen settlement
+- 🏁 **Class ladder (big screen)**: 15 levels, safe levels, ends on a wrong answer or timeout; seven skins, leaderboard and full-screen settlement
 - 🎲 **Unified picking**: four activities share one set of class weights and one ledger keyed by student ID, so two big screens no longer overwrite each other; cross-activity pick records with stats and Excel export
 - 🏠 **Dashboard banner**: teaching scope degrades in three layers so long lists no longer break the card
 
@@ -1186,6 +1192,13 @@ Current version **8.9.0**. Only changes a reader can notice are listed; per-comm
 - 🗑️ **Bulk delete** with per-item skip reasons; 📐 a denser list shows about 40% more items per screen
 - 💻 **Code in questions** renders as real code blocks and collapses into a “code · N lines” badge; Word papers and AI-generated quiz pages follow the same convention
 - 🔧 **Skills on by default**, with a warning when none are in effect; 🧑‍ course and resource panels collapsible and drawer-style on narrow screens
+
+**Resource centre and bank analytics**
+
+- 🗂️ **One-click grouping for ungrouped resources**: a new ⚡ action in the group panel classifies files by content type, chapter (Chapter N) or section (N.M). It previews which groups will be created or reused and how many items each takes, and only writes after you confirm; already grouped files are never touched
+- 🏷️ **A "Courseware" content type**: AI courseware pages are named `{point_id}_{title}_课件.html` and used to fall into the catch-all bucket shown as "Other page"; that bucket is now "Unclassified page" and the sidebar gains a Courseware facet
+- 🩹 **Sort box leaking the raw value `unseen`**: the two share tabs shared one localStorage key, so a sort value from the tab that has a reading-status dimension reached a tab that does not. Preferences are now stored per tab and validated on load
+- 📊 **Creator breakdowns in bank analytics no longer truncate**: types were limited to the top 5 and subjects to the top 3, so the smallest subject — typically a newly added one — vanished while its questions still counted in the total. Both now list everything and act as filters
 
 **Deployment and upgrades**
 

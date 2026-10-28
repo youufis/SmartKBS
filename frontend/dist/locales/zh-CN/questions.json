@@ -26,6 +26,8 @@
   "analyticsKpTop": "高频知识点 Top 15",
   "analyticsKpTable": "知识点统计",
   "analyticsCreatorTable": "创建者统计",
+  "analyticsChipFilterTip": "点击按此条件筛选",
+  "analyticsChipClearTip": "点击取消该筛选",
   "analyticsQuality": "题库信息与质量检查",
   "analyticsNoKp": "未标注知识点（允许）",
   "analyticsKpAllowedHint": "知识点允许自由填写或留空，不要求来自课程；未标注知识点不影响题目使用，需要补充时可使用「AI 补标」。",
