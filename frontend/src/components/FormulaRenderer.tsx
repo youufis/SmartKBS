@@ -14,6 +14,7 @@
  * - 把 \\(\\) / \\[\\] 这种 LaTeX 定界符换成 $ / $$。
  */
 import React from 'react'
+import katex from 'katex'
 import { Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
@@ -21,6 +22,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import type { Components } from 'react-markdown'
+import type { PluggableList } from 'unified'
 
 /**
  * 把 AI 常写的「行内 $$...$$」与 \(\)、\[\] 定界符整理成 remark-math 认得的形式。
@@ -206,24 +208,91 @@ interface FormulaRendererProps {
   breaks?: boolean
 }
 
-const FormulaRenderer: React.FC<FormulaRendererProps> = ({ content, inline = false, components, gfm = true, breaks = false }) => {
-  const normalized = normalizeMath(content || '')
-  const source = breaks ? preserveBreaks(normalized) : normalized
+/**
+ * 下面三组常量必须是模块级：每次 render 新建数组/对象会让 react-markdown 认定
+ * "配置变了"，于是把整棵 Markdown AST 连同 KaTeX 重新解析渲染一遍。
+ * 试题管理一屏 50 行、每行 1-2 个实例，点一个勾选框就要重解析上百篇文档（实测卡 1 秒）。
+ */
+const REHYPE_PLUGINS = [rehypeKatex]
+const REMARK_PLUGINS_GFM: PluggableList = [remarkGfm, remarkMath]
+const REMARK_PLUGINS_MATH: PluggableList = [remarkMath]
+/** 行内模式默认只有 img 覆盖，提到模块级供无自定义 components 的调用方共用 */
+const INLINE_COMPONENTS: Components = {
+  img: ({ src, alt }) => (
+    <img src={src} alt={alt || ''} style={{ maxWidth: 120, maxHeight: 80, verticalAlign: 'middle', margin: '0 4px', borderRadius: 4 }} />
+  ),
+}
+
+/**
+ * 会不会让 Markdown / LaTeX 语义生效？命中任意一条就老老实实走完整管线。
+ * 判据故意偏保守：宁可少走快路径，也不能让题干渲染结果和以前不一样。
+ */
+function needsFullPipeline(src: string): boolean {
+  if (src.includes('\n')) return true                       // 多行：段落 / 列表 / 硬换行交给 markdown
+  if (/[\\`*_~<>|]/.test(src)) return true                 // 转义、代码、强调、原始 HTML、表格分隔
+  if (src.includes('$$')) return true                        // 独立公式块
+  if (/!\[|\[[^\]]*\]\(|https?:\/\/|www\./.test(src)) return true  // 图片 / 链接 / GFM 自动链接
+  if (/^\s*(#{1,6}\s|>|[-+]\s|\d+[.)]\s|=)/.test(src)) return true   // 行首块级标记
+  return false
+}
+
+const INLINE_MATH = /\$([^$\n]+)\$/g
+
+/**
+ * 单行、无块级语法、只含 $...$ 行内公式时，直接逐段 katex.renderToString，
+ * 跳过 unified -> remark -> rehype -> katex 整条管线。
+ * 返回 null 表示"没有公式"，由调用方按纯文本渲染。
+ *
+ * 产出的 DOM 与完整管线一致（同样是 <p> 包 <span class="katex">），
+ * 所以只在没有自定义 components（调用方可能覆盖 p/img 等）时才启用。
+ */
+function renderInlineMathSegments(src: string): React.ReactNode[] | null {
+  if (!src.includes('$')) return null
+  const out: React.ReactNode[] = []
+  let last = 0
+  let hit = false
+  INLINE_MATH.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = INLINE_MATH.exec(src)) !== null) {
+    hit = true
+    if (m.index > last) out.push(src.slice(last, m.index))
+    if (m[1]) {
+      out.push(
+        <span
+          key={`m-${m.index}`}
+          dangerouslySetInnerHTML={{ __html: katex.renderToString(m[1], { throwOnError: false, displayMode: false }) }}
+        />,
+      )
+    }
+    last = m.index + m[0].length
+  }
+  if (!hit) return null
+  if (last < src.length) out.push(src.slice(last))
+  return out
+}
+
+const FormulaRendererInner: React.FC<FormulaRendererProps> = ({ content, inline = false, components, gfm = true, breaks = false }) => {
+  const source = React.useMemo(() => {
+    const normalized = normalizeMath(content || '')
+    return breaks ? preserveBreaks(normalized) : normalized
+  }, [content, breaks])
+
+  // 快路径：题干/选项绝大多数是"单行纯文本"或"单行 + 行内公式"，不值得跑整条 markdown 管线
+  if (source && !components && !needsFullPipeline(source)) {
+    const segs = renderInlineMathSegments(source)
+    if (!segs) return <p>{source}</p>
+    return <p>{segs}</p>
+  }
+
   if (!source) return null
 
   if (inline) {
     // 选项等简短内容：公式 + 图片 + 基本 Markdown
-    const inlineComponents: Components = {
-      // 使图片在行内模式也能正常显示
-      img: ({ src, alt }) => (
-        <img src={src} alt={alt || ''} style={{ maxWidth: 120, maxHeight: 80, verticalAlign: 'middle', margin: '0 4px', borderRadius: 4 }} />
-      ),
-      ...components,
-    }
+    const inlineComponents: Components = components ? { ...INLINE_COMPONENTS, ...components } : INLINE_COMPONENTS
     const segments = splitFences(source)
     if (!segments.some(seg => seg.code)) {
       return (
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={inlineComponents}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS_GFM} rehypePlugins={REHYPE_PLUGINS} components={inlineComponents}>
           {source}
         </ReactMarkdown>
       )
@@ -236,8 +305,8 @@ const FormulaRenderer: React.FC<FormulaRendererProps> = ({ content, inline = fal
           : (
             <ReactMarkdown
               key={`text-${i}`}
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[rehypeKatex]}
+              remarkPlugins={REMARK_PLUGINS_GFM}
+              rehypePlugins={REHYPE_PLUGINS}
               components={inlineComponents}
             >
               {seg.text}
@@ -248,15 +317,19 @@ const FormulaRenderer: React.FC<FormulaRendererProps> = ({ content, inline = fal
   }
 
   // 完整模式：GFM（表格、列表、代码块）+ 公式；调用方自带的 components 优先级更高
+  const merged: Components = components ? { ...codeComponents, ...components } : codeComponents
   return (
     <ReactMarkdown
-      remarkPlugins={gfm ? [remarkGfm, remarkMath] : [remarkMath]}
-      rehypePlugins={[rehypeKatex]}
-      components={{ ...codeComponents, ...components }}
+      remarkPlugins={gfm ? REMARK_PLUGINS_GFM : REMARK_PLUGINS_MATH}
+      rehypePlugins={REHYPE_PLUGINS}
+      components={merged}
     >
       {source}
     </ReactMarkdown>
   )
 }
+
+/** 包一层 memo：表格翻页 / 勾选任意一行都不该把 50 行的公式重解析一遍 */
+const FormulaRenderer = React.memo(FormulaRendererInner)
 
 export default FormulaRenderer

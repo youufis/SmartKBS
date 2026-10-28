@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:https-site": "set VITE_REACT_DEV=1&& tsc -b && vite build"
   },
   "dependencies": {
     "@ant-design/icons": "^6.2.3",

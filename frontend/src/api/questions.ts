@@ -47,8 +47,8 @@ export async function listQuestions(params?: {
   end_date?: string;
   page?: number;
   page_size?: number;
-}): Promise<QuestionListResponse> {
-  const { data } = await apiClient.get('/api/questions', { params });
+}, opts?: { signal?: AbortSignal }): Promise<QuestionListResponse> {
+  const { data } = await apiClient.get('/api/questions', { params, signal: opts?.signal });
   return data;
 }
 

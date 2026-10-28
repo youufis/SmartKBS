@@ -1014,20 +1014,52 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
     )
 
 
+# ── CSV 批量导入：表头与错误码 ──
+IMPORT_COLUMNS = ("username", "password", "name", "gender", "role", "class", "grade", "subjects")
+IMPORT_REQUIRED_COLUMNS = ("username", "password")
+# done 事件回传给前端的错误明细条数上限（前端另有"仅显示前 N 条"的提示）
+IMPORT_ERROR_PREVIEW = 100
+# 进度事件上限：再多就把中间的行合并掉，避免 5000 行发 5000 个 SSE 事件
+IMPORT_PROGRESS_TICKS = 200
+
+IMPORT_ERR_LABELS = {
+    "EMPTY_USERNAME": "username 列为空，该行没有账号可用",
+    "EMPTY_PASSWORD": "password 列为空，新建账号必须有初始密码",
+    "DUPLICATE": "该账号已存在，已跳过（要改信息请到「用户列表」编辑，不要重复导入）",
+    "OUT_OF_SCOPE": "该年级/班级不在您的任教范围内，无权建号",
+    "PREPARE_FAILED": "年级/班级准备失败",
+    "DB_ERROR": "写入数据库失败",
+}
+
+
+def _norm_col(name: Optional[str]) -> str:
+    """表头归一：去掉 BOM、首尾空白、引号、大小写，避免「列名看着对、实际没匹配上」"""
+    return str(name or "").replace("\ufeff", "").strip().strip('"').strip("'").lower()
+
+
 @router.post("/import")
 async def import_users(file: UploadFile = File(...), request: Request = None):  # type: ignore[assignment]
-    """CSV 批量导入用户（流式进度返回）"""
+    """CSV 批量导入用户（流式进度返回）
+
+    2026-10-28 重构，针对"导入失败只知道数量、不知道为什么"：
+    - 表头缺列/带 BOM 直接 400 说清列名，不再把列名没匹配摊成 N 条"用户名或密码为空"；
+    - 每条错误带 code/field/message，同时保留 errors: string[] 兼容老前端；
+    - 出错行也发进度事件（原来 continue 直接跳过了 yield，界面一直显示"已处理 0/N"）；
+    - 年级/班级在事务外建好：原来在写事务里另开连接 INSERT，必撞 WAL 单写者，
+      每行先卡满 30 秒 busy_timeout 再吐一句 database is locked；
+    - 事务整体失败时也会把 done 事件发完（原来流直接断掉，前端只剩"导入中断"）。
+    """
+    current_user = {"username": "", "role": 0}
     if request:
         current_user = get_current_user(request)
         if not can_import_users(current_user["username"]):
             raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以导入用户")
 
-    if not (file.filename or "").endswith(".csv"):
-        raise HTTPException(status_code=400, detail="请上传 CSV 文件")
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="请上传 CSV 文件（.csv）")
 
     content = await file.read()
 
-    # 尝试多种编码
     content_str = None
     for encoding in ["utf-8-sig", "utf-8", "gbk", "gb2312"]:
         try:
@@ -1036,199 +1068,285 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
         except (UnicodeDecodeError, LookupError):
             continue
     if content_str is None:
-        raise HTTPException(status_code=400, detail="无法解析 CSV 文件编码")
+        raise HTTPException(
+            status_code=400,
+            detail="无法识别 CSV 编码。请在 Excel 里「另存为 → CSV UTF-8(逗号分隔) (*.csv)」后重试，或用模板重新导出。",
+        )
 
-    reader = csv.DictReader(io.StringIO(content_str))
-    rows = list(reader)
-    total = len(rows)
+    parsed = list(csv.reader(io.StringIO(content_str)))
+    if not parsed or not any(str(c).strip() for c in parsed[0]):
+        raise HTTPException(status_code=400, detail="CSV 文件没有表头行。表头应为：" + ",".join(IMPORT_COLUMNS))
+    header = [_norm_col(h) for h in parsed[0]]
+    missing = [c for c in IMPORT_REQUIRED_COLUMNS if c not in header]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "CSV 表头缺少必需列：" + "、".join(missing) + "。"
+                "实际读到的表头：" + "、".join(h for h in header if h) + "。"
+                "模板列顺序：" + ",".join(IMPORT_COLUMNS) + "（可点「下载模板」对照）。"
+            ),
+        )
+    unknown_cols = [h for h in header if h and h not in IMPORT_COLUMNS]
+
+    # 整行空白（Excel 常留下的一串逗号）不计为错误行
+    entries: list[tuple[int, list[str]]] = []
+    for row_num, cells in enumerate(parsed[1:], start=2):
+        if any(str(c or "").strip() for c in cells):
+            entries.append((row_num, list(cells)))
+    total = len(entries)
+
+    def _cell(cells: list[str], col: str) -> str:
+        try:
+            idx = header.index(col)
+        except ValueError:
+            return ""
+        if idx >= len(cells) or cells[idx] is None:
+            return ""
+        return str(cells[idx]).strip()
+
+    importer_name = current_user["username"]
+    is_admin_importer = _caller_role(current_user) == 0
+
+    grade_cache: dict[str, int] = {}
+    class_cache: dict[tuple[int, str], int] = {}
+
+    def _ensure_grade(name: str) -> int:
+        if name not in grade_cache:
+            grade_cache[name] = upsert_grade(name)
+        return grade_cache[name]
+
+    def _ensure_class(grade_id: int, raw_name: str) -> int:
+        cls_name = str(raw_name or "").strip()
+        if cls_name and "班" not in cls_name:
+            cls_name = f"{cls_name}班"
+        key = (grade_id, cls_name)
+        if key not in class_cache:
+            class_cache[key] = upsert_class(grade_id, cls_name)
+        return class_cache[key]
+
+    def _plan_row(row_num: int, cells: list[str]) -> tuple[Optional[dict], Optional[tuple[str, str, str, str]]]:
+        """把一行 CSV 变成「可执行计划」。校验、建年级/班级都在这里（事务外），
+        返回 (plan, (code, field, username, extra))，二者只有一个非空。"""
+        username = _cell(cells, "username")
+        password = _cell(cells, "password")
+        if not username:
+            return None, ("EMPTY_USERNAME", "username", "", "")
+        if not password:
+            return None, ("EMPTY_PASSWORD", "password", username, "")
+
+        name_val = _cell(cells, "name")
+        gender_val = _standardize_gender(_cell(cells, "gender") or "0")
+        role_val = _standardize_role(_cell(cells, "role") or "2")
+        grade_val = _cell(cells, "grade")
+        class_val = _normalize_class(_cell(cells, "class"))
+
+        # U-SCOPE: 教师导入不得造出教师/管理员账号
+        clamped = False
+        if not is_admin_importer and role_val != 2:
+            role_val = 2
+            clamped = True
+
+        subjects_str = _cell(cells, "subjects")
+        subject_list = [s.strip() for s in subjects_str.replace("，", ",").split(",") if s.strip()] if subjects_str else []
+        if subject_list:
+            from backend.subject_config import get_subjects
+            valid_subjects = get_subjects()
+            invalid = [s for s in subject_list if s not in valid_subjects]
+            if invalid:
+                valid_str = "、".join(valid_subjects) if valid_subjects else "（未配置）"
+                logger.warning(
+                    f"导入用户 '{username}' 学科 {','.join(invalid)} 不在系统配置 SUBJECTS 中"
+                    f"（当前配置: {valid_str}），已跳过非法学科"
+                )
+                subject_list = [s for s in subject_list if s in valid_subjects]
+
+        plan: dict = {
+            "row": row_num,
+            "username": username,
+            "password": password,
+            "name": name_val,
+            "gender": gender_val,
+            "role": role_val,
+            "grade": grade_val,
+            "class": class_val,
+            "subjects": subject_list,
+            "clamped": clamped,
+            "grade_id": None,
+            "class_id": None,
+            "assignments": [],
+        }
+
+        if not is_admin_importer:
+            first_grade = grade_val.split("|")[0].strip()
+            if not _teacher_can_assign_class(importer_name, first_grade, class_val):
+                return None, ("OUT_OF_SCOPE", "grade/class", username,
+                                 f"年级「{first_grade or '空'}」班级「{class_val or '空'}」")
+
+        if role_val == 2 and grade_val:
+            g_name = grade_val.split("|")[0].strip()   # 学生：单年级单班级
+            gid = _ensure_grade(g_name)
+            plan["grade_id"] = gid
+            if class_val:
+                plan["class_id"] = _ensure_class(gid, class_val)
+        elif role_val == 1 and grade_val:
+            gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
+            for g_name, cls_names in gcm.items():
+                gid = _ensure_grade(g_name)
+                if subject_list:
+                    for subj in subject_list:
+                        if not cls_names:
+                            plan["assignments"].append((gid, None, subj))
+                        else:
+                            for cn in cls_names:
+                                plan["assignments"].append((gid, _ensure_class(gid, cn), subj))
+                else:
+                    if not cls_names:
+                        plan["assignments"].append((gid, None, None))
+                    else:
+                        for cn in cls_names:
+                            plan["assignments"].append((gid, _ensure_class(gid, cn), None))
+        return plan, None
+
+    def _err_item(row_num: int, username: str, code: str, extra: str = "") -> dict:
+        """一条可读的错误：行号 + 账号 + 原因码 + 人话（extra 是具体情形，如班级名、DB 报错原文）"""
+        label = IMPORT_ERR_LABELS.get(code, code)
+        who = (username or "").strip()
+        reason = f"{label}：{str(extra).strip()}" if str(extra or "").strip() else label
+        return {
+            "row": row_num,
+            "username": who,
+            "code": code,
+            "message": reason,
+            "text": (f"第{row_num}行 账号 {who}：{reason}" if who else f"第{row_num}行：{reason}"),
+        }
 
     async def event_generator():
         imported = 0
-        errors = []
-        # U-SCOPE: 记录本次导入者身份与是否管理员(CSV 的 role 列对教师一律降级为学生)
-        importer_name = current_user["username"]
-        is_admin_importer = _caller_role(current_user) == 0
+        error_items: list[dict] = []
+        warnings: list[str] = []
         role_clamped = 0
 
-        # 发送开始事件
         yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
 
-        # 预解析所有年级/班级名称，构建缓存
-        grade_cache: dict[str, int] = {}   # grade_name → grade_id
-        class_cache: dict[tuple[int, str], int] = {}  # (grade_id, class_name) → class_id
-        for row in rows:
-            grade_val = row.get("grade", "").strip()
-            if grade_val:
-                for g_name in grade_val.split("|"):
-                    g_name = g_name.strip()
-                    if g_name and g_name not in grade_cache:
-                        grade_cache[g_name] = upsert_grade(g_name)
-            class_val = row.get("class", "").strip()
-            if class_val:
-                # 解析班级名（可能包含管道分隔）
-                class_groups = [c.strip() for c in class_val.split("|")] if "|" in class_val else [class_val]
-                for cg in class_groups:
-                    for cn in cg.split(","):
-                        cn = cn.strip()
-                        if not cn:
-                            continue
-                        if "班" not in cn:
-                            cn = f"{cn}班"
-                        # 需要知道 grade_id，但这里不好推断...
-                        # 对班级做宽松处理：导入时先按名称创建，grade_id 绑定在事务中处理
+        if total == 0:
+            yield "data: " + json.dumps({
+                'type': 'done', 'imported': 0, 'total': 0, 'role_clamped': 0,
+                'error_count': 0, 'errors': [], 'error_items': [], 'error_codes': [],
+                'truncated': False, 'aborted': False, 'warnings': warnings,
+                'message': "CSV 里除表头外没有数据行，未导入任何账号",
+            }, ensure_ascii=False) + "\n\n"
+            return
 
-        # 在单一事务中执行所有数据库操作
-        with get_transaction() as conn:
-            cursor = conn.cursor()
+        if unknown_cols:
+            warnings.append("CSV 里这些列不在模板中，已忽略：" + "、".join(unknown_cols))
 
-            for row_num, row in enumerate(rows, start=2):
-                try:
-                    username = row.get("username", "").strip()
-                    password = row.get("password", "").strip()
-                    if not username or not password:
-                        errors.append(f"第{row_num}行：用户名或密码为空")
-                        await asyncio.sleep(0)
-                        continue
+        # ① 事务外先把每行解析成计划；年级/班级在这里就建好（此时没有写事务，不会撞锁）
+        rows_ready: list[tuple[int, Optional[dict], Optional[dict]]] = []
+        for row_num, cells in entries:
+            try:
+                plan, err = _plan_row(row_num, cells)
+            except Exception as exc:  # 建年级/班级失败等
+                plan, err = None, ("PREPARE_FAILED", "", (cells[0] if cells else ""), str(exc))
+            if err:
+                error_items.append(_err_item(row_num, err[2], err[0], err[3]))
+            else:
+                assert plan is not None
+                if plan["clamped"]:
+                    role_clamped += 1
+                rows_ready.append((row_num, plan, None))
 
-                    # 检查是否已存在
-                    cursor.execute(
-                        "SELECT username FROM users WHERE username=?", (username,)
-                    )
-                    if cursor.fetchone():
-                        errors.append(f"第{row_num}行：用户 '{username}' 已存在，跳过")
-                        await asyncio.sleep(0)
-                        continue
-
-                    hashed = hash_password(password)
-                    class_val = _normalize_class(row.get("class", "").strip())
-                    name_val = row.get("name", "").strip()
-                    gender_val = _standardize_gender(row.get("gender", "0"))
-                    role_val = _standardize_role(row.get("role", "2"))
-                    grade_val = row.get("grade", "").strip()
-
-                    # U-SCOPE: 教师导入不得造出教师/管理员账号, 且只能建自己任教范围内的学生
-                    if not is_admin_importer:
-                        if role_val != 2:
-                            role_clamped += 1
-                            role_val = 2
-                        first_grade = grade_val.split("|")[0].strip()
-                        if not _teacher_can_assign_class(importer_name, first_grade, class_val):
-                            errors.append(f"第{row_num}行：年级「{first_grade or '空'}」班级「{class_val or '空'}」不在您的任教范围内")
-                            await asyncio.sleep(0)
-                            continue
-
-                    # 解析年级/班级 ID
-                    grade_id = None
-                    class_id = None
-                    if grade_val and role_val == 2:
-                        # 学生：单年级单班级
-                        g_name = grade_val.split("|")[0].strip()  # 取第一个（学生不应有管道）
-                        grade_id = grade_cache.get(g_name) or upsert_grade(g_name)
-                        grade_cache[g_name] = grade_id
-                        if class_val:
-                            cls_name = class_val.strip()
-                            if "班" not in cls_name:
-                                cls_name = f"{cls_name}班"
-                            cache_key = (grade_id, cls_name)
-                            if cache_key not in class_cache:
-                                class_cache[cache_key] = upsert_class(grade_id, cls_name)
-                            class_id = class_cache[cache_key]
-
-                    cursor.execute(
-                        "INSERT INTO users (username, password, class, name, gender, role, grade, grade_id, class_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (username, hashed, class_val, name_val, gender_val, role_val, grade_val, grade_id, class_id),
-                    )
-
-                    # 解析任教学科（CSV 中逗号分隔，如 "信息科技,通用技术"）
-                    subjects_str = row.get("subjects", "").strip()
-                    subject_list = [s.strip() for s in subjects_str.replace("，", ",").split(",") if s.strip()] if subjects_str else []
-                    # 校验学科是否在系统配置中，不在则发出警告
-                    if subject_list:
-                        from backend.subject_config import get_subjects
-                        valid_subjects = get_subjects()
-                        invalid = [s for s in subject_list if s not in valid_subjects]
-                        if invalid:
-                            valid_str = "、".join(valid_subjects) if valid_subjects else "（未配置）"
-                            logger.warning(f"导入用户 '{username}' 学科 {','.join(invalid)} 不在系统配置 SUBJECTS 中（当前配置: {valid_str}），已跳过非法学科")
-                            subject_list = [s for s in subject_list if s in valid_subjects]
-
-                    # 教师：写入 teacher_assignments
-                    if role_val == 1 and grade_val:
-                        gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
-                        for g_name, cls_names in gcm.items():
-                            gid = grade_cache.get(g_name) or upsert_grade(g_name)
-                            grade_cache[g_name] = gid
-                            # 如果有指定学科，为每个学科创建一条记录；否则创建一条无学科记录
-                            if subject_list:
-                                for subj in subject_list:
-                                    if not cls_names:
-                                        cursor.execute(
-                                            "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id, subject) VALUES (?, ?, NULL, ?)",
-                                            (username, gid, subj),
-                                        )
-                                    else:
-                                        for cn in cls_names:
-                                            if "班" not in cn:
-                                                cn = f"{cn}班"
-                                            cache_key = (gid, cn)
-                                            if cache_key not in class_cache:
-                                                class_cache[cache_key] = upsert_class(gid, cn)
-                                            cid = class_cache[cache_key]
-                                            cursor.execute(
-                                                "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id, subject) VALUES (?, ?, ?, ?)",
-                                                (username, gid, cid, subj),
-                                            )
-                            else:
-                                # 未指定学科，保持向后兼容
-                                if not cls_names:
+        # ② 事务内只做 INSERT；错误行同样计入进度（原来错误行 continue 把进度吞了）
+        step = max(1, -(-total // IMPORT_PROGRESS_TICKS))
+        processed = 0
+        aborted = False
+        try:
+            with get_transaction() as conn:
+                cursor = conn.cursor()
+                for row_num, plan, _ in rows_ready:
+                    username = plan["username"]
+                    try:
+                        cursor.execute("SELECT username FROM users WHERE username=?", (username,))
+                        if cursor.fetchone():
+                            error_items.append(_err_item(row_num, username, "DUPLICATE"))
+                        else:
+                            hashed = hash_password(plan["password"])
+                            cursor.execute(
+                                "INSERT INTO users (username, password, class, name, gender, role, grade, grade_id, class_id)"
+                                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                (username, hashed, plan["class"], plan["name"], plan["gender"],
+                                 plan["role"], plan["grade"], plan["grade_id"], plan["class_id"]),
+                            )
+                            for gid, cid, subj in plan["assignments"]:
+                                if subj:
                                     cursor.execute(
-                                        "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, NULL)",
-                                        (username, gid),
+                                        "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id, subject)"
+                                        " VALUES (?, ?, ?, ?)",
+                                        (username, gid, cid, subj),
                                     )
                                 else:
-                                    for cn in cls_names:
-                                        if "班" not in cn:
-                                            cn = f"{cn}班"
-                                        cache_key = (gid, cn)
-                                        if cache_key not in class_cache:
-                                            class_cache[cache_key] = upsert_class(gid, cn)
-                                        cid = class_cache[cache_key]
-                                        cursor.execute(
-                                            "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, ?)",
-                                            (username, gid, cid),
-                                        )
+                                    cursor.execute(
+                                        "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id)"
+                                        " VALUES (?, ?, ?)",
+                                        (username, gid, cid),
+                                    )
+                            imported += 1
+                    except Exception as exc:
+                        error_items.append(_err_item(row_num, username, "DB_ERROR", str(exc)))
+                    processed += 1
+                    if processed % step == 0 or processed >= total:
+                        await asyncio.sleep(0)
+                        yield "data: " + json.dumps({
+                            'type': 'progress',
+                            'current': min(processed, total),
+                            'total': total,
+                            'imported': imported,
+                            'error_count': len(error_items),
+                            'percent': round(min(processed, total) / total * 100, 1),
+                        }, ensure_ascii=False) + "\n\n"
+                processed = total
+        except Exception as exc:  # 事务本身失败 = 全部回滚，也必须把原因告诉前端
+            logger.error(f"批量导入用户事务失败: {exc}", exc_info=True)
+            aborted = True
+            error_items.append(_err_item(0, "", "DB_ERROR", f"整批写入失败，本次已导入的 {imported} 个账号全部回滚：{exc}"))
+            imported = 0
+            processed = total
 
-                    imported += 1
-                except Exception as e:
-                    errors.append(f"第{row_num}行：{str(e)}")
-
-                # 每处理一行发送一次进度
-                progress_data = {
-                    'type': 'progress',
-                    'current': row_num - 1,
-                    'total': total,
-                    'imported': imported,
-                    'error_count': len(errors),
-                    'percent': round((row_num - 1) / total * 100, 1),
-                }
-                yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
-
-        # 事务在此自动提交，所有插入一次性写入磁盘
-
-        # 发送完成事件
-        logger.info(f"批量导入用户: imported={imported}, errors={len(errors)}")
+        # ③ 完成事件：明细 + 按原因汇总，并说明是否被截断
+        error_items.sort(key=lambda it: it["row"])
+        by_code: dict[str, int] = {}
+        for it in error_items:
+            by_code[it["code"]] = by_code.get(it["code"], 0) + 1
+        error_codes = [
+            {"code": c, "label": IMPORT_ERR_LABELS.get(c, c), "count": n}
+            for c, n in sorted(by_code.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        shown = error_items[:IMPORT_ERROR_PREVIEW]
+        truncated = len(error_items) > len(shown)
         if role_clamped:
-            errors.append(f"注：{role_clamped} 行的 role 列被降级为学生（教师账号无权创建教师/管理员）")
-        done_msg = f"成功导入 {imported} 个用户，{len(errors)} 个错误"
-        done_data = {
+            warnings.append(f"{role_clamped} 行的 role 列被降级为学生（教师账号无权创建教师/管理员）")
+        done_msg = f"成功导入 {imported} 个用户，{len(error_items)} 个错误"
+        if truncated:
+            done_msg += f"（明细回传前 {len(shown)} 条）"
+        if aborted:
+            done_msg = "导入失败，本次未写入任何账号：" + str(error_items[-1]["message"] if error_items else "事务回滚")
+
+        logger.info(f"批量导入用户: imported={imported}, errors={len(error_items)}, aborted={aborted}")
+        yield "data: " + json.dumps({
             'type': 'done',
             'imported': imported,
+            'total': total,
             'role_clamped': role_clamped,
-            'error_count': len(errors),
-            'errors': errors[:50],
+            'error_count': len(error_items),
+            'errors': [it["text"] for it in shown],
+            'error_items': shown,
+            'error_codes': error_codes,
+            'truncated': truncated,
+            'error_preview_limit': IMPORT_ERROR_PREVIEW,
+            'aborted': aborted,
+            'warnings': warnings,
             'message': done_msg,
-        }
-        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+        }, ensure_ascii=False) + "\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

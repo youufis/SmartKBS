@@ -4,9 +4,17 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   define: {
-    // TLDraw v5 在生产模式下检查 license key，HTTPS 下判定为非开发环境
-    // 覆写 NODE_ENV 为 development 让 TLDraw 始终以开发模式运行，跳过 license 强制验证
-    'process.env.NODE_ENV': JSON.stringify('development'),
+    // 【为什么这里要动 NODE_ENV】
+    // TLDraw v5 的 LicenseManager.getIsDevelopment() = 「页面协议不是 https:」或「localhost」或「NODE_ENV != production」。
+    // 早年为了跳过白板 license 校验，这里把 NODE_ENV 全局钉成 development，
+    // 代价是打进产物的 React / antd / rc-* 全变成**开发版**，渲染慢 3~5 倍
+    //（实测：试题管理翻页阻塞主线程 4.0s → 1.2s，勾选一行 1.0s → 85ms）。
+    //
+    // 现在的默认值：production（React 生产构建）。
+    // 桌面版和 http 内网部署靠"协议非 https:"就走 TLDraw 的 development 分支，白板不受影响。
+    // 只有「公网 HTTPS 站点 + 教学白板」需要旧的无 license 行为：
+    //   npm run build:https-site   ← 只有这条命令会把 React 退回 development 模式
+    'process.env.NODE_ENV': JSON.stringify(process.env.VITE_REACT_DEV === '1' ? 'development' : 'production'),
   },
   build: {
     target: 'es2015',

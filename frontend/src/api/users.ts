@@ -191,6 +191,22 @@ export async function importUsers(file: File): Promise<{ message: string; import
 }
 
 /** 流式导入用户（支持进度回调） */
+/** 单条导入错误：行号 + 账号 + 原因码 + 人话 */
+export interface ImportErrorItem {
+  row: number;
+  username?: string;
+  code: string;
+  message: string;
+  /** 后端拼好的整句（第 N 行 账号 xxx：原因），前端可直接展示 */
+  text?: string;
+}
+
+export interface ImportErrorCode {
+  code: string;
+  label: string;
+  count: number;
+}
+
 export interface ImportProgressEvent {
   type: 'start' | 'progress' | 'done';
   total?: number;
@@ -199,6 +215,16 @@ export interface ImportProgressEvent {
   error_count?: number;
   percent?: number;
   errors?: string[];
+  /** 结构化错误明细（done 事件，最多回传前 100 条） */
+  error_items?: ImportErrorItem[];
+  /** 按原因码汇总，用于"8 行重复 / 3 行缺密码"这类总览 */
+  error_codes?: ImportErrorCode[];
+  /** 错误总数是否超过回传上限 */
+  truncated?: boolean;
+  error_preview_limit?: number;
+  /** 整批回滚：本次一个账号都没写进去 */
+  aborted?: boolean;
+  warnings?: string[];
   message?: string;
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image,
@@ -61,6 +61,14 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   hard: 'red',
 }
 
+/**
+ * 单元格更新判据：只有这一行的数据对象换了才重渲染。
+ * 勾选、开关弹窗、改筛选输入框这类纯本地状态变化，原本会把 50 行 × 8 列的
+ * render（Tooltip / Tag / Button / Popconfirm / 公式渲染）全部重算一遍 ——
+ * 实测点一个复选框阻塞主线程约 1.1 秒，加这条后回到几十毫秒。
+ */
+const CELL_UPDATE = (record: QuestionInfo, prevRecord: QuestionInfo) => record !== prevRecord
+
 const DIFFICULTY_LABELS: Record<string, string> = {
   easy: 'easy',
   medium: 'medium',
@@ -69,6 +77,59 @@ const DIFFICULTY_LABELS: Record<string, string> = {
 
 let subjectOptions: string[] = []
 
+/** 列表筛选条件（同时是 URL 下钻参数的载体，见 filtersFromQuery） */
+interface QBFilters {
+  type?: string
+  difficulty?: string
+  subject?: string
+  creator?: string
+  knowledge_points?: string
+  keyword?: string
+  start_date?: string
+  end_date?: string
+}
+
+const FILTER_KEYS: (keyof QBFilters)[] = [
+  'type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'keyword', 'start_date', 'end_date',
+]
+
+/** 支持从统计页下钻：/question-bank?type=...&creator=...&keyword=... */
+function filtersFromQuery(qs: string): QBFilters {
+  const params = new URLSearchParams(qs)
+  const next: QBFilters = {}
+  for (const key of FILTER_KEYS) {
+    const val = params.get(key)
+    if (val) (next as Record<string, string>)[key] = val
+  }
+  return next
+}
+
+/** 内容相同就复用旧对象：filters 是 loadQuestions 的依赖，引用一变就会多发一次请求 */
+function sameFilters(a: QBFilters, b: QBFilters): boolean {
+  for (const key of FILTER_KEYS) {
+    if ((a[key] || undefined) !== (b[key] || undefined)) return false
+  }
+  return true
+}
+
+/** 日期区间同样要"值相等即复用"，否则每次 effect 都产生新数组、连累 dateRange 相关渲染 */
+function sameRange(
+  a: [Dayjs | null, Dayjs | null] | null,
+  b: [Dayjs | null, Dayjs | null] | null,
+): boolean {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return String(a[0]?.valueOf()) === String(b[0]?.valueOf()) && String(a[1]?.valueOf()) === String(b[1]?.valueOf())
+}
+
+function rangeFromQuery(qs: string): [Dayjs | null, Dayjs | null] | null {
+  const params = new URLSearchParams(qs)
+  const sd = params.get('start_date')
+  const ed = params.get('end_date')
+  if (!sd && !ed) return null
+  return [sd ? dayjs(sd) : null, ed ? dayjs(ed) : null]
+}
+
 const QuestionBankPage: React.FC = () => {
   const { t } = useTranslation('questions')
   const { t: tc } = useTranslation('common')
@@ -76,6 +137,8 @@ const QuestionBankPage: React.FC = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryString = searchParams.toString()
+  const queryFilters = useMemo(() => filtersFromQuery(queryString), [queryString])
+  const queryRange = useMemo(() => rangeFromQuery(queryString), [queryString])
 
   // 从后端加载课程列表
   useEffect(() => {
@@ -86,28 +149,6 @@ const QuestionBankPage: React.FC = () => {
     }).catch((err) => { reportLoadError(err, { key: 'questionBank.subjects' }) })
   }, [])
 
-  // 创建者筛选项（与统计页共用同一份元数据）
-  useEffect(() => {
-    questionsApi.getQuestionAnalyticsMeta()
-      .then((meta) => setCreatorOptions(meta.creators || []))
-      .catch(() => setCreatorOptions([]))
-  }, [])
-
-  // 支持从统计页下钻：/question-bank?type=...&creator=...&keyword=...
-  useEffect(() => {
-    const params = new URLSearchParams(queryString)
-    const next: any = {}
-    for (const key of ['type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'keyword', 'start_date', 'end_date']) {
-      const val = params.get(key)
-      if (val) next[key] = val
-    }
-    setFilters(next)
-    setKeywordInput(next.keyword || '')
-    const sd = params.get('start_date')
-    const ed = params.get('end_date')
-    setDateRange(sd || ed ? [sd ? dayjs(sd) : null, ed ? dayjs(ed) : null] : null)
-    setPage(1)
-  }, [queryString])
   // ── 生成试题表单 ──
   const [generateForm] = Form.useForm()
   // 知识点候选由共用控件从课程树拉取（含模块级缓存），此处只负责按学科过滤
@@ -135,19 +176,18 @@ const QuestionBankPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
-  const [filters, setFilters] = useState<{
-    type?: string
-    keyword?: string
-    difficulty?: string
-    subject?: string
-    creator?: string
-    knowledge_points?: string
-    start_date?: string
-    end_date?: string
-  }>({})
-  const [keywordInput, setKeywordInput] = useState('')
-  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
+  const [filters, setFilters] = useState<QBFilters>(() => filtersFromQuery(queryString))
+  const [keywordInput, setKeywordInput] = useState(() => filtersFromQuery(queryString).keyword || '')
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(() => rangeFromQuery(queryString))
   const [creatorOptions, setCreatorOptions] = useState<{ username: string; name: string }[]>([])
+
+  // 创建者筛选项（与统计页共用同一份元数据）
+  useEffect(() => {
+    questionsApi.getQuestionAnalyticsMeta()
+      .then((meta) => setCreatorOptions(meta.creators || []))
+      .catch(() => setCreatorOptions([]))
+  }, [])
+
   // 多选批量删除：只作用于当前页可见行（翻页后自动剔除不可见 id，见下方 effect）
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [batchDeleting, setBatchDeleting] = useState(false)
@@ -162,23 +202,41 @@ const QuestionBankPage: React.FC = () => {
   const [optionEntries, setOptionEntries] = useState<{ key: string; value: string }[]>([])
   const [showFormulaHelp, setShowFormulaHelp] = useState(false)
 
+  // URL 参数 -> 筛选条件。两个 setter 都做了"值没变就保留原引用"，
+  // 避免挂载时 filters 被换成等价的新对象后 loadQuestions 重建、同一页数据再拉一遍
+  useEffect(() => {
+    setFilters(prev => (sameFilters(prev, queryFilters) ? prev : queryFilters))
+    setKeywordInput(queryFilters.keyword || '')
+    setDateRange(prev => (sameRange(prev, queryRange) ? prev : queryRange))
+    setPage(1)
+  }, [queryFilters, queryRange])
+
   // ── 加载题库列表 ──
+  // 翻页/筛选连点时，旧请求的结果一律作废：否则慢的那次会把新页数据盖掉
+  const reqSeqRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
+
   const loadQuestions = useCallback(async () => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    const seq = ++reqSeqRef.current
     setLoading(true)
     try {
-      const res = await questionsApi.listQuestions({
-        ...filters,
-        page,
-        page_size: pageSize,
-      })
+      const res = await questionsApi.listQuestions(
+        { ...filters, page, page_size: pageSize },
+        { signal: ctrl.signal },
+      )
+      if (seq !== reqSeqRef.current) return
       setQuestions(res.questions)
       setTotal(res.total)
     } catch (err: any) {
+      if (ctrl.signal.aborted || err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return
       message.error(err?.response?.data?.detail || t('loadFailed'))
     } finally {
-      setLoading(false)
+      if (seq === reqSeqRef.current) setLoading(false)
     }
-  }, [filters, page, pageSize])
+  }, [filters, page, pageSize, t])
 
   useEffect(() => {
     loadQuestions()
@@ -649,7 +707,7 @@ const QuestionBankPage: React.FC = () => {
   }
 
   // ── 表格列定义 ──
-  const columns = [
+  const rawColumns = [
     {
       title: 'ID',
       dataIndex: 'id',
@@ -810,6 +868,9 @@ const QuestionBankPage: React.FC = () => {
       },
     },
   ]
+
+  // 见 CELL_UPDATE 注释：统一挂到每一列上
+  const columns = rawColumns.map((col) => ({ ...col, shouldCellUpdate: CELL_UPDATE }))
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>

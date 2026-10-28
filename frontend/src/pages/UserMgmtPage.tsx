@@ -10,7 +10,7 @@ import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseO
 import * as usersApi from '../api/users'
 import type { UserItem } from '../types'
 import type {
-  ImportProgressEvent, BulkDeleteProgressEvent, BulkMatchMode,
+  ImportProgressEvent, ImportErrorItem, ImportErrorCode, BulkDeleteProgressEvent, BulkMatchMode,
   GradePromotionPreview, GradePromotionResult,
 } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
@@ -561,6 +561,12 @@ const UserMgmtPage: React.FC = () => {
     imported: number
     errorCount: number
     errors: string[]
+    /** 结构化明细 + 汇总：后端一次回传前 100 条，超出部分用 errorCount 说明 */
+    errorItems: ImportErrorItem[]
+    errorCodes: ImportErrorCode[]
+    truncated: boolean
+    aborted: boolean
+    warnings: string[]
     message: string
     done: boolean
   }>({
@@ -571,6 +577,11 @@ const UserMgmtPage: React.FC = () => {
     imported: 0,
     errorCount: 0,
     errors: [],
+    errorItems: [],
+    errorCodes: [],
+    truncated: false,
+    aborted: false,
+    warnings: [],
     message: '',
     done: false,
   })
@@ -584,6 +595,11 @@ const UserMgmtPage: React.FC = () => {
       imported: 0,
       errorCount: 0,
       errors: [],
+      errorItems: [],
+      errorCodes: [],
+      truncated: false,
+      aborted: false,
+      warnings: [],
       message: t('parsingFile'),
       done: false,
     })
@@ -607,13 +623,18 @@ const UserMgmtPage: React.FC = () => {
             message: t('importingProgress', { current: event.current, total: event.total }),
           }))
         } else if (event.type === 'done') {
-          const errList = event.errors || []
           setImportProgress(prev => ({
             ...prev,
             percent: 100,
+            current: event.total ?? prev.total,
             imported: event.imported || 0,
             errorCount: event.error_count || 0,
-            errors: errList,
+            errors: event.errors || [],
+            errorItems: event.error_items || [],
+            errorCodes: event.error_codes || [],
+            truncated: !!event.truncated,
+            aborted: !!event.aborted,
+            warnings: event.warnings || [],
             message: event.message || t('importDone'),
             done: true,
           }))
@@ -928,11 +949,39 @@ const UserMgmtPage: React.FC = () => {
                     ｜ {t('failed')} {importProgress.errorCount}
                   </Typography.Text>
                 )}
+                {importProgress.errorCodes.length > 0 && (
+                  <div>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('importErrSummary')}：</Typography.Text>
+                    <Space wrap size={4} style={{ marginTop: 4 }}>
+                      {importProgress.errorCodes.map(c => (
+                        <Tag key={c.code} color="red" title={c.label}>{c.label} × {c.count}</Tag>
+                      ))}
+                    </Space>
+                  </div>
+                )}
                 {importProgress.errors.length > 0 && (
                   <div style={{ maxHeight: 200, overflow: 'auto', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4, padding: '8px 12px' }}>
                     <Typography.Text type="danger" strong>{t('errorDetails')}:</Typography.Text>
                     {importProgress.errors.map((err, i) => (
                       <Typography.Text key={i} type="danger" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{err}</Typography.Text>
+                    ))}
+                    {importProgress.truncated && (
+                      <Typography.Text type="warning" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                        {t('importTruncated', { count: importProgress.errorCount, shown: importProgress.errors.length })}
+                      </Typography.Text>
+                    )}
+                  </div>
+                )}
+                {importProgress.aborted && (
+                  <Typography.Text type="danger" strong style={{ display: 'block' }}>
+                    <CloseCircleOutlined /> {t('importFailed')}
+                  </Typography.Text>
+                )}
+                {importProgress.warnings.length > 0 && (
+                  <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4, padding: '8px 12px' }}>
+                    <Typography.Text type="warning" strong>{t('importWarnings')}:</Typography.Text>
+                    {importProgress.warnings.map((w, i) => (
+                      <Typography.Text key={i} type="warning" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{w}</Typography.Text>
                     ))}
                   </div>
                 )}
