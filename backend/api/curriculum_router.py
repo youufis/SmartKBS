@@ -21,6 +21,7 @@ from backend.database import (
 )
 from backend.question_db import execute_query as q_execute_query
 from backend import resource_registry as rr
+from backend import resource_kind
 from backend.question_media import (SOURCE_BANK, ensure_media_dir, normalize_media_files)
 from backend.svg_safety import is_usable_svg, sanitize_svg
 from backend.api.config_router import get_config_value
@@ -1971,7 +1972,8 @@ def _fetch_candidates(spec, username: str, admin_all: bool) -> list[dict[str, An
     for alias, col in (("subject", spec.subject_col), ("grade", spec.grade_col),
                        ("classes", spec.class_col), ("scope", spec.scope_col),
                        ("status", spec.status_col), ("created_at", spec.created_col),
-                       ("source", spec.source_col), ("kp_text", spec.kp_col)):
+                       ("source", spec.source_col), ("kp_text", spec.kp_col),
+                       ("path", spec.path_col)):
         if col:
             sel.append(f"{col} AS {alias}")
     for alias, expr in spec.meta_exprs:
@@ -2106,6 +2108,12 @@ async def list_bindable_candidates(
     truncated: dict[str, bool] = {}
     for spec in specs:
         rows = _fetch_candidates(spec, username, admin_all)
+        # 内容类型这一维只有文件类资源有：先按物理路径批量取显式标注，再逐条回落文件名推断
+        _file_like = bool(spec.path_col)
+        _kind_marks = resource_kind.marks_for(
+            resource_kind.canon_path(str(r.get("owner") or ""), str(r.get("path") or ""), spec.key)
+            for r in rows
+        ) if _file_like else {}
         totals[spec.key] = _count_candidates(spec, username, admin_all)
         truncated[spec.key] = totals[spec.key] > len(rows)
         bound = _binding_index(spec.key, kp_id)
@@ -2131,7 +2139,10 @@ async def list_bindable_candidates(
                 "created_at": str(row.get("created_at") or ""),
                 "source": str(row.get("source") or ""),
                 "kp_text": str(row.get("kp_text") or ""),
-                "sub_kind": rr.sub_kind_of(name) if spec.key in ("html", "download") else "",
+                "sub_kind": resource_kind.resolve(
+                    resource_kind.canon_path(str(row.get("owner") or ""),
+                                             str(row.get("path") or ""), spec.key),
+                    name, _kind_marks) if _file_like else "",
                 "kp_match": _kp_match(spec, row, name, ctx),
                 "bound_here": here,
                 "bound_other": other,

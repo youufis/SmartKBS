@@ -8,6 +8,7 @@
  *   1) icon 名 → 图标组件的映射；2) 接口没回来时的兜底清单；3) 展示名清洗。
  */
 import React from 'react'
+import { resourceKindLabel } from '../constants/resourceKinds'
 import {
   CheckCircleOutlined, DownloadOutlined, FileTextOutlined, FormOutlined,
   PlayCircleOutlined, QuestionCircleOutlined, ScheduleOutlined, TeamOutlined,
@@ -101,7 +102,10 @@ export const SUB_KIND_KEYS: Record<string, string> = {
 
 export function subKindLabel(t: (key: string) => string, kind: string): string {
   const k = SUB_KIND_KEYS[kind]
-  return k ? t(k) : kind
+  if (!k) return resourceKindLabel(kind)
+  const label = t(k)
+  // 语言包缺这一条时 t() 会原样返回键名：改用后端标签，界面上永远不该出现 subKind.xxx
+  return label === k ? resourceKindLabel(kind) : label
 }
 
 /**

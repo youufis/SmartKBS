@@ -1367,6 +1367,18 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # 资源内容类型标注（v8.9 C 档）：网页资源没有主数据表（列表是磁盘扫描出来的），
+            # 所以单独存一份显式标注。键是相对项目根的 POSIX 物理路径（本身已含属主目录，
+            # 如 root/html/x.html），同一个物理文件被多人共享也只有一份内容类型。
+            # set_by：manual(人工) > ai(AI 补标) > rule(生成时写入)，见 backend/resource_kind.py。
+            c.execute("""CREATE TABLE IF NOT EXISTS resource_kind_marks (
+                file_path TEXT PRIMARY KEY,
+                sub_kind TEXT NOT NULL,
+                set_by TEXT NOT NULL DEFAULT 'manual',
+                set_by_user TEXT DEFAULT '',
+                updated_at TEXT NOT NULL
+            )""")
+
             # ═══════════════════════════════════════════════
             # 资源查看日志表（v6.7）
             # ═══════════════════════════════════════════════
