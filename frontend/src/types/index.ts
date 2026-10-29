@@ -94,6 +94,10 @@ export interface ResourceFile {
   url_path?: string;
   size: number;
   display_name: string;
+  /** 内容类型（课件/动画讲解/…）：显式标注优先，其次后端按文件名推断 */
+  sub_kind?: string;
+  /** manual=人工标的（可撤销）；ai/rule=系统标的；空=没有标注 */
+  sub_kind_set_by?: string;
 }
 
 // 任务信息

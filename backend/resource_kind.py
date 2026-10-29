@@ -21,10 +21,13 @@
 """
 from __future__ import annotations
 
+import os
+import re
+import sqlite3
 import time
 from typing import Iterable
 
-from backend.config import STU_DIR
+from backend.config import BASE_DIR, STU_DIR
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
 from backend.resource_registry import SUBKIND_LABELS, sub_kind_of
@@ -59,8 +62,63 @@ def valid_kind(kind: object) -> bool:
     return str(kind or "") in SUBKIND_LABELS
 
 
+def norm_path(path: object) -> str:
+    # 任意写法（绝对 / 相对项目根 / 相对 html 目录 / 带前导斜杠）-> 相对项目根的 POSIX 路径
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    is_abs_win = bool(re.match(r"^[A-Za-z]:[/\\]", raw))
+    if raw.startswith("/") and "://" not in raw and not is_abs_win:
+        raw = raw.lstrip("/")           # 前端偶尔会带个前导斜杠
+    if os.path.isabs(raw) or is_abs_win:
+        try:
+            return os.path.relpath(os.path.normpath(raw), str(BASE_DIR)).replace("\\", "/")
+        except ValueError:              # 跨盘符无法相对化：原样收敛分隔符
+            return raw.replace("\\", "/")
+    return raw.replace("\\", "/").lstrip("/")
+
+
+def mark_file(path: object, sub_kind: str, set_by: str = "manual", by_user: str = "") -> bool:
+    # 按任意写法的路径写标注（产物落盘后调用，不用调用方自己算相对路径）
+    return set_mark(norm_path(path), sub_kind, set_by, by_user)
+
+
+def remap_mark(old_path: object, new_path: object) -> int:
+    # 文件/目录改名后把标注搬过去 —— 这正是「落盘即定类」的价值：改名不掉标。
+    # 先读出来、删干净、再按新路径写回：比在 SQL 里做子树字符串拼接更好核对。
+    old, new = norm_path(old_path), norm_path(new_path)
+    if not old or not new or old == new:
+        return 0
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            rows = cur.execute(
+                "SELECT file_path, sub_kind, set_by, set_by_user FROM resource_kind_marks "
+                "WHERE file_path=? OR file_path LIKE ?", (old, old + "/%"),
+            ).fetchall()
+            if not rows:
+                return 0
+            cur.execute("DELETE FROM resource_kind_marks WHERE file_path=? OR file_path LIKE ?",
+                        (old, old + "/%"))
+            moved = 0
+            for fp, kind, set_by, by_user in rows:
+                target = new if fp == old else new + fp[len(old):]
+                cur.execute(
+                    "INSERT OR REPLACE INTO resource_kind_marks "
+                    "(file_path, sub_kind, set_by, set_by_user, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    (target, kind, set_by or "manual", by_user or "", now),
+                )
+                moved += 1
+            conn.commit()
+        return moved
+    except Exception as e:
+        logger.warning(f"搬迁资源内容类型标注失败 ({old} -> {new}): {e}")
+        return 0
+
+
 def marks_for(paths: Iterable[str]) -> dict[str, tuple[str, str]]:
-    """批量取显式标注：物理路径 -> (sub_kind, set_by)。一次查完，不做 N+1。"""
+    # 批量取显式标注：物理路径 -> (sub_kind, set_by)。一次查完，不做 N+1。
     want = {str(p or "").replace("\\", "/") for p in paths if p}
     if not want:
         return {}
@@ -138,6 +196,25 @@ def clear_mark(path: str) -> int:
         logger.warning(f"撤销资源内容类型标注失败 ({key}): {e}")
         return 0
 
+
+
+def purge_mark(path: object) -> int:
+    # 删文件/删目录时清掉标注（含整棵子树），不留指向已删资源的脏记录
+    key = norm_path(path)
+    if not key:
+        return 0
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            n = cur.execute(
+                "DELETE FROM resource_kind_marks WHERE file_path=? OR file_path LIKE ?",
+                (key, key + "/%"),
+            ).rowcount
+            conn.commit()
+        return n
+    except Exception as e:
+        logger.warning(f"清理资源内容类型标注失败 ({key}): {e}")
+        return 0
 
 def label(kind: str) -> str:
     """小类的中文兜底标签（未知值原样返回，绝不返回键路径）。"""
