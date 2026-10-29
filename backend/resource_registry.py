@@ -155,7 +155,11 @@ HTML_SUBKINDS: tuple[tuple[str, str], ...] = (
     ("_课件", "courseware"),
     ("_动画讲解", "animation"),
     ("_互动答题", "quiz"),
-    ("_练习", "practice"),
+    # 「练习题」必须先于「_练习」判：前者字面包含后者，顺序反了会把不计分的练习页
+    # 全部错认成计分的课程练习。这里不带下划线，是因为教师自己上传的那批就叫
+    # 「1.1走进技术世界练习题」（标题后直接接练习题），带下划线会漏掉一整组。
+    ("练习题", "chapter_practice"),
+    ("_练习", "course_practice"),
     ("_播客", "podcast"),
     ("_实验交互", "interactive"),
     ("_自定义", "custom"),
@@ -200,7 +204,11 @@ SUBKIND_LABELS: dict[str, str] = {
     "courseware": "课件",
     "animation": "动画讲解",
     "quiz": "互动答题",
-    "practice": "章节练习",
+    # 两类练习长得几乎一样，差别只在「会不会留成绩」：
+    #   course_practice  = 知识点 AI 练习（{知识点id}_{名}_{时间}_练习.html），答题记录成绩与分数
+    #   chapter_practice = AI 生成的练习页（{标题}_练习题.html），学生做完不留成绩
+    "course_practice": "课程练习",
+    "chapter_practice": "章节练习",
     "podcast": "播客",
     "interactive": "实验交互",
     "custom": "自定义页面",

@@ -2204,9 +2204,11 @@ async def ai_generate_async(request: Request):
                     "registered": _register_own_html(username),
                 }
 
-            # 落盘即定类：这条链路知道 gen_type，直接写标注，之后改名也不掉标
-            if resource_kind.valid_kind(gen_type):
-                resource_kind.mark_file(rel_path, gen_type, "rule", username)
+            # 落盘即定类：这条链路知道 gen_type，直接写标注，之后改名也不掉标。
+            # 只有 practice 要改名 —— 生成器的「练习题」页不留成绩，和知识点的课程练习不是一回事。
+            _sub_kind = {"practice": "chapter_practice"}.get(gen_type, gen_type)
+            if resource_kind.valid_kind(_sub_kind):
+                resource_kind.mark_file(rel_path, _sub_kind, "rule", username)
 
             # ── 阶段3: 配图增强（如果启用）──
             media_count = 0
