@@ -32,7 +32,7 @@ import { getFileKind } from '../utils/fileKind'
 import { compactClassScope } from '../utils/classScope'
 import {
   FALLBACK_RESOURCE_TYPES, prettyResourceName, resourceIcon, resourceTypeLabel,
-  sourceBadgeLabel, sourceLabel, subKindLabel,
+  SUB_KIND_KEYS, sourceBadgeLabel, sourceLabel, subKindLabel,
 } from '../utils/resourceType'
 
 const { Text } = Typography
@@ -229,12 +229,16 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [searched])
 
-  const kindLabel = useCallback((v: string) => (
-    v === 'practice' || v === 'animation' || v === 'quiz' || v === 'podcast'
-      || v === 'interactive' || v === 'custom' || v === 'other'
-      ? subKindLabel(t, v)
-      : tm(`kind.${v}`)
-  ), [t, tm])
+  /** 内容类型文案：网页资源的小类走 curriculum:subKind.*，其余大类（文件扩展名、
+   *  题库 / 作业 …）走 menu:kind.*。判定必须跟着 SUB_KIND_KEYS 这张表走 ——
+   *  以前是把小类名硬列在这里，新加一个 courseware 就漏了，界面直接显示裸键
+   *  "kind.courseware"；两级文案都查不到时退回原始值，至少不丢键路径给人看。 */
+  const kindLabel = useCallback((v: string) => {
+    if (SUB_KIND_KEYS[v]) return subKindLabel(t, v)
+    const key = `kind.${v}`
+    const label = tm(key)
+    return label === key ? v : label
+  }, [t, tm])
 
   const statusLabel = useCallback((v: string) => {
     const map: Record<string, string> = {

@@ -143,6 +143,11 @@ SHELF_KEYS: tuple[str, ...] = tuple(
 GROUP_ORDER: tuple[str, ...] = ("courseware", "practice", "assessment", "interaction")
 
 # 网页课件的内容小类：AI 产物文件名后缀 → 小类键（与 resources_router 的 type_labels 同口径）
+# ⚠️ 新增一个小类要同时改四处，少一处界面上就会露出裸键（历史上 courseware 就漏了后两处）：
+#   1) 这里加后缀映射
+#   2) frontend/src/utils/resourceType.tsx 的 SUB_KIND_KEYS
+#   3) frontend/public/locales/{zh-CN,en}/curriculum.json 的 "subKind.<键>"
+#   4) 若要进「自动归类」，再加 backend/api/resources_router.py 的 _SUBKIND_GROUP_NAMES
 # 「_课件」排在最前：它是 AI 课件产物的固定后缀（{知识点id}_{知识点名}_课件.html），
 # 而知识点名本身可能带「练习」等字样，先判它才不会把课件错认成章节练习。
 HTML_SUBKINDS: tuple[tuple[str, str], ...] = (
