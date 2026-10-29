@@ -141,6 +141,24 @@ def marks_for(paths: Iterable[str]) -> dict[str, tuple[str, str]]:
     return out
 
 
+def marks_under(prefix: str) -> dict[str, tuple[str, str]]:
+    # 整批取某个目录下的标注（资源管理树一次扫几十个文件，不能逐个查）
+    root = norm_path(prefix).rstrip("/")
+    if not root:
+        return {}
+    try:
+        return {
+            str(fp or "").replace("\\", "/"): (str(kind), str(set_by or "manual"))
+            for fp, kind, set_by in execute_query(
+                "SELECT file_path, sub_kind, set_by FROM resource_kind_marks WHERE file_path LIKE ?",
+                (root + "/%",),
+            ) or [] if valid_kind(kind)
+        }
+    except Exception as e:
+        logger.warning(f"读取资源内容类型标注失败（本请求退回文件名推断）: {e}")
+        return {}
+
+
 def resolve(path: str, name: object, marks: dict[str, tuple[str, str]] | None = None) -> str:
     """一条资源的内容类型：显式标注优先，其次按文件名推断。"""
     key = str(path or "").replace("\\", "/")

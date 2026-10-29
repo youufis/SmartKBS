@@ -1049,6 +1049,8 @@ def _build_share_items(rows, username: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for r in rows:
         _rid = int(r[0] or 0)
+        _phys = _html_phys.get(_rid, "")
+        _mark = _kind_marks.get(_phys)
         items.append({
             "id": r[0],
             "owner_username": r[1],
@@ -1077,8 +1079,10 @@ def _build_share_items(rows, username: str) -> list[dict[str, Any]]:
             "total_size": (dir_map.get(_rid) or {}).get("total_size", 0),
             # 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径，
             # 卡片不再只显示笼统的"网页课件"
-            "sub_kind": resource_kind.resolve(_html_phys[_rid], r[3], _kind_marks)
-                        if _rid in _html_phys else "",
+            # 内容类型 + 标注键 + 是谁标的：前端据此决定标签能不能点、要不要给「撤销标注」
+            "sub_kind": (_mark[0] if _mark else (rr.sub_kind_of(r[3]) if _phys else "")),
+            "kind_path": _phys,
+            "kind_set_by": _mark[1] if _mark else "",
             # 同一物理文件被多人各共享一次时的合并信息（「再共享」会产生这种行）
             "share_count": 1,
             "shared_by": [],

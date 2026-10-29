@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Alert, Dropdown, Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, Radio, Select, Spin, theme } from 'antd'
+import { Alert, Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, Radio, Select, Spin, theme } from 'antd'
 import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
@@ -8,8 +8,8 @@ import type { ResourceFile } from '../types'
 import { useAuthStore } from '../stores/authStore'
 import ShareDialog from '../components/ShareDialog'
 import ResourceBrowser, { type BrowserItem } from '../components/ResourceBrowser'
-import { KIND_LABELS } from '../constants/resourceKinds'
 import { subKindLabel } from '../utils/resourceType'
+import KindTag from '../components/KindTag'
 import { useTranslation } from 'react-i18next'
 
 const HtmlFilesPage: React.FC = () => {
@@ -187,18 +187,6 @@ const HtmlFilesPage: React.FC = () => {
     return [...m.entries()].sort((a, b) => b[1] - a[1])
       .map(([key, n]) => ({ value: key, label: `${subKindLabel(t, key)} ${n}` }))
   }, [files, searchText, t])
-
-  const applyKindMark = async (urlPath: string, key: string) => {
-    const clear = !key || key === '__clear__'
-    try {
-      await resourcesApi.setKindMark(urlPath, clear ? '' : key)
-      message.success(clear ? t('kindCleared') : t('kindSetOk', { name: subKindLabel(t, key) }))
-      await loadData()
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || t('operationFailed'))
-    }
-  }
 
   // ── 分组管理 ──
   const openCreateGroup = () => {
@@ -423,28 +411,9 @@ const HtmlFilesPage: React.FC = () => {
             {isShared && owner ? <Tag color="blue" style={{ fontSize: 11 }}>{t('fromOwner', { owner })}</Tag> : null}
             {/* 内容类型：点标签直接改标。金色带 · 的是人工标的（压过文件名推断、跟着改名走），
                 灰色的是系统按文件名推出来的，标一次就不再会因为改名而掉类。 */}
-            {subKind ? (
-              <Dropdown
-                trigger={['click']}
-                menu={{
-                  selectedKeys: [subKind],
-                  items: [
-                    ...Object.keys(KIND_LABELS).map(k => ({ key: k, label: subKindLabel(t, k) })),
-                    ...(subKindSetBy === 'manual'
-                      ? [{ key: '__clear__', label: t('kindClearMark'), danger: true }] : []),
-                  ],
-                  onClick: ({ key }) => void applyKindMark(urlPath, String(key)),
-                }}
-              >
-                <Tag
-                  color={subKindSetBy === 'manual' ? 'gold' : undefined}
-                  style={{ fontSize: 11, cursor: 'pointer', marginInlineEnd: 0 }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {subKindLabel(t, subKind)}{subKindSetBy === 'manual' ? ' ·' : ''} ▾
-                </Tag>
-              </Dropdown>
-            ) : null}
+            {subKind && (
+              <KindTag path={urlPath} kind={subKind} setBy={subKindSetBy} onChanged={loadData} />
+            )}
           </Space>
         }
       />
@@ -474,6 +443,8 @@ const HtmlFilesPage: React.FC = () => {
       kpName: s.kp_name,
       bindingCount: s.binding_count,
       subKind: s.sub_kind,
+      kindPath: s.kind_path,
+      kindSetBy: s.kind_set_by,
       shareCount: s.share_count,
       sharedBy: s.shared_by,
     }))
@@ -498,6 +469,8 @@ const HtmlFilesPage: React.FC = () => {
     kpName: s.kp_name,
     bindingCount: s.binding_count,
     subKind: s.sub_kind,
+    kindPath: s.kind_path,
+    kindSetBy: s.kind_set_by,
     shareCount: s.share_count,
     sharedBy: s.shared_by,
   }))
@@ -713,6 +686,7 @@ const HtmlFilesPage: React.FC = () => {
                   items={myShareItems}
                   loading={loading}
                   showStatus={false}
+                  editableKinds
                   prefScope="mine"
                   shareTooltip={t('rb.manageShare')}
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
@@ -735,6 +709,7 @@ const HtmlFilesPage: React.FC = () => {
                   mode="teacher"
                   items={browserItems}
                   loading={loading}
+                  editableKinds
                   prefScope="received"
                   onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
                   onReshare={(it) => openShare(it.filePath, it.name,

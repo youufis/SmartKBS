@@ -4,6 +4,7 @@ import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderO
 import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
 import type { TreeNode } from '../types'
+import KindTag from '../components/KindTag'
 import { getFileIcon } from '../utils/fileIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -11,12 +12,15 @@ import { reportLoadError } from '../utils/loadError'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 
 // 展平树节点为文件列表
-function flattenTree(nodes: TreeNode[], basePath = ''): { name: string; path: string; isLeaf: boolean }[] {
-  const result: { name: string; path: string; isLeaf: boolean }[] = []
+function flattenTree(nodes: TreeNode[], basePath = ''): { name: string; path: string; isLeaf: boolean; sub_kind?: string; sub_kind_set_by?: string }[] {
+  const result: { name: string; path: string; isLeaf: boolean; sub_kind?: string; sub_kind_set_by?: string }[] = []
   for (const node of nodes) {
     const fullPath = basePath ? `${basePath}/${node.title}` : node.title
     if (node.isLeaf) {
-      result.push({ name: node.title, path: node.key || fullPath, isLeaf: true })
+      result.push({
+        name: node.title, path: node.key || fullPath, isLeaf: true,
+        sub_kind: node.sub_kind, sub_kind_set_by: node.sub_kind_set_by,
+      })
     }
     if (node.children) {
       result.push(...flattenTree(node.children, fullPath))
@@ -478,6 +482,9 @@ const ResourceMgmtPage: React.FC = () => {
                               {node.size < 1024 ? `${node.size}B` : node.size < 1048576 ? `${(node.size / 1024).toFixed(1)}KB` : `${(node.size / 1048576).toFixed(1)}MB`}
                             </Tag>
                           )}
+                          {node.isLeaf && node.sub_kind && (
+                            <KindTag path={node.key} kind={node.sub_kind} setBy={node.sub_kind_set_by} onChanged={loadTree} />
+                          )}
                           <span onClick={(e) => e.stopPropagation()} className="resource-tree-actions" style={{ flexShrink: 0, whiteSpace: 'nowrap', opacity: 0, transition: 'opacity 0.2s' }}>
                             <Tooltip title={t('resource.rename')}>
                               <Button type="link" size="small" icon={<EditOutlined />}
@@ -532,6 +539,11 @@ const ResourceMgmtPage: React.FC = () => {
                               {file.name}
                             </div>
                           </Tooltip>
+                          <div style={{ marginTop: 4, minHeight: 18 }}>
+                            {file.sub_kind && (
+                              <KindTag path={file.path} kind={file.sub_kind} setBy={file.sub_kind_set_by} onChanged={loadTree} />
+                            )}
+                          </div>
                         </Card>
                       ))}
                     </div>

@@ -20,6 +20,7 @@ import { compactClassScope } from '../utils/classScope'
 import { getFileKind, KIND_COLOR, DOC_KINDS, MEDIA_KINDS } from '../utils/fileKind'
 import { isResourceKind, resourceKindLabel } from '../constants/resourceKinds'
 import { subKindLabel } from '../utils/resourceType'
+import KindTag from './KindTag'
 
 const { Text } = Typography
 
@@ -45,6 +46,10 @@ export interface BrowserItem {
   entryType?: 'file' | 'dir'
   /** 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径 */
   subKind?: string
+  /** 标注键（后端下发的物理路径）；空 = 这一条不给改 */
+  kindPath?: string
+  /** manual=人工标的，菜单里给「撤销标注」 */
+  kindSetBy?: string
   /** 指定教师/管理员共享时的目标姓名（后端按 target_users 解析，卡片上直接列出来） */
   targetUserNames?: string[]
   /** 同一物理文件被多人各共享一次时合并进来的行数（>1 表示还有别人也共享了这份） */
@@ -79,11 +84,13 @@ const ResourceBrowser: React.FC<{
   openIcon?: React.ReactNode
   /** 是否显示「阅读状态」维度。教师端浏览文件不留痕，默认给关掉免得永远「未读」 */
   showStatus?: boolean
+  /** 允许在卡片上改内容类型（只有后端给了 kindPath 的条目会生效） */
+  editableKinds?: boolean
   /** 同一 variant/mode 下并列多个浏览器时（如「我共享的」与「同事共享的」）区分偏好存储；
    *  不分键会共用同一份 view/sort/pageSize，把 A 栏的排序值带进选项集不同的 B 栏。 */
   prefScope?: string
   onRefresh?: () => void
-}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, shareTooltip, openLabel, openIcon, showStatus, prefScope, onRefresh }) => {
+}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, shareTooltip, openLabel, openIcon, showStatus, editableKinds, prefScope, onRefresh }) => {
   const { t } = useTranslation(['menu', 'curriculum'])
   const { token } = theme.useToken()
   const isDark = useThemeStore((s) => s.current) === 'midnight'
@@ -350,11 +357,11 @@ const ResourceBrowser: React.FC<{
         <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, color: KIND_COLOR[kind], borderColor: KIND_COLOR[kind], background: 'transparent' }}>
           {t(`kind.${kind}`)}
         </Tag>
-        {it.subKind && (
-          <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0 }}>
-            {t(`curriculum:subKind.${it.subKind}`)}
-          </Tag>
-        )}
+        {it.subKind && (editableKinds && it.kindPath ? (
+          <KindTag path={it.kindPath} kind={it.subKind} setBy={it.kindSetBy} fontSize={10} onChanged={onRefresh} />
+        ) : (
+          <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0 }}>{contentTypeLabel(it.subKind)}</Tag>
+        ))}
         {(it.shareCount ?? 1) > 1 && (
           <Tooltip title={t('rb.alsoSharedBy', { names: (it.sharedBy || []).join('、') })}>
             <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0 }}>
@@ -651,9 +658,11 @@ const ResourceBrowser: React.FC<{
                       <Text type="secondary" style={{ fontSize: 12 }} ellipsis>{it.kpName || it.courseName || '—'}</Text>
                       <Space size={2} wrap>
                         <Tag style={{ fontSize: 10, marginInlineEnd: 0, color: KIND_COLOR[kind], borderColor: KIND_COLOR[kind], background: 'transparent' }}>{t(`kind.${kind}`)}</Tag>
-                        {it.subKind && (
-                          <Tag style={{ fontSize: 10, marginInlineEnd: 0 }}>{t(`curriculum:subKind.${it.subKind}`)}</Tag>
-                        )}
+                        {it.subKind && (editableKinds && it.kindPath ? (
+                          <KindTag path={it.kindPath} kind={it.subKind} setBy={it.kindSetBy} fontSize={10} onChanged={onRefresh} />
+                        ) : (
+                          <Tag style={{ fontSize: 10, marginInlineEnd: 0 }}>{contentTypeLabel(it.subKind)}</Tag>
+                        ))}
                       </Space>
                       <Text type="secondary" style={{ fontSize: 12 }} ellipsis>{it.ownerName || it.ownerUsername}</Text>
                       <Text type="secondary" style={{ fontSize: 12 }}>{relTime(it.createdAt)}</Text>

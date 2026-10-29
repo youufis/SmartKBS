@@ -2123,6 +2123,9 @@ async def list_bindable_candidates(
             name = rr.display_name(spec, row.get("name"))
             here, other = bound.get(rid, (False, 0))
             owner = str(row.get("owner") or "")
+            _phys = (resource_kind.canon_path(owner, str(row.get("path") or ""), spec.key)
+                     if _file_like else "")
+            _mark = _kind_marks.get(_phys) if _phys else None
             items.append({
                 "type": spec.key,
                 "id": rid,
@@ -2139,10 +2142,9 @@ async def list_bindable_candidates(
                 "created_at": str(row.get("created_at") or ""),
                 "source": str(row.get("source") or ""),
                 "kp_text": str(row.get("kp_text") or ""),
-                "sub_kind": resource_kind.resolve(
-                    resource_kind.canon_path(str(row.get("owner") or ""),
-                                             str(row.get("path") or ""), spec.key),
-                    name, _kind_marks) if _file_like else "",
+                "sub_kind": (_mark[0] if _mark else (rr.sub_kind_of(name) if _phys else "")),
+                "kind_path": _phys,
+                "kind_set_by": _mark[1] if _mark else "",
                 "kp_match": _kp_match(spec, row, name, ctx),
                 "bound_here": here,
                 "bound_other": other,

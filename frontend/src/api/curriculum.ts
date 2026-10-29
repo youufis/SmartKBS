@@ -159,6 +159,10 @@ export interface ResourceCandidate {
   source: string;
   kp_text: string;
   sub_kind: string;
+  /** 标注键（相对项目根的物理路径），改内容类型时回传；空 = 这一类没有该维度 */
+  kind_path?: string;
+  /** manual=人工标的；ai/rule=系统标的；空=没有标注 */
+  kind_set_by?: string;
   /** exact=就是本知识点 / contains=提到本知识点 / chapter=同章节 / none=无关 */
   kp_match: 'exact' | 'contains' | 'chapter' | 'none' | string;
   bound_here: boolean;
