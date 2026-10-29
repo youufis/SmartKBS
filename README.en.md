@@ -55,7 +55,7 @@
 >
 > **Resource centre and bank analytics** (added in this build)
 > - 🗂️ **One-click grouping for ungrouped resources**: three rules — content type / chapter / section — each with a preview of which groups will be created and how many items they take; only ungrouped files are touched and a group with the same name is reused
-> - 🏷️ **A "Courseware" content type**: AI courseware pages used to fall into the catch-all bucket labelled "Other page", now renamed "Unclassified page"
+> - 🏷️ **New content types — Courseware, Activity, Handout**: AI courseware pages used to fall into the catch-all bucket labelled "Other page", now renamed "Unclassified page"
 > - 📊 **Bank analytics no longer truncate**: per-creator type and subject breakdowns list everything, so a newly added subject is no longer silently dropped; click a chip to filter by it
 > - 🩹 **The "My shares" sort box no longer leaks the raw `unseen`**: the two share tabs stopped overwriting each other's view, sort and page-size preferences
 >
@@ -1197,6 +1197,7 @@ Current version **8.9.0**. Only changes a reader can notice are listed; per-comm
 
 - 🗂️ **One-click grouping for ungrouped resources**: a new ⚡ action in the group panel classifies files by content type, chapter (Chapter N) or section (N.M). It previews which groups will be created or reused and how many items each takes, and only writes after you confirm; already grouped files are never touched
 - 🏷️ **A "Courseware" content type**: AI courseware pages are named `{point_id}_{title}_课件.html` and used to fall into the catch-all bucket shown as "Other page"; that bucket is now "Unclassified page" and the sidebar gains a Courseware facet
+- 🏷️ **Two more content types: Activity and Handout** — recognised from naming habits (`小活动-*`, plus pages whose name means outline / course intro / knowledge check / chapter summary). These rules sit after the AI-artifact suffixes, so `314_知识纲要_…_练习.html` is still chapter practice; unclassified items for the admin account dropped from 87 to 59
 - 🩹 **Sort box leaking the raw value `unseen`**: the two share tabs shared one localStorage key, so a sort value from the tab that has a reading-status dimension reached a tab that does not. Preferences are now stored per tab and validated on load
 - 📊 **Creator breakdowns in bank analytics no longer truncate**: types were limited to the top 5 and subjects to the top 3, so the smallest subject — typically a newly added one — vanished while its questions still counted in the total. Both now list everything and act as filters
 
