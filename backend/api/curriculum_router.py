@@ -3046,6 +3046,8 @@ async def ai_generate_courseware(kp_id: int, request: Request):
             filepath = os.path.join(html_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(html_content)
+            # 落盘即定类：生成时就知道是课件，写进标注表，之后改名也不会掉标
+            resource_kind.mark_file(filepath, "courseware", "rule", username)
 
             # 生成访问 URL
             from backend.config import BASE_DIR
@@ -3291,6 +3293,7 @@ async def ai_generate_podcast(kp_id: int, request: Request):
             filepath = os.path.join(html_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(result["html"])
+            resource_kind.mark_file(filepath, "podcast", "rule", username)  # 落盘即定类
 
             from backend.config import BASE_DIR
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
@@ -3756,6 +3759,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
             filepath = os.path.join(html_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(html_content)
+            resource_kind.mark_file(filepath, "practice", "rule", username)  # 落盘即定类
 
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
@@ -4707,6 +4711,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
     filepath = os.path.join(html_dir, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html_content)
+    resource_kind.mark_file(filepath, "practice", "rule", username)  # 落盘即定类
 
     rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
     file_url = f"/api/files/{rel_path}"
@@ -4837,6 +4842,7 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
     filepath = os.path.join(html_dir, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html_content)
+    resource_kind.mark_file(filepath, "practice", "rule", username)  # 落盘即定类
 
     rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
     file_url = f"/api/files/{rel_path}"

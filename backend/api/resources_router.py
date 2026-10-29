@@ -53,19 +53,27 @@ async def list_resources(request: Request):
 
     files = []
     try:
-        for fname in sorted(os.listdir(html_dir), key=str.lower):
+        names = [f for f in sorted(os.listdir(html_dir), key=str.lower)
+                 if os.path.isfile(os.path.join(html_dir, f)) and not f.endswith((".json", ".js"))]
+        # 内容类型：先批量取显式标注，再逐条回落文件名推断（一次查询，不做 N+1）
+        rels = {n: os.path.relpath(os.path.join(html_dir, n), str(BASE_DIR)).replace("\\", "/")
+                for n in names}
+        marks = resource_kind.marks_for(rels.values())
+        for fname in names:
             fpath = os.path.join(html_dir, fname)
-            if os.path.isfile(fpath) and not fname.endswith(".json") and not fname.endswith(".js"):
-                # 生成相对于项目根目录的路径（用于链接）
-                rel_path = os.path.relpath(fpath, str(BASE_DIR)).replace("\\", "/")
-                files.append({
-                    "name": fname,
-                    # T6: 前端用 path 做 key/重命名/删除参数, 只需相对 html 根, 不再泄露服务器绝对路径
-                    "path": os.path.relpath(fpath, html_dir).replace("\\", "/"),
-                    "url_path": rel_path,
-                    "size": os.path.getsize(fpath),
-                    "display_name": os.path.splitext(fname)[0],
-                })
+            rel_path = rels[fname]
+            mark = marks.get(rel_path)
+            files.append({
+                "name": fname,
+                # T6: 前端用 path 做 key/重命名/删除参数, 只需相对 html 根, 不再泄露服务器绝对路径
+                "path": os.path.relpath(fpath, html_dir).replace("\\", "/"),
+                "url_path": rel_path,
+                "size": os.path.getsize(fpath),
+                "display_name": os.path.splitext(fname)[0],
+                # 内容类型，以及它是人工标的还是推断来的：前端据此决定给不给「撤销标注」
+                "sub_kind": mark[0] if mark else rr.sub_kind_of(fname),
+                "sub_kind_set_by": mark[1] if mark else "",
+            })
     except Exception as e:
         logger.error(f"获取资源列表失败: {e}")
 
@@ -292,6 +300,7 @@ async def delete_resource(request: Request, path: str = Query(...)):
             purged = _purge_group_items_for_path(username, target_path)
             if purged:
                 logger.info(f"已同步清理 {purged} 条资源分组引用: {db_path}")
+            resource_kind.purge_mark(target_path)   # 内容类型标注跟着清（含目录子树）
         except Exception as cleanup_err:
             logger.warning(f"清理资源分组引用失败: {cleanup_err}")
 
@@ -461,14 +470,17 @@ async def rename_resource(request: Request):
 
             # 资源分组引用：按统一后的规范路径重写（含目录改名下的子资源）
             synced_groups = _remap_group_items_after_rename(username, old_path, new_path)
+            # 内容类型标注跟着改名走 —— 落盘即定类之后，改名不再掉标
+            synced_kind = resource_kind.remap_mark(old_path, new_path)
 
             execute_insert_update(
                 "UPDATE resource_meta SET file_path=?, file_name=?, updated_at=? WHERE file_path=? OR file_path=?",
                 (new_bn, new_bn, now, old_bn, old_rel),
             )
 
-            if synced_shares or synced_groups:
-                logger.info(f"重命名同步: shares={synced_shares}, groups={synced_groups} ({old_bn} -> {new_bn})")
+            if synced_shares or synced_groups or synced_kind:
+                logger.info(f"重命名同步: shares={synced_shares}, groups={synced_groups}, "
+                            f"kinds={synced_kind} ({old_bn} -> {new_bn})")
         except Exception as sync_err:
             logger.warning(f"重命名后同步数据库记录失败: {sync_err}")
 
@@ -852,6 +864,46 @@ async def list_resource_kinds(request: Request):
     """
     get_current_user(request)
     return {"kinds": resource_kind.kinds_payload()}
+
+
+@router.put("/kind-mark", summary="设置/撤销资源内容类型（人工标注）")
+async def set_kind_mark(request: Request):
+    """给一份资源定内容类型。人工标注优先级最高，且跟着改名走。
+
+    body：`{file_path, sub_kind}`；`sub_kind` 传空 = 撤销标注、交回按文件名判断。
+    与分组同一套边界：只能标本人 html 目录里的资源。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    raw = str(body.get("file_path") or "").strip()
+    kind = str(body.get("sub_kind") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="file_path 不能为空")
+
+    root_rel = _html_root_rel(username)
+    canon, exists, resolved = _resolve_group_path(raw, root_rel)
+    if not resolved or not exists:
+        raise HTTPException(status_code=400, detail="资源不存在，请刷新后重试")
+    abs_target = os.path.join(str(BASE_DIR), *canon.split("/"))
+    if not path_within(os.path.abspath(get_account_html_dir(username)), abs_target):
+        raise HTTPException(status_code=400, detail="只能标注本人资源目录内的资源")
+
+    if not kind:
+        removed = resource_kind.purge_mark(canon)
+        logger.info(f"撤销内容类型标注: {username} {canon} removed={removed}")
+        return {"message": "已撤销内容类型标注", "file_path": canon, "sub_kind": "", "removed": removed}
+    if not resource_kind.valid_kind(kind):
+        raise HTTPException(status_code=400, detail="内容类型不合法")
+    if not resource_kind.set_mark(canon, kind, "manual", username):
+        raise HTTPException(status_code=500, detail="标注失败，请查看服务端日志")
+    logger.info(f"内容类型标注: {username} {canon} -> {kind}")
+    return {"message": "已设置内容类型", "file_path": canon, "sub_kind": kind, "set_by": "manual"}
 
 
 @router.post("/groups")
@@ -2139,6 +2191,10 @@ async def ai_generate_async(request: Request):
                     "url_path": rel_path,
                     "registered": _register_own_html(username),
                 }
+
+            # 落盘即定类：这条链路知道 gen_type，直接写标注，之后改名也不掉标
+            if resource_kind.valid_kind(gen_type):
+                resource_kind.mark_file(rel_path, gen_type, "rule", username)
 
             # ── 阶段3: 配图增强（如果启用）──
             media_count = 0

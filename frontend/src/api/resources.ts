@@ -106,6 +106,15 @@ export async function autoClassify(by: AutoClassifyBy, apply = false): Promise<A
   return data;
 }
 
+/** 设置资源的内容类型；sub_kind 传空串 = 撤销标注、交回按文件名判断。 */
+export async function setKindMark(
+  file_path: string,
+  sub_kind: string,
+): Promise<{ message: string; file_path: string; sub_kind: string }> {
+  const { data } = await apiClient.put('/api/resources/kind-mark', { file_path, sub_kind });
+  return data;
+}
+
 export async function reorderGroups(group_ids: number[]): Promise<{ message: string }> {
   const { data } = await apiClient.put('/api/resources/groups/reorder', { group_ids });
   return data;

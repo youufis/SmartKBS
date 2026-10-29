@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Alert, Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, Radio, Spin, theme } from 'antd'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { Alert, Dropdown, Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, Radio, Select, Spin, theme } from 'antd'
 import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
@@ -8,10 +8,12 @@ import type { ResourceFile } from '../types'
 import { useAuthStore } from '../stores/authStore'
 import ShareDialog from '../components/ShareDialog'
 import ResourceBrowser, { type BrowserItem } from '../components/ResourceBrowser'
+import { KIND_LABELS } from '../constants/resourceKinds'
+import { subKindLabel } from '../utils/resourceType'
 import { useTranslation } from 'react-i18next'
 
 const HtmlFilesPage: React.FC = () => {
-  const { t } = useTranslation('menu')
+  const { t } = useTranslation(['menu', 'curriculum'])
   const { token } = theme.useToken()
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
@@ -46,11 +48,13 @@ const HtmlFilesPage: React.FC = () => {
 
   // ── 搜索 ──
   const [searchText, setSearchText] = useState('')
+  // 内容类型筛选（'' = 不限）。声明放在翻页 effect 之前，否则 effect 里引用不到
+  const [kindFilter, setKindFilter] = useState('')
 
   // 搜索词变化时把「我的资源」各分组翻回第一页（共享给我的由 ResourceBrowser 自管分页）
   useEffect(() => {
     setGroupPages({})
-  }, [searchText])
+  }, [searchText, kindFilter])
 
   // ── 分组状态 ──
   const [groups, setGroups] = useState<resourcesApi.ResourceGroup[]>([])
@@ -161,14 +165,40 @@ const HtmlFilesPage: React.FC = () => {
   // ── 统一口径：侧栏「个数」与右侧卡片走同一套过滤条件，数字永远等于能看到的内容 ──
   const kw = searchText.trim().toLowerCase()
   const matchesSearch = (f: ResourceFile) => !kw || (f.display_name || f.name).toLowerCase().includes(kw)
-  const filesInSet = (pathSet: Set<string>) => files.filter(f => pathSet.has(fileKeyOf(f)) && matchesSearch(f))
+  const matchesKind = (f: ResourceFile) => !kindFilter || (f.sub_kind || 'other') === kindFilter
+  const filesInSet = (pathSet: Set<string>) => files.filter(f => pathSet.has(fileKeyOf(f)) && matchesSearch(f) && matchesKind(f))
   const groupedPaths = getAllGroupedPaths()
-  const ungroupedFiles = files.filter(f => !groupedPaths.has(fileKeyOf(f)) && matchesSearch(f))
+  const ungroupedFiles = files.filter(f => !groupedPaths.has(fileKeyOf(f)) && matchesSearch(f) && matchesKind(f))
   const filteredFiles = activeGroup === null
     ? ungroupedFiles                                            // 全部 = 未分组的
     : filesInSet(getGroupFilePaths(activeGroup))
   // 分组个数只统计「仍然存在且当前可见」的资源（后端已剔除失效引用，避免虚高）
   const visibleGroupCount = (g: resourcesApi.ResourceGroup) => filesInSet(new Set(g.files)).length
+
+  // 内容类型下拉：计数按「已搜索、未过类型」的集合算，点进去看到的条数才和数字一致
+  const kindOptions = useMemo(() => {
+    const k = searchText.trim().toLowerCase()
+    const m = new Map<string, number>()
+    for (const f of files) {
+      if (k && !(f.display_name || f.name).toLowerCase().includes(k)) continue
+      const key = f.sub_kind || 'other'
+      m.set(key, (m.get(key) || 0) + 1)
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+      .map(([key, n]) => ({ value: key, label: `${subKindLabel(t, key)} ${n}` }))
+  }, [files, searchText, t])
+
+  const applyKindMark = async (urlPath: string, key: string) => {
+    const clear = !key || key === '__clear__'
+    try {
+      await resourcesApi.setKindMark(urlPath, clear ? '' : key)
+      message.success(clear ? t('kindCleared') : t('kindSetOk', { name: subKindLabel(t, key) }))
+      await loadData()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      message.error(err?.response?.data?.detail || err?.message || t('operationFailed'))
+    }
+  }
 
   // ── 分组管理 ──
   const openCreateGroup = () => {
@@ -345,7 +375,7 @@ const HtmlFilesPage: React.FC = () => {
     window.open(`/api/files/${urlPath}`, '_blank');
   }
 
-  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false, showGroupActions = false, resourceId?: number, resourceType?: string) => (
+  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false, showGroupActions = false, resourceId?: number, resourceType?: string, subKind?: string, subKindSetBy?: string) => (
     <Card
       key={urlPath}
       size="small"
@@ -391,6 +421,30 @@ const HtmlFilesPage: React.FC = () => {
         description={
           <Space size={4}>
             {isShared && owner ? <Tag color="blue" style={{ fontSize: 11 }}>{t('fromOwner', { owner })}</Tag> : null}
+            {/* 内容类型：点标签直接改标。金色带 · 的是人工标的（压过文件名推断、跟着改名走），
+                灰色的是系统按文件名推出来的，标一次就不再会因为改名而掉类。 */}
+            {subKind ? (
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  selectedKeys: [subKind],
+                  items: [
+                    ...Object.keys(KIND_LABELS).map(k => ({ key: k, label: subKindLabel(t, k) })),
+                    ...(subKindSetBy === 'manual'
+                      ? [{ key: '__clear__', label: t('kindClearMark'), danger: true }] : []),
+                  ],
+                  onClick: ({ key }) => void applyKindMark(urlPath, String(key)),
+                }}
+              >
+                <Tag
+                  color={subKindSetBy === 'manual' ? 'gold' : undefined}
+                  style={{ fontSize: 11, cursor: 'pointer', marginInlineEnd: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {subKindLabel(t, subKind)}{subKindSetBy === 'manual' ? ' ·' : ''} ▾
+                </Tag>
+              </Dropdown>
+            ) : null}
           </Space>
         }
       />
@@ -593,11 +647,27 @@ const HtmlFilesPage: React.FC = () => {
 
                   {/* 右侧资源卡片 */}
                   <div style={{ flex: 1, minWidth: 0 }}>
+                    {files.length > 0 && (
+                      <Space size={8} wrap style={{ marginBottom: 10 }}>
+                        <Select
+                          allowClear size="small" style={{ width: 200 }}
+                          placeholder={t('kindFilter')}
+                          value={kindFilter || undefined}
+                          onChange={(v) => setKindFilter(v || '')}
+                          options={kindOptions}
+                        />
+                        {kindFilter && (
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {t('kindFilterCount', { count: filteredFiles.length })}
+                          </Typography.Text>
+                        )}
+                      </Space>
+                    )}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
                       {(() => {
                         const currentPage = getGroupPage(activeGroup)
                         return filteredFiles.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((f) =>
-                          renderFileCard(f.display_name, f.url_path || f.name, false, undefined, true, true)
+                          renderFileCard(f.display_name, f.url_path || f.name, false, undefined, true, true, undefined, undefined, f.sub_kind, f.sub_kind_set_by)
                         )
                       })()}
                       {filteredFiles.length === 0 && (
@@ -729,7 +799,7 @@ const HtmlFilesPage: React.FC = () => {
           <Alert
             type="info" showIcon style={{ marginBottom: 12 }}
             message={t('autoClassifyTip', { count: classifyData?.candidates ?? 0 })}
-            description={t('autoClassifyScopeTip')}
+            description={t('autoClassifyScopeTip') + (classifyBy === 'subkind' ? t('autoClassifyMarkTip') : '')}
           />
           <Radio.Group
             optionType="button"
