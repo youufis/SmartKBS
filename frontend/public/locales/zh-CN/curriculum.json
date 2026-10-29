@@ -390,6 +390,8 @@
   "subKind.podcast": "播客",
   "subKind.interactive": "实验交互",
   "subKind.custom": "自定义页面",
+  "subKind.activity": "互动活动",
+  "subKind.handout": "讲义纲要",
   "subKind.other": "未归类网页",
   "source.smart": "AI 生成",
   "source.bank": "题库组卷",
