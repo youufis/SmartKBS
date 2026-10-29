@@ -18,6 +18,8 @@ import { useThemeStore } from '../stores/themeStore'
 import { getFileIcon } from '../utils/fileIcon'
 import { compactClassScope } from '../utils/classScope'
 import { getFileKind, KIND_COLOR, DOC_KINDS, MEDIA_KINDS } from '../utils/fileKind'
+import { isResourceKind, resourceKindLabel } from '../constants/resourceKinds'
+import { subKindLabel } from '../utils/resourceType'
 
 const { Text } = Typography
 
@@ -144,14 +146,13 @@ const ResourceBrowser: React.FC<{
   const contentTypeOf = (it: BrowserItem) => (isFiles ? kindOf(it) : (it.subKind || 'other'))
   const contentTypeLabel = (v: string) => {
     if (isFiles) return t(`kind.${v}` as never)
-    const key = `curriculum:subKind.${v}`
-    const label = t(key as never)
-    if (label !== key) return label
+    // 「是不是内容小类」问后端下发的唯一清单，不再前端硬列名单
+    if (isResourceKind(v)) return subKindLabel((k: string) => t(k as never), v)
     // 统计条里的「网页资源/文档/视频音频」是按扩展名筛的，这些值没有小类文案，回落到扩展名文案
     const kindKey = `kind.${v}`
     const kindLabel = t(kindKey as never)
-    // 两级都查不到时退回原始值：宁可显示 courseware，也不要把 "kind.courseware" 这种键路径丢到界面上
-    return kindLabel === kindKey ? v : kindLabel
+    // 两级都查不到时退回后端标签/原始值：绝不把 kind.xxx 这种键路径丢到界面上
+    return kindLabel === kindKey ? resourceKindLabel(v) : kindLabel
   }
   /** 是否给这条目摆「再共享」按钮（外部可逐条判断） */
   const canShare = (it: BrowserItem) => (canReshare ? canReshare(it) : !!onReshare)

@@ -37,6 +37,7 @@ class ResourceTypeSpec:
     grade_col: str = ""
     class_col: str = ""
     scope_col: str = ""      # target_scope / share_scope：用于「目标范围」展示
+    path_col: str = ""       # 物理路径列（文件类资源才有，内容类型标注按它落键）
     created_col: str = "created_at"
     kp_col: str = ""         # 知识点字段（自由文本，用于「本知识点」推荐匹配）
     source_col: str = ""     # 来源字段（AI 生成 / 题库组卷 / 手动）
@@ -54,7 +55,7 @@ SPECS: tuple[ResourceTypeSpec, ...] = (
     ResourceTypeSpec(
         key="html", label_key="resourceType.html", group="courseware", icon="file",
         source_db="main", table="shared_resources", name_col="file_name",
-        owner_col="owner_username", status_col="",
+        owner_col="owner_username", status_col="", path_col="file_path",
         grade_col="target_grade", class_col="target_class", scope_col="share_scope",
         url="",  # 文件类走 /api/files/... ，由 _get_resource_info 特例拼
         order=10,
@@ -62,7 +63,7 @@ SPECS: tuple[ResourceTypeSpec, ...] = (
     ResourceTypeSpec(
         key="download", label_key="resourceType.download", group="courseware", icon="download",
         source_db="main", table="shared_resources", name_col="file_name",
-        owner_col="owner_username", status_col="",
+        owner_col="owner_username", status_col="", path_col="file_path",
         grade_col="target_grade", class_col="target_class", scope_col="share_scope",
         url="",
         order=20,
@@ -190,6 +191,25 @@ def open_url(spec: ResourceTypeSpec, resource_id: object) -> str:
     if not spec.url:
         return ""
     return spec.url.replace("{id}", str(resource_id))
+
+
+# 内容小类的中文名与全集 —— 单一来源：既给「自动归类」当分组名，也给
+# GET /api/resources/kinds 当兜底标签。新增小类时与 HTML_SUBKINDS 一起加；
+# 前端 curriculum.json 的 subKind.<键> 是首选文案、这里是兜底文案，漏加不会再露裸键。
+SUBKIND_LABELS: dict[str, str] = {
+    "courseware": "课件",
+    "animation": "动画讲解",
+    "quiz": "互动答题",
+    "practice": "章节练习",
+    "podcast": "播客",
+    "interactive": "实验交互",
+    "custom": "自定义页面",
+    "activity": "互动活动",
+    "handout": "讲义纲要",
+    "other": "未归类网页",
+}
+
+ALL_SUBKINDS: tuple[str, ...] = tuple(SUBKIND_LABELS)
 
 
 def sub_kind_of(name: object) -> str:

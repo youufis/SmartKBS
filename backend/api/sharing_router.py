@@ -21,6 +21,7 @@ from backend.api.config_router import get_config_value
 from backend.config import STU_DIR, ROOT_DIR, DATA_DIR
 from backend.permission_service import check_share_visibility
 from backend import resource_registry as rr
+from backend import resource_kind
 from backend import shared_assets
 
 router = APIRouter()
@@ -108,21 +109,10 @@ def _is_shared_only_to_self(row_owner: str, share_scope: str,
 def _share_physical_path(row_owner: str, file_path: str, resource_type: str) -> str:
     """共享行里的路径 -> 相对项目根的物理路径（判断两行是不是同一个文件的唯一口径）。
 
-    入库形态混着 `x.html` / `html/x.html` / `<owner>/html/x.html` / `stu/<owner>/html/x.html`，
-    再共享还会出现「行 owner=root、路径却是 youufis/html/x.html」这种 owner 与文件属主不一致的行，
-    所以必须看这段路径自己是否已带 <谁>/html/ 前缀，不能一律再拼一遍 owner。
+    实现已挪到 backend/resource_kind.canon_path（内容类型标注要用同一个键落库），
+    这里保留原名与全部调用点，行为一字不改。
     """
-    _dir = "html" if resource_type == "html" else "downloads"
-    p = str(file_path or "").replace("\\", "/").strip().lstrip("/")
-    if not p:
-        return f"{row_owner}/{_dir}/"
-    if p.startswith(f"{STU_DIR}/"):
-        return p
-    if p.startswith(f"{_dir}/"):
-        return f"{row_owner}/{p}"
-    if f"/{_dir}/" in f"/{p}":       # 已带 <某账号>/html|downloads/ 前缀 -> 本身就是物理路径
-        return p
-    return f"{row_owner}/{_dir}/{p}"
+    return resource_kind.canon_path(row_owner, file_path, resource_type)
 
 
 def _teacher_allowed_grades(username: str) -> list[str]:
@@ -1048,6 +1038,14 @@ def _build_share_items(rows, username: str) -> list[dict[str, Any]]:
         if r[0] is not None and str(r[4] or "") == "download":
             dir_map[int(r[0])] = download_share_stats(str(r[1] or ""), str(r[2] or ""), "download")
 
+    # 内容类型：显式标注优先，其次文件名推断。先把这批 html 的物理路径算出来一次查完，
+    # 避免每条资源一回数据库（本文件里 N+1 是被专门治理过的）。
+    _html_phys = {
+        int(r[0]): resource_kind.canon_path(str(r[1] or ""), str(r[2] or ""), str(r[4] or ""))
+        for r in rows if r[0] is not None and str(r[4] or "") == "html"
+    }
+    _kind_marks = resource_kind.marks_for(_html_phys.values())
+
     items: list[dict[str, Any]] = []
     for r in rows:
         _rid = int(r[0] or 0)
@@ -1079,7 +1077,8 @@ def _build_share_items(rows, username: str) -> list[dict[str, Any]]:
             "total_size": (dir_map.get(_rid) or {}).get("total_size", 0),
             # 内容小类（动画讲解/章节练习/播客…）：与「课程 -> 绑定资源」同一套口径，
             # 卡片不再只显示笼统的"网页课件"
-            "sub_kind": rr.sub_kind_of(r[3]) if str(r[4] or "") == "html" else "",
+            "sub_kind": resource_kind.resolve(_html_phys[_rid], r[3], _kind_marks)
+                        if _rid in _html_phys else "",
             # 同一物理文件被多人各共享一次时的合并信息（「再共享」会产生这种行）
             "share_count": 1,
             "shared_by": [],

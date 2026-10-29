@@ -11,11 +11,14 @@ import './index.css'
 import './styles/theme.css'
 import './styles/mobile.css'
 import { loadQuestionTypes } from './constants/questionTypes'
+import { loadResourceKinds } from './constants/resourceKinds'
 import { useThemeStore, initTheme, themeMap } from './stores/themeStore'
 import { useLocaleStore } from './stores/localeStore'
 
 // 启动时从后端加载题型配置（使用默认值 fallback，不阻塞渲染）
 loadQuestionTypes()
+// 网页资源「内容类型」唯一清单（后端为准，失败用兜底）
+loadResourceKinds()
 
 // 初始化主题（从 localStorage 恢复 CSS 变量）
 initTheme()

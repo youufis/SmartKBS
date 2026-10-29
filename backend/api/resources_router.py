@@ -645,7 +645,8 @@ import time
 from backend.database import (
     execute_query, execute_insert_update, execute_batch, get_connection, get_transaction,
 )
-from backend.resource_registry import sub_kind_of
+from backend import resource_kind
+from backend import resource_registry as rr
 
 
 # ── 分组内资源路径统一（收敛为 url_path 格式）+ 残留清理 ──
@@ -841,6 +842,18 @@ async def list_groups(request: Request):
     return {"groups": result}
 
 
+@router.get("/kinds", summary="网页资源内容类型清单")
+async def list_resource_kinds(request: Request):
+    """内容类型的唯一清单：键 + 中文兜底标签。
+
+    前端拿它当「哪些值属于内容类型」的判据，不再各自硬列名单 —— 历史上正是名单漏项
+    让界面先显示成「其它网页」、后露出裸键 kind.courseware。前端有 i18n 文案时用文案，
+    没有时用这里的 label，两级都没有才退回原始值。
+    """
+    get_current_user(request)
+    return {"kinds": resource_kind.kinds_payload()}
+
+
 @router.post("/groups")
 async def create_group(request: Request):
     """创建新分组"""
@@ -872,16 +885,9 @@ async def create_group(request: Request):
 # 内容小类 -> 分组名。分组名是**落库的数据**而不是界面文案，所以在这里固定中文，
 # 与前端 curriculum:subKind.* 同口径；other（未归类网页）不建组 —— 硬造一个
 # 「未归类」组只会把「未分组」这个数字变好看，资源照样得自己翻。
+# 分组名直接取注册表里的中文标签（单一来源，不再抄第二份）。
 _SUBKIND_GROUP_NAMES: dict[str, str] = {
-    "courseware": "课件",
-    "animation": "动画讲解",
-    "quiz": "互动答题",
-    "practice": "章节练习",
-    "podcast": "播客",
-    "interactive": "实验交互",
-    "custom": "自定义页面",
-    "activity": "互动活动",
-    "handout": "讲义纲要",
+    k: v for k, v in rr.SUBKIND_LABELS.items() if k != "other"
 }
 
 # 章节前缀必须写成「数字.数字」才算章节号：AI 产物的文件名是
@@ -893,11 +899,15 @@ _CHAPTER_CN_RE = re.compile(r"^\s*第\s*([0-9一二三四五六七八九十]+)\s
 AUTO_CLASSIFY_BY: tuple[str, ...] = ("subkind", "chapter", "section")
 
 
-def _auto_group_name(fname: str, by: str) -> str:
-    """算一个资源该进哪个分组；返回空串 = 这条规则不覆盖它，继续留在未分组。"""
+def _auto_group_name(path: str, fname: str, by: str,
+                     marks: dict[str, tuple[str, str]] | None = None) -> str:
+    """算一个资源该进哪个分组；返回空串 = 这条规则不覆盖它，继续留在未分组。
+
+    内容类型这一维走 resource_kind.resolve：教师手工标注过的一律优先，没标注的才按文件名推。
+    """
     stem = os.path.splitext(fname)[0]
     if by == "subkind":
-        return _SUBKIND_GROUP_NAMES.get(sub_kind_of(stem), "")
+        return _SUBKIND_GROUP_NAMES.get(resource_kind.resolve(path, stem, marks), "")
     cn = _CHAPTER_CN_RE.match(stem)
     if cn:
         return f"第{cn.group(1)}章"
@@ -945,9 +955,10 @@ async def auto_classify_groups(request: Request):
         grouped.update(paths)
     candidates = [f for f in names if f"{root_rel}/{f}" not in grouped]
 
+    _kind_marks = resource_kind.marks_for(f"{root_rel}/{f}" for f in candidates)
     buckets: dict[str, list[str]] = {}
     for fname in candidates:
-        gname = _auto_group_name(fname, by)
+        gname = _auto_group_name(f"{root_rel}/{fname}", fname, by, _kind_marks)
         if gname:
             buckets.setdefault(gname, []).append(f"{root_rel}/{fname}")
 
