@@ -146,8 +146,12 @@ const ResourceBrowser: React.FC<{
     if (isFiles) return t(`kind.${v}` as never)
     const key = `curriculum:subKind.${v}`
     const label = t(key as never)
+    if (label !== key) return label
     // 统计条里的「网页资源/文档/视频音频」是按扩展名筛的，这些值没有小类文案，回落到扩展名文案
-    return label === key ? t(`kind.${v}` as never) : label
+    const kindKey = `kind.${v}`
+    const kindLabel = t(kindKey as never)
+    // 两级都查不到时退回原始值：宁可显示 courseware，也不要把 "kind.courseware" 这种键路径丢到界面上
+    return kindLabel === kindKey ? v : kindLabel
   }
   /** 是否给这条目摆「再共享」按钮（外部可逐条判断） */
   const canShare = (it: BrowserItem) => (canReshare ? canReshare(it) : !!onReshare)
