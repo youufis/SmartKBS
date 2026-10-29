@@ -15,7 +15,7 @@
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/version-8.9.0-blue)
+![Version](https://img.shields.io/badge/version-9.0.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -35,42 +35,28 @@
 
 ---
 
-> 📌 **Highlights of V8.9.0**
+> 📌 **Highlights of V9.0.0**
 >
-> **Points and honour system, reworked** (the biggest piece of this release)
-> - ⚖️ **Scoring re-weighted**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice 9/6/3, classroom answers 6/4/2); buzzers pay by placing; the class ladder pays by ladder score rate
-> - 🎯 **Every classroom activity awards points**: roll-call answers, in-class picks, ladder, discussion posts, mistake fixes, approved answers
-> - 🧱 **Anti-farming quotas split into pools**: academic 80 / class participation 40 / light activities 30 — farming buzzers can no longer swallow an exam bonus
-> - 📋 **One source of truth for the rules**: student dialog and teacher banner are both served by the backend
-> - 🏅 **Titles and badges recalibrated**: twelve thresholds re-cut, six permanently locked badges lit up, subject titles weigh accuracy, locked badges show what is missing
-> - 💰 **Deductions vs. spending separated**; weekly stars scoped to the class; a new teacher recognition channel
+> **Resource centre and content types** (the biggest piece of this release)
+> - 🏷️ **Web resources now have a content-type system**: 11 types — courseware, animation, course practice, chapter practice, interactive quiz, lab simulation, podcast, custom page, activity, handout, unclassified
+> - ✍️ **The type can be set by hand**: an explicit mark beats filename guessing, artifacts are classified when written, **follow renames and are cleared on delete**; click the tag in any of four places to reclassify, and filter by type at the top
+> - 🗃️ **One-click grouping for ungrouped resources**: by content type, chapter or section, with a preview before anything is written; only ungrouped files are touched and same-named groups are reused
+> - ✂️ **Two kinds of practice separated**: AI course practice records student scores, generated chapter exercises record nothing — they used to share one label
 >
-> **Classroom and homework**
-> - 📎 **File-submission homework**: upload documents, spreadsheets or photos, AI grading with teacher review before publishing; three attempts, only the last is graded, lateness only flagged
-> - 🏁 **Class ladder (big screen)**: single-player 15-level ladder, safe levels, three lifelines, seven skins
-> - 🎲 **Unified picking**: roll call, questioning, ladder and AI quiz share one set of weights and one ledger keyed by student ID, plus a cross-activity pick log with Excel export
+> **Sharing and binding**
+> - 🗂️ **Three share tabs, consistent semantics**: a new "My shares" tab (only what you actually shared out, admins included), "Shared with me" renamed "Shared by colleagues", and admin management now addresses shares by record instead of guessing from the path
+> - 🔁 **Re-sharing really works and merges**: one physical file shared by several people is one card, with a note about who else shared it
+> - 🧩 **Resource binding rebuilt**: one registry replaces six hard-coded lists, synchronous practice is on the shelf, and the picker gained a facet sidebar, card layout and honest totals
 >
-> **My portrait**
-> - 🖼️ **All three roles can use a portrait as their avatar**, and any portrait (past periods included) can be pinned; staff portraits are as visible as students’
+> **Security, analytics and polish**
+> - 🔒 **Path traversal in static file serving fixed** (server files were reachable without login); API docs are off by default in production
+> - 📊 **Bank analytics no longer truncate**: full per-creator type and subject breakdowns, click a chip to filter
+> - 📥 **Bulk import reports the reason per row**; question management is faster; editing a knowledge point's chapter now shows the chapter name and actually saves
+> - 📱 **Detail tables became cards on phones**; portrait and avatar images no longer break with 401
 >
-> **Resource centre and bank analytics** (added in this build)
-> - 🗂️ **One-click grouping for ungrouped resources**: three rules — content type / chapter / section — each with a preview of which groups will be created and how many items they take; only ungrouped files are touched and a group with the same name is reused
-> - 🏷️ **New content types — Courseware, Activity, Handout**: AI courseware pages used to fall into the catch-all bucket labelled "Other page", now renamed "Unclassified page"
-> - 📊 **Bank analytics no longer truncate**: per-creator type and subject breakdowns list everything, so a newly added subject is no longer silently dropped; click a chip to filter by it
-> - 🩹 **The "My shares" sort box no longer leaks the raw `unseen`**: the two share tabs stopped overwriting each other's view, sort and page-size preferences
-> - ✂️ **Two kinds of practice separated**: AI course practice records student scores, while generated chapter exercises do not — they used to share one label and now have their own content types, with the difference on hover
-> - ✍️ **Content type can be set by hand**: click the type tag to reclassify in place — in My resources, on the share cards, in the resource-binding picker and in resource management — and filter by content type at the top; AI artifacts are classified when written and **follow a rename**, so renaming a file no longer drops its type
+> - ⚠️ **Breaking changes**: none. One security default changed — see the changelog
 >
-> **Question bank, UI and deployment**
-> - 🗑️ **Question management**: multi-select bulk delete; a denser list shows about 40% more items per screen
-> - 💻 **Code in question stems** renders as real code blocks, same convention in Word papers and AI-generated quiz pages
-> - 🔧 **Skills on by default**: fresh installs work out of the box and future skills are picked up automatically
-> - 🖥️ **Per-form upgrade paths**: desktop compares version plus release build, source installs can convert to a Git deployment, update checks trust GitHub
-> - 🩹 **Also fixed**: same-named classmates sharing one roll-call points key, whiteboard AI generation always failing, log spam
->
-> - ⚠️ **Breaking changes**: none. Two points-system semantics changes are listed in the changelog
->
-> 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.8.0 → 8.9.0 release; database changes are applied automatically at startup.
+> 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes, including the new content-type mark table, are applied automatically at startup.
 
 ---
 
@@ -1162,61 +1148,59 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **8.9.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.8 is merged into one section below.
+Current version **9.0.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.9.0 is merged into one outline section below.
 
-### v8.9.0
+### v9.0.0
 
-**Points and honour system**
+**Security**
 
-- ⚖️ **Scoring re-weighted**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice 9/6/3, classroom answers 6/4/2); buzzers pay by placing; the ladder pays by score rate; polls, browsing and chat only pay participation
-- 🧱 **Anti-farming quotas split into pools**: academic 80 / class participation 40 / light activities 30, tunable, 0 = unlimited
-- 🎯 **Every classroom activity awards points**, and the rules now have one source of truth served by the backend — three advertised-vs-actual mismatches fixed in the same pass
-- 🏅 **Titles and badges recalibrated**: twelve thresholds re-cut, six permanently locked badges lit up, subject titles weigh accuracy, locked badges show what is missing
-- 💰 **Deductions vs. spending separated** and colour-coded; chat points wait for an actual reply; ⭐ weekly stars scoped to the class; 🙋 new teacher recognition channel
-- ⚙️ **Two behaviour changes**: the daily total cap defaults to unlimited; manual classroom marks and reward points remain separate ledgers
+- 🔒 **Path traversal in static file serving fixed**: the `/api/files/` catch-all let anyone pull files off the server without logging in; paths are now resolved and only served when they stay inside the build directory. **`/docs` and `/openapi.json` are closed by default in production** — enable them when debugging
+- 🩹 **The student view of shared files passed one parameter too many**, so `resource_id` was always 0 and views never attached to the resource
 
-**Classroom and homework**
+**Resource centre and content types**
 
-- 📎 **File-submission homework**: upload Word · PDF · spreadsheets · PPT · images, extensions and content both validated; three attempts, only the last graded, lateness flagged only
-- 🤖 **AI grading and publishing**: one long-text call per class returns dimension scores, requirement verdicts, quoted evidence and improvement notes; results stay pending review until the teacher publishes; grading bench with previews, similarity flagging and class-wide archive download
-- 🏁 **Class ladder (big screen)**: 15 levels, safe levels, ends on a wrong answer or timeout; seven skins, leaderboard and full-screen settlement
-- 🎲 **Unified picking**: four activities share one set of class weights and one ledger keyed by student ID, so two big screens no longer overwrite each other; cross-activity pick records with stats and Excel export
-- 🏠 **Dashboard banner**: teaching scope degrades in three layers so long lists no longer break the card
+- 🗂️ **Three share tabs with consistent semantics**: a new "My shares" tab lists only what you actually shared out (admins included; private registrations to yourself are not listed), "Shared with me" became "Shared by colleagues", and admin management addresses shares by record instead of guessing from the path
+- 🔁 **Re-sharing really works and merges**: one physical file shared by several people is now a single card that honestly notes who else shared it
+- 🧩 **Resource binding rebuilt**: one registry replaces six hard-coded type lists (fixing "change one, miss five"), synchronous practice is on the shelf, and the candidate list gained a facet sidebar, a card picker, real totals and an explicit truncated flag
+- 🏷️ **Web resources now have a content-type system**: 11 types (courseware, animation, course practice, chapter practice, interactive quiz, lab simulation, podcast, custom page, activity, handout, unclassified); an explicit mark wins over filename guessing, artifacts are classified when written, **follow renames and are cleared on delete**
+- ✍️ **Types can be set by hand**: click the tag in My resources, on a share card, in the binding picker or in resource management (tree and grid) to reclassify, with a content-type filter on top; a gold tag with a dot is a human mark and can be cleared back to filename inference
+- 🗃️ **One-click grouping for ungrouped resources**: by content type, chapter (Chapter N) or section (N.M), previewing which groups are created or reused and how many items each takes before anything is written; already grouped files are never touched
+- ✂️ **Two kinds of practice separated**: `{point_id}_{title}_{timestamp}_练习.html` is **course practice** (answers recorded with a score) while a name ending in 练习题 is a **chapter exercise** (a generated page that records nothing). Both used to share one value shown as chapter practice; the tag now explains the difference on hover
+- 🩹 **The "My shares" sort box leaked the raw `unseen`**: the two share tabs shared one localStorage key, so a sort value from the tab with a reading-status dimension reached a tab without one. Preferences are stored per tab and validated on load, so view and page size no longer overwrite each other either
 
-**My portrait**
+**Question bank, courses and import**
 
-- 🖼️ **The avatar slot is open to all three roles**, falling back to a role default when there is no portrait yet
-- 📌 **Pin any portrait as your avatar** (past periods included), or switch back to “latest” / “default avatar”
-- 👀 **Staff portraits are as visible as student ones**; 💸 staff stay outside the points system with their own per-period cap, and opening the dashboard no longer inflates view counts
+- 📊 **Creator breakdowns in bank analytics no longer truncate**: types were capped at the top 5 and subjects at the top 3, so the smallest subject — typically a newly added one — vanished while its questions still counted in the total. Both now list everything and act as filters
+- 📥 **Bulk import explains every failed row** instead of "row 3 failed", naming the column and what is missing
+- ⚡ **Question management is faster**: production build, duplicate requests removed, cells re-render only when they change
+- 🗂️ **Knowledge point chapter fixed**: the editor shows the chapter name instead of a bare id, and switching chapters really saves
 
-**Question bank and UI**
+**Phones and images**
 
-- 🗑️ **Bulk delete** with per-item skip reasons; 📐 a denser list shows about 40% more items per screen
-- 💻 **Code in questions** renders as real code blocks and collapses into a “code · N lines” badge; Word papers and AI-generated quiz pages follow the same convention
-- 🔧 **Skills on by default**, with a warning when none are in effect; 🧑‍ course and resource panels collapsible and drawer-style on narrow screens
-
-**Resource centre and bank analytics**
-
-- 🗂️ **One-click grouping for ungrouped resources**: a new ⚡ action in the group panel classifies files by content type, chapter (Chapter N) or section (N.M). It previews which groups will be created or reused and how many items each takes, and only writes after you confirm; already grouped files are never touched
-- 🏷️ **A "Courseware" content type**: AI courseware pages are named `{point_id}_{title}_课件.html` and used to fall into the catch-all bucket shown as "Other page"; that bucket is now "Unclassified page" and the sidebar gains a Courseware facet
-- 🏷️ **Two more content types: Activity and Handout** — recognised from naming habits (`小活动-*`, plus pages whose name means outline / course intro / knowledge check / chapter summary). These rules sit after the AI-artifact suffixes, so `314_知识纲要_…_练习.html` is still chapter practice; unclassified items for the admin account dropped from 87 to 59
-- 🩹 **Sort box leaking the raw value `unseen`**: the two share tabs shared one localStorage key, so a sort value from the tab that has a reading-status dimension reached a tab that does not. Preferences are now stored per tab and validated on load
-- ✂️ **Two kinds of practice separated**: `{point_id}_{title}_{timestamp}_练习.html` is **course practice** (answers recorded with a score), while a name ending in 练习题 is a **chapter exercise** (a generated exercise page that records nothing). Both used to collapse into the single `practice` value shown as chapter practice; they are now `course_practice` / `chapter_practice`, the tag explains the difference on hover, and auto-grouping builds a group for each. Measured: 12 + 14 files for the admin account, 29 + 1 for the teacher account
-- ✍️ **Content type is no longer guessed from the file name alone**: explicit marks (priority manual > AI > rule, a lower tier never overwrites a human mark) are written when AI courseware, podcasts, exercises and generated pages are saved, **follow renames and are cleared on delete**; cards can be reclassified with one click (a gold tag with a dot is a human mark, clear it to fall back to the file name) through one shared tag component used by My resources, the share cards, the resource-binding picker and resource management in both tree and grid view, with a content-type filter on top, so all four entry points always read the same value
-- 📊 **Creator breakdowns in bank analytics no longer truncate**: types were limited to the top 5 and subjects to the top 3, so the smallest subject — typically a newly added one — vanished while its questions still counted in the total. Both now list everything and act as filters
-
-**Deployment and upgrades**
-
-- 🖥️ **Per-form upgrade paths**: desktop compares version plus release build and points to the installer; source installs can convert to a Git deployment in one click
-- 🧭 **Authoritative update checks**: GitHub decides, so a re-release under the same version is still detected
+- 📱 **Detail tables became cards**, fixing six places that could not be read on a narrow screen
+- 🖼️ **Avatars and portrait images broke with 401 on every client**; protected image URLs now carry the token
 
 **Fixes**
 
-- 🩹 **Roll-call points collision**: same-named classmates shared one idempotency key and the second silently earned nothing; existing rows re-keyed, values unchanged
-- 🩹 **Points ledger and stats**: raw key names leaked to students, participation counts capped at 100, question and answer keys overwriting each other, cross-type resource-view collisions
-- 🩹 **Whiteboard AI generation always failed**; handshake and polling log spam fixed; a fresh database no longer reports missing tables
+- 🩹 The class ladder failed to load completion, with roster matching and the reset owner column fixed along the way
+- 🩹 AI teaching suggestions were missing a prompt import deleted during the 8.8.0 refactor; three same-root risks were fixed in the same pass
 
-### v7.x – v8.8 (merged)
+### v7.x – v8.9.0 (outline)
+
+**v8.9.0 (2026-10-24)**
+
+- ⚖️ **Points and honour system reworked**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice 9/6/3, classroom answers 6/4/2), buzzers pay by placing, the ladder pays by score rate; anti-farming quotas split into three pools (academic 80 / participation 40 / light 30); every classroom activity awards points; one source of truth served by the backend
+- 🏅 **Titles and badges recalibrated**: twelve thresholds re-cut, six permanently locked badges lit up, subject titles weigh accuracy, locked badges show what is missing; deductions and spending separated, weekly stars scoped to the class, a new teacher recognition channel
+- 📎 **File-submission homework**: documents, spreadsheets, slides and photos, one AI pass for the whole class with teacher review before publishing; three attempts, only the last is graded, lateness only flagged; a grading desk with duplicate flags and bulk download
+- 🏁 **Class ladder (big screen)**: 15 levels, safe levels, ends on a wrong answer or timeout, AI top-up questions, seven skins and full-screen settlement
+- 🎲 **Unified picking**: roll call, questioning, ladder and AI quiz share one set of weights and one ledger keyed by student ID, with a cross-activity log, per-activity stats and Excel export
+- 🖼️ **My portrait**: all three roles can use a portrait as their avatar and pin any one (past periods included); staff portraits are as visible as students' and outside the points system
+- 💻 **Question management**: multi-select bulk delete with a reason per skipped item; a denser list shows about 40% more per screen; code in stems and explanations renders as real code blocks, same convention in Word papers and AI quiz pages
+- 🗂️ **Course management**: soft disable plus a recycle bin; the course list returns active courses only by default, with a switch to view, restore or delete permanently
+- 🔧 **Deployment and polish**: skills on by default; per-form upgrade paths with GitHub as the authoritative source; the knowledge-point panel collapses and turns into a drawer on narrow screens
+- 🩹 **Fixes**: same-named classmates sharing one roll-call points key (existing rows re-keyed), whiteboard AI generation always failing, handshake and polling log spam, points and portfolio details unreadable on phones, broken portrait avatars, raw key names leaking, participation capped at 100, missing-table warnings on a fresh database
+
+**v7.x – v8.8**
 
 - 💬 **Classroom interaction**: question submission de-dup, idempotency and async review, teacher filtering, anonymity, follow-ups, popularity and live refresh; in-class picking and AI podcasts added
 - 🧩 **Teaching flow**: unified knowledge-point input across the site; draft/publish state machine for practice and quizzes; card-style activity lists; completion scoped to the activity; student answer drafts and submission guards
