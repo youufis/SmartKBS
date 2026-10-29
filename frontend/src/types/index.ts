@@ -71,6 +71,9 @@ export interface TreeNode {
   isLeaf: boolean;
   children?: TreeNode[];
   size?: number;
+  /** 内容类型（资源管理树用）：显式标注优先，其次后端按文件名推断 */
+  sub_kind?: string;
+  sub_kind_set_by?: string;
   /** 磁盘文件名（含前缀），用于区分智答/学伴/作业存档 */
   filename?: string;
   /** 消息条数（历史记录列表用） */

@@ -36,8 +36,12 @@ export interface ShareItem {
   /** 目录内文件数 / 该共享条目总大小（字节）；仅 download 类型返回 */
   file_count?: number;
   total_size?: number;
-  /** 内容小类（动画讲解/章节练习/播客…）：仅 html 类型返回，与「课程 -> 绑定资源」同一套口径 */
+  /** 内容小类（课件/动画讲解/章节练习/播客…）：仅 html 类型返回，与「课程 -> 绑定资源」同一套口径 */
   sub_kind?: string;
+  /** 标注键（相对项目根的物理路径）；空 = 这一条没有内容类型维度 */
+  kind_path?: string;
+  /** manual=人工标的（可撤销）；ai/rule=系统标的；空=没有标注 */
+  kind_set_by?: string;
   /** 同一物理文件被多人各共享一次时合并展示的行数（>1 表示还有别人也共享了这份） */
   share_count?: number;
   /** 除保留行之外，还共享了这份文件的人（显示名） */

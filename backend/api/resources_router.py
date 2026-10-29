@@ -87,7 +87,9 @@ _TREE_MAX_ENTRIES = 4000
 
 
 def _scan_tree(dirpath: str, base_rel: str = "", with_meta: bool = True,
-               _depth: int = 0, _budget: list | None = None) -> list[dict[str, Any]]:
+               _depth: int = 0, _budget: list | None = None,
+               kind_marks: dict[str, tuple[str, str]] | None = None,
+               kind_prefix: str = "") -> list[dict[str, Any]]:
     """扫描目录树; 限制深度与条目数, 避免大目录把响应撑到几百 KB 并卡住前端渲染。"""
     if _budget is None:
         _budget = [0, False]        # [剩余条目, 是否截断]
@@ -112,14 +114,22 @@ def _scan_tree(dirpath: str, base_rel: str = "", with_meta: bool = True,
             except OSError:
                 continue
             _, ext = os.path.splitext(name.lower())
-            entry = {"title": name, "key": rel.replace("\\", "/"), "isLeaf": True}
+            rel_posix = rel.replace("\\", "/")
+            entry = {"title": name, "key": rel_posix, "isLeaf": True}
             if with_meta:
                 entry["size"] = stat.st_size
                 entry["mtime"] = __import__("datetime").datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
                 entry["ext"] = ext
+                # 内容类型只有网页页面这一维；标注键 = 相对项目根的物理路径，前端原样回传即可
+                if ext in (".html", ".htm"):
+                    _p = f"{kind_prefix}/{rel_posix}" if kind_prefix else rel_posix
+                    _m = (kind_marks or {}).get(_p)
+                    entry["sub_kind"] = _m[0] if _m else rr.sub_kind_of(name)
+                    entry["sub_kind_set_by"] = _m[1] if _m else ""
             entries.append(entry)
         elif os.path.isdir(full):
-            children = _scan_tree(full, rel, with_meta, _depth + 1, _budget)
+            children = _scan_tree(full, rel, with_meta, _depth + 1, _budget,
+                                  kind_marks, kind_prefix)
             entries.append({"title": name, "key": rel.replace("\\", "/"), "isLeaf": False, "children": children})
     return entries
 
@@ -133,7 +143,9 @@ async def get_resource_tree(request: Request):
     if not os.path.exists(html_dir):
         return {"tree": []}
     budget = [_TREE_MAX_ENTRIES, False]
-    tree = _scan_tree(html_dir, with_meta=True, _budget=budget)
+    _root_rel = _html_root_rel(username)
+    tree = _scan_tree(html_dir, with_meta=True, _budget=budget,
+                      kind_marks=resource_kind.marks_under(_root_rel), kind_prefix=_root_rel)
     # T6: 不再返回服务器绝对路径(前端未使用)
     return {"tree": tree, "truncated": bool(budget[1])}
 

@@ -31,6 +31,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { getFileKind } from '../utils/fileKind'
 import { compactClassScope } from '../utils/classScope'
 import { isResourceKind } from '../constants/resourceKinds'
+import KindTag from './KindTag'
 import {
   FALLBACK_RESOURCE_TYPES, prettyResourceName, resourceIcon, resourceTypeLabel,
   sourceBadgeLabel, sourceLabel, subKindLabel,
@@ -503,7 +504,12 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
         <Tag color="gold" icon={<StarFilled />} style={tagStyle}>{t('rbKpExact')}</Tag>
       )}
       {it.kp_match === 'chapter' && <Tag style={tagStyle}>{t('rbKpChapter')}</Tag>}
-      {kindOf(it) && <Tag style={tagStyle}>{kindLabel(kindOf(it))}</Tag>}
+      {it.type === 'html' && it.sub_kind && it.mine && it.kind_path ? (
+        /* 绑定时最常发现「类型不对」：就地改标，不必回资源中心 */
+        <KindTag path={it.kind_path} kind={it.sub_kind} setBy={it.kind_set_by} fontSize={10} onChanged={loadCandidates} />
+      ) : kindOf(it) ? (
+        <Tag style={tagStyle}>{kindLabel(kindOf(it))}</Tag>
+      ) : null}
       {!!sourceBadgeLabel(t, it.source) && (
         <Tag color={it.source === 'wrong_book' ? 'purple' : undefined} style={tagStyle}>
           {sourceBadgeLabel(t, it.source)}
