@@ -10,7 +10,7 @@
  * 不传 onChanged（或不传 path）时退化成只读标签，只显示不能改。
  */
 import React from 'react'
-import { Dropdown, Tag, message } from 'antd'
+import { Dropdown, Tag, Tooltip, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import * as resourcesApi from '../api/resources'
 import { KIND_LABELS } from '../constants/resourceKinds'
@@ -31,6 +31,11 @@ const KindTag: React.FC<{
   if (!kind) return null
   const manual = setBy === 'manual'
   const editable = !!path && !!onChanged
+  const tr = t as unknown as (k: string) => string
+  // 两类练习的名字只差一个字，差别却在「会不会留成绩」—— 只有 Tooltip 说得清
+  const hintKey = `subKind.${kind}Hint`
+  const hintRaw = tr(hintKey)
+  const hint = hintRaw === hintKey ? '' : hintRaw
   const tag = (
     <Tag
       color={manual ? 'gold' : undefined}
@@ -39,7 +44,8 @@ const KindTag: React.FC<{
       {subKindLabel(t, kind)}{manual ? ' ·' : ''}{editable ? ' ▾' : ''}
     </Tag>
   )
-  if (!editable) return tag
+  const tagged = hint ? <Tooltip title={hint}>{tag}</Tooltip> : tag
+  if (!editable) return tagged
   return (
     <Dropdown
       trigger={['click']}
@@ -65,7 +71,7 @@ const KindTag: React.FC<{
         },
       }}
     >
-      <span onClick={(e) => e.stopPropagation()}>{tag}</span>
+      <span onClick={(e) => e.stopPropagation()}>{tagged}</span>
     </Dropdown>
   )
 }
