@@ -94,6 +94,8 @@ export const SUB_KIND_KEYS: Record<string, string> = {
   podcast: 'subKind.podcast',
   interactive: 'subKind.interactive',
   custom: 'subKind.custom',
+  activity: 'subKind.activity',
+  handout: 'subKind.handout',
   other: 'subKind.other',
 }
 

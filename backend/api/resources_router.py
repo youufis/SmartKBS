@@ -880,6 +880,8 @@ _SUBKIND_GROUP_NAMES: dict[str, str] = {
     "podcast": "播客",
     "interactive": "实验交互",
     "custom": "自定义页面",
+    "activity": "互动活动",
+    "handout": "讲义纲要",
 }
 
 # 章节前缀必须写成「数字.数字」才算章节号：AI 产物的文件名是

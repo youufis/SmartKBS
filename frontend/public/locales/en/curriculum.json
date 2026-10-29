@@ -390,6 +390,8 @@
   "subKind.podcast": "Podcast",
   "subKind.interactive": "Lab simulation",
   "subKind.custom": "Custom page",
+  "subKind.activity": "Activity",
+  "subKind.handout": "Handout",
   "subKind.other": "Unclassified page",
   "source.smart": "AI-generated",
   "source.bank": "From question bank",
