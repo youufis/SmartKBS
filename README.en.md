@@ -38,12 +38,12 @@
 > 📌 **Highlights of V9.0.0**
 >
 > **Mistake book and auto consolidation**
-> - 📕 **The mistake book moved from a seven-column table to one card per question**: stem (figure inline) → answer comparison → explanation → knowledge points, read top to bottom; the text column has a capped measure and the figure uses a new smaller `card` thumbnail (168×96) that sits right beside the stem — dropping below it on narrow screens instead of spilling out of the card — while right and wrong are encoded three ways (icon + label + tint), status is a tag while actions are buttons, and cards reflow on phones
+> - 📕 **The mistake book is now card-based**: one question reads top to bottom — stem, your answer against the correct one, explanation, knowledge points — with the figure beside the stem and dropping below it on narrow screens
 > - 🧠 **Mistakes finally carry explanations**: existing bank explanations show in a collapsible block; missing ones can be AI-generated straight into the bank — **empty slots only, never overwriting a teacher's text**
 > - 🔎 **Filter, group, batch, export**: pending / mastered / all with real counts, group by exam, topic or question type, keyword search, topic chips as filters, batch mark-as-mastered, and a Word export with explanations
 > - 🔁 **Auto consolidation practice works again**: an unanswered set no longer blocks forever, pushes notify with a direct link, cooldown and a daily cap were added, selection prefers frequently-missed and long-neglected questions while avoiding recent sets, all four knobs live in system settings, and teachers can push a set on demand
-> - 🧭 **Admins decide what feeds the mistake book**: a new multi-select in system settings (exams always included, plus practice, quick quiz, class questioning, course practice, class ladder), the mistake book states its current scope next to its title, and the student list is now driven by the mistake book itself so practice-only students are no longer unreachable
-> - 🧭 **Fixed “targeted practice invisible to everyone”**: `target_students` is a JSON array but was split on commas, so consolidated and teacher-targeted sets vanished from the home focus card and the to-do list; consolidated sets now rank highest and deep-link straight into the answers
+> - 🧭 **Admins decide what feeds the mistake book**: tick which activities' mistakes are collected in system settings (exams are always included), and the page shows its current scope; students who only ever did practice or class questioning can now be reached too
+> - 🧭 **Teacher-targeted practice is visible again**: sets pushed to named students and auto-consolidation sets used to vanish from the student home page and the to-do list; they are listed now, consolidation sets ranked first, one click straight into the answers
 >
 > **Resource centre and content types**
 > - 🏷️ **Web resources now have a content-type system**: 11 types — courseware, animation, course practice, chapter practice, interactive quiz, lab simulation, podcast, custom page, activity, handout, unclassified
@@ -57,12 +57,12 @@
 > - 🧩 **Resource binding rebuilt**: one registry replaces six hard-coded lists, synchronous practice is on the shelf, and the picker gained a facet sidebar, card layout and honest totals
 >
 > **Security, analytics and polish**
-> - 🔒 **Path traversal in static file serving fixed** (server files were reachable without login); API docs are off by default in production
+> - 🔒 **Path traversal in static file serving fixed** (server files were reachable without logging in); the API listing page is no longer exposed by default in production
 > - 📊 **Bank analytics no longer truncate**: full per-creator type and subject breakdowns, click a chip to filter
 > - 📥 **Bulk import reports the reason per row**; question management is faster; editing a knowledge point's chapter now shows the chapter name and actually saves
 > - 📱 **Detail tables became cards on phones**; portrait and avatar images no longer break with 401
 >
-> - ⚠️ **Breaking changes**: none. One security default changed — see the changelog
+> - ⚠️ **Breaking changes**: none
 >
 > 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes, including the new content-type mark table, are applied automatically at startup.
 
@@ -1162,22 +1162,22 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 
 **Security**
 
-- 🔒 **Path traversal in static file serving fixed**: the `/api/files/` catch-all let anyone pull files off the server without logging in; paths are now resolved and only served when they stay inside the build directory. **`/docs` and `/openapi.json` are closed by default in production** — enable them when debugging
-- 🩹 **The student view of shared files passed one parameter too many**, so `resource_id` was always 0 and views never attached to the resource
+- 🔒 **Path traversal in static file serving fixed**: files could be pulled off the server without logging in; only paths inside the site directory are served now, and the API listing page is off by default in production
+- 🩹 **Views of shared files never attached to a resource**: the query passed one parameter too many, so the view count stayed empty
 
 **Mistake book and auto consolidation**
 
-- 📕 **One card per question instead of a seven-column table**: the stem, figure, options, knowledge points and mastery state were sliced across seven columns, the options column stretched every row to 250px and left holes under the rest; a question is now read top to bottom as stem → answer comparison → explanation → knowledge points; the card body is capped at 1000px with a 68ch stem, and figures use a new `card` tier (168×96) that hugs the stem and wraps below it on narrow screens rather than breaking out of the card
-- 🧠 **Mistakes now show explanations**: the API selected `explanation` but never sent it, so students only saw knowledge points; bank explanations render in a collapsible block, and missing ones can be AI-generated back into the bank — **empty slots only, never overwriting teacher-written text**, up to 20 per run
-- 🎨 **Right and wrong no longer rely on red/green alone**: icon (✓ / ✗) + text label (your choice / correct answer) + tint, font sizes raised from 10px to 12–13px, all colours from theme variables so dark mode works; status is a tag and actions are buttons, so “mastered” no longer reads like a state
-- 🔎 **Filtering, grouping, batching, exporting**: real counts on pending / mastered / all, group by exam, topic or question type, keyword search and topic filters, batch mark-as-mastered, and a Word export grouped by source with answer comparison and explanations
-- 🔁 **Auto consolidation practice revived**: an unanswered set used to block future pushes **forever** (one sat untouched for 9 days while its owner had 99 pending mistakes); stale sets are now closed automatically, pushes send a notification with a direct link, cooldown and a daily cap prevent the opposite failure, selection prefers frequently-missed and long-neglected questions while avoiding recent sets, and threshold / per-set size / interval / avoid-recent-sets moved into system settings with a live status line and an on-demand push button for teachers
-- 🧭 **Fixed targeted practice being invisible**: `target_students` holds a JSON array but the task feed split it on commas, so `["s11001"]` never matched and both consolidated sets and teacher-targeted assignments vanished from the home focus card and the to-do list; consolidated sets now rank at priority 75 (above the 70 summary entry and 60 for ordinary practice) and deep-link via `/practice?open=<id>`
-- 🧭 **The ingestion scope is now an admin setting**: a multi-select in System settings › Mistake book; exams are always collected (ticking them off has no effect, so that box is disabled), everything else is opt-in; a disabled source writes nothing and leaves an INFO line explaining why, and the mistake book shows its current scope beside the title and in the empty state. Only activities whose questions map back to `question_bank` are offered — knowledge quest (AI-generated, own pool) and code practice (own problem table) would be dead switches
-- 🩹 **The student list now comes from `wrong_book` itself**: `/students`, `/grades` and `/classes` used `exam_attempts` as a proxy for “has mistakes”, so students who only ever did practice or class questioning could never be picked (locally reproduced: s11008 has rows but was unlistable)
-- 🧷 **Quick quiz now records the bank question id**: the room-preflight INSERT never wrote `source_question_id`, so the ingestion guard was always false and not one quiz mistake was ever collected; when reusing existing room questions it reads the column rather than the room-local row id, so it cannot attribute a mistake to the wrong question
-- 🧷 **A mistake keeps its origin**: getting a question wrong again inside a consolidation set only increments the counter and refreshes the last wrong answer — it no longer rewrites “which exam did they get it wrong in” into a practice; the reverse upgrade still applies, and existing rows were re-attributed to the earliest exam where the student missed them
-- 🩹 Students finally get the “consolidate mistakes” button to do something (generate a set or resume the unfinished one) instead of a toast; retired questions are labelled as such; duplicated knowledge-point tags no longer collide on a React key
+- 📕 **The mistake book is now card-based**: one question reads top to bottom — stem, your answer against the correct one, explanation, knowledge points; the figure sits beside the stem and drops below it on narrow screens instead of breaking out of the card
+- 🧠 **Mistakes carry explanations**: explanations already in the bank show in a collapsible block, and missing ones can be AI-generated straight into the bank — **empty slots only, never overwriting a teacher's text**
+- 🎨 **Right and wrong no longer rely on colour alone**: icon + text label + tint, theme colours throughout so dark mode works; status is a tag and actions are buttons, so “mastered” no longer reads like a state
+- 🔎 **Filter, group, batch, export**: real counts on pending / mastered / all, grouping by exam, topic or question type, keyword and topic filtering, batch mark-as-mastered, and a Word export grouped by source with answer comparison and explanations
+- 🔁 **Auto consolidation practice revived**: an unanswered set no longer blocks future ones (stale sets are closed after the interval); pushes send a notification that opens the set directly; a cooldown and a daily cap keep it from swinging to the opposite extreme; selection prefers frequently-missed and long-neglected questions and avoids recent sets; teachers see the policy and each student's state, and can push a set on demand
+- 🧭 **Admins choose the sources**: tick which activities feed the mistake book in system settings — exams are always included — and the page states its current scope. Only activities whose questions can be traced back to the bank are offered
+- 🧭 **Teacher-targeted practice is visible again**: sets pushed to named students and auto-consolidation sets used to vanish from the student home page and to-do list; they are listed now, with consolidation sets ranked first and one click straight into the answers
+- 🩹 **Students who only did practice or class questioning can now be reached**: the grade, class and student pickers used to list only students with exam submissions
+- 🧷 **Quick-quiz mistakes can be traced again**: quiz questions never recorded which bank question they came from, so nothing could reach the mistake book
+- 🧷 **A mistake keeps its origin**: getting it wrong again inside a consolidation set only raises the counter, it no longer rewrites which exam the mistake came from; existing rows were re-attributed to the earliest exam where the student missed them
+- 🩹 The student-side “consolidate mistakes” button now actually works (draw a set or resume the unfinished one) instead of only showing a note; retired questions are labelled as such
 
 **Resource centre and content types**
 
@@ -1188,7 +1188,7 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 - ✍️ **Types can be set by hand**: click the tag in My resources, on a share card, in the binding picker or in resource management (tree and grid) to reclassify, with a content-type filter on top; a gold tag with a dot is a human mark and can be cleared back to filename inference
 - 🗃️ **One-click grouping for ungrouped resources**: by content type, chapter (Chapter N) or section (N.M), previewing which groups are created or reused and how many items each takes before anything is written; already grouped files are never touched
 - ✂️ **Two kinds of practice separated**: `{point_id}_{title}_{timestamp}_练习.html` is **course practice** (answers recorded with a score) while a name ending in 练习题 is a **chapter exercise** (a generated page that records nothing). Both used to share one value shown as chapter practice; the tag now explains the difference on hover
-- 🩹 **The "My shares" sort box leaked the raw `unseen`**: the two share tabs shared one localStorage key, so a sort value from the tab with a reading-status dimension reached a tab without one. Preferences are stored per tab and validated on load, so view and page size no longer overwrite each other either
+- 🩹 **The “My shares” sort box leaked an internal value**: both share tabs read one local preference, so a sort option from one leaked into the other; preferences are now stored per tab and validated, and view and page size no longer overwrite each other
 
 **Question bank, courses and import**
 

@@ -1132,6 +1132,7 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
         answers = {}
 
     touched = False
+    touched_keys: set[str] = set()
     for qid, new_score in (req.question_scores or {}).items():
         one = answers.get(str(qid))
         if not isinstance(one, dict):
@@ -1150,6 +1151,7 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
         one["grading"] = "graded"          # 教师已定分, 不再进后台批改队列
         one.pop("needs_review", None)
         touched = True
+        touched_keys.add(str(qid))
 
     for qid, comment in (req.question_comments or {}).items():
         one = answers.get(str(qid))
@@ -1192,7 +1194,7 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
         try:
             again = execute_query_one("SELECT * FROM practice_attempts WHERE id=?", (attempt["id"],))
             if again:
-                _settle_practice_attempt(again)
+                _settle_practice_attempt(again, wrong_only_keys=touched_keys)
         except Exception as settle_err:
             logger.warning(f"练习结算失败 attempt={req.attempt_id}: {settle_err}")
 
@@ -1501,6 +1503,14 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
             })
         except Exception as wb_err:
             logger.warning(f"练习结算失败 (user={username}, session={session_id}): {wb_err}")
+    else:
+        # 主观题还挂在后台批改队列里：先把已判完的客观题记进错题本。
+        # 否则批改器一旦没跑（或跑得很慢），这份答卷的错题在错题本里会一直不出现。
+        # 积分仍按原样等判完再发 —— 得分没定稿就发分会算错档。
+        try:
+            _settle_practice_wrong_book(username, session_id, graded)
+        except Exception as wb_err:
+            logger.warning(f"练习错题预记失败 (user={username}, session={session_id}): {wb_err}")
             logger.warning(traceback.format_exc())
 
     try:
@@ -1637,7 +1647,32 @@ def _parse_ai_result(text: str) -> list[dict[str, Any]]:
 _pending_keys = pending_keys
 
 
-def _settle_practice_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
+def _settle_practice_wrong_book(username: str, sid: Any, graded: dict[str, Any],
+                                only_keys: set[str] | None = None) -> None:
+    """把这份答卷里"已判完"的题记进错题本（与积分结算分开）。
+
+    only_keys 传集合时只记这批：提交时客观题已经先记过一次，批改完成后再全量记一遍
+    会把同一道题的 wrong_count 重复累加，错题次数就失真了。
+    """
+    from backend.api.wrong_book_router import mark_wrong_mastered, record_wrong_answers
+
+    items = {k: v for k, v in (graded or {}).items()
+             if isinstance(v, dict) and v.get("grading") != "pending"
+             and (only_keys is None or k in only_keys)}
+    correct = {k: v for k, v in items.items() if v.get("is_correct")}
+    wrong = {k: v for k, v in items.items() if not v.get("is_correct")}
+    if correct:
+        mark_wrong_mastered(username, correct)
+    if wrong:
+        record_wrong_answers(username, sid, wrong, source="practice")
+
+
+# 批改器本轮刚判完的题号（attempt_id -> keys）：finalize 只补记这批，避免与提交时重复
+_PRACTICE_JUST_GRADED: dict[int, set[str]] = {}
+
+
+def _settle_practice_attempt(attempt: dict[str, Any],
+                             wrong_only_keys: set[str] | None = None) -> dict[str, Any]:
     """一份练习答卷判分完毕后的结算：等级积分 + 错题本（幂等，可重复调用）
 
     有主观题待批改时不在提交请求里结算，否则会出现"按 0 分进错题本、少发一档积分，
@@ -1657,15 +1692,8 @@ def _settle_practice_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
     title = (sess or {}).get("title") or f"练习#{sid}"
 
     try:
-        from backend.api.wrong_book_router import (
-            mark_wrong_mastered, record_wrong_answers, check_and_auto_generate_wrong_practice,
-        )
-        correct = {k: v for k, v in graded.items() if isinstance(v, dict) and v.get("is_correct")}
-        wrong = {k: v for k, v in graded.items() if isinstance(v, dict) and not v.get("is_correct")}
-        if correct:
-            mark_wrong_mastered(username, correct)
-        if wrong:
-            record_wrong_answers(username, sid, wrong, source="practice")
+        from backend.api.wrong_book_router import check_and_auto_generate_wrong_practice
+        _settle_practice_wrong_book(username, sid, graded, wrong_only_keys)
         _spawn_bg(check_and_auto_generate_wrong_practice, username)
     except Exception as wb_err:
         logger.warning(f"练习错题本结算失败 (user={username}, session={sid}): {wb_err}")
@@ -1783,6 +1811,7 @@ def _practice_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str
             one["max_score"] = job.max_score
             one["is_correct"] = bool(res.get("is_correct"))
             one["graded_by"] = str(res.get("graded_by") or "ai")
+            _PRACTICE_JUST_GRADED.setdefault(int(attempt_id), set()).add(job.entry_key)
             note = str(res.get("feedback") or res.get("comment") or "")[:600]
             if note:
                 one["feedback"] = note
@@ -1806,11 +1835,16 @@ def _practice_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str
 
 
 def _practice_finalize_if_done(attempt_id: int) -> None:
-    """该份答卷全部判完 → 补做积分与错题本结算"""
+    """该份答卷全部判完 → 补做积分，并只补记本轮刚判完的主观题错题。
+
+    只补记这批而不是全量重记：客观题在学生提交时就已进错题本，
+    再走一遍会把同一道题的 wrong_count 累加两次。
+    """
+    just_graded = _PRACTICE_JUST_GRADED.pop(int(attempt_id), None)
     attempt = execute_query_one("SELECT * FROM practice_attempts WHERE id=?", (attempt_id,))
     if not attempt or attempt.get("ai_pending"):
         return
-    _settle_practice_attempt(attempt)
+    _settle_practice_attempt(attempt, wrong_only_keys=just_graded)
 
 
 register_source(SourceAdapter(

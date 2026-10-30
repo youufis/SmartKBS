@@ -80,6 +80,7 @@ def _check_teacher_can_view_student(teacher_username: str, student_username: str
 
 # 已确认"无错题可回填"的学生, 避免每次请求重复全量扫描考试记录
 _BACKFILL_SCANNED: set[str] = set()
+_PRACTICE_BACKFILL_SCANNED: set[str] = set()
 
 
 def _assert_can_access_student(user: dict, requested: str) -> str:
@@ -167,6 +168,27 @@ def _activity_meta_map(student: str, source: str, ids: list[int]) -> dict[int, d
                     ORDER BY pa.submitted_at DESC""",
                 (student, *ids),
             )
+        elif source == "course_practice":
+            # 课程练习按知识点组织，知识点名就是这份练习的名字（知识点表在主库，别用题库连接）
+            krows = db_dict(
+                f"SELECT id, name, updated_at FROM knowledge_points WHERE id IN ({ph})", tuple(ids)
+            ) or []
+            rows = [{
+                "rid": r["id"], "title": r.get("name") or "", "subject": "",
+                "score": None, "total_score": None,
+                "submitted_at": r.get("updated_at") or "", "attempt_id": None,
+            } for r in krows]
+        elif source in ("class_drill", "class_ladder"):
+            # 课堂活动的会话表在主库，字段名也和考试不同，这里统一成同一套键
+            table = "class_drill_sessions" if source == "class_drill" else "class_ladder_sessions"
+            srows = db_dict(
+                f"SELECT id, topic, subject, updated_at FROM {table} WHERE id IN ({ph})", tuple(ids)
+            ) or []
+            rows = [{
+                "rid": r["id"], "title": r.get("topic") or "", "subject": r.get("subject") or "",
+                "score": None, "total_score": None, "submitted_at": r.get("updated_at") or "",
+                "attempt_id": None,
+            } for r in srows]
         else:
             return {}
     except Exception as e:
@@ -179,11 +201,86 @@ def _activity_meta_map(student: str, source: str, ids: list[int]) -> dict[int, d
 
 
 def _backfill_wrong_book(student: str) -> int:
+    """回填历史错题：考试与同步练习各扫一次（进程内记名，避免每次打开错题本都重解析答卷）。
+
+    练习侧只补"表里还没有的题"，已有行不累加 wrong_count —— 否则回填一次就等于
+    每人又多错一遍，错题次数这个指标会被自己灌爆。
+    """
+    if not student:
+        return 0
+    written = 0
+    if student not in _BACKFILL_SCANNED:
+        written += _backfill_exam_wrong_book(student)
+    if student not in _PRACTICE_BACKFILL_SCANNED:
+        written += _backfill_practice_wrong_book(student)
+    return written
+
+
+def _backfill_practice_wrong_book(student: str) -> int:
+    """把只存在于 practice_attempts.answers 里的历史错题补进 wrong_book。
+
+    同步练习接入错题本之前做的练习不会自己冒出来；不回填的话，老学生的错题本
+    看起来永远比实际少，而教师看不出是"没错题"还是"没回填"。
+    """
+    _PRACTICE_BACKFILL_SCANNED.add(student)
+    try:
+        attempts = execute_query(
+            """SELECT session_id, answers, submitted_at FROM practice_attempts
+               WHERE student_username = ? AND status = 'submitted'
+               ORDER BY submitted_at DESC""",
+            (student,),
+        )
+    except Exception as e:
+        logger.warning(f"同步练习错题回填失败 ({student}): {e}")
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    written = 0
+    for a in attempts or []:
+        data = a.get("answers")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(data, dict):
+            continue
+        for qid_raw, ans in data.items():
+            if not isinstance(ans, dict) or ans.get("is_correct"):
+                continue
+            if str(ans.get("grading") or "") == "pending":
+                continue          # 主观题还没判完，不能当错题记
+            qid = _to_int(qid_raw)
+            if qid is None:
+                continue
+            if db_exec("SELECT 1 FROM wrong_book WHERE student_username=? AND question_id=? LIMIT 1",
+                       (student, qid)):
+                continue          # 已有行（考试记的或上次回填的）不再加次数
+            meta = _question_meta_map([qid]).get(qid, {})
+            when = a.get("submitted_at") or now
+            try:
+                db_insert(
+                    """INSERT OR IGNORE INTO wrong_book
+                       (student_username, question_id, source, source_id, knowledge_points, question_type,
+                        status, wrong_answer, created_at, wrong_count, last_wrong_at)
+                       VALUES (?, ?, 'practice', ?, ?, ?, 'pending', ?, ?, 1, ?)""",
+                    (student, qid, a.get("session_id") or 0,
+                     meta.get("knowledge_points", "") or "", meta.get("type", "") or "",
+                     str(ans.get("student_answer", ""))[:500], when, when),
+                )
+                written += 1
+            except Exception as e:
+                logger.warning(f"同步练习错题回填单行失败 ({student} qid={qid}): {e}")
+    if written:
+        logger.info(f"[错题本] 同步练习历史回填 {student}: 补 {written} 行")
+    return written
+
+
+def _backfill_exam_wrong_book(student: str) -> int:
     """把只存在于 exam_attempts.answers 里的历史错题回填进 wrong_book(W5)。
 
     每人只跑一次: 表内已有记录或已确认无错题则跳过。
     """
-    if not student or student in _BACKFILL_SCANNED:
+    if student in _BACKFILL_SCANNED:
         return 0
     try:
         has = db_exec("SELECT 1 FROM wrong_book WHERE student_username=? LIMIT 1", (student,))
@@ -283,6 +380,10 @@ _SOURCE_FALLBACK_TITLES = {
     "exam": "考试错题",
     "practice": "同步练习错题",
     "quiz": "随堂测验错题",
+    "quick_quiz": "随堂测验错题",
+    "class_drill": "课堂抽问错题",
+    "course_practice": "课程练习错题",
+    "class_ladder": "课堂闯关错题",
     "auto": "系统自动归集",
 }
 

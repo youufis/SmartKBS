@@ -545,6 +545,19 @@ async def judge(request: Request):
             question.get("source") or "bank", result, points, _now(),
         ),
     )
+    # 错题本：抽问答错也记账（受系统配置「错题本接入范围」闸门管；AI 现场生成的题不追）
+    _q_src = str(question.get("source") or "bank")
+    if stu_username and _q_src == "bank" and result in ("correct", "incorrect") and question.get("id"):
+        try:
+            from backend.api.wrong_book_router import mark_wrong_mastered, record_single_wrong
+            if result == "incorrect":
+                record_single_wrong(stu_username, question["id"], student_answer,
+                                    "class_drill", session["id"])
+            else:
+                mark_wrong_mastered(stu_username, {str(question["id"]): {"is_correct": True}})
+        except Exception as e:
+            logger.warning(f"[课堂抽问] 错题本写入失败 {stu_username} q={question.get('id')}: {e}")
+
     # 统一台账：把刚才那次抽人的结果与明细指针补上（同班同名靠学号区分）
     try:
         pick_engine.finish(grade=grade, cls=cls, activity=pick_engine.ACT_DRILL,

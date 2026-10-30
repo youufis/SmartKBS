@@ -604,6 +604,26 @@ def _settle_run(run: dict, session: dict) -> None:
     run["points_awarded"] = correct
     run["_settled"] = True
 
+    # 错题本：闯关答错的题入库（题池取自主题库，可按题号追溯；_settled 保证一次 run 只记一遍）
+    stu = str(run.get("student_username") or "")
+    if stu:
+        try:
+            from backend.api.wrong_book_router import mark_wrong_mastered, record_single_wrong
+            right_map: dict[str, dict[str, Any]] = {}
+            for a in answers:
+                qid = str(a.get("question_id") or "")
+                if not qid.isdigit():
+                    continue            # AI 现场生成的题没有主题库题号，不追
+                if a.get("correct"):
+                    right_map[qid] = {"is_correct": True}
+                else:
+                    record_single_wrong(stu, int(qid), str(a.get("selected") or ""),
+                                        "class_ladder", int(run.get("id") or 0))
+            if right_map:
+                mark_wrong_mastered(stu, right_map)
+        except Exception as e:
+            logger.warning(f"[课堂闯关] 错题本写入失败 run={run.get('id')}: {e}")
+
     # 结算结果回填到抽人台账（points 记实际入账的课堂积分，阶梯分留在明细里）。
     # 走 ref 指针而不是姓名：同班两个同名学生同时闯关时，按姓名反查会回填到错误那行。
     try:

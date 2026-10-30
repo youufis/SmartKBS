@@ -5011,6 +5011,23 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
          total_reward, answers_json, now),
     )
 
+    # 错题本：课程练习答错的题入库（题号就是判分用的 question_bank 行，可追溯）
+    try:
+        from backend.api.wrong_book_router import mark_wrong_mastered, record_wrong_answers
+        graded_map = {
+            str(r["question_id"]): {"is_correct": bool(r.get("is_correct")),
+                                    "student_answer": str(r.get("student_answer") or "")}
+            for r in results_list if str(r.get("question_id") or "").isdigit()
+        }
+        wrong_map = {k: v for k, v in graded_map.items() if not v["is_correct"]}
+        correct_map = {k: v for k, v in graded_map.items() if v["is_correct"]}
+        if wrong_map:
+            record_wrong_answers(username, kp_id, wrong_map, source="course_practice")
+        if correct_map:
+            mark_wrong_mastered(username, correct_map)
+    except Exception as e:
+        logger.warning(f"[课程练习] 错题本写入失败 kp_id={kp_id} user={username}: {e}")
+
     logger.info(f"AI 练习成绩已保存: kp_id={kp_id}, username={username}, score={req.score}/{req.total_score}, reward={total_reward}")
     return {
         "message": "成绩已记录",
