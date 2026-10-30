@@ -69,7 +69,7 @@ interface ConfigZone {
 }
 
 const CONFIG_ZONES: ConfigZone[] = [
-  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward', 'showcase'] },
+  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward', 'wrongbook', 'showcase'] },
   { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill', 'classladder', 'portrait'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
@@ -82,6 +82,7 @@ const SECTION_TITLES: Record<string, string> = {
   notify: 'group_notify',
   incentive: 'group_incentive',
   reward: 'group_reward',
+  wrongbook: 'group_wrongbook',
   showcase: 'group_showcase',
   credentials: 'group_credentials',
   models: 'group_models',
@@ -268,7 +269,13 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'REWARD_DAILY_ACADEMIC_POINTS', labelKey: 'field_REWARD_DAILY_ACADEMIC_POINTS', descKey: 'field_REWARD_DAILY_ACADEMIC_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
   { key: 'REWARD_DAILY_CLASS_POINTS', labelKey: 'field_REWARD_DAILY_CLASS_POINTS', descKey: 'field_REWARD_DAILY_CLASS_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
   { key: 'REWARD_DAILY_FUN_POINTS', labelKey: 'field_REWARD_DAILY_FUN_POINTS', descKey: 'field_REWARD_DAILY_FUN_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
-  { key: 'REWARD_DAILY_TOTAL_POINTS', labelKey: 'field_REWARD_DAILY_TOTAL_POINTS', descKey: 'field_REWARD_DAILY_TOTAL_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' }, 
+  { key: 'REWARD_DAILY_TOTAL_POINTS', labelKey: 'field_REWARD_DAILY_TOTAL_POINTS', descKey: 'field_REWARD_DAILY_TOTAL_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
+
+  // ══ 错题本：自动错题巩固（backend/api/wrong_book_router.py 的 wrong_practice_policy）══
+  { key: 'wrong_practice_threshold', labelKey: 'field_wrong_practice_threshold', descKey: 'field_wrong_practice_threshold_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitItem' },
+  { key: 'wrong_practice_per_set', labelKey: 'field_wrong_practice_per_set', descKey: 'field_wrong_practice_per_set_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitItem' },
+  { key: 'wrong_practice_interval_days', labelKey: 'field_wrong_practice_interval_days', descKey: 'field_wrong_practice_interval_days_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitDay' },
+  { key: 'wrong_practice_avoid_recent_sets', labelKey: 'field_wrong_practice_avoid_recent_sets', descKey: 'field_wrong_practice_avoid_recent_sets_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitTime' },
 
   // ══ ③ 文件与存储 ══
   // 上传限制与类型白名单

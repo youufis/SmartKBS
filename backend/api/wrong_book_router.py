@@ -3,14 +3,16 @@
 自动归集学生错题，AI 生成复习计划
 """
 import json
-from datetime import datetime
+import re
+import threading
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
-from backend.question_db import execute_query, execute_query_one
+from backend.question_db import execute_query, execute_query_one, execute_update
 from backend.database import execute_query as user_query
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
@@ -267,7 +269,10 @@ async def get_wrong_questions(
         user, request.query_params.get("student_username", "")
     )
     if not target_username:
-        return {"total_wrong": 0, "exams": [], "mastered_total": 0, "student_username": ""}
+        return {
+            "total_wrong": 0, "exams": [], "student_username": "",
+            "pending_total": 0, "mastered_total": 0, "all_total": 0,
+        }
 
     _backfill_wrong_book(target_username)
 
@@ -278,11 +283,14 @@ async def get_wrong_questions(
            WHERE student_username = ? AND (? = 'all' OR status = ?)""",
         (target_username, status, status),
     ) or []
-    mastered_rows = db_exec(
-        "SELECT COUNT(*) FROM wrong_book WHERE student_username=? AND status='mastered'",
+    status_rows = db_dict(
+        "SELECT status, COUNT(*) AS cnt FROM wrong_book WHERE student_username=? GROUP BY status",
         (target_username,),
-    )
-    mastered_total = mastered_rows[0][0] if mastered_rows else 0
+    ) or []
+    status_counts = {str(r["status"]): int(r["cnt"] or 0) for r in status_rows}
+    mastered_total = status_counts.get("mastered", 0)
+    pending_total = sum(v for k, v in status_counts.items() if k != "mastered")
+    all_total = mastered_total + pending_total
 
     qmeta = _question_meta_map([r["question_id"] for r in rows])
     grouped: dict[tuple[str, int], list[dict]] = {}
@@ -316,6 +324,7 @@ async def get_wrong_questions(
                 "options": options,
                 "correct_answer": q.get("correct_answer", "") or "",
                 "student_answer": it.get("wrong_answer", "") or "",
+                "explanation": (q.get("explanation") or "").strip(),
                 "score": 0,
                 "max_score": 0,
                 "knowledge_points": it.get("knowledge_points") or q.get("knowledge_points") or "",
@@ -346,27 +355,25 @@ async def get_wrong_questions(
         "total_wrong": total_wrong,
         "exams": groups,
         "mastered_total": mastered_total,
+        "pending_total": pending_total,
+        "all_total": all_total,
         "student_username": target_username,
     }
 
 
 class MasterToggleRequest(BaseModel):
-    wrong_book_id: int
+    wrong_book_id: int = 0
+    wrong_book_ids: list[int] = []  # 批量: 错题本页勾选多道一次标记
     status: str = "mastered"  # mastered=已掌握 pending=取消(重回待掌握)
 
 
-@router.post("/master", summary="手动切换单条错题的掌握状态")
-async def toggle_wrong_mastered(req: MasterToggleRequest, request: Request):
-    """学生自主控制错题本: 把某道题标为已掌握(从待掌握列表消失)或取消。
+def _apply_master_toggle(user: dict, wb_id: int, status: str) -> int:
+    """切换单条错题的掌握状态, 返回实际更新行数(0 = 状态本就一致)。
 
-    与判分自动标记共用同一 status 字段: 标掌握后再次答错会由 _upsert_wrong
-    自动重开为 pending, 所以手动标记不会把题永久锁死在错题本外。
+    权限守卫与订正积分都收在这里, 单条与批量走同一条路径, 不会出现
+    "批量绕过了教师任教范围检查" 这类偏差。
     """
-    user = get_current_user(request)
-    if req.status not in ("mastered", "pending"):
-        raise HTTPException(status_code=400, detail="status 仅支持 mastered 或 pending")
-
-    rows = db_dict("SELECT id, student_username, status FROM wrong_book WHERE id=?", (req.wrong_book_id,))
+    rows = db_dict("SELECT id, student_username, status FROM wrong_book WHERE id=?", (wb_id,))
     if not rows:
         raise HTTPException(status_code=404, detail="错题记录不存在")
 
@@ -376,27 +383,57 @@ async def toggle_wrong_mastered(req: MasterToggleRequest, request: Request):
         raise HTTPException(status_code=403, detail="无权修改其他学生的错题本")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if req.status == "mastered":
+    if status == "mastered":
         updated = _db_write(
             "UPDATE wrong_book SET status='mastered', mastered_at=? WHERE id=? AND status<>'mastered'",
-            (now, req.wrong_book_id),
+            (now, wb_id),
         )
         if updated:
             # 把错题真正改会是有价值的学习行为，以前在积分体系里一分不算（订正类每日上限 5 分）
             try:
                 from backend.reward_engine import award_participation
-                award_participation(owner, "wrong_book", str(req.wrong_book_id),
-                                    f"错题订正 #{req.wrong_book_id}")
+                award_participation(owner, "wrong_book", str(wb_id), f"错题订正 #{wb_id}")
             except Exception as e:
                 logger.warning(f"[错题本] 订正积分发放失败 {owner}: {e}")
     else:
         updated = _db_write(
             "UPDATE wrong_book SET status='pending', mastered_at=NULL WHERE id=? AND status<>'pending'",
-            (req.wrong_book_id,),
+            (wb_id,),
         )
-    logger.info(f"错题手动切换掌握状态: {user.get('username')} wb={req.wrong_book_id} "
-                f"-> {req.status} (updated={updated})")
-    return {"ok": True, "updated": updated, "wrong_book_id": req.wrong_book_id, "status": req.status}
+    logger.info(f"错题手动切换掌握状态: {user.get('username')} wb={wb_id} "
+                f"-> {status} (updated={updated})")
+    return updated
+
+
+@router.post("/master", summary="手动或批量切换错题的掌握状态")
+async def toggle_wrong_mastered(req: MasterToggleRequest, request: Request):
+    """学生自主控制错题本: 把某道题(或勾选的一批)标为已掌握, 或取消标记。
+
+    与判分自动标记共用同一 status 字段: 标掌握后再次答错会由 _upsert_wrong
+    自动重开为 pending, 所以手动标记不会把题永久锁死在错题本外。
+    """
+    user = get_current_user(request)
+    if req.status not in ("mastered", "pending"):
+        raise HTTPException(status_code=400, detail="status 仅支持 mastered 或 pending")
+
+    ids: list[int] = []
+    for raw in [req.wrong_book_id, *(req.wrong_book_ids or [])]:
+        try:
+            wid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if wid > 0 and wid not in ids:
+            ids.append(wid)
+    if not ids:
+        raise HTTPException(status_code=400, detail="缺少 wrong_book_id")
+    if len(ids) > 200:
+        raise HTTPException(status_code=400, detail="单次最多处理 200 条错题")
+
+    updated = 0
+    for wid in ids:
+        updated += _apply_master_toggle(user, wid, req.status)
+    return {"ok": True, "updated": updated, "wrong_book_id": ids[0],
+            "wrong_book_ids": ids, "status": req.status}
 
 
 @router.get("/students", summary="获取有错题记录的学生列表")
@@ -823,6 +860,9 @@ def _upsert_wrong(student: str, qid: int, source: str, source_id: int,
     - 新题: 插入 pending
     - 已 pending: 累加 wrong_count 并更新最近错误答案/时间
     - 曾 mastered 又答错: 重开为 pending(错题本不能只减不加)
+
+    来源不漂移：巩固练习里再错一次只累加次数，不把"哪次考试错的"改写成练习。
+    反过来，原本只在练习里错过的题，一旦在考试里又错，来源会升级为考试。
     """
     existing = db_exec(
         "SELECT id, status FROM wrong_book WHERE student_username=? AND question_id=?",
@@ -833,11 +873,15 @@ def _upsert_wrong(student: str, qid: int, source: str, source_id: int,
             """UPDATE wrong_book
                SET status='pending', mastered_at=NULL,
                    wrong_count=COALESCE(wrong_count, 1) + 1,
-                   wrong_answer=?, last_wrong_at=?, source=?, source_id=?,
+                   wrong_answer=?, last_wrong_at=?,
+                   source=CASE WHEN ? = 'practice' AND COALESCE(source, '') NOT IN ('', 'practice')
+                               THEN source ELSE ? END,
+                   source_id=CASE WHEN ? = 'practice' AND COALESCE(source, '') NOT IN ('', 'practice')
+                                  THEN source_id ELSE ? END,
                    knowledge_points=CASE WHEN ? <> '' THEN ? ELSE knowledge_points END,
                    question_type=CASE WHEN ? <> '' THEN ? ELSE question_type END
                WHERE id=?""",
-            (wrong_answer[:500], when, source, source_id, kp, kp, qtype, qtype, existing[0][0]),
+            (wrong_answer[:500], when, source, source, source, source_id, kp, kp, qtype, qtype, existing[0][0]),
         )
     return db_insert(
         """INSERT OR IGNORE INTO wrong_book
@@ -1004,46 +1048,211 @@ async def generate_wrong_practice(req: PracticeGenerateRequest, request: Request
     }
 
 
-def check_and_auto_generate_wrong_practice(student_username: str, threshold: int = 30) -> int:
-    """错题数超过阈值时自动生成"错题巩固练习"。
+# ── 自动错题巩固：策略参数（系统配置可覆盖，键名 wrong_practice_*） ──
+WRONG_PRACTICE_DEFAULTS = {"threshold": 30, "per_set": 5, "interval_days": 7, "avoid_recent_sets": 3}
 
-    W10: 只查 wrong_book(表已由回填保证有数据), 不再每次全量解析历史答卷 JSON;
-    本函数是同步的, 调用方应通过 backend.async_utils.spawn_bg 放到后台线程执行。
-    返回新建的 session_id, 0 表示未生成。
+
+def wrong_practice_policy() -> dict[str, int]:
+    """读自动巩固的三个参数。配置缺失或写成负数就退回默认，不能让坏配置把机制整个关掉。"""
+    from backend.api.config_router import get_config_value
+
+    out: dict[str, int] = {}
+    for key, default in WRONG_PRACTICE_DEFAULTS.items():
+        try:
+            val = int(get_config_value(f"wrong_practice_{key}", default))
+        except (TypeError, ValueError):
+            val = default
+        out[key] = val if val >= 0 else default
+    return out
+
+
+_WRONG_PRACTICE_LOCKS: dict[str, threading.Lock] = {}
+_WRONG_PRACTICE_LOCKS_GUARD = threading.Lock()
+
+
+def _student_lock(student_username: str) -> threading.Lock:
+    """按学生取一把锁。
+
+    生成练习是"先查有没有挡路会话、再插入"两步，交卷结算与打开错题本同时触发时
+    会双双通过检查、生成两份重复练习；SQLite 串行写救不了这个 check-then-insert。
+    """
+    with _WRONG_PRACTICE_LOCKS_GUARD:
+        lock = _WRONG_PRACTICE_LOCKS.get(student_username)
+        if lock is None:
+            if len(_WRONG_PRACTICE_LOCKS) > 1024:
+                _WRONG_PRACTICE_LOCKS.clear()   # 回收，避免字典随学生数无界增长
+            lock = _WRONG_PRACTICE_LOCKS[student_username] = threading.Lock()
+        return lock
+
+
+def _target_like(student_username: str) -> str:
+    return f'%"{student_username}"%'
+
+
+def _days_since(ts: str) -> int:
+    """时间串距今几天。解析不了当作很久以前 —— 宁可多布置一次，也别永远不布置。"""
+    text = str(ts or "")
+    if not text:
+        return 10 ** 6
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(text[:len(fmt) + 4].strip(), fmt)
+        except ValueError:
+            continue
+        return max(0, (datetime.now() - dt).days)
+    return 10 ** 6
+
+
+def _find_outstanding_wrong_practice(student_username: str, within_days: int = 7) -> int:
+    """最近 within_days 天内、还没作答的错题巩固会话 id, 没有则 0。
+
+    时间窗是必须的：旧实现只看"存在未作答会话"，学生漏做一次就永久失去自动巩固
+    资格（实测有挂了 9 天没人做的会话，把 99 道待掌握错题的学生彻底挡在门外）。
+    """
+    cutoff = (datetime.now() - timedelta(days=max(0, within_days))).strftime("%Y-%m-%d %H:%M:%S")
+    rows = execute_query(
+        """SELECT ps.id FROM practice_sessions ps
+           WHERE ps.source = 'wrong_book' AND ps.status = 'active'
+             AND ps.target_students LIKE ? AND ps.created_at >= ?
+             AND NOT EXISTS (SELECT 1 FROM practice_attempts pa
+                             WHERE pa.session_id = ps.id AND pa.student_username = ?)
+           ORDER BY ps.id DESC LIMIT 1""",
+        (_target_like(student_username), cutoff, student_username),
+    )
+    return int(rows[0]["id"]) if rows else 0
+
+
+def _last_wrong_practice_at(student_username: str) -> str:
+    rows = execute_query(
+        "SELECT MAX(created_at) AS t FROM practice_sessions"
+        " WHERE source='wrong_book' AND target_students LIKE ?",
+        (_target_like(student_username),),
+    )
+    if not rows or not rows[0]["t"]:
+        return ""
+    return str(rows[0]["t"])
+
+
+def _expire_stale_wrong_practice(student_username: str, within_days: int) -> int:
+    """把超期还没人做的巩固会话置为 ended，免得练习列表里堆一堆僵尸条目。"""
+    cutoff = (datetime.now() - timedelta(days=max(0, within_days))).strftime("%Y-%m-%d %H:%M:%S")
+    n = execute_update(
+        """UPDATE practice_sessions SET status='ended', updated_at=?
+           WHERE source='wrong_book' AND status='active' AND created_at < ?
+             AND target_students LIKE ?
+             AND NOT EXISTS (SELECT 1 FROM practice_attempts pa
+                             WHERE pa.session_id = practice_sessions.id AND pa.student_username = ?)""",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), cutoff,
+         _target_like(student_username), student_username),
+    )
+    return int(n or 0)
+
+
+def _recent_practice_question_ids(student_username: str, sets: int) -> set[int]:
+    """最近 sets 组巩固练习里出过的题。
+
+    刚做过的题马上原样再来一遍没有训练价值，只会让学生觉得错题本永远清不完。
+    """
+    if sets <= 0:
+        return set()
+    rows = execute_query(
+        """SELECT psq.question_id FROM practice_session_questions psq
+           JOIN practice_sessions ps ON ps.id = psq.session_id
+           WHERE ps.source = 'wrong_book' AND ps.target_students LIKE ?
+             AND ps.id IN (SELECT id FROM practice_sessions
+                           WHERE source = 'wrong_book' AND target_students LIKE ?
+                           ORDER BY id DESC LIMIT ?)""",
+        (_target_like(student_username), _target_like(student_username), int(sets)),
+    )
+    return {int(r["question_id"]) for r in rows if r.get("question_id") is not None}
+
+
+def _notify_wrong_practice(student_username: str, session_id: int, count: int) -> None:
+    """布置完要出声。以前只把会话塞进练习列表，学生不点开就永远不知道（作答率 0/2）。"""
+    try:
+        from backend.api.notification_router import notify_users
+        # 通知"类型"要在系统配置(通知类型)里启用才投得出去，站内只有 exam/info/task 常开；
+        # 沿用「教师一键提醒未提交」的既有约定：type=info + source_type=practice。
+        notify_users(
+            [student_username], "info", "错题巩固练习已布置",
+            f"你的待掌握错题较多，已为你准备 {count} 道巩固题",
+            f"/practice?open={session_id}",
+            source_type="practice", source_id=str(session_id),
+        )
+    except Exception as e:
+        logger.warning(f"[错题巩固] 通知发送失败 student={student_username} session={session_id}: {e}")
+
+
+def _evaluate_wrong_practice(student_username: str) -> dict[str, Any]:
+    """统一判定"现在该不该给这个学生自动生成一组"，触发器与状态查询共用一份逻辑。"""
+    policy = wrong_practice_policy()
+    rows = db_dict(
+        "SELECT COUNT(*) AS c FROM wrong_book WHERE student_username=? AND status='pending'",
+        (student_username,),
+    ) or []
+    pending_total = int(rows[0]["c"] or 0) if rows else 0
+    last_at = _last_wrong_practice_at(student_username)
+    days_since = _days_since(last_at)
+    outstanding = _find_outstanding_wrong_practice(student_username, policy["interval_days"])
+    if pending_total <= policy["threshold"]:
+        ready, reason = False, "below_threshold"
+    elif outstanding:
+        ready, reason = False, "outstanding"
+    elif days_since < policy["interval_days"]:
+        ready, reason = False, "cooldown"
+    else:
+        ready, reason = True, "ready"
+    return {
+        "policy": policy,
+        "pending_total": pending_total,
+        "last_created_at": last_at,
+        "days_since_last": (None if not last_at else days_since),
+        "outstanding_id": outstanding,
+        "next_in_days": (0 if ready else max(0, policy["interval_days"] - days_since)),
+        "ready": ready,
+        "reason": reason,
+    }
+
+
+def create_wrong_book_practice(student_username: str, count: int = 5, notify: bool = True) -> int:
+    """从该生待掌握错题里抽题组成一组巩固练习, 返回 session_id, 0 表示没题可出。
+
+    题已下架(status != active)的不进练习, 但错题本仍保留记录(W14)。
+    notify=False 用于学生自助场景：人就在页面上，再发一条通知纯属噪音。
     """
     import random as _random
     from backend.question_db import execute_insert as q_ins, execute_update as q_upd
 
     if not student_username:
         return 0
+    want = max(1, min(int(count or 5), 20))
     _backfill_wrong_book(student_username)
     rows = db_dict(
-        "SELECT question_id FROM wrong_book WHERE student_username=? AND status='pending'",
+        """SELECT question_id, COALESCE(wrong_count, 1) AS wc,
+                  COALESCE(NULLIF(last_wrong_at, ''), created_at) AS lw
+           FROM wrong_book WHERE student_username=? AND status='pending'""",
         (student_username,),
     ) or []
-    pending_ids = [r["question_id"] for r in rows if r.get("question_id") is not None]
-    if len(pending_ids) <= threshold:
+    rows = [r for r in rows if r.get("question_id") is not None]
+    if not rows:
         return 0
 
-    # 已有未作答的错题巩固练习就不再重复生成(一次 JOIN 判断)
-    outstanding = execute_query(
-        """SELECT ps.id FROM practice_sessions ps
-           LEFT JOIN practice_attempts pa
-                  ON pa.session_id = ps.id AND pa.student_username = ?
-           WHERE ps.source = 'wrong_book' AND ps.status = 'active'
-             AND ps.target_students LIKE ? AND pa.id IS NULL
-           LIMIT 1""",
-        (student_username, f'%"{student_username}"%'),
-    )
-    if outstanding:
-        return 0
-
-    meta = _question_meta_map(pending_ids)
-    usable = [qid for qid in pending_ids if (meta.get(qid) or {}).get("status") == "active"]
+    meta = _question_meta_map([r["question_id"] for r in rows])
+    usable = [r for r in rows if (meta.get(r["question_id"]) or {}).get("status") == "active"]
     if not usable:
         return 0
-    _random.shuffle(usable)
-    selected = usable[:5]
+
+    # 错得多的优先，错次数相同则最久没碰的优先；再避开最近几组刚出过的题。
+    # 排除后不够一组就退回全集，不能因为"避开"把练习卡死。
+    ranked = sorted(usable, key=lambda r: (-int(r["wc"] or 1), str(r["lw"] or "")))
+    avoid = wrong_practice_policy().get("avoid_recent_sets", 3)
+    recent = _recent_practice_question_ids(student_username, avoid)
+    fresh = [r for r in ranked if int(r["question_id"]) not in recent]
+    pool = fresh if len(fresh) >= want else ranked
+    # 只在优先级最高的 want*3 里打散：既保住排序，又不至于每次都是同一批
+    top = pool[:want * 3]
+    _random.shuffle(top)
+    selected = [int(r["question_id"]) for r in top[:want]]
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     title = f"错题巩固练习（{now[:10]}）"
@@ -1067,10 +1276,46 @@ def check_and_auto_generate_wrong_practice(student_username: str, threshold: int
         total_score += per_scores[i]
     q_upd("UPDATE practice_sessions SET total_score=? WHERE id=?", (total_score, session_id))
     logger.info(
-        f"自动生成错题巩固练习 session={session_id} 学生={student_username} "
-        f"抽题={len(selected)} 待掌握错题={len(pending_ids)}"
+        f"[错题巩固] 生成 session={session_id} 学生={student_username} "
+        f"抽题={len(selected)} 待掌握错题={len(rows)} 避开最近{avoid}组"
     )
+    if session_id and notify:
+        _notify_wrong_practice(student_username, int(session_id), len(selected))
     return session_id or 0
+
+
+def check_and_auto_generate_wrong_practice(student_username: str, threshold: int | None = None) -> int:
+    """阈值与冷却都过了才生成一组错题巩固练习；每种跳过原因都写日志。
+
+    W10: 只查 wrong_book(表已由回填保证有数据), 不再每次全量解析历史答卷 JSON;
+    本函数是同步的, 调用方应通过 backend.async_utils.spawn_bg 放到后台线程执行。
+    threshold 只为旧调用方/测试保留，平时留空由系统配置决定。
+    """
+    if not student_username:
+        return 0
+    # 见 _student_lock：并发触发会生成两份重复练习
+    with _student_lock(student_username):
+        return _check_and_auto_generate_wrong_practice(student_username, threshold)
+
+
+def _check_and_auto_generate_wrong_practice(student_username: str, threshold: int | None = None) -> int:
+    """check_and_auto_generate_wrong_practice 的无锁实现，调用方必须已持有该生的锁。"""
+    _backfill_wrong_book(student_username)
+    state = _evaluate_wrong_practice(student_username)
+    if threshold is not None and state["pending_total"] <= threshold:
+        state = {**state, "ready": False, "reason": "below_threshold"}
+    if not state["ready"]:
+        logger.info(
+            f"[错题巩固] 跳过({student_username}) 原因={state['reason']} "
+            f"待掌握={state['pending_total']} 阈值={state['policy']['threshold']} "
+            f"未作答会话={state['outstanding_id'] or '-'} 距上一组={state['days_since_last']}"
+        )
+        return 0
+    _expire_stale_wrong_practice(student_username, state["policy"]["interval_days"])
+    session_id = create_wrong_book_practice(student_username, state["policy"]["per_set"])
+    if not session_id:
+        logger.info(f"[错题巩固] 跳过({student_username}) 原因=no_usable_question 待掌握={state['pending_total']}")
+    return session_id
 
 
 def _students_with_pending_wrong(limit: int = 200) -> list[str]:
@@ -1079,6 +1324,24 @@ def _students_with_pending_wrong(limit: int = 200) -> list[str]:
         (limit,),
     ) or []
     return [str(r["student_username"]) for r in rows if r.get("student_username")]
+
+
+@router.get("/practice/auto-status", summary="错题巩固自动布置的策略与该生当前状态")
+async def wrong_practice_auto_status(
+    request: Request,
+    student_username: str = Query("", description="学生用户名"),
+):
+    """给教师端看"为什么没自动布置"：阈值/每组题数/间隔 + 该生的实际判定结果。
+
+    判定逻辑与自动触共用 `_evaluate_wrong_practice`，两边不会各说一套。
+    """
+    user = get_current_user(request)
+    target = _assert_can_access_student(user, student_username)
+    if not target:
+        raise HTTPException(status_code=400, detail="请先选择学生")
+    _backfill_wrong_book(target)
+    state = _evaluate_wrong_practice(target)
+    return {"student_username": target, **state}
 
 
 @router.get("/practice/check-auto", summary="学生端检查是否需要错题巩固练习")
@@ -1116,10 +1379,24 @@ async def trigger_auto_wrong_practice(request: Request):
     except Exception:
         body = {}
     target = (body.get("student_username") or request.query_params.get("student_username") or "").strip()
+    force = bool(body.get("force"))
 
     if target:
         if role != 0:
             _check_teacher_can_view_student(username, target)
+        if force:
+            # 教师点名要一组：跳过阈值与冷却，但仍未作答的旧会话要沿用，别叠两份
+            with _student_lock(target):
+                state = _evaluate_wrong_practice(target)
+                if state["outstanding_id"]:
+                    return {"message": "该生还有一组未完成的巩固练习，已直接沿用",
+                            "session_id": state["outstanding_id"], "reused": True, "dispatched": [target]}
+                session_id = create_wrong_book_practice(target, state["policy"]["per_set"])
+                if not session_id:
+                    raise HTTPException(status_code=400, detail="没有可出的题（待掌握错题可能都已下架）")
+                return {"message": f"已为 {target} 布置一组错题巩固练习",
+                        "session_id": session_id, "reused": False,
+                        "question_count": _practice_question_count(int(session_id)), "dispatched": [target]}
         spawn_bg(check_and_auto_generate_wrong_practice, target, name=f"错题巩固练习({target})")
         return {"message": f"已为 {target} 提交后台检查", "dispatched": [target]}
 
@@ -1138,3 +1415,316 @@ async def trigger_auto_wrong_practice(request: Request):
         "dispatched": allowed[:50],
         "dispatched_total": len(allowed),
     }
+
+
+# ═══════════════════════════════════════════════
+# 错题本增强：AI 补解析 / 学生自助巩固练习 / 导出 Word
+# ═══════════════════════════════════════════════
+
+_STATUS_LABELS = {"pending": "待掌握", "mastered": "已掌握", "all": "全部"}
+_TYPE_LABELS = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
+                "fill": "填空题", "essay": "作文题", "code": "编程题"}
+
+
+def _options_text(raw: Any) -> str:
+    """把题库 options(JSON 串或 dict) 压成一行文本, 喂模型或写进 Word 都用它。"""
+    try:
+        opts = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(opts, dict):
+        return ""
+    return "；".join(f"{k}. {v}" for k, v in opts.items())
+
+
+def _md_to_text(raw: Any) -> str:
+    """题干与解析带 Markdown/公式记号, Word 里不渲染, 落笔前清成纯文本。"""
+    text = str(raw or "")
+    text = re.sub(r"`+", "", text)
+    text = re.sub(r"\*\*|__|~~", "", text)
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.M)
+    text = text.replace("$", "")
+    return text.strip()
+
+
+def _letters(raw: Any) -> set[str]:
+    """答案串里的选项字母集合(多选按每个字母算命中)。"""
+    return {c for c in str(raw or "").upper() if c.isalpha()}
+
+
+class ExplanationGenerateRequest(BaseModel):
+    question_ids: list[int] = []
+    student_username: str = ""
+    overwrite: bool = False  # 默认只补空解析, 不动老师已写好的
+
+
+@router.post("/explanation/generate", summary="AI 补全错题解析（写回题库）")
+async def generate_wrong_explanations(req: ExplanationGenerateRequest, request: Request):
+    """给没有解析的错题生成讲解并写回 question_bank.explanation(异步任务)。
+
+    只补空、不覆盖(与题库「AI 补标」同一口径): 老师手写的解析永远优先。
+    解析落在题库而不是错题本快照上, 是因为一道题的讲解属于题本身, 不该按学生存一份;
+    代价是老师改了题目解析后, 学生错题本里看到的会跟着变 —— 这是有意保持一致。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    # 学生一律本人, 教师限任教范围; 目标学生只影响"针对谁的错误答案讲"
+    target = _assert_can_access_student(user, req.student_username)
+
+    qids: list[int] = []
+    for raw in req.question_ids or []:
+        qid = _to_int(raw)
+        if qid is not None and qid not in qids:
+            qids.append(qid)
+    if not qids:
+        raise HTTPException(status_code=400, detail="缺少 question_ids")
+    if len(qids) > 20:
+        raise HTTPException(status_code=400, detail=f"单次最多补 20 道题（当前 {len(qids)}）")
+
+    meta = _question_meta_map(qids)
+    todo: list[tuple[int, dict]] = []
+    missing_from_bank: list[int] = []
+    for qid in qids:
+        q = meta.get(qid)
+        if not q:
+            missing_from_bank.append(qid)
+            continue
+        if not req.overwrite and str(q.get("explanation") or "").strip():
+            continue
+        todo.append((qid, q))
+    if not todo:
+        return {"task_id": 0, "todo": 0, "requested": len(qids), "missing_from_bank": missing_from_bank,
+                "message": "所选错题都已有解析"}
+
+    keys = get_api_keys(username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    wrong_map: dict[int, str] = {}
+    if target:
+        for r in db_dict("SELECT question_id, wrong_answer FROM wrong_book WHERE student_username=?",
+                         (target,)) or []:
+            try:
+                wrong_map[int(r["question_id"])] = str(r.get("wrong_answer") or "")
+            except (TypeError, ValueError):
+                continue
+
+    from backend.prompts.wrong_book import WRONG_BOOK_EXPLAIN_PROMPT
+    from backend.ai_task_manager import task_manager
+
+    overwrite = req.overwrite
+
+    async def _do() -> dict[str, Any]:
+        import asyncio
+        from backend.question_db import execute_update as q_upd
+
+        def _safe(s: Any) -> str:
+            return str("" if s is None else s).replace("{", "{{").replace("}", "}}")
+
+        sem = asyncio.Semaphore(3)
+
+        async def _one(qid: int, q: dict) -> dict[str, Any]:
+            async with sem:
+                prompt = WRONG_BOOK_EXPLAIN_PROMPT.format(
+                    question_text=_safe(q.get("question_text")),
+                    question_type=_safe(_TYPE_LABELS.get(q.get("type"), q.get("type"))),
+                    options=_safe(_options_text(q.get("options")) or "（非选择题）"),
+                    correct_answer=_safe(q.get("correct_answer")),
+                    student_answer=_safe(wrong_map.get(qid) or "（未记录）"),
+                    knowledge_points=_safe(q.get("knowledge_points")),
+                )
+                prompt = apply_skills(prompt, "wrong-book")
+                try:
+                    text = await call_ai_async(prompt, api_key, use_kb=False)
+                except Exception as e:
+                    logger.warning(f"[错题本] AI 解析生成失败 qid={qid}: {e}")
+                    return {"question_id": qid, "saved": False, "error": str(e)[:160]}
+                text = str(text or "").strip()
+                if len(text) < 10:
+                    return {"question_id": qid, "saved": False, "error": "AI 未返回有效解析"}
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if overwrite:
+                    n = q_upd("UPDATE question_bank SET explanation=?, updated_at=? WHERE id=?",
+                              (text[:4000], now, qid))
+                else:
+                    n = q_upd("""UPDATE question_bank SET explanation=?, updated_at=?
+                                 WHERE id=? AND (explanation IS NULL OR TRIM(explanation)='')""",
+                              (text[:4000], now, qid))
+                return {"question_id": qid, "saved": bool(n)}
+
+        raw = await asyncio.gather(*[_one(qid, q) for qid, q in todo], return_exceptions=True)
+        results: list[dict[str, Any]] = []
+        for i, r in enumerate(raw):
+            if isinstance(r, Exception):
+                logger.error(f"[错题本] AI 解析任务异常 qid={todo[i][0]}: {r}")
+                results.append({"question_id": todo[i][0], "saved": False, "error": str(r)[:160]})
+            else:
+                results.append(r)
+        saved = sum(1 for r in results if r.get("saved"))
+        logger.info(f"[错题本] AI 补解析完成: {saved}/{len(todo)} 学生={target or '-'} 操作人={username}")
+        return {"saved": saved, "total": len(todo), "results": results}
+
+    task_id = await task_manager.create_task(
+        description=f"错题解析补全({target or username})", coro_factory=_do,
+        dedupe_key=f"wb-explain:{target or username}", max_concurrent=2,
+    )
+    return {"task_id": task_id, "todo": len(todo), "requested": len(qids),
+            "missing_from_bank": missing_from_bank, "student_username": target}
+
+
+def _practice_question_count(session_id: int) -> int:
+    """一组练习实际有几道题。practice_* 表在 questions.db, 别用主库连接去查。"""
+    rows = execute_query("SELECT COUNT(*) AS cnt FROM practice_session_questions WHERE session_id=?",
+                         (session_id,))
+    return int(rows[0]["cnt"]) if rows else 0
+
+
+@router.post("/practice/self", summary="学生自助生成或继续错题巩固练习")
+async def self_wrong_practice(request: Request):
+    """学生点「错题巩固」: 有未作答的一组就直接给回去, 没有就现抽一组。
+
+    以前学生端这个按钮只弹一句提示(后端能力全在教师侧), 现在补上自助入口;
+    题量上限 10 道, 避免一次抽太多把练习做成考试。
+    """
+    user = get_current_user(request)
+    if user.get("role", 2) != 2:
+        raise HTTPException(status_code=403, detail="仅学生可自助生成练习")
+    username = user["username"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    count = _to_int(body.get("count")) or 5
+    count = max(1, min(count, 10))
+
+    with _student_lock(username):
+        outstanding = _find_outstanding_wrong_practice(
+            username, wrong_practice_policy()["interval_days"])
+        if outstanding:
+            return {"session_id": outstanding, "reused": True,
+                    "question_count": _practice_question_count(outstanding),
+                    "message": "已有一组未完成的错题巩固练习"}
+        session_id = create_wrong_book_practice(username, count, notify=False)
+    if not session_id:
+        raise HTTPException(status_code=400, detail="暂无可用于巩固的错题（可能都已掌握，或题目已下架）")
+    n = _practice_question_count(session_id)
+    return {"session_id": session_id, "reused": False, "question_count": n,
+            "message": f"已生成 {n} 道错题巩固练习"}
+
+
+@router.get("/export", summary="导出错题本为 Word 文档（含作答对照与解析）")
+async def export_wrong_book_docx(request: Request, status: str = Query("pending")):
+    """按来源分组导出错题: 题干 / 选项 / 我的选择 / 正确答案 / 解析 / 知识点。
+
+    直接复用 /list 的组装结果, 保证"页面上看到的"和"导出来的"永远是同一份。
+    """
+    import io as _io
+    import urllib.parse
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from fastapi.responses import StreamingResponse
+
+    user = get_current_user(request)
+    target = _assert_can_access_student(user, request.query_params.get("student_username", ""))
+    if not target:
+        raise HTTPException(status_code=400, detail="请先选择学生")
+
+    payload = await get_wrong_questions(request, status)
+    exams = payload.get("exams") or []
+    if not exams:
+        raise HTTPException(status_code=400, detail="没有可导出的错题")
+
+    urows = user_query("SELECT name, grade, class FROM users WHERE username=?", (target,))
+    student_name = (urows[0][0] or target) if urows else target
+    student_grade = (urows[0][1] or "") if urows else ""
+    student_class = str(urows[0][2] or "") if urows else ""
+    status_label = _STATUS_LABELS.get(status, status)
+
+    doc = Document()
+    normal = doc.styles["Normal"]
+    normal.font.name = "Microsoft YaHei"
+    normal.font.size = Pt(11)
+    normal.paragraph_format.line_spacing = 1.4
+
+    heading = doc.add_heading(f"{student_name} 的错题本（{status_label}）", level=1)
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    info = doc.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = info.add_run(
+        f"年级：{student_grade}  班级：{student_class}班  错题：{payload.get('total_wrong', 0)} 道"
+        f"  来源：{len(exams)} 场  导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    seq = 0
+    for gi, exam in enumerate(exams, 1):
+        doc.add_heading(f"{gi}. {exam.get('exam_title') or '错题来源'}", level=2)
+        bits = [str(x) for x in [
+            exam.get("exam_subject") or "",
+            f"{exam.get('wrong_count', len(exam.get('wrong_questions') or []))} 道错题",
+            (f"得分 {exam.get('score')}/{exam.get('total_score')}"
+             if exam.get("score") is not None and exam.get("total_score") else ""),
+            str(exam.get("submitted_at") or "")[:10],
+        ] if x]
+        if bits:
+            meta = doc.add_paragraph("  ·  ".join(bits))
+            meta.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+
+        for q in exam.get("wrong_questions") or []:
+            seq += 1
+            qtype = _TYPE_LABELS.get(q.get("question_type"), q.get("question_type") or "题目")
+            doc.add_heading(f"第 {seq} 题（{qtype}）", level=3)
+            doc.add_paragraph(_md_to_text(q.get("question_text")))
+
+            opts = q.get("options") or {}
+            right_letters = _letters(q.get("correct_answer"))
+            mine_letters = _letters(q.get("student_answer"))
+            if opts:
+                for key, val in opts.items():
+                    marks = []
+                    if str(key).upper() in right_letters:
+                        marks.append("正确答案")
+                    if str(key).upper() in mine_letters:
+                        marks.append("你的选择")
+                    p = doc.add_paragraph(f"{key}. {_md_to_text(val)}")
+                    if marks:
+                        r = p.add_run(f"  【{'、'.join(marks)}】")
+                        r.bold = True
+                        r.font.color.rgb = (RGBColor(0x1E, 0x87, 0x41) if "正确答案" in marks
+                                            else RGBColor(0xC0, 0x39, 0x2B))
+            else:
+                doc.add_paragraph(f"我的作答：{_md_to_text(q.get('student_answer')) or '（未作答）'}")
+                doc.add_paragraph(f"参考答案：{_md_to_text(q.get('correct_answer')) or '—'}")
+
+            line = doc.add_paragraph()
+            line.add_run("你的选择：").bold = True
+            line.add_run(f"{q.get('student_answer') or '（未作答）'}    ")
+            line.add_run("正确答案：").bold = True
+            line.add_run(str(q.get("correct_answer") or "—"))
+
+            exp = _md_to_text(q.get("explanation"))
+            p = doc.add_paragraph()
+            if exp:
+                p.add_run("解析：").bold = True
+                p.add_run(exp)
+            else:
+                r = p.add_run("解析：（题库暂无，可在错题本页点「AI 补全解析」生成）")
+                r.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+            if q.get("knowledge_points"):
+                kp = doc.add_paragraph()
+                kp.add_run("知识点：").bold = True
+                kp.add_run(str(q.get("knowledge_points")))
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    filename = urllib.parse.quote(f"{student_name}_错题本_{status_label}.docx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )

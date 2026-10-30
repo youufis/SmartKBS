@@ -1,0 +1,219 @@
+/* ============================================================
+   错题本（WrongBookPage）— 卡片式错题列表
+   取代原来的 7 列宽表格：一道题的信息按「题干 → 作答对照 → 解析 → 元信息」
+   纵向排布，颜色只做辅助，状态与操作分离，全部取主题变量以适配暗色。
+   ============================================================ */
+
+.wb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.wb-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 批量操作条 */
+.wb-bulkbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: var(--bg-container);
+  border: 1px solid var(--border-color-secondary);
+  border-radius: 8px;
+  box-shadow: var(--header-shadow);
+}
+
+/* ── 错题卡片 ── */
+.wb-card {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px 10px 16px;
+  margin-bottom: 10px;
+  background: var(--bg-container);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+/* 左侧色条：红=待掌握，绿=已掌握（旁边同时有文字状态标签，不依赖颜色单独表意） */
+.wb-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--error-color);
+  opacity: 0.85;
+}
+.wb-card.is-mastered::before { background: var(--success-color); }
+.wb-card.is-selected {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 14%, transparent);
+}
+.wb-card-main { flex: 1 1 auto; min-width: 0; }
+
+.wb-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.wb-meta { font-size: 12px; color: var(--text-tertiary); }
+.wb-flex { flex: 1 1 auto; }
+
+/* 题干 + 配图：宽屏左右分栏，窄屏自动堆叠 */
+.wb-stem-row { display: flex; gap: 14px; align-items: flex-start; }
+.wb-stem {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.wb-media { flex: 0 0 auto; width: 180px; max-width: 34%; }
+/* MediaDisplay 自带居中与上下外边距，卡片里靠左贴齐即可 */
+.wb-media > div { margin: 0 !important; justify-content: flex-start !important; }
+
+/* 作答对照 */
+.wb-answer-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  margin: 10px 0 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.wb-answer-line b { color: var(--text-primary); font-weight: 600; }
+.wb-answer-line .ok { color: var(--success-color); font-weight: 600; }
+.wb-answer-line .bad { color: var(--error-color); font-weight: 600; }
+
+.wb-opt {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+.wb-opt + .wb-opt { margin-top: 2px; }
+.wb-opt-mark { flex: 0 0 16px; width: 16px; padding-top: 4px; text-align: center; }
+.wb-opt-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--border-color-secondary); }
+.wb-opt-key { flex: 0 0 auto; font-weight: 600; }
+.wb-opt-text { flex: 1 1 auto; min-width: 0; word-break: break-word; white-space: pre-wrap; }
+.wb-opt-badge {
+  flex: 0 0 auto;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.wb-opt-badge.right { color: var(--success-color); background: color-mix(in srgb, var(--success-color) 14%, transparent); }
+.wb-opt-badge.mine { color: var(--error-color); background: color-mix(in srgb, var(--error-color) 12%, transparent); }
+/* 正确选项：绿底描边；选错的选项：红底描边；两者叠加时以正确为主色 */
+.wb-opt.is-right {
+  background: color-mix(in srgb, var(--success-color) 10%, transparent);
+  border-color: color-mix(in srgb, var(--success-color) 34%, transparent);
+}
+.wb-opt.is-right .wb-opt-mark { color: var(--success-color); }
+.wb-opt.is-mine {
+  background: color-mix(in srgb, var(--error-color) 8%, transparent);
+  border-color: color-mix(in srgb, var(--error-color) 30%, transparent);
+}
+.wb-opt.is-mine .wb-opt-mark { color: var(--error-color); }
+.wb-opt.is-mine.is-right {
+  background: color-mix(in srgb, var(--success-color) 10%, transparent);
+  border-color: color-mix(in srgb, var(--success-color) 34%, transparent);
+}
+.wb-opt.is-mine.is-right .wb-opt-mark { color: var(--success-color); }
+
+/* 主观题 / 判断题：我的作答 vs 参考答案 */
+.wb-answer-block {
+  padding: 8px 10px;
+  margin-top: 8px;
+  background: var(--bg-container);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+.wb-answer-block.is-mine { border-left: 3px solid var(--error-color); }
+.wb-answer-block.is-ref { border-left: 3px solid var(--success-color); }
+.wb-answer-label { font-size: 12px; color: var(--text-tertiary); }
+.wb-answer-body {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 解析 */
+.wb-exp { margin-top: 8px; }
+.wb-exp-toggle { padding-inline: 0 !important; }
+.wb-exp-body {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.8;
+  background: var(--bg-layout);
+  border-left: 3px solid var(--primary-color);
+  border-radius: 0 8px 8px 0;
+}
+.wb-exp-empty { margin-top: 8px; font-size: 12px; color: var(--text-tertiary); }
+
+/* 卡片底部：知识点 + 操作 */
+.wb-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+}
+.wb-kp-chip { cursor: pointer; }
+.wb-kp-chip.is-active { border-color: var(--primary-color); color: var(--primary-color); }
+.wb-actions { display: flex; gap: 6px; align-items: center; }
+
+/* 分组内「展开其余 N 题」 */
+.wb-more { display: flex; justify-content: center; margin: 4px 0 12px; }
+
+/* 分组标题 */
+.wb-group-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* 自动巩固策略条：教师端显示阈值/每组题数/间隔与当前卡在哪一步 */
+.wb-auto-state {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px dashed var(--border-color-secondary);
+  border-radius: 6px;
+}
+
+@media (max-width: 768px) {
+  .wb-card { padding: 10px 10px 8px 12px; }
+  .wb-stem-row { flex-direction: column; gap: 8px; }
+  .wb-media { width: 100%; max-width: 100%; }
+  .wb-media img { max-height: 180px; }
+  .wb-toolbar { align-items: stretch; }
+  .wb-toolbar-group > * { flex: 1 1 auto; }
+}

@@ -1405,5 +1405,14 @@
   "skillNoneEnabledDesc": "各 AI 功能仍可正常使用，但会退回基座模型的默认风格：结构化程度、示例密度、追问引导与内容安全约束都会减少。需要恢复时打开右上角「全部启用」。",
   "skillRecommendedTag": "建议常开",
   "skillRecommendedTip": "这项承载底线约束（如内容安全），关闭后该场景不再有此约束，功能不会报错但质量会降",
-  "taskMobileReadonlyHint": "手机上只做查看：编辑、AI 批改、结束与删除请到电脑端操作。"
+  "taskMobileReadonlyHint": "手机上只做查看：编辑、AI 批改、结束与删除请到电脑端操作。",
+  "group_wrongbook": "错题本与自动巩固",
+  "field_wrong_practice_threshold": "自动布置阈值",
+  "field_wrong_practice_threshold_desc": "待掌握错题超过这个数量时，系统自动为该生布置一组错题巩固练习；0 表示只要有错题就布置。",
+  "field_wrong_practice_per_set": "每组题数",
+  "field_wrong_practice_per_set_desc": "每次自动布置抽几道题（1~20）。抽题优先错得多的、最久没碰的，并避开最近几组刚出过的题。",
+  "field_wrong_practice_interval_days": "布置间隔",
+  "field_wrong_practice_interval_days_desc": "两组自动巩固练习之间至少间隔的天数；同时决定「未作答的旧会话」还能挡路几天，超过就自动收尾并允许布置新的一组。",
+  "field_wrong_practice_avoid_recent_sets": "避开最近组数",
+  "field_wrong_practice_avoid_recent_sets_desc": "抽题时排除最近几组已出过的题（0 = 不排除）。可选题不足一组时自动退回全集，不会因此布置不出来。"
 }

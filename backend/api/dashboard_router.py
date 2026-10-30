@@ -2101,28 +2101,38 @@ async def get_task_todo(request: Request):
                ORDER BY ps.created_at DESC""",
             (username,),
         )
+        from backend.api.practice_router import _parse_target_students
         for pp in pending_practices:
-            # 定向练习（target_students 不为空）仅对指定学生可见
-            target = (pp.get("target_students") or "").strip()
-            if target:
-                target_list = [u.strip() for u in target.split(",") if u.strip()]
-                if username not in target_list:
-                    continue
-            # 错题巩固练习（source='wrong_book'）仅对目标学生可见
-            if pp.get("source") == "wrong_book" and not target:
+            # 定向练习（target_students 存的是 JSON 数组）只对名单里的学生可见。
+            # 旧实现按逗号切字符串，'["s11001"]' 永远切不出用户名，
+            # 结果错题巩固与教师定向布置的练习在学生任务流里全体隐身。
+            targets = _parse_target_students(pp.get("target_students"))
+            if targets and username not in targets:
                 continue
+            # 错题巩固练习（source='wrong_book'）必须点名到人，没有名单就不下发
+            is_wrong_practice = pp.get("source") == "wrong_book"
+            if is_wrong_practice and not targets:
+                continue
+            desc_bits = [b for b in [
+                pp.get("subject") or "",
+                f"{pp['question_count']}题",
+                f"{pp['total_score']}分",
+            ] if b]
             items.append({
                 "id": f"practice-{pp['id']}",
                 "type": "practice",
                 "title": pp["title"],
-                "description": f"{pp.get('subject','信息科技')} · {pp['question_count']}题 · {pp['total_score']}分",
+                "description": ("系统按你的待掌握错题自动组卷 · " if is_wrong_practice else "")
+                                 + " · ".join(desc_bits),
                 "subject": pp.get("subject", ""),
                 "status": "pending",
-                "priority": 60,
+                # "点一下就能做"的一组巩固题压在错题本汇总项(70)之上，别被埋在最底下
+                "priority": 75 if is_wrong_practice else 60,
                 "deadline": None,
-                "url": "/practice",
-                "action_label": "开始练习",
-                "meta": {"question_count": pp["question_count"]},
+                # 深链直达这份练习，省得学生在同步练习列表里翻找
+                "url": f"/practice?open={pp['id']}",
+                "action_label": "去巩固" if is_wrong_practice else "开始练习",
+                "meta": {"question_count": pp["question_count"], "source": pp.get("source") or ""},
             })
     except Exception as e:
         logger.warning(f"[task-todo] 查询练习失败: {e}")
@@ -2531,14 +2541,15 @@ async def get_task_todo(request: Request):
             items.append({
                 "id": "wrong_book",
                 "type": "wrong_book",
-                "title": f"错题巩固（{wrong_count} 道待巩固）",
-                "description": f"有 {wrong_count} 道错题需要复习巩固",
+                # 与"错题巩固练习（自动抽的那一组）"区分：这条是账本汇总，那条才是可做的题
+                "title": f"错题本 · {wrong_count} 道待巩固",
+                "description": f"有 {wrong_count} 道错题尚未掌握；超过阈值时系统会自动抽一组巩固题",
                 "subject": "",
                 "status": "pending",
                 "priority": 70,
                 "deadline": None,
                 "url": "/wrong-book",
-                "action_label": "去巩固",
+                "action_label": "整理错题",
                 "meta": {"count": wrong_count},
             })
     except Exception as e:

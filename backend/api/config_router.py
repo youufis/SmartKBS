@@ -49,6 +49,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "HOMEWORK_ENABLE_VL": True,        # 图片作业的多模态预解读（与聊天的 ENABLE_MULTIMODAL 解耦）
     "HOMEWORK_ALLOWED_EXTS": [".docx", ".pdf", ".txt", ".md", ".xlsx", ".pptx",
                               ".jpg", ".jpeg", ".png", ".webp", ".bmp"],
+    # ── 错题本：自动错题巩固练习（判定逻辑见 wrong_book_router.wrong_practice_policy）──
+    "wrong_practice_threshold": 30,      # 待掌握错题超过这个数才自动布置
+    "wrong_practice_per_set": 5,         # 每组抽几道题
+    "wrong_practice_interval_days": 7,   # 两组之间的间隔天数，也是"未作答会话"的挡路时限
+    "wrong_practice_avoid_recent_sets": 3,  # 抽题时避开最近几组出过的题（0=不排除）
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-plus",
     "MODEL_NAME": "qwen3.7-flash",   # 默认值统一由 backend/model_catalog.py 维护（DEFAULT_CHAT_MODEL）
@@ -367,6 +372,10 @@ def _mask_config(config: dict[str, Any]) -> dict[str, Any]:
 # ── C2/C5: 配置写入校验 ──
 
 _NUM_RANGES: dict[str, tuple[float, float]] = {
+    "wrong_practice_threshold": (0, 500),
+    "wrong_practice_per_set": (1, 20),
+    "wrong_practice_interval_days": (0, 90),
+    "wrong_practice_avoid_recent_sets": (0, 20),
     "JWT_EXPIRATION_HOURS": (1, 720),
     "JWT_RENEW_THRESHOLD_MINUTES": (0, 43200),
     "ONLINE_USER_TIMEOUT_SECONDS": (60, 86400),

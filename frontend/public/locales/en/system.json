@@ -1405,5 +1405,14 @@
   "skillNoneEnabledDesc": "AI features still work, but fall back to the base model's default style: less structure, fewer examples, weaker follow-up guidance and no content-safety layer. Use \"Enable all\" at the top right to restore it.",
   "skillRecommendedTag": "Keep on",
   "skillRecommendedTip": "Carries a baseline guardrail (e.g. content safety). Turning it off won't break the feature but removes that constraint",
-  "taskMobileReadonlyHint": "Mobile is view-only: edit, AI grading, ending and deleting tasks need the desktop app."
+  "taskMobileReadonlyHint": "Mobile is view-only: edit, AI grading, ending and deleting tasks need the desktop app.",
+  "group_wrongbook": "Mistake book & auto practice",
+  "field_wrong_practice_threshold": "Auto-push threshold",
+  "field_wrong_practice_threshold_desc": "Once a student's pending mistakes exceed this number, a practice set is pushed automatically; 0 means push whenever any mistake exists.",
+  "field_wrong_practice_per_set": "Questions per set",
+  "field_wrong_practice_per_set_desc": "How many questions each auto set contains (1-20). Selection prefers frequently-missed and long-neglected questions, avoiding recent sets.",
+  "field_wrong_practice_interval_days": "Push interval",
+  "field_wrong_practice_interval_days_desc": "Minimum days between two auto sets. It also decides how long an unanswered set keeps blocking new pushes; stale sets are then closed automatically.",
+  "field_wrong_practice_avoid_recent_sets": "Avoid last N sets",
+  "field_wrong_practice_avoid_recent_sets_desc": "Exclude questions served in the last N sets (0 = no exclusion). Falls back to the full pool when too few candidates remain."
 }

@@ -37,7 +37,14 @@
 
 > 📌 **Highlights of V9.0.0**
 >
-> **Resource centre and content types** (the biggest piece of this release)
+> **Mistake book and auto consolidation**
+> - 📕 **The mistake book moved from a seven-column table to one card per question**: stem (figure inline) → answer comparison → explanation → knowledge points, read top to bottom; right and wrong are encoded three ways (icon + label + tint), status is a tag while actions are buttons, and cards reflow on phones
+> - 🧠 **Mistakes finally carry explanations**: existing bank explanations show in a collapsible block; missing ones can be AI-generated straight into the bank — **empty slots only, never overwriting a teacher's text**
+> - 🔎 **Filter, group, batch, export**: pending / mastered / all with real counts, group by exam, topic or question type, keyword search, topic chips as filters, batch mark-as-mastered, and a Word export with explanations
+> - 🔁 **Auto consolidation practice works again**: an unanswered set no longer blocks forever, pushes notify with a direct link, cooldown and a daily cap were added, selection prefers frequently-missed and long-neglected questions while avoiding recent sets, all four knobs live in system settings, and teachers can push a set on demand
+> - 🧭 **Fixed “targeted practice invisible to everyone”**: `target_students` is a JSON array but was split on commas, so consolidated and teacher-targeted sets vanished from the home focus card and the to-do list; consolidated sets now rank highest and deep-link straight into the answers
+>
+> **Resource centre and content types**
 > - 🏷️ **Web resources now have a content-type system**: 11 types — courseware, animation, course practice, chapter practice, interactive quiz, lab simulation, podcast, custom page, activity, handout, unclassified
 > - ✍️ **The type can be set by hand**: an explicit mark beats filename guessing, artifacts are classified when written, **follow renames and are cleared on delete**; click the tag in any of four places to reclassify, and filter by type at the top
 > - 🗃️ **One-click grouping for ungrouped resources**: by content type, chapter or section, with a preview before anything is written; only ungrouped files are touched and same-named groups are reused
@@ -1157,6 +1164,17 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 - 🔒 **Path traversal in static file serving fixed**: the `/api/files/` catch-all let anyone pull files off the server without logging in; paths are now resolved and only served when they stay inside the build directory. **`/docs` and `/openapi.json` are closed by default in production** — enable them when debugging
 - 🩹 **The student view of shared files passed one parameter too many**, so `resource_id` was always 0 and views never attached to the resource
 
+**Mistake book and auto consolidation**
+
+- 📕 **One card per question instead of a seven-column table**: the stem, figure, options, knowledge points and mastery state were sliced across seven columns, the options column stretched every row to 250px and left holes under the rest; a question is now read top to bottom as stem → answer comparison → explanation → knowledge points, and cards reflow on phones
+- 🧠 **Mistakes now show explanations**: the API selected `explanation` but never sent it, so students only saw knowledge points; bank explanations render in a collapsible block, and missing ones can be AI-generated back into the bank — **empty slots only, never overwriting teacher-written text**, up to 20 per run
+- 🎨 **Right and wrong no longer rely on red/green alone**: icon (✓ / ✗) + text label (your choice / correct answer) + tint, font sizes raised from 10px to 12–13px, all colours from theme variables so dark mode works; status is a tag and actions are buttons, so “mastered” no longer reads like a state
+- 🔎 **Filtering, grouping, batching, exporting**: real counts on pending / mastered / all, group by exam, topic or question type, keyword search and topic filters, batch mark-as-mastered, and a Word export grouped by source with answer comparison and explanations
+- 🔁 **Auto consolidation practice revived**: an unanswered set used to block future pushes **forever** (one sat untouched for 9 days while its owner had 99 pending mistakes); stale sets are now closed automatically, pushes send a notification with a direct link, cooldown and a daily cap prevent the opposite failure, selection prefers frequently-missed and long-neglected questions while avoiding recent sets, and threshold / per-set size / interval / avoid-recent-sets moved into system settings with a live status line and an on-demand push button for teachers
+- 🧭 **Fixed targeted practice being invisible**: `target_students` holds a JSON array but the task feed split it on commas, so `["s11001"]` never matched and both consolidated sets and teacher-targeted assignments vanished from the home focus card and the to-do list; consolidated sets now rank at priority 75 (above the 70 summary entry and 60 for ordinary practice) and deep-link via `/practice?open=<id>`
+- 🧷 **A mistake keeps its origin**: getting a question wrong again inside a consolidation set only increments the counter and refreshes the last wrong answer — it no longer rewrites “which exam did they get it wrong in” into a practice; the reverse upgrade still applies, and existing rows were re-attributed to the earliest exam where the student missed them
+- 🩹 Students finally get the “consolidate mistakes” button to do something (generate a set or resume the unfinished one) instead of a toast; retired questions are labelled as such; duplicated knowledge-point tags no longer collide on a React key
+
 **Resource centre and content types**
 
 - 🗂️ **Three share tabs with consistent semantics**: a new "My shares" tab lists only what you actually shared out (admins included; private registrations to yourself are not listed), "Shared with me" became "Shared by colleagues", and admin management addresses shares by record instead of guessing from the path
@@ -1187,8 +1205,6 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 
 ### v7.x – v8.9.0 (outline)
 
-**v8.9.0 (2026-10-24)**
-
 - ⚖️ **Points and honour system reworked**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice 9/6/3, classroom answers 6/4/2), buzzers pay by placing, the ladder pays by score rate; anti-farming quotas split into three pools (academic 80 / participation 40 / light 30); every classroom activity awards points; one source of truth served by the backend
 - 🏅 **Titles and badges recalibrated**: twelve thresholds re-cut, six permanently locked badges lit up, subject titles weigh accuracy, locked badges show what is missing; deductions and spending separated, weekly stars scoped to the class, a new teacher recognition channel
 - 📎 **File-submission homework**: documents, spreadsheets, slides and photos, one AI pass for the whole class with teacher review before publishing; three attempts, only the last is graded, lateness only flagged; a grading desk with duplicate flags and bulk download
@@ -1199,9 +1215,6 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 - 🗂️ **Course management**: soft disable plus a recycle bin; the course list returns active courses only by default, with a switch to view, restore or delete permanently
 - 🔧 **Deployment and polish**: skills on by default; per-form upgrade paths with GitHub as the authoritative source; the knowledge-point panel collapses and turns into a drawer on narrow screens
 - 🩹 **Fixes**: same-named classmates sharing one roll-call points key (existing rows re-keyed), whiteboard AI generation always failing, handshake and polling log spam, points and portfolio details unreadable on phones, broken portrait avatars, raw key names leaking, participation capped at 100, missing-table warnings on a fresh database
-
-**v7.x – v8.8**
-
 - 💬 **Classroom interaction**: question submission de-dup, idempotency and async review, teacher filtering, anonymity, follow-ups, popularity and live refresh; in-class picking and AI podcasts added
 - 🧩 **Teaching flow**: unified knowledge-point input across the site; draft/publish state machine for practice and quizzes; card-style activity lists; completion scoped to the activity; student answer drafts and submission guards
 - 🧱 **Question bank and results**: single ingestion path with validation, dedup, transactions and knowledge-point links; paper composition prefers the bank with AI top-up; unified result tabs with per-question accuracy and AI analysis; bank analytics (type / difficulty / subject / knowledge point / creator / quality) with subjects constrained to the configured courses
