@@ -139,7 +139,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
           <div className="wb-stem"><FormulaRenderer content={q.question_text} /></div>
           {hasMedia && (
             <div className="wb-media">
-              <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="normal" />
+              <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="card" />
             </div>
           )}
         </div>

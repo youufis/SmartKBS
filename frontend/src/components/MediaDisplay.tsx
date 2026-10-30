@@ -17,8 +17,8 @@ interface MediaDisplayProps {
   hasSvg?: number | null
   /** 媒体文件列表（万相生图等） */
   mediaFiles?: MediaFile[] | string | null
-  /** 缩略图尺寸：'compact'（60px 高，表格用）| 'normal'（120px 高，默认）| 'large'（200px 高，考试页用） */
-  size?: 'compact' | 'normal' | 'large'
+  /** 缩略图尺寸：'compact'（60px 高，表格用）| 'card'（88px 高，错题本卡片用）| 'normal'（120px 高，默认）| 'large'（200px 高，考试页用） */
+size?: 'compact' | 'card' | 'normal' | 'large'
 }
 
 const MediaDisplay: React.FC<MediaDisplayProps> = ({ svgContent, hasSvg, mediaFiles, size = 'normal' }) => {
@@ -39,6 +39,8 @@ const MediaDisplay: React.FC<MediaDisplayProps> = ({ svgContent, hasSvg, mediaFi
   // 根据尺寸选择缩略图高度和样式
   const sizeMap = {
     compact: { thumbHeight: 50, boxWidth: 100, svgThumbHeight: 40 },
+    // SVGViewer 的缩略盒宽固定是 2×thumbHeight，所以 card 档实际约 160×80（图片档 160×88）
+    card: { thumbHeight: 88, boxWidth: 160, svgThumbHeight: 80 },
     normal: { thumbHeight: 120, boxWidth: 180, svgThumbHeight: 120 },
     large: { thumbHeight: 200, boxWidth: 280, svgThumbHeight: 200 },
   }

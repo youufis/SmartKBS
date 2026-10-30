@@ -63,7 +63,8 @@
   border-color: var(--primary-color);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 14%, transparent);
 }
-.wb-card-main { flex: 1 1 auto; min-width: 0; }
+/* 正文列限宽：一行拉满 1400px 既难读，也会把配图顶到卡片最右边 */
+.wb-card-main { flex: 1 1 auto; min-width: 0; max-width: 1000px; }
 
 .wb-card-head {
   display: flex;
@@ -75,19 +76,25 @@
 .wb-meta { font-size: 12px; color: var(--text-tertiary); }
 .wb-flex { flex: 1 1 auto; }
 
-/* 题干 + 配图：宽屏左右分栏，窄屏自动堆叠 */
-.wb-stem-row { display: flex; gap: 14px; align-items: flex-start; }
+/* 题干与配图并排；空间不够时配图整块换行到题干下方，而不是溢出卡片右边界 */
+.wb-stem-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
 .wb-stem {
-  flex: 1 1 auto;
+  flex: 1 1 320px;
   min-width: 0;
   font-size: 14px;
   line-height: 1.75;
   color: var(--text-primary);
   word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 68ch;
 }
-.wb-media { flex: 0 0 auto; width: 180px; max-width: 34%; }
-/* MediaDisplay 自带居中与上下外边距，卡片里靠左贴齐即可 */
-.wb-media > div { margin: 0 !important; justify-content: flex-start !important; }
+/* SVGViewer 的缩略盒固定是「宽 = 2×thumbHeight」（normal 档 240px），MediaDisplay 又外加 8px 内边距，
+   所以必须逐层压 max-width，否则配图会顶穿卡片右边界；MediaDisplay 自带的居中与上下外边距在这里去掉。 */
+.wb-media { flex: 0 0 auto; width: 168px; min-width: 0; max-width: 100%; }
+.wb-media > div { margin: 0 !important; justify-content: flex-start !important; max-width: 100%; }
+.wb-media > div > div,
+.wb-media .ant-image,
+.wb-media img { max-width: 100%; }
 
 /* 作答对照 */
 .wb-answer-line {
