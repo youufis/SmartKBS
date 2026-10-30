@@ -187,6 +187,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 服务接入
   { key: 'dashscope_api_key', labelKey: 'field_dashscope_api_key', descKey: 'field_dashscope_api_key_desc', type: 'password', group: 'credentials' },
   { key: 'AI_REQUEST_TIMEOUT', labelKey: 'field_AI_REQUEST_TIMEOUT', descKey: 'field_AI_REQUEST_TIMEOUT_desc', type: 'number', group: 'credentials', unitKey: 'unitSecond' },
+  { key: 'AI_MAX_CONCURRENCY', labelKey: 'field_AI_MAX_CONCURRENCY', descKey: 'field_AI_MAX_CONCURRENCY_desc', type: 'number', group: 'credentials', unitKey: 'unitCount' },
   // 模型与端点
   { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_APPID' },
   { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', required: false },

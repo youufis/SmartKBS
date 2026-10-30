@@ -196,6 +196,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_pull_enabled": True,
     # AI 请求超时设置（秒）— 白板 AI 生成图示/板书等操作的超时时间
     "AI_REQUEST_TIMEOUT": 300,
+    # AI 线程池并发上限 — 全站同步 AI 调用（图示/板书/出题/批改/讨论/闯关）共用的工作线程数。
+    # 这些线程只挂在网络等待上，放开到 8 不会压住数据库；调太小会让高峰期请求排队。
+    "AI_MAX_CONCURRENCY": 8,
     # ── 直连模式多轮记忆（backend/chat_memory.py；仅在 APPID 留空/本次强制直连时生效）──
     # 默认开启；关闭后代码行为与"加记忆之前"逐字一致（读与写都不发生）。
     "CHAT_MEMORY_ENABLED": True,
@@ -395,6 +398,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
     "MAX_ALLOWED_REQUESTS": (1, 10000),
     "AI_REQUEST_TIMEOUT": (5, 900),
+    "AI_MAX_CONCURRENCY": (1, 32),
     "CHAT_MEMORY_MAX_TURNS": (1, 30),
     "CHAT_MEMORY_TTL_MINUTES": (1, 1440),
     "CHAT_MEMORY_MAX_CHARS": (500, 30000),

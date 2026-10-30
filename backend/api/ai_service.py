@@ -6,6 +6,8 @@ AI 服务封装：根据是否配置 APPID 自动选择调用模式
 """
 import json
 import os
+import re
+import threading
 import time
 import concurrent.futures
 from typing import Any, Optional
@@ -258,11 +260,67 @@ async def _apost_model(bases: list, client, payload: dict, headers: dict, timeou
     if last_err is not None:
         raise _timeout_error(last_err, bases, segments) from last_err
     return bases[-1], None
-# 限制最大 3 个并发 AI 线程，避免长时间等待的 AI 调用阻塞数据库等其他操作
-_ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
-    max_workers=3,
-    thread_name_prefix="ai_call",
-)
+# AI 线程池：全站所有同步 AI 调用（图示/板书/出题/批改/讨论/闯关…）共用一个池。
+#
+# 以前写死 max_workers=3，两个问题叠在一起：
+#   ① 一次批量出题就能把后面所有请求堵在队列里；
+#   ② 排队时间又被算进 AI_REQUEST_TIMEOUT（wait_for 罩着 run_in_executor），
+#      模型还没开始跑就被判"AI 请求超时" —— 前端表现为转圈很久然后假失败。
+# 现在并发数走系统配置 AI_MAX_CONCURRENCY（默认 8），排队与执行分开计时、分开封顶。
+_AI_POOL_DEFAULT_WORKERS = 8
+_AI_QUEUE_POLL_SECONDS = 5.0      # 轮询粒度：既能观察"还在排队"，也让执行超时按真正开跑起算
+_AI_QUEUE_TIMEOUT_SECONDS = 180.0  # 排队独立上限，与模型执行预算互不侵占
+_QUEUE_WARN_AFTER = 5.0
+
+
+def _ai_pool_size() -> int:
+    try:
+        from backend.api.config_router import get_config_value
+        n = int(get_config_value("AI_MAX_CONCURRENCY", _AI_POOL_DEFAULT_WORKERS))
+    except Exception:
+        n = _AI_POOL_DEFAULT_WORKERS
+    return max(1, min(32, n))
+
+
+class _LazyAiPool:
+    """按系统配置延迟建池的 ThreadPoolExecutor 代理。
+
+    模块导入期读不到配置（DB 尚未初始化），不能在 import 时定死并发数；
+    又必须保住 `_ai_thread_pool` 这个名字与 `.submit()` 接口 ——
+    discussion/interaction/quest 三个 router 按名字 import 它，
+    asyncio.run_in_executor 也只会调 `.submit()`。
+    """
+
+    def __init__(self) -> None:
+        self._pool = None
+        self._lock = threading.Lock()
+
+    def _ensure(self):
+        pool = self._pool
+        if pool is None:
+            with self._lock:
+                pool = self._pool
+                if pool is None:
+                    n = _ai_pool_size()
+                    pool = concurrent.futures.ThreadPoolExecutor(
+                        max_workers=n, thread_name_prefix="ai_call")
+                    self._pool = pool
+                    logger.info(f"[AI] 线程池就绪：并发上限 {n}（系统配置 AI_MAX_CONCURRENCY）")
+        return pool
+
+    def submit(self, fn, *args, **kwargs):
+        return self._ensure().submit(fn, *args, **kwargs)
+
+    def shutdown(self, wait=True):
+        if self._pool is not None:
+            self._pool.shutdown(wait=wait)
+
+    @property
+    def max_workers(self) -> int:
+        return self._ensure()._max_workers
+
+
+_ai_thread_pool = _LazyAiPool()
 
 
 def get_ai_config(use_agent: bool = True):
@@ -351,15 +409,32 @@ _KB_INJECT_HEAD_LOCAL = (
 )
 
 
+# 给模型看的「学科口径」串里常挂着一句指令，例如多科任教时 _resolve_subject 会返回
+# 「信息科技、通用技术、人工智能、物理（请依据白板内容从中确定本节课学科）」，
+# 无科目时返回「未指定（请依据白板内容自行判断学科，不要默认「通用技术」）」。
+# 那句话是说给模型听的，不是检索词：连着一起 embed 会把整条查询的语义带偏
+# （命中一堆与"请依据…确定…"相关的噪声，教材原文反而排不到前面）。
+_KB_QUERY_INSTRUCTION_RE = re.compile(r"[（(][^（()）]{0,80}?[)）]")
+
+
+def clean_kb_query(q: str) -> str:
+    """剥掉检索词里的模型指令括号与「未指定」占位，只留真正的关键词。"""
+    text = _KB_QUERY_INSTRUCTION_RE.sub(" ", q or "")
+    text = text.replace("未指定", " ")
+    return " ".join(text.split()).strip(" 、,，;；/")
+
+
 def _kb_query_of(prompt: str, kb_query: str = "") -> str:
     """检索词选取（与任务 prompt 解耦）：显式 kb_query > 短提问原样 > 长模板提关键词。
 
     备课/组卷/生成HTML 等任务 prompt 动辄上万字符，直接当检索词既超接口限制
     （百炼 query≤4500 字节）又稀释语义——这里保证送进检索的永远是一条干净的查询。
+    清洗放在这唯一漏斗里，白板/出题/组卷/随堂练等 20+ 个入口一起受益。
     """
-    q = (kb_query or "").strip()
-    if q:
-        return q[:1200]
+    raw = (kb_query or "").strip()
+    if raw:
+        # 洗空了就退回原样：绝不能因为清洗反而退化成把整条任务 prompt 当检索词
+        return (clean_kb_query(raw) or raw)[:1200]
     # 未显式给主题时原样下传，由 rag.resolve_search_query 统一收敛（与聊天同一策略）
     return prompt
 
@@ -417,22 +492,62 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: Optional
                                     max_tokens: Optional[int] = None,
                                     json_mode: bool = False,
                                     use_kb: bool = True, kb_query: str = "") -> str:
-    """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
+    """带超时的异步 AI 调用，将同步调用放到专用线程池中执行。
+
+    超时预算只算「模型真正在跑」的时间：排队等线程池另走 _AI_QUEUE_TIMEOUT_SECONDS。
+    以前两者混在一起掐，高峰期光排队就能把整条 AI_REQUEST_TIMEOUT 吃光。
+    排队超过 5 秒会留一行日志 —— 下次有人问"AI 怎么变慢了"，
+    日志能直接区分是排队慢还是上游慢。
+    """
     import asyncio
     loop = asyncio.get_running_loop()
     if timeout is None:
         timeout = _ai_read_timeout()
+    started: dict = {}
+    submitted = time.monotonic()
+
+    def _runner():
+        started["t"] = time.monotonic()
+        return call_ai_sync(prompt, api_key, history, max_tokens, json_mode, use_kb, kb_query)
+
+    fut = loop.run_in_executor(_ai_thread_pool, _runner)  # type: ignore[arg-type]
+    # 超时/排队放弃后线程里抛出的异常没人取走，asyncio 会刷 "exception was never retrieved"
+    fut.add_done_callback(lambda f: None if f.cancelled() else f.exception())
+
+    while True:
+        t0 = started.get("t")
+        if t0 is None:
+            waited = time.monotonic() - submitted
+            if waited > _AI_QUEUE_TIMEOUT_SECONDS:
+                fut.cancel()
+                logger.error(f"AI 排队超时 {waited:.0f}s：并发上限 {_ai_thread_pool.max_workers}，"
+                             f"排队预算 {_AI_QUEUE_TIMEOUT_SECONDS:.0f}s 已用尽")
+                raise AiTimeoutError(
+                    f"AI 线程池排队超过 {_AI_QUEUE_TIMEOUT_SECONDS:.0f} 秒仍未开始执行"
+                    f"（并发上限 {_ai_thread_pool.max_workers}，可在系统配置调大 AI_MAX_CONCURRENCY）")
+            if waited > _QUEUE_WARN_AFTER and not started.get("warned"):
+                started["warned"] = True
+                logger.warning(f"[AI] 排队 {waited:.0f}s 仍未拿到工作线程"
+                               f"（并发上限 {_ai_thread_pool.max_workers}，AI_MAX_CONCURRENCY 可调）")
+            slice_s = _AI_QUEUE_POLL_SECONDS
+        else:
+            slice_s = timeout - (time.monotonic() - t0)
+            if slice_s <= 0:
+                logger.error(f"AI 请求超时（{timeout}秒）: prompt={prompt[:200]}")
+                raise TimeoutError(f"AI 请求超时（超过{timeout}秒），请稍后重试或简化描述")
+        try:
+            await asyncio.wait_for(asyncio.shield(fut), timeout=min(_AI_QUEUE_POLL_SECONDS, slice_s))
+            break  # 已完成（成功或抛错都一样），统一交给 fut.result()
+        except asyncio.TimeoutError:
+            if fut.done():
+                break  # 是 AI 调用自己抛的超时，不是这一小段轮询到点
+            continue
+
     try:
-        result = await asyncio.wait_for(
-            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens, json_mode, use_kb, kb_query),
-            timeout=timeout,
-        )
-        return result
-    except asyncio.TimeoutError:
-        logger.error(f"AI 请求超时（{timeout}秒）: prompt={prompt[:200]}")
-        raise TimeoutError(f"AI 请求超时（超过{timeout}秒），请稍后重试或简化描述")
+        return fut.result()
     except Exception as e:
-        logger.error(f"AI 请求失败: {e}")
+        if not _is_timeout_error(e):
+            logger.error(f"AI 请求失败: {e}")
         raise
 
 

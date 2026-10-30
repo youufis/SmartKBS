@@ -545,6 +545,8 @@
   "field_ENABLE_SUBJECT_TITLES_desc": "Stop awarding and showing per-subject titles; main level titles and points are unaffected.",
   "field_AI_REQUEST_TIMEOUT": "AI request timeout (s)",
   "field_AI_REQUEST_TIMEOUT_desc": "Upper bound for slow AI operations such as whiteboard diagram or board generation; the request fails after this.",
+  "field_AI_MAX_CONCURRENCY": "AI concurrency (workers)",
+  "field_AI_MAX_CONCURRENCY_desc": "How many worker threads AI calls share. When more requests are in flight, the rest queue up and everything slows down; read only when the pool is created, so restart the backend for this to take effect.",
   "field_AUTH_FAIL_WINDOW_SECONDS": "Auth-failure counting window (s)",
   "field_AUTH_FAIL_WINDOW_SECONDS_desc": "Token-validation failures accumulate per source IP inside this window before the limit below triggers a ban.",
   "field_LOGIN_FAIL_WINDOW_SECONDS": "Login-failure counting window (s)",
