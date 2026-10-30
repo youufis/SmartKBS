@@ -2046,6 +2046,27 @@ const SystemConfigPage: React.FC = () => {
     })
   }
 
+  // ── 清理临时缓存（本页右上角的图标按钮与运维页共用同一处逻辑） ──
+  const handleCleanupCache = () => {
+    Modal.confirm({
+      title: t('confirmCleanup'),
+      icon: <ExclamationCircleOutlined />,
+      content: t('confirmCleanupContent'),
+      okText: t('confirmCleanupOk'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      onOk: async () => {
+        try {
+          await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
+          message.success(t('cleanupSuccess'))
+        } catch (e: unknown) {
+          const err = e as { response?: { data?: { detail?: string } }; message?: string }
+          message.error(t('cleanupFailed') + ': ' + (err?.response?.data?.detail || err?.message || t('unknownError')))
+        }
+      },
+    })
+  }
+
   // ── 改动清单：按「哪个小节改了什么」列出来，点条目直接跳过去 ──
   const showDirtyList = () => {
     const dirtyFields = GLOBAL_CONFIG_FIELDS.filter((f) => dirty.includes(f.key))
@@ -2829,11 +2850,16 @@ const SystemConfigPage: React.FC = () => {
 
   return (
     <Card style={{ borderRadius: 8 }}>
-      {/* 页面标题只说一次：Tab 里不再重复「系统配置」 */}
-      <Space style={{ marginBottom: 12 }}>
-        <SettingOutlined style={{ fontSize: 22, color: '#1677ff' }} />
-        <Title level={4} style={{ margin: 0 }}>{t('systemConfig')}</Title>
-      </Space>
+      {/* 页面标题只说一次：Tab 里不再重复「系统配置」；右上角挂清理缓存的快捷图标 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+        <Space>
+          <SettingOutlined style={{ fontSize: 22, color: '#1677ff' }} />
+          <Title level={4} style={{ margin: 0 }}>{t('systemConfig')}</Title>
+        </Space>
+        <Tooltip title={t('clearTempFiles')}>
+          <Button icon={<DeleteOutlined />} onClick={handleCleanupCache} aria-label={t('clearTempFiles')} />
+        </Tooltip>
+      </div>
 
         {apikeyStatus && !apikeyStatus.configured && (
           <Alert
@@ -3030,43 +3056,7 @@ const SystemConfigPage: React.FC = () => {
             key: 'upgrade',
             label: <span><CloudUploadOutlined /> {t('tabVersion')}</span>,
             children: (
-            <>
-              {/* 缓存清理不单独占 Tab，置顶成一行：进运维页第一眼就能看到 */}
-              <Card size="small" style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 260 }}>
-                    <div style={{ fontWeight: 500, marginBottom: 2 }}>{t('clearTempFiles')}</div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>{t('tempFileDesc')}</Text>
-                  </div>
-                  <Button
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => {
-                      Modal.confirm({
-                        title: t('confirmCleanup'),
-                        icon: <ExclamationCircleOutlined />,
-                        content: t('confirmCleanupContent'),
-                        okText: t('confirmCleanupOk'),
-                        okType: 'danger',
-                        cancelText: t('cancel'),
-                        onOk: async () => {
-                          try {
-                            await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
-                            message.success(t('cleanupSuccess'))
-                          } catch (e: unknown) {
-                            const err = e as { response?: { data?: { detail?: string } }; message?: string }
-                            message.error(t('cleanupFailed') + ': ' + (err?.response?.data?.detail || err?.message || t('unknownError')))
-                          }
-                        },
-                      })
-                    }}
-                  >
-                    {t('cleanAllCache')}
-                  </Button>
-                </div>
-              </Card>
-              <UpgradePanel />
-            </>
+            <UpgradePanel />
             ),
           },
           ]}
