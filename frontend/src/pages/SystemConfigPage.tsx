@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
-  Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
+  Card, Tabs, Form, Input, InputNumber, Button, message, Switch, Radio,
   Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip,
   AutoComplete,
   Collapse,
@@ -11,7 +11,8 @@ import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
   CheckCircleOutlined, CloseCircleOutlined, EditOutlined, DownOutlined, BarChartOutlined,
-  DesktopOutlined,
+  DesktopOutlined, AppstoreOutlined, CloudUploadOutlined, ControlOutlined, InfoCircleOutlined,
+  PlusOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
@@ -33,23 +34,38 @@ const { Title, Text } = Typography
 // ── 全局配置表单 ──
 //
 // 三级结构：分区(zone) → 小节(section) → 字段。渲染顺序就是 GLOBAL_CONFIG_FIELDS 的声明顺序，
-// 新增一项只要挑一个小节加一行，左侧锚点导航、搜索、脏值统计都会自动跟上。
+// 新增一项只要挑一个小节加一行，左侧导航、搜索、脏值统计都会自动跟上。
 //
 // 关于「生效方式」：所有配置都是运行时经 backend get_config_value() 读取（走 mtime 缓存），
-// 保存即生效、**不需要重启服务**。只有两类需要额外说明，用 scope 标注：
-//   nextRound = 下一轮后台任务生效（后台节拍到了才重读）；nextLogin = 只对新的登录会话生效。
+// 保存即生效、不需要重启服务。以下三类例外用 scope 标注：
+//   nextRound = 下一轮后台任务生效（后台节拍到了才重读）
+//   nextLogin = 只对新的登录会话生效
+//   restart   = 进程内缓存的资源（如 AI 线程池）在启动时建好，改完要重启服务
+//
+// 关于「常用/高级」：level='advanced' 的项默认收在「高级参数」里。判定口径是
+// 「改它需要懂实现原理」——不含业务决策的调参项（token 预算、后台节拍、审计阈值）一律进高级。
 
-type EffScope = 'nextRound' | 'nextLogin'
+type EffScope = 'nextRound' | 'nextLogin' | 'restart'
+
+/** 枚举/二选一：options 直接给出候选值（保存值 -> 展示文案 key） */
+interface FieldOption {
+  value: string | boolean
+  labelKey: string
+}
 
 interface ConfigField {
   key: string
   labelKey: string
   descKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size'
+  /** 完整说明（原理、注意事项、取值范围）。说明行只放一句话，长文进 label 旁的 ⓘ */
+  longDescKey?: string
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate'
   group: string
+  /** 面向管理员的常用项，默认可见；未标注 = advanced */
+  level?: 'basic' | 'advanced'
   required?: boolean
   placeholderKey?: string
-  /** 数字单位（i18n key）：配合后端 /api/config/meta 下发的范围显示成「可填 5~3600 秒」 */
+  /** 数字单位（i18n key）：渲染成输入框后缀，配合后端 /api/config/meta 下发的范围 */
   unitKey?: string
   /** 生效方式，未标注即保存后立即生效 */
   scope?: EffScope
@@ -57,6 +73,8 @@ interface ConfigField {
   optionsKind?: 'chat' | 'long' | 'vl' | 'image'
   /** tts_voice 用：置顶一个「自动（按模型挑选）」空值选项（播客音色留空 = 交给后端自选） */
   autoOption?: boolean
+  /** select / radio 的候选值 */
+  options?: FieldOption[]
   /** 改动会影响安全面或难以挽回，保存前统一二次确认 */
   danger?: boolean
 }
@@ -68,13 +86,38 @@ interface ConfigZone {
   sections: string[]
 }
 
+// 分区口径：按「谁在什么场景下改」切，而不是按技术模块切。
+// 学校与展示 = 管理员首次部署填一次；教学与激励 = 教务处/年级主任日常调；
+// AI 能力 = 需要懂模型与计费；存储与安全 = 运维/安全。
 const CONFIG_ZONES: ConfigZone[] = [
-  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive', 'reward', 'wrongbook', 'showcase'] },
-  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen', 'tts', 'classdrill', 'classladder', 'portrait'] },
-  { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
-  { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard'] },
-  { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
+  {
+    id: 'school',
+    titleKey: 'zone_school',
+    descKey: 'zone_school_desc',
+    sections: ['brand', 'curriculum', 'notify', 'showcase'],
+  },
+  {
+    id: 'teaching',
+    titleKey: 'zone_teaching',
+    descKey: 'zone_teaching_desc',
+    sections: ['incentive', 'reward', 'wrongbook', 'portrait', 'classdrill', 'classladder'],
+  },
+  {
+    id: 'ai',
+    titleKey: 'zone_ai',
+    descKey: 'zone_ai_desc',
+    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'memory', 'grading', 'imagegen', 'tts'],
+  },
+  {
+    id: 'storage',
+    titleKey: 'zone_storage',
+    descKey: 'zone_storage_desc',
+    sections: ['upload', 'quota', 'session', 'guard', 'upgrade'],
+  },
 ]
+
+// 小节总数由 sections 累加得出，不再手写（曾出现「5 个小节」其实传的是分区数）
+const TOTAL_SECTIONS = CONFIG_ZONES.reduce((n, z) => n + z.sections.length, 0)
 
 const SECTION_TITLES: Record<string, string> = {
   brand: 'group_brand',
@@ -88,6 +131,7 @@ const SECTION_TITLES: Record<string, string> = {
   models: 'group_models',
   knowledgebase: 'group_knowledgebase',
   chat: 'group_chat',
+  quality: 'group_quality',
   memory: 'group_memory',
   grading: 'group_grading',
   imagegen: 'group_imagegen',
@@ -109,7 +153,37 @@ const SECTION_DOM_ID = 'cfg-sec-'
 const SCOPE_TAG_KEYS: Record<NonNullable<ConfigField['scope']>, string> = {
   nextRound: 'scopeNextRound',
   nextLogin: 'scopeNextLogin',
+  restart: 'scopeRestart',
 }
+
+// 枚举字段的候选值集中在这里，避免散落在 JSX 里
+const BANK_MODE_OPTIONS: FieldOption[] = [
+  { value: true, labelKey: 'optBankModeBank' },
+  { value: false, labelKey: 'optBankModeAi' },
+]
+const RANK_MODE_OPTIONS: FieldOption[] = [
+  { value: 'top30', labelKey: 'optRankTop30' },
+  { value: 'top10', labelKey: 'optRankTop10' },
+  { value: 'all', labelKey: 'optRankAll' },
+  { value: 'none', labelKey: 'optRankNone' },
+]
+const SKILL_SEGMENT_OPTIONS: FieldOption[] = [
+  { value: 'system', labelKey: 'optSegmentSystem' },
+  { value: 'inline', labelKey: 'optSegmentInline' },
+]
+const LADDER_SKIN_OPTIONS: FieldOption[] = [
+  { value: 'cloud', labelKey: 'optSkinCloud' },
+  { value: 'sunrise', labelKey: 'optSkinSunrise' },
+  { value: 'mint', labelKey: 'optSkinMint' },
+  { value: 'star', labelKey: 'optSkinStar' },
+  { value: 'cyber', labelKey: 'optSkinCyber' },
+  { value: 'academy', labelKey: 'optSkinAcademy' },
+  { value: 'classic', labelKey: 'optSkinClassic' },
+]
+const PORTRAIT_PERIOD_OPTIONS: FieldOption[] = [
+  { value: false, labelKey: 'optPeriodWeekly' },
+  { value: true, labelKey: 'optPeriodMonthly' },
+]
 
 // 后端下发的校验元数据（GET /api/config/meta），前端不再自己复制一份取值范围
 interface ConfigMeta {
@@ -165,59 +239,89 @@ interface ModelOption {
 const MANAGED_ELSEWHERE_KEYS = ['enabled_skills', 'skill_scene_map', 'TITLE_CONFIG', 'SUBJECT_TITLE_CONFIG', 'BADGE_CONFIG']
 
 const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
-  // ══ ① 基础与内容 ══
-  // 品牌信息
-  { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', type: 'text', group: 'brand', required: false },
-  { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', required: false, placeholderKey: 'placeholder_ORG_NAME' },
+  // ══ ① 学校与展示 ══
+  // 品牌与单位
+  { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', longDescKey: 'field_AGENT_EDITION_tip', type: 'text', group: 'brand', level: 'basic', required: false, placeholderKey: 'placeholder_agentEdition' },
+  { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', level: 'basic', required: false, placeholderKey: 'placeholder_ORG_NAME' },
   // 课程与题型
-  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'curriculum' },
-  { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'curriculum' },
+  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'curriculum', level: 'basic' },
+  { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'curriculum', level: 'basic' },
   // 消息通知
-  { key: 'enabled_notification_types', labelKey: 'field_enabled_notification_types', descKey: 'field_enabled_notification_types_desc', type: 'notifications', group: 'notify' },
-  // 激励与闯关（后端 ENABLE_BADGES / ENABLE_SUBJECT_TITLES / QUEST_USE_BANK，此前页面看不到）
-  { key: 'ENABLE_BADGES', labelKey: 'field_ENABLE_BADGES', descKey: 'field_ENABLE_BADGES_desc', type: 'boolean', group: 'incentive', required: false },
-  { key: 'ENABLE_SUBJECT_TITLES', labelKey: 'field_ENABLE_SUBJECT_TITLES', descKey: 'field_ENABLE_SUBJECT_TITLES_desc', type: 'boolean', group: 'incentive', required: false },
-  { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'boolean', group: 'incentive' },
+  { key: 'enabled_notification_types', labelKey: 'field_enabled_notification_types', descKey: 'field_enabled_notification_types_desc', type: 'notifications', group: 'notify', level: 'basic' },
   // 荣耀殿堂（backend/showcase_auto.py + api/showcase_router.py）：自动建卡与名次展示策略
-  { key: 'SHOWCASE_AUTO_ENABLED', labelKey: 'field_SHOWCASE_AUTO_ENABLED', descKey: 'field_SHOWCASE_AUTO_ENABLED_desc', type: 'boolean', group: 'showcase', required: false },
-  { key: 'SHOWCASE_MIN_POINTS', labelKey: 'field_SHOWCASE_MIN_POINTS', descKey: 'field_SHOWCASE_MIN_POINTS_desc', type: 'number', group: 'showcase', required: false, unitKey: 'unitPoint' },
+  { key: 'SHOWCASE_AUTO_ENABLED', labelKey: 'field_SHOWCASE_AUTO_ENABLED', descKey: 'field_SHOWCASE_AUTO_ENABLED_desc', longDescKey: 'field_SHOWCASE_AUTO_ENABLED_tip', type: 'boolean', group: 'showcase', level: 'basic', required: false },
+  { key: 'SHOWCASE_MIN_POINTS', labelKey: 'field_SHOWCASE_MIN_POINTS', descKey: 'field_SHOWCASE_MIN_POINTS_desc', type: 'number', group: 'showcase', unitKey: 'unitPoint', required: false },
   { key: 'SHOWCASE_AUTO_INTERVAL_MIN', labelKey: 'field_SHOWCASE_AUTO_INTERVAL_MIN', descKey: 'field_SHOWCASE_AUTO_INTERVAL_MIN_desc', type: 'number', group: 'showcase', required: false, unitKey: 'unitMinute' },
-  { key: 'SHOWCASE_RANK_MODE', labelKey: 'field_SHOWCASE_RANK_MODE', descKey: 'field_SHOWCASE_RANK_MODE_desc', type: 'text', group: 'showcase', required: false },
+  { key: 'SHOWCASE_RANK_MODE', labelKey: 'field_SHOWCASE_RANK_MODE', descKey: 'field_SHOWCASE_RANK_MODE_desc', type: 'select', group: 'showcase', required: false, options: RANK_MODE_OPTIONS },
 
-  // ══ ② AI 与模型 ══
+  // ══ ② 教学与激励 ══
+  // 激励与闯关（后端 ENABLE_BADGES / ENABLE_SUBJECT_TITLES / QUEST_USE_BANK）
+  { key: 'ENABLE_BADGES', labelKey: 'field_ENABLE_BADGES', descKey: 'field_ENABLE_BADGES_desc', type: 'boolean', group: 'incentive', level: 'basic', required: false },
+  { key: 'ENABLE_SUBJECT_TITLES', labelKey: 'field_ENABLE_SUBJECT_TITLES', descKey: 'field_ENABLE_SUBJECT_TITLES_desc', type: 'boolean', group: 'incentive', level: 'basic', required: false },
+  { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'radio', group: 'incentive', level: 'basic', options: BANK_MODE_OPTIONS },
+  // 积分与每日上限：分池额度先给，总封顶与场次限制收进高级
+  { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', level: 'basic', required: false, unitKey: 'unitPoint' },
+  { key: 'REWARD_DAILY_ACADEMIC_POINTS', labelKey: 'field_REWARD_DAILY_ACADEMIC_POINTS', descKey: 'field_REWARD_DAILY_ACADEMIC_POINTS_desc', type: 'number', group: 'reward', level: 'basic', required: false, unitKey: 'unitPoint' },
+  { key: 'REWARD_DAILY_CLASS_POINTS', labelKey: 'field_REWARD_DAILY_CLASS_POINTS', descKey: 'field_REWARD_DAILY_CLASS_POINTS_desc', type: 'number', group: 'reward', level: 'basic', required: false, unitKey: 'unitPoint' },
+  { key: 'REWARD_DAILY_QUIZ_SESSIONS', labelKey: 'field_REWARD_DAILY_QUIZ_SESSIONS', descKey: 'field_REWARD_DAILY_QUIZ_SESSIONS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitSession' },
+  { key: 'REWARD_DAILY_FUN_POINTS', labelKey: 'field_REWARD_DAILY_FUN_POINTS', descKey: 'field_REWARD_DAILY_FUN_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
+  { key: 'REWARD_DAILY_TOTAL_POINTS', labelKey: 'field_REWARD_DAILY_TOTAL_POINTS', descKey: 'field_REWARD_DAILY_TOTAL_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
+  // 错题本：自动错题巩固（backend/api/wrong_book_router.py 的 wrong_practice_policy）
+  { key: 'wrong_practice_threshold', labelKey: 'field_wrong_practice_threshold', descKey: 'field_wrong_practice_threshold_desc', type: 'number', group: 'wrongbook', level: 'basic', required: false, unitKey: 'unitItem' },
+  { key: 'wrong_book_sources', labelKey: 'field_wrong_book_sources', descKey: 'field_wrong_book_sources_desc', type: 'wrong_book_sources', group: 'wrongbook', level: 'basic', required: false },
+  { key: 'wrong_practice_per_set', labelKey: 'field_wrong_practice_per_set', descKey: 'field_wrong_practice_per_set_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitItem' },
+  { key: 'wrong_practice_interval_days', labelKey: 'field_wrong_practice_interval_days', descKey: 'field_wrong_practice_interval_days_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitDay' },
+  { key: 'wrong_practice_avoid_recent_sets', labelKey: 'field_wrong_practice_avoid_recent_sets', descKey: 'field_wrong_practice_avoid_recent_sets_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitTime' },
+  // AI 画像（backend/api/portrait_router.py）：周期决定"免费额度"与"画像吃哪一段数据"
+  { key: 'PORTRAIT_ENABLED', labelKey: 'field_PORTRAIT_ENABLED', descKey: 'field_PORTRAIT_ENABLED_desc', type: 'boolean', group: 'portrait', level: 'basic', required: false },
+  { key: 'PORTRAIT_PERIOD_MONTHLY', labelKey: 'field_PORTRAIT_PERIOD_MONTHLY', descKey: 'field_PORTRAIT_PERIOD_MONTHLY_desc', type: 'radio', group: 'portrait', level: 'basic', required: false, options: PORTRAIT_PERIOD_OPTIONS },
+  { key: 'PORTRAIT_EXTRA_POINTS', labelKey: 'field_PORTRAIT_EXTRA_POINTS', descKey: 'field_PORTRAIT_EXTRA_POINTS_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitPoint' },
+  { key: 'PORTRAIT_EXTRA_MAX', labelKey: 'field_PORTRAIT_EXTRA_MAX', descKey: 'field_PORTRAIT_EXTRA_MAX_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitTime' },
+  { key: 'PORTRAIT_STAFF_MAX', labelKey: 'field_PORTRAIT_STAFF_MAX', descKey: 'field_PORTRAIT_STAFF_MAX_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitTime' },
+  { key: 'PORTRAIT_AUTO_PUSH', labelKey: 'field_PORTRAIT_AUTO_PUSH', descKey: 'field_PORTRAIT_AUTO_PUSH_desc', longDescKey: 'field_PORTRAIT_AUTO_PUSH_tip', type: 'boolean', group: 'portrait', required: false },
+  // 课堂抽问（backend/api/class_drill_router.py）：总闸关掉后该页只从题库取题，零 AI 计费
+  { key: 'CLASS_DRILL_AI_ENABLED', labelKey: 'field_CLASS_DRILL_AI_ENABLED', descKey: 'field_CLASS_DRILL_AI_ENABLED_desc', type: 'boolean', group: 'classdrill', level: 'basic', required: false },
+  // 课堂闯关（backend/api/class_ladder_router.py）：AI 补题总闸 + 大屏默认皮肤
+  { key: 'CLASS_LADDER_AI_ENABLED', labelKey: 'field_CLASS_LADDER_AI_ENABLED', descKey: 'field_CLASS_LADDER_AI_ENABLED_desc', type: 'boolean', group: 'classladder', level: 'basic', required: false },
+  { key: 'CLASS_LADDER_SOUND_ENABLED', labelKey: 'field_CLASS_LADDER_SOUND_ENABLED', descKey: 'field_CLASS_LADDER_SOUND_ENABLED_desc', type: 'boolean', group: 'classladder', level: 'basic', required: false },
+  { key: 'CLASS_LADDER_DEFAULT_SKIN', labelKey: 'field_CLASS_LADDER_DEFAULT_SKIN', descKey: 'field_CLASS_LADDER_DEFAULT_SKIN_desc', longDescKey: 'field_CLASS_LADDER_DEFAULT_SKIN_tip', type: 'select', group: 'classladder', required: false, options: LADDER_SKIN_OPTIONS },
+
+  // ══ ③ AI 能力 ══
   // 服务接入
-  { key: 'dashscope_api_key', labelKey: 'field_dashscope_api_key', descKey: 'field_dashscope_api_key_desc', type: 'password', group: 'credentials' },
+  { key: 'dashscope_api_key', labelKey: 'field_dashscope_api_key', descKey: 'field_dashscope_api_key_desc', type: 'password', group: 'credentials', level: 'basic' },
   { key: 'AI_REQUEST_TIMEOUT', labelKey: 'field_AI_REQUEST_TIMEOUT', descKey: 'field_AI_REQUEST_TIMEOUT_desc', type: 'number', group: 'credentials', unitKey: 'unitSecond' },
-  { key: 'AI_MAX_CONCURRENCY', labelKey: 'field_AI_MAX_CONCURRENCY', descKey: 'field_AI_MAX_CONCURRENCY_desc', type: 'number', group: 'credentials', unitKey: 'unitCount' },
+  // 并发数是进程内线程池的规格，建池时读取一次 -> 标 restart
+  { key: 'AI_MAX_CONCURRENCY', labelKey: 'field_AI_MAX_CONCURRENCY', descKey: 'field_AI_MAX_CONCURRENCY_desc', type: 'number', group: 'credentials', unitKey: 'unitThread', scope: 'restart' },
   // 模型与端点
-  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_APPID' },
-  { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', required: false },
+  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', longDescKey: 'field_APPID_tip', type: 'text', group: 'models', level: 'basic', required: false, placeholderKey: 'placeholder_APPID' },
+  { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', level: 'basic', required: false },
+  { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models', level: 'basic' },
+  { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models', level: 'basic' },
+  { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models', level: 'basic' },
   // 接入地址：专属域名优先（非必填），普通域名备用（默认已填）；两者通用，连不上自动回落
-  { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
-  { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', type: 'text', group: 'models' },
-  { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models' },
+  { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', longDescKey: 'field_KB_API_BASE_tip', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
+  { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', longDescKey: 'field_QWEN_OPENAI_API_BASE_tip', type: 'text', group: 'models' },
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'model_select', optionsKind: 'long', group: 'models' },
-  { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models' },
-  { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
   { key: 'HOMEWORK_ENABLE_VL', labelKey: 'field_HOMEWORK_ENABLE_VL', descKey: 'field_HOMEWORK_ENABLE_VL_desc', type: 'boolean', group: 'models' },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
-  { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', type: 'boolean', group: 'knowledgebase', required: false },
-  { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
+  { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', longDescKey: 'field_KB_ENABLED_tip', type: 'boolean', group: 'knowledgebase', level: 'basic', required: false },
+  { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', level: 'basic', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
   { key: 'KB_TOP_K', labelKey: 'field_KB_TOP_K', descKey: 'field_KB_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'KB_MIN_SCORE', labelKey: 'field_KB_MIN_SCORE', descKey: 'field_KB_MIN_SCORE_desc', type: 'float', group: 'knowledgebase', required: false },
   { key: 'KB_TIMEOUT_MS', labelKey: 'field_KB_TIMEOUT_MS', descKey: 'field_KB_TIMEOUT_MS_desc', type: 'number', group: 'knowledgebase', required: false, unitKey: 'unitMilliSecond' },
   { key: 'KB_REL_GAP', labelKey: 'field_KB_REL_GAP', descKey: 'field_KB_REL_GAP_desc', type: 'float', group: 'knowledgebase', required: false },
   // AI 对话权限与每日限额：前者管"谁能用"，后者管"能用多少次"，同一件事的两个维度，放在一节
-  { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat' },
-  { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', type: 'boolean', group: 'chat' },
-  { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'chat', unitKey: 'unitTime' },
-  // V8.6.1 知识问答输出质量闸门（backend/chat_intent.py / chat_prompts.py）
-  { key: 'CHAT_META_GUARD_ENABLED', labelKey: 'field_CHAT_META_GUARD_ENABLED', descKey: 'field_CHAT_META_GUARD_ENABLED_desc', type: 'boolean', group: 'chat', required: false },
-  { key: 'CHAT_IDENTITY_GUARD_ENABLED', labelKey: 'field_CHAT_IDENTITY_GUARD_ENABLED', descKey: 'field_CHAT_IDENTITY_GUARD_ENABLED_desc', type: 'boolean', group: 'chat', required: false },
-  { key: 'CHAT_SKILL_SEGMENT_MODE', labelKey: 'field_CHAT_SKILL_SEGMENT_MODE', descKey: 'field_CHAT_SKILL_SEGMENT_MODE_desc', type: 'text', group: 'chat', required: false, placeholderKey: 'placeholder_CHAT_SKILL_SEGMENT_MODE' },
-  { key: 'CHAT_META_MAX_TOKENS', labelKey: 'field_CHAT_META_MAX_TOKENS', descKey: 'field_CHAT_META_MAX_TOKENS_desc', type: 'number', group: 'chat', required: false },
+  { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat', level: 'basic' },
+  { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', longDescKey: 'field_ENABLE_REQUEST_LIMIT_tip', type: 'boolean', group: 'chat', level: 'basic' },
+  { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'chat', level: 'basic', unitKey: 'unitTime' },
+  // 回答质量（V8.6.1 知识问答输出质量闸门；backend/chat_intent.py / chat_prompts.py）
+  // 这几项是提示词工程调参，与「谁能用、能用几次」不是一件事，单独成节并默认收在高级里
+  { key: 'CHAT_META_GUARD_ENABLED', labelKey: 'field_CHAT_META_GUARD_ENABLED', descKey: 'field_CHAT_META_GUARD_ENABLED_desc', type: 'boolean', group: 'quality', level: 'basic', required: false },
+  { key: 'CHAT_IDENTITY_GUARD_ENABLED', labelKey: 'field_CHAT_IDENTITY_GUARD_ENABLED', descKey: 'field_CHAT_IDENTITY_GUARD_ENABLED_desc', type: 'boolean', group: 'quality', required: false },
+  { key: 'CHAT_SKILL_SEGMENT_MODE', labelKey: 'field_CHAT_SKILL_SEGMENT_MODE', descKey: 'field_CHAT_SKILL_SEGMENT_MODE_desc', type: 'select', group: 'quality', required: false, options: SKILL_SEGMENT_OPTIONS },
+  { key: 'CHAT_META_MAX_TOKENS', labelKey: 'field_CHAT_META_MAX_TOKENS', descKey: 'field_CHAT_META_MAX_TOKENS_desc', type: 'number', group: 'quality', required: false },
   // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
-  { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', type: 'boolean', group: 'memory' },
+  { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', longDescKey: 'field_CHAT_MEMORY_ENABLED_tip', type: 'boolean', group: 'memory', level: 'basic' },
   { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitTurn' },
   { key: 'CHAT_MEMORY_TTL_MINUTES', labelKey: 'field_CHAT_MEMORY_TTL_MINUTES', descKey: 'field_CHAT_MEMORY_TTL_MINUTES_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitMinute' },
   { key: 'CHAT_MEMORY_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_MAX_CHARS', descKey: 'field_CHAT_MEMORY_MAX_CHARS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitChar' },
@@ -230,93 +334,154 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AI_GRADING_CONCURRENCY', labelKey: 'field_AI_GRADING_CONCURRENCY', descKey: 'field_AI_GRADING_CONCURRENCY_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitThread', scope: 'nextRound' },
   { key: 'AI_GRADING_MAX_ITEMS_PER_ROUND', labelKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND', descKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitItem', scope: 'nextRound' },
   // 图片生成
-  { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen' },
-  { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', type: 'model_select', optionsKind: 'image', group: 'imagegen' },
+  { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen', level: 'basic' },
+  { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', longDescKey: 'field_IMAGE_GEN_MODEL_tip', type: 'model_select', optionsKind: 'image', group: 'imagegen', level: 'basic' },
   // 尺寸可选 auto（不传，用模型默认值）；档位与允许范围随模型所在端点变化，切换模型时会自动校正
   { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'image_size', group: 'imagegen' },
   { key: 'IMAGE_GEN_MAX_PLACEHOLDERS', labelKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS', descKey: 'field_IMAGE_GEN_MAX_PLACEHOLDERS_desc', type: 'number', group: 'imagegen', required: false, unitKey: 'unitCount' },
   // 语音合成（backend/tts_service.py；百炼 qwen-audio-3.0-tts-flash，WebSocket 实时合成）
-  // 只放 5 项：超时/格式/音高在 tts_service.py 里写死，避免管理员决策负担
-  { key: 'TTS_ENABLED', labelKey: 'field_TTS_ENABLED', descKey: 'field_TTS_ENABLED_desc', type: 'boolean', group: 'tts', required: false },
-  { key: 'TTS_MODEL', labelKey: 'field_TTS_MODEL', descKey: 'field_TTS_MODEL_desc', type: 'tts_model', group: 'tts' },
-  { key: 'TTS_VOICE', labelKey: 'field_TTS_VOICE', descKey: 'field_TTS_VOICE_desc', type: 'tts_voice', group: 'tts' },
+  { key: 'TTS_ENABLED', labelKey: 'field_TTS_ENABLED', descKey: 'field_TTS_ENABLED_desc', type: 'boolean', group: 'tts', level: 'basic', required: false },
+  { key: 'TTS_MODEL', labelKey: 'field_TTS_MODEL', descKey: 'field_TTS_MODEL_desc', type: 'tts_model', group: 'tts', level: 'basic' },
+  { key: 'TTS_VOICE', labelKey: 'field_TTS_VOICE', descKey: 'field_TTS_VOICE_desc', longDescKey: 'field_TTS_VOICE_tip', type: 'tts_voice', group: 'tts', level: 'basic' },
   { key: 'TTS_SPEECH_RATE', labelKey: 'field_TTS_SPEECH_RATE', descKey: 'field_TTS_SPEECH_RATE_desc', type: 'float', group: 'tts', required: false, unitKey: 'unitRate' },
   { key: 'TTS_VOLUME', labelKey: 'field_TTS_VOLUME', descKey: 'field_TTS_VOLUME_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitLevel' },
   // AI 播客双主播音色：留空 = 按当前合成模型自动各挑一条（A 主讲默认男声、B 互动默认女声）
   { key: 'PODCAST_VOICE_A', labelKey: 'field_PODCAST_VOICE_A', descKey: 'field_PODCAST_VOICE_A_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
   { key: 'PODCAST_VOICE_B', labelKey: 'field_PODCAST_VOICE_B', descKey: 'field_PODCAST_VOICE_B_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
-  // 播客时长：档位与硬上限（原先只存在于后端与配置文件中，页面上看不到 → 被「未收录配置键」面板点名）
   { key: 'PODCAST_DURATION_OPTIONS', labelKey: 'field_PODCAST_DURATION_OPTIONS', descKey: 'field_PODCAST_DURATION_OPTIONS_desc', type: 'text', group: 'tts', required: false, placeholderKey: 'placeholder_PODCAST_DURATION_OPTIONS' },
   { key: 'PODCAST_MAX_SECONDS', labelKey: 'field_PODCAST_MAX_SECONDS', descKey: 'field_PODCAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
-  // 课堂抽问（backend/api/class_drill_router.py）：总闸关掉后该页只从题库取题，零 AI 计费
-  { key: 'CLASS_DRILL_AI_ENABLED', labelKey: 'field_CLASS_DRILL_AI_ENABLED', descKey: 'field_CLASS_DRILL_AI_ENABLED_desc', type: 'boolean', group: 'classdrill', required: false },
-  // 课堂闯关（backend/api/class_ladder_router.py）：AI 补题总闸 + 大屏默认皮肤
-  { key: 'CLASS_LADDER_AI_ENABLED', labelKey: 'field_CLASS_LADDER_AI_ENABLED', descKey: 'field_CLASS_LADDER_AI_ENABLED_desc', type: 'boolean', group: 'classladder', required: false },
-  { key: 'CLASS_LADDER_DEFAULT_SKIN', labelKey: 'field_CLASS_LADDER_DEFAULT_SKIN', descKey: 'field_CLASS_LADDER_DEFAULT_SKIN_desc', type: 'text', group: 'classladder', required: false, placeholderKey: 'placeholder_CLASS_LADDER_DEFAULT_SKIN' },
-  { key: 'CLASS_LADDER_SOUND_ENABLED', labelKey: 'field_CLASS_LADDER_SOUND_ENABLED', descKey: 'field_CLASS_LADDER_SOUND_ENABLED_desc', type: 'boolean', group: 'classladder', required: false },
 
-  // AI 画像（backend/api/portrait_router.py）：周期决定"免费额度"与"画像吃哪一段数据"
-  { key: 'PORTRAIT_ENABLED', labelKey: 'field_PORTRAIT_ENABLED', descKey: 'field_PORTRAIT_ENABLED_desc', type: 'boolean', group: 'portrait', required: false },
-  { key: 'PORTRAIT_PERIOD_MONTHLY', labelKey: 'field_PORTRAIT_PERIOD_MONTHLY', descKey: 'field_PORTRAIT_PERIOD_MONTHLY_desc', type: 'boolean', group: 'portrait', required: false },
-  { key: 'PORTRAIT_EXTRA_POINTS', labelKey: 'field_PORTRAIT_EXTRA_POINTS', descKey: 'field_PORTRAIT_EXTRA_POINTS_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitPoint' },
-  { key: 'PORTRAIT_EXTRA_MAX', labelKey: 'field_PORTRAIT_EXTRA_MAX', descKey: 'field_PORTRAIT_EXTRA_MAX_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitTime' },
-  { key: 'PORTRAIT_STAFF_MAX', labelKey: 'field_PORTRAIT_STAFF_MAX', descKey: 'field_PORTRAIT_STAFF_MAX_desc', type: 'number', group: 'portrait', required: false, unitKey: 'unitTime' },
-  { key: 'PORTRAIT_AUTO_PUSH', labelKey: 'field_PORTRAIT_AUTO_PUSH', descKey: 'field_PORTRAIT_AUTO_PUSH_desc', type: 'boolean', group: 'portrait', required: false },
-
-  // 积分防刷：每日上限（0 = 不限制）
-  { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
-  { key: 'REWARD_DAILY_QUIZ_SESSIONS', labelKey: 'field_REWARD_DAILY_QUIZ_SESSIONS', descKey: 'field_REWARD_DAILY_QUIZ_SESSIONS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitSession' },
-  { key: 'REWARD_DAILY_ACADEMIC_POINTS', labelKey: 'field_REWARD_DAILY_ACADEMIC_POINTS', descKey: 'field_REWARD_DAILY_ACADEMIC_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
-  { key: 'REWARD_DAILY_CLASS_POINTS', labelKey: 'field_REWARD_DAILY_CLASS_POINTS', descKey: 'field_REWARD_DAILY_CLASS_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
-  { key: 'REWARD_DAILY_FUN_POINTS', labelKey: 'field_REWARD_DAILY_FUN_POINTS', descKey: 'field_REWARD_DAILY_FUN_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
-  { key: 'REWARD_DAILY_TOTAL_POINTS', labelKey: 'field_REWARD_DAILY_TOTAL_POINTS', descKey: 'field_REWARD_DAILY_TOTAL_POINTS_desc', type: 'number', group: 'reward', required: false, unitKey: 'unitPoint' },
-
-  // ══ 错题本：自动错题巩固（backend/api/wrong_book_router.py 的 wrong_practice_policy）══
-  { key: 'wrong_practice_threshold', labelKey: 'field_wrong_practice_threshold', descKey: 'field_wrong_practice_threshold_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitItem' },
-  { key: 'wrong_practice_per_set', labelKey: 'field_wrong_practice_per_set', descKey: 'field_wrong_practice_per_set_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitItem' },
-  { key: 'wrong_practice_interval_days', labelKey: 'field_wrong_practice_interval_days', descKey: 'field_wrong_practice_interval_days_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitDay' },
-  { key: 'wrong_practice_avoid_recent_sets', labelKey: 'field_wrong_practice_avoid_recent_sets', descKey: 'field_wrong_practice_avoid_recent_sets_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitTime' },
-  { key: 'wrong_book_sources', labelKey: 'field_wrong_book_sources', descKey: 'field_wrong_book_sources_desc', type: 'wrong_book_sources', group: 'wrongbook', required: false },
-
-  // ══ ③ 文件与存储 ══
+  // ══ ④ 存储与安全 ══
   // 上传限制与类型白名单
-  { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', descKey: 'field_MAX_DOC_SIZE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB' },
-  { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', descKey: 'field_MAX_IMAGE_SIZE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB' },
+  { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', descKey: 'field_MAX_DOC_SIZE_MB_desc', type: 'number', group: 'upload', level: 'basic', unitKey: 'unitMB' },
+  { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', descKey: 'field_MAX_IMAGE_SIZE_MB_desc', type: 'number', group: 'upload', level: 'basic', unitKey: 'unitMB' },
   { key: 'IMAGE_EXTENSIONS', labelKey: 'field_IMAGE_EXTENSIONS', descKey: 'field_IMAGE_EXTENSIONS_desc', type: 'tags', group: 'upload' },
   { key: 'DOCUMENT_EXTENSIONS', labelKey: 'field_DOCUMENT_EXTENSIONS', descKey: 'field_DOCUMENT_EXTENSIONS_desc', type: 'tags', group: 'upload' },
   // ── 文件提交类作业（上传限额是天花板：教师建作业时只能在这个框里往下调）──
-  { key: 'HOMEWORK_MAX_FILE_MB', labelKey: 'field_HOMEWORK_MAX_FILE_MB', descKey: 'field_HOMEWORK_MAX_FILE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB', required: false },
+  { key: 'HOMEWORK_MAX_FILE_MB', labelKey: 'field_HOMEWORK_MAX_FILE_MB', descKey: 'field_HOMEWORK_MAX_FILE_MB_desc', longDescKey: 'field_HOMEWORK_MAX_FILE_MB_tip', type: 'number', group: 'upload', unitKey: 'unitMB', required: false },
   { key: 'HOMEWORK_MAX_FILES', labelKey: 'field_HOMEWORK_MAX_FILES', descKey: 'field_HOMEWORK_MAX_FILES_desc', type: 'number', group: 'upload', unitKey: 'unitCount', required: false },
-  { key: 'HOMEWORK_ALLOWED_EXTS', labelKey: 'field_HOMEWORK_ALLOWED_EXTS', descKey: 'field_HOMEWORK_ALLOWED_EXTS_desc', type: 'tags', group: 'upload' },
+  { key: 'HOMEWORK_ALLOWED_EXTS', labelKey: 'field_HOMEWORK_ALLOWED_EXTS', descKey: 'field_HOMEWORK_ALLOWED_EXTS_desc', longDescKey: 'field_HOMEWORK_ALLOWED_EXTS_tip', type: 'tags', group: 'upload' },
   // 下载配额
-  { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'quota', unitKey: 'unitGB' },
-
-  // ══ ④ 账号与安全 ══
+  { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'quota', level: 'basic', unitKey: 'unitGB' },
   // 登录与会话
-  { key: 'JWT_EXPIRATION_HOURS', labelKey: 'field_JWT_EXPIRATION_HOURS', descKey: 'field_JWT_EXPIRATION_HOURS_desc', type: 'number', group: 'session', unitKey: 'unitHour', scope: 'nextLogin' },
+  { key: 'JWT_EXPIRATION_HOURS', labelKey: 'field_JWT_EXPIRATION_HOURS', descKey: 'field_JWT_EXPIRATION_HOURS_desc', type: 'number', group: 'session', level: 'basic', unitKey: 'unitHour', scope: 'nextLogin' },
   { key: 'JWT_RENEW_THRESHOLD_MINUTES', labelKey: 'field_JWT_RENEW_THRESHOLD_MINUTES', descKey: 'field_JWT_RENEW_THRESHOLD_MINUTES_desc', type: 'number', group: 'session', unitKey: 'unitMinute' },
   { key: 'ONLINE_USER_TIMEOUT_SECONDS', labelKey: 'field_ONLINE_USER_TIMEOUT_SECONDS', descKey: 'field_ONLINE_USER_TIMEOUT_SECONDS_desc', type: 'number', group: 'session', unitKey: 'unitSecond' },
   // 爆破与 IP 防护（backend/security_guard.py，计数为内存态，重启即清）
-  { key: 'ENABLE_IP_GUARD', labelKey: 'field_ENABLE_IP_GUARD', descKey: 'field_ENABLE_IP_GUARD_desc', type: 'boolean', group: 'guard', required: false, danger: true },
-  { key: 'TRUST_PROXY_HEADERS', labelKey: 'field_TRUST_PROXY_HEADERS', descKey: 'field_TRUST_PROXY_HEADERS_desc', type: 'boolean', group: 'guard' },
+  { key: 'ENABLE_IP_GUARD', labelKey: 'field_ENABLE_IP_GUARD', descKey: 'field_ENABLE_IP_GUARD_desc', longDescKey: 'field_ENABLE_IP_GUARD_tip', type: 'boolean', group: 'guard', level: 'basic', required: false, danger: true },
+  { key: 'TRUST_PROXY_HEADERS', labelKey: 'field_TRUST_PROXY_HEADERS', descKey: 'field_TRUST_PROXY_HEADERS_desc', longDescKey: 'field_TRUST_PROXY_HEADERS_tip', type: 'boolean', group: 'guard' },
   { key: 'LOGIN_FAIL_LIMIT', labelKey: 'field_LOGIN_FAIL_LIMIT', descKey: 'field_LOGIN_FAIL_LIMIT_desc', type: 'number', group: 'guard', unitKey: 'unitTime' },
   { key: 'LOGIN_FAIL_WINDOW_SECONDS', labelKey: 'field_LOGIN_FAIL_WINDOW_SECONDS', descKey: 'field_LOGIN_FAIL_WINDOW_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
   { key: 'AUTH_FAIL_LIMIT', labelKey: 'field_AUTH_FAIL_LIMIT', descKey: 'field_AUTH_FAIL_LIMIT_desc', type: 'number', group: 'guard', unitKey: 'unitTime' },
   { key: 'AUTH_FAIL_WINDOW_SECONDS', labelKey: 'field_AUTH_FAIL_WINDOW_SECONDS', descKey: 'field_AUTH_FAIL_WINDOW_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
   { key: 'AUTH_FAIL_BAN_SECONDS', labelKey: 'field_AUTH_FAIL_BAN_SECONDS', descKey: 'field_AUTH_FAIL_BAN_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
   { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'guard', required: false, placeholderKey: 'placeholder_ipDenylist', danger: true },
-  // 登录闸门：升级维护时按角色或按来源关掉新登录入口，管理员不受影响
-  // 三项共用一条说明（挂在第一个开关下），避免同一段文字重复出现三次
-  { key: 'LOGIN_BLOCK_STUDENT', labelKey: 'field_LOGIN_BLOCK_STUDENT', descKey: 'field_LOGIN_BLOCK_desc', type: 'boolean', group: 'guard', danger: true },
-  { key: 'LOGIN_BLOCK_TEACHER', labelKey: 'field_LOGIN_BLOCK_TEACHER', type: 'boolean', group: 'guard', danger: true },
-  { key: 'LOGIN_BLOCK_EXTERNAL', labelKey: 'field_LOGIN_BLOCK_EXTERNAL', type: 'boolean', group: 'guard', danger: true },
-
-  // ══ ⑤ 运维与升级 ══
-  { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade', danger: true },
+  // 登录闸门：升级维护时按角色或按来源关掉新登录入口，管理员不受影响。
+  // 三项合成一张卡片渲染（渲染层按 type='login_gate' 归并），共用一条说明。
+  { key: 'LOGIN_BLOCK_STUDENT', labelKey: 'field_LOGIN_BLOCK_STUDENT', descKey: 'field_LOGIN_BLOCK_desc', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
+  { key: 'LOGIN_BLOCK_TEACHER', labelKey: 'field_LOGIN_BLOCK_TEACHER', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
+  { key: 'LOGIN_BLOCK_EXTERNAL', labelKey: 'field_LOGIN_BLOCK_EXTERNAL', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
+  // 版本与自动同步（升级/回滚操作在「版本与升级」标签页）
+  { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade', level: 'basic', danger: true },
 ]
 
 // tags 类字段的键：保存时统一把逗号分隔字符串转回数组（留空 -> []，允许清空）
 const TAG_FIELD_KEYS = GLOBAL_CONFIG_FIELDS.filter((f) => f.type === 'tags').map((f) => f.key)
+
+// ── 题型列表编辑器 ──
+// 存储格式仍是「每行 key:标签」的多行文本（后端契约不变），但界面上不再让人手写格式：
+// 点进弹窗按行增删，key 与显示名分开填，保存时再拼回文本。
+const parseQTypes = (text: string): { key: string; label: string }[] =>
+  text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const i = line.indexOf(':')
+      if (i < 0) return { key: line, label: line }
+      const k = line.slice(0, i).trim()
+      return { key: k, label: line.slice(i + 1).trim() || k }
+    })
+
+const QuestionTypeEditor: React.FC<{
+  value?: string
+  onChange?: (v: string) => void
+}> = ({ value, onChange }) => {
+  const { t } = useTranslation('system')
+  const rows = useMemo(() => parseQTypes(value || ''), [value])
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<{ key: string; label: string }[]>([])
+
+  const startEdit = () => {
+    setDraft(rows.length ? rows : [{ key: '', label: '' }])
+    setOpen(true)
+  }
+  const patch = (i: number, part: 'key' | 'label', v: string) => {
+    setDraft((prev) => prev.map((r, idx) => (idx === i ? { ...r, [part]: v } : r)))
+  }
+  const commit = () => {
+    const cleaned = draft
+      .map((r) => ({ key: r.key.trim(), label: r.label.trim() }))
+      .filter((r) => r.key)
+    const dup = cleaned.map((r) => r.key).filter((k, i, arr) => arr.indexOf(k) !== i)
+    if (dup.length) {
+      message.warning(t('qtypeDupKey', { keys: Array.from(new Set(dup)).join('、') }))
+      return
+    }
+    onChange?.(cleaned.map((r) => `${r.key}:${r.label || r.key}`).join('\n'))
+    setOpen(false)
+  }
+
+  return (
+    <>
+      <Button onClick={startEdit}>{rows.length ? t('qtypeEdit', { n: rows.length }) : t('qtypeAdd')}</Button>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
+        {rows.length ? rows.map((r) => `${r.label}（${r.key}）`).join('、') : t('qtypeEmpty')}
+      </div>
+      <Modal
+        open={open}
+        title={t('qtypeTitle')}
+        onCancel={() => setOpen(false)}
+        onOk={commit}
+        okText={t('saveShort')}
+        cancelText={t('cancel')}
+        width={560}
+      >
+        <div style={{ marginTop: 8 }}>
+          {draft.map((r, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <Input
+                value={r.key}
+                placeholder={t('qtypeKeyPlaceholder')}
+                style={{ width: 180 }}
+                onChange={(e) => patch(i, 'key', e.target.value)}
+              />
+              <Input
+                value={r.label}
+                placeholder={t('qtypeLabelPlaceholder')}
+                onChange={(e) => patch(i, 'label', e.target.value)}
+              />
+              <Button
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => setDraft((prev) => prev.filter((_, idx) => idx !== i))}
+              />
+            </div>
+          ))}
+          <Button
+            type="dashed"
+            icon={<PlusOutlined />}
+            block
+            onClick={() => setDraft((prev) => [...prev, { key: '', label: '' }])}
+          >
+            {t('qtypeAddRow')}
+          </Button>
+        </div>
+      </Modal>
+    </>
+  )
+}
 
 // 后端配置 -> 表单值：tags 转逗号串、题型转多行 key:label，并补齐两个"配置文件里可能没写"的默认值
 // （否则老部署一保存就把它们顺手改掉了）。对已经是表单值的对象再调一次是幂等的。
@@ -1763,7 +1928,7 @@ const SystemConfigPage: React.FC = () => {
   } | null>(null)
   const [form] = Form.useForm()
   const [query, setQuery] = useState('')                // 顶部搜索关键词
-  const [activeSec, setActiveSec] = useState('')        // 锚点导航当前高亮的小节
+  const [activeSec, setActiveSec] = useState('brand')   // 左栏当前小节（主从视图右侧只渲染它）
   const [dirty, setDirty] = useState<string[]>([])      // 与已加载值不同的配置键
   const loadedRef = useRef<Record<string, unknown>>({}) // 上次加载/保存后的表单快照（脏值对比 + 放弃修改）
   const [meta, setMeta] = useState<ConfigMeta | null>(null)        // 后端校验元数据（取值范围/长度上限）
@@ -1773,7 +1938,8 @@ const SystemConfigPage: React.FC = () => {
   const [ttsDefaultVoice, setTtsDefaultVoice] = useState<Record<string, string>>({})
   const [modelOptions, setModelOptions] = useState<Record<string, ModelOption[]>>({})
   const [imageSizes, setImageSizes] = useState<Record<string, ImageSizeConf>>({})
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ memory: true }) // 收起的小节
+  const [advPanel, setAdvPanel] = useState<Record<string, boolean>>({}) // 手动展开「高级参数」的小节
+  const [showAdvanced, setShowAdvanced] = useState(false)               // 全局显示高级参数（默认收起，降低首屏噪音）
   const [advOpen, setAdvOpen] = useState(false)                     // 「未收录配置键」兜底面板
 
   // ── 加载 API Key 状态 ──
@@ -1850,8 +2016,10 @@ const SystemConfigPage: React.FC = () => {
   }, [t, applyConfig, loadApikeyStatus])
 
   // ── 逐项比对快照，统计"几项未保存" ──
+  // 用 getFieldsValue(true) 取全部 store 值：搜索或切换小节会让部分 Form.Item 卸载，
+  // 默认取值只覆盖"已注册"的字段，会把未挂载小节算成空值、进而误判脏值。
   const handleValuesChange = useCallback(() => {
-    const cur = form.getFieldsValue() as Record<string, unknown>
+    const cur = form.getFieldsValue(true) as Record<string, unknown>
     setDirty(
       GLOBAL_CONFIG_FIELDS
         .filter((f) => normVal(cur[f.key]) !== normVal(loadedRef.current[f.key]))
@@ -1865,13 +2033,58 @@ const SystemConfigPage: React.FC = () => {
     message.success(t('discardDone'))
   }
 
-  // ── 锚点跳转 ──
-  const scrollToSection = (sec: string) => {
-    setCollapsed((prev) => (prev[sec] ? { ...prev, [sec]: false } : prev))
+  // ── 重新读取：有脏值时先确认，避免一点就丢掉改动 ──
+  const handleReload = () => {
+    if (!dirty.length) { loadConfig(); return }
+    Modal.confirm({
+      title: t('reloadConfirmTitle'),
+      content: t('reloadConfirmContent', { n: dirty.length }),
+      okText: t('reload'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      onOk: () => loadConfig(),
+    })
+  }
+
+  // ── 改动清单：按「哪个小节改了什么」列出来，点条目直接跳过去 ──
+  const showDirtyList = () => {
+    const dirtyFields = GLOBAL_CONFIG_FIELDS.filter((f) => dirty.includes(f.key))
+    Modal.info({
+      title: t('dirtyListTitle', { n: dirtyFields.length }),
+      width: 520,
+      okText: t('close'),
+      content: (
+        <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
+          {dirtyFields.map((f) => (
+            <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '5px 0', borderBottom: '1px dashed var(--border-color-secondary)', fontSize: 12 }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t(f.labelKey)}</span>
+              <Text type="secondary" style={{ fontSize: 11, flex: '0 0 auto' }}>{t(SECTION_TITLES[f.group])}</Text>
+            </div>
+          ))}
+        </div>
+      ),
+    })
+  }
+
+  // ── 有未保存修改时刷新/关标签要拦一下 ──
+  useEffect(() => {
+    if (!dirty.length) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty.length])
+
+  // ── 左栏切换小节：主从视图直接换右侧内容，不再做长距离滚动 ──
+  const selectSection = (sec: string) => {
     setActiveSec(sec)
-    // 等展开的这一帧渲染完再定位，否则测到的是收起后的高度
+    // 搜索状态下点左栏，先退出搜索，否则右侧还停在搜索结果上
+    if (query) setQuery('')
+    // 右侧换完内容后回到顶部，避免上一节的滚动位置残留
     window.setTimeout(() => {
-      document.getElementById(SECTION_DOM_ID + sec)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      document.getElementById('cfg-content-top')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 0)
   }
 
@@ -1895,8 +2108,9 @@ const SystemConfigPage: React.FC = () => {
     let values: Record<string, unknown>
     try {
       await form.validateFields()
-      // 用 getFieldsValue 而不是 validateFields 的返回值，确保未被改动的字段也一并提交
-      values = toApiValues(form.getFieldsValue() as Record<string, unknown>)
+      // 用 getFieldsValue(true) 而不是 validateFields 的返回值：确保搜索过滤掉、
+      // 或收在「高级参数」里没挂载的字段也一并提交，否则一次搜索后保存会把它们清空。
+      values = toApiValues(form.getFieldsValue(true) as Record<string, unknown>)
     } catch {
       return // 表单校验未通过，错误已就地标红
     }
@@ -1934,29 +2148,7 @@ const SystemConfigPage: React.FC = () => {
     loadModelOptions()
   }, [user?.role, loadConfig, loadMeta, loadTtsVoices, loadModelOptions])
 
-  // 滚动时高亮左侧导航当前小节（IntersectionObserver 不依赖外层滚动容器的实现细节）
-  useEffect(() => {
-    if (activeTab !== 'global' || loading) return
-    const els = GLOBAL_CONFIG_FIELDS
-      .map((f) => document.getElementById(SECTION_DOM_ID + f.group))
-      .filter((el): el is HTMLDivElement => !!el)
-    if (!els.length) return
-    const tops = new Map<string, number>()
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach((en) => {
-        if (en.isIntersecting) tops.set(en.target.id, en.boundingClientRect.top)
-        else tops.delete(en.target.id)
-      })
-      let best = ''
-      let bestTop = Number.POSITIVE_INFINITY
-      tops.forEach((top, id) => {
-        if (top < bestTop) { bestTop = top; best = id }
-      })
-      if (best) setActiveSec(best.slice(SECTION_DOM_ID.length))
-    }, { rootMargin: '-100px 0px -55% 0px', threshold: 0 })
-    els.forEach((el) => io.observe(el))
-    return () => io.disconnect()
-  }, [activeTab, loading, query])
+  // 主从视图不需要滚动监听：左栏高亮完全由点击驱动
 
   // 非管理员重定向到 AI 对话
   if (user?.role !== 'admin') {
@@ -2100,15 +2292,16 @@ const SystemConfigPage: React.FC = () => {
     return opts.filter((o) => `${o.value} ${o.label}`.toLowerCase().includes(q))
   }, [freeSearch])
 
-  // ── 全局配置表单各小节 ──
+  // 当前小节所属分区：右侧顶部用它显示「这一组管什么」，替代原来的大标题+分隔线
+  const activeZone = CONFIG_ZONES.find((z) => z.sections.includes(activeSec))
+  // 单列行式：label 固定宽 + 控件 + 一行说明。长说明收进 label 旁的 ⓘ，
+  // 高级项默认折叠（口径：改它需要懂实现原理），避免 105 项一次铺满。
   const renderGroup = (group: string) => {
     const fields = fieldsOf(group)
     if (!fields.length) return null
-    // 搜索时一律展开，保证命中的项不会被折叠藏住
-    const isOpen = !!q || !collapsed[group]
     const secDirty = fields.filter((f) => dirty.includes(f.key)).length
     const getLabel = (field: ConfigField) => t(field.labelKey)
-    // 数字项把后端 _NUM_RANGES 的范围直接标在说明里，避免"填了才被拒"
+    // 数字项把后端 _NUM_RANGES 的范围标进说明，避免"填了才被拒"
     const getDesc = (field: ConfigField) => {
       let base = field.descKey ? t(field.descKey) : undefined
       // 尺寸的可选项随模型变，直接把该模型的实测规则挂在说明里，省得管理员去猜
@@ -2122,81 +2315,104 @@ const SystemConfigPage: React.FC = () => {
       const hint = t('rangeHint', { lo: range[0], hi: range[1], unit: field.unitKey ? t(field.unitKey) : '' })
       return base ? base + hint : hint
     }
-    // 非即时生效的项挂个徽标，免得以为改了没反应
-    const getLabelNode = (field: ConfigField) => (field.scope ? (
-      <Space size={4}>
+    // 说明只露两行，全文进 Tooltip；长说明（原理/注意事项）另挂在 label 的 ⓘ 上
+    const descNode = (field: ConfigField) => {
+      const text = getDesc(field)
+      const long = field.longDescKey ? t(field.longDescKey) : ''
+      if (!text && !long) return undefined
+      return (
+        <Tooltip title={<div style={{ maxWidth: 380, whiteSpace: 'pre-line' }}>{long || text}</div>}>
+          <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {text || long}
+          </span>
+        </Tooltip>
+      )
+    }
+    // 生效方式徽标 + 长说明入口
+    const getLabelNode = (field: ConfigField) => (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
         <span>{getLabel(field)}</span>
-        <Tag color="orange" style={{ fontSize: 11, lineHeight: '18px', marginInlineEnd: 0 }}>
-          {t(SCOPE_TAG_KEYS[field.scope])}
-        </Tag>
-      </Space>
-    ) : getLabel(field))
+        {field.scope ? (
+          <Tag color="orange" style={{ fontSize: 11, lineHeight: '18px', marginInlineEnd: 0 }}>
+            {t(SCOPE_TAG_KEYS[field.scope])}
+          </Tag>
+        ) : null}
+        {field.longDescKey ? (
+          <Tooltip title={<div style={{ maxWidth: 380, whiteSpace: 'pre-line' }}>{t(field.longDescKey)}</div>}>
+            <InfoCircleOutlined style={{ fontSize: 12, color: 'var(--text-tertiary)', cursor: 'help' }} />
+          </Tooltip>
+        ) : null}
+      </span>
+    )
     const getRule = (field: ConfigField) =>
       field.required !== false ? [{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }] : undefined
-    return (
-      <div key={group} id={SECTION_DOM_ID + group} style={{ marginBottom: 32, scrollMarginTop: 8 }}>
-        <Title
-          level={5}
-          style={{ marginTop: 0, cursor: 'pointer', userSelect: 'none' }}
-          onClick={() => setCollapsed((prev) => ({ ...prev, [group]: isOpen }))}
-        >
-          <DownOutlined
-            style={{ fontSize: 10, marginRight: 8, color: 'var(--text-tertiary)', transition: 'transform .2s', transform: isOpen ? 'none' : 'rotate(-90deg)' }}
-          />
-          {t(SECTION_TITLES[group])}
-          {q ? (
-            <Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 6 }}>({fields.length})</Text>
-          ) : null}
-          {!isOpen ? (
-            <Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 6 }}>
-              {t('sectionCollapsed', { n: fields.length })}
-            </Text>
-          ) : null}
-          {secDirty ? (
-            <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 6 }}>
-              {t('secUnsaved', { n: secDirty })}
-            </Tag>
-          ) : null}
-        </Title>
-        {/* 折叠只藏视觉、不卸载组件：Form.Item 一旦卸载，提交时这些项的值就丢了 */}
-        <div style={{ display: isOpen ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16, paddingTop: isOpen ? 12 : 0, borderTop: isOpen ? '1px solid var(--border-color)' : 'none' }}>
-          {fields.map((field) => (
-            <div key={field.key}>
-              {field.type === 'boolean' ? (
+    const basicFields = fields.filter((f) => f.level === 'basic' && f.type !== 'login_gate')
+    const advFields = fields.filter((f) => f.level !== 'basic' && f.type !== 'login_gate')
+    // 登录闸门三项合成一张卡片，共用一条说明（原先后两个开关没有任何解释）
+    const gateFields = fields.filter((f) => f.type === 'login_gate')
+    // 搜索时一律展开；整节都是高级项时也展开，否则点进来是一片空白
+    const advShown = !!q || showAdvanced || !!advPanel[group] || basicFields.length === 0
+    const renderFieldBox = (field: ConfigField) => (
+            <div key={field.key} style={{ marginBottom: 16 }}>
+              {field.type === 'select' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={descNode(field)}
+                >
+                  <Select
+                    options={(field.options || []).map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                    placeholder={t('placeholder_select')}
+                  />
+                </Form.Item>
+              ) : field.type === 'radio' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  extra={descNode(field)}
+                >
+                  <Radio.Group
+                    options={(field.options || []).map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                  />
+                </Form.Item>
+              ) : field.type === 'boolean' ? (
                 <Form.Item
                   name={field.key}
                   label={getLabelNode(field)}
                   valuePropName="checked"
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
-                  <Switch />
+                  <Switch checkedChildren={t('switchOn')} unCheckedChildren={t('switchOff')} />
                 </Form.Item>
               ) : field.type === 'number' ? (
                 <Form.Item
                   name={field.key}
                   label={getLabelNode(field)}
                   rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <InputNumber
-                    style={{ width: '100%' }}
+                    style={{ width: 200 }}
                     min={meta?.num_ranges?.[field.key]?.[0] ?? 0}
                     max={meta?.num_ranges?.[field.key]?.[1]}
                     step={1}
+                    addonAfter={field.unitKey ? t(field.unitKey) : undefined}
                   />
                 </Form.Item>
               ) : field.type === 'float' ? (
                 <Form.Item
                   name={field.key}
                   label={getLabelNode(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <InputNumber
-                    style={{ width: '100%' }}
+                    style={{ width: 200 }}
                     min={meta?.float_ranges?.[field.key]?.[0] ?? 0.01}
                     max={meta?.float_ranges?.[field.key]?.[1] ?? 1}
                     step={0.05}
                     precision={2}
+                    addonAfter={field.unitKey ? t(field.unitKey) : undefined}
                   />
                 </Form.Item>
               ) : field.type === 'password' ? (
@@ -2222,7 +2438,7 @@ const SystemConfigPage: React.FC = () => {
                       )}
                     </Space>
                   }
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <Input.Password placeholder={apikeyStatus?.configured ? t('placeholder_notCover') : t('placeholder_enterApiKey')} />
                 </Form.Item>
@@ -2232,7 +2448,7 @@ const SystemConfigPage: React.FC = () => {
                   label={getLabelNode(field)}
                   // 必填与否交给字段声明（IP 黑名单要能留空 = 不拦任何人），别再硬编码 required
                   rules={getRule(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                   getValueFromEvent={(e) => e.target.value}
                 >
                   <Input placeholder={field.placeholderKey ? t(field.placeholderKey) : t('placeholder_extensions')} />
@@ -2242,16 +2458,15 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={getLabelNode(field)}
                   rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
-                  extra={getDesc(field)}
-                  getValueFromEvent={(e) => e.target.value}
+                  extra={descNode(field)}
                 >
-                  <Input.TextArea rows={7} placeholder={t('placeholder_questionTypes')} />
+                  <QuestionTypeEditor />
                 </Form.Item>
               ) : field.type === 'roles' ? (
                 <Form.Item
                   name={field.key}
                   label={getLabelNode(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <Checkbox.Group>
                     <Checkbox value={1}>{t('teacher')}</Checkbox>
@@ -2262,7 +2477,7 @@ const SystemConfigPage: React.FC = () => {
                 <Form.Item
                   name={field.key}
                   label={getLabelNode(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <Checkbox.Group>
                     <Checkbox value="exam">{t('notifExam')}</Checkbox>
@@ -2278,7 +2493,7 @@ const SystemConfigPage: React.FC = () => {
                 <Form.Item
                   name={field.key}
                   label={getLabelNode(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <Checkbox.Group>
                     {/* 考试是错题本的基本盘，勾掉也不生效，直接禁用免得出现「关了却没关」的错觉 */}
@@ -2295,7 +2510,7 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={getLabelNode(field)}
                   rules={getRule(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <Select
                     showSearch
@@ -2314,7 +2529,7 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={getLabelNode(field)}
                   rules={getRule(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <AutoComplete
                     options={pickBySearch(modelOptionsFor(field.optionsKind))}
@@ -2329,7 +2544,7 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={getLabelNode(field)}
                   rules={getRule(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <AutoComplete
                     options={pickBySearch(imageSizeOptions)}
@@ -2344,7 +2559,7 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={getLabelNode(field)}
                   rules={getRule(field)}
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <Select
                     options={ttsModels.map((m) => ({
@@ -2359,7 +2574,7 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={getLabelNode(field)}
                   valuePropName="checked"
-                  extra={getDesc(field)}
+                  extra={descNode(field)}
                 >
                   <Checkbox>
                     {t('multimodalCheckbox')}
@@ -2370,21 +2585,68 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={getLabelNode(field)}
                   rules={getRule(field)}
-                  extra={field.key === 'AGENT_EDITION' ? t('agentEditionExtra') : getDesc(field)}
+                  extra={descNode(field)}
                 >
-                  {field.key === 'AGENT_EDITION' ? (
-                    <Input placeholder={t('placeholder_agentEdition')} maxLength={meta?.str_limits?.[field.key]} />
-                  ) : (
-                    <Input
-                      placeholder={field.placeholderKey ? t(field.placeholderKey) : undefined}
-                      maxLength={meta?.str_limits?.[field.key]}
-                    />
-                  )}
+                  <Input
+                    placeholder={field.placeholderKey ? t(field.placeholderKey) : undefined}
+                    maxLength={meta?.str_limits?.[field.key]}
+                  />
                 </Form.Item>
               )}
             </div>
-          ))}
-          {group === 'models' && isOpen && (
+    )
+    return (
+      <div key={group} id={SECTION_DOM_ID + group} style={{ marginBottom: 28, scrollMarginTop: 8 }}>
+        <Title level={5} style={{ margin: '0 0 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {t(SECTION_TITLES[group])}
+          {secDirty ? (
+            <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px', marginInlineEnd: 0 }}>
+              {t('secUnsaved', { n: secDirty })}
+            </Tag>
+          ) : null}
+          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+            {t('sectionFieldCount', { n: fields.length })}
+          </Text>
+        </Title>
+        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 14, marginTop: 10 }}>
+          {basicFields.map(renderFieldBox)}
+          {/* 登录闸门：三项合成一张卡片，共用一条说明 */}
+          {gateFields.length > 0 && (
+            <div style={{ marginBottom: 18, padding: '12px 14px', border: '1px solid var(--border-color)', borderRadius: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>{t('loginGateTitle')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10, lineHeight: 1.6 }}>{t('loginGateDesc')}</div>
+              <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+                {gateFields.map((f) => (
+                  <Form.Item
+                    key={f.key}
+                    name={f.key}
+                    valuePropName="checked"
+                    label={t(f.labelKey)}
+                    labelCol={{ flex: '0 0 auto' }}
+                    wrapperCol={{ flex: '0 0 auto' }}
+                    colon={false}
+                    style={{ marginBottom: 0, marginRight: 8 }}
+                  >
+                    <Switch checkedChildren={t('switchOn')} unCheckedChildren={t('switchOff')} />
+                  </Form.Item>
+                ))}
+              </div>
+            </div>
+          )}
+              {advFields.length > 0 && (
+            <>
+              <div
+                onClick={() => setAdvPanel((prev) => ({ ...prev, [group]: !advShown }))}
+                style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6, margin: '2px 0 12px', fontSize: 12, color: 'var(--text-secondary)' }}
+              >
+                <DownOutlined style={{ fontSize: 10, transition: 'transform .2s', transform: advShown ? 'none' : 'rotate(-90deg)' }} />
+                {t('advancedParams', { n: advFields.length })}
+              </div>
+              {/* 只藏视觉、不卸载：Form.Item 一旦卸载，提交时这些项的值就没了 */}
+              <div style={{ display: advShown ? 'block' : 'none' }}>{advFields.map(renderFieldBox)}</div>
+            </>
+          )}
+          {group === 'models' && (
             <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
               <Tooltip title={t('modelTestHint')}>
                 <Button size="small" loading={modelTesting} onClick={async () => {
@@ -2445,7 +2707,7 @@ const SystemConfigPage: React.FC = () => {
               )}
             </div>
           )}
-          {group === 'knowledgebase' && isOpen && (
+          {group === 'knowledgebase' && (
             <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
               <Button size="small" loading={kbTesting} onClick={async () => {
                 setKbTesting(true); setKbTestResult(null)
@@ -2475,7 +2737,7 @@ const SystemConfigPage: React.FC = () => {
             </div>
           )}
           {/* 生图自检：配置填完就该当场知道对不对，而不是等教师出题时才发现配图全空 */}
-          {group === 'imagegen' && isOpen && (
+          {group === 'imagegen' && (
             <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
               <Tooltip title={t('imageTestHint')}>
                 <Button size="small" loading={imageTesting} onClick={async () => {
@@ -2518,7 +2780,7 @@ const SystemConfigPage: React.FC = () => {
             </div>
           )}
           {/* 语音合成自检：回传可播放音频，管理员当场听音色，比看参数有用 */}
-          {group === 'tts' && isOpen && (
+          {group === 'tts' && (
             <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
               <Tooltip title={t('ttsTestHint')}>
                 <Button size="small" loading={ttsTesting} onClick={async () => {
@@ -2565,24 +2827,13 @@ const SystemConfigPage: React.FC = () => {
     )
   }
 
-  // ── 一个分区（zone）= 大标题 + 其下若干小节 ──
-  const renderZone = (zone: ConfigZone) => (
-    <div key={zone.id} style={{ marginBottom: 40 }}>
-      <div>
-        <Title level={4} style={{ margin: 0 }}>{t(zone.titleKey)}</Title>
-        <Text type="secondary" style={{ fontSize: 12 }}>{t(zone.descKey)}</Text>
-      </div>
-      <Divider style={{ margin: '10px 0 20px' }} />
-      {zone.sections.map(renderGroup)}
-    </div>
-  )
-
   return (
     <Card style={{ borderRadius: 8 }}>
-      <Space style={{ marginBottom: 16 }}>
-        <SettingOutlined style={{ fontSize: 24, color: '#1677ff' }} />
+      {/* 页面标题只说一次：Tab 里不再重复「系统配置」 */}
+      <Space style={{ marginBottom: 12 }}>
+        <SettingOutlined style={{ fontSize: 22, color: '#1677ff' }} />
         <Title level={4} style={{ margin: 0 }}>{t('systemConfig')}</Title>
-        </Space>
+      </Space>
 
         {apikeyStatus && !apikeyStatus.configured && (
           <Alert
@@ -2611,7 +2862,7 @@ const SystemConfigPage: React.FC = () => {
           items={[
           {
             key: 'global',
-            label: <span><SettingOutlined /> {t('systemConfig')}</span>,
+            label: <span><ControlOutlined /> {t('tabGlobal')}</span>,
             children: (
             <Spin spinning={loading}>
               {/* 搜索：按名称 / 键名 / 说明过滤，没有命中的小节与分区自动收起 */}
@@ -2627,48 +2878,62 @@ const SystemConfigPage: React.FC = () => {
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {q
                     ? t('matchedN', { n: hitCount, total: GLOBAL_CONFIG_FIELDS.length })
-                    : t('totalSections', { sections: CONFIG_ZONES.length, fields: GLOBAL_CONFIG_FIELDS.length })}
+                    : t('totalSections', { zones: CONFIG_ZONES.length, sections: TOTAL_SECTIONS, fields: GLOBAL_CONFIG_FIELDS.length })}
                 </Text>
+                <Checkbox checked={showAdvanced} onChange={(e) => setShowAdvanced(e.target.checked)}>
+                  <Text style={{ fontSize: 12 }}>{t('showAdvanced')}</Text>
+                </Checkbox>
               </Space>
 
               <Form
                 form={form}
-                layout="vertical"
+                layout="horizontal"
+                labelCol={{ flex: '0 0 180px' }}
+                wrapperCol={{ flex: '1 1 auto' }}
+                labelAlign="left"
+                colon={false}
                 onValuesChange={handleValuesChange}
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
-                  {/* 左侧锚点导航：点击定位，滚动时自动高亮当前小节 */}
-                  <div style={{ position: 'sticky', top: 0, flex: '0 0 178px', width: 178, maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingTop: 4 }}>
+                  {/* 左栏：分区 → 小节。点击即换右侧内容，未保存的小节挂一个计数点 */}
+                  <div style={{ position: 'sticky', top: 0, flex: '0 0 220px', width: 220, maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingTop: 4 }}>
                     <Text type="secondary" style={{ fontSize: 11 }}>{t('navTitle')}</Text>
                     {visibleZones.map((zone) => (
-                      <div key={zone.id} style={{ marginTop: 8 }}>
-                        <div
-                          onClick={() => scrollToSection(zone.sections[0])}
-                          style={{ fontSize: 12, fontWeight: 600, cursor: 'pointer', marginBottom: 2, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                        >
+                      <div key={zone.id} style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4, paddingLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {t(zone.titleKey)}
                         </div>
-                        {zone.sections.map((sec) => (
-                          <div
-                            key={sec}
-                            onClick={() => scrollToSection(sec)}
-                            style={{
-                              fontSize: 12,
-                              lineHeight: '22px',
-                              padding: '0 8px',
-                              cursor: 'pointer',
-                              borderRadius: 4,
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              color: activeSec === sec ? 'var(--primary-color)' : 'var(--text-secondary)',
-                              background: activeSec === sec ? 'color-mix(in srgb, var(--primary-color) 10%, transparent)' : 'transparent',
-                              fontWeight: activeSec === sec ? 600 : 400,
-                            }}
-                          >
-                            {t(SECTION_TITLES[sec])}
-                          </div>
-                        ))}
+                        {zone.sections.map((sec) => {
+                          const dirtyN = GLOBAL_CONFIG_FIELDS.filter((f) => f.group === sec && dirty.includes(f.key)).length
+                          const on = activeSec === sec && !q
+                          return (
+                            <div
+                              key={sec}
+                              onClick={() => selectSection(sec)}
+                              style={{
+                                fontSize: 12,
+                                lineHeight: '26px',
+                                padding: '0 8px',
+                                cursor: 'pointer',
+                                borderRadius: 4,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                whiteSpace: 'nowrap',
+                                color: on ? 'var(--primary-color)' : 'var(--text-secondary)',
+                                background: on ? 'color-mix(in srgb, var(--primary-color) 10%, transparent)' : 'transparent',
+                                fontWeight: on ? 600 : 400,
+                              }}
+                            >
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t(SECTION_TITLES[sec])}</span>
+                              {dirtyN > 0 && (
+                                <span style={{ marginLeft: 'auto', minWidth: 16, height: 16, lineHeight: '16px', borderRadius: 8, background: '#faad14', color: '#fff', fontSize: 10, textAlign: 'center', padding: '0 4px' }}>
+                                  {dirtyN}
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     ))}
                     {!visibleZones.length && (
@@ -2676,8 +2941,25 @@ const SystemConfigPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div style={{ flex: 1, minWidth: 0, maxWidth: 960 }}>
-                    {visibleZones.map(renderZone)}
+                  <div id="cfg-content-top" style={{ flex: 1, minWidth: 0, maxWidth: 720 }}>
+                    {!q && activeZone && (
+                      <div style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7 }}>
+                        <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{t(activeZone.titleKey)}</span>
+                        <span style={{ margin: '0 6px' }}>·</span>
+                        {t(activeZone.descKey)}
+                      </div>
+                    )}
+                    {/* 所有小节常驻挂载，只切 display：卸载 Form.Item 会丢值。
+                        搜索时跨小节平铺命中项，平时只显示左栏选中的那一节。 */}
+                    {visibleZones.map((zone) => (
+                      <div key={zone.id}>
+                        {zone.sections.map((sec) => (
+                          <div key={sec} style={{ display: q || sec === activeSec ? 'block' : 'none' }}>
+                            {renderGroup(sec)}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                     {/* 兜底：后端有、但本表单没给表单项的配置键 —— 防止再出现"改了页面上看不到的参数" */}
                     {!q && (
                       <div style={{ marginTop: 8, borderTop: '1px dashed var(--border-color-secondary)', paddingTop: 10 }}>
@@ -2715,7 +2997,11 @@ const SystemConfigPage: React.FC = () => {
                     display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
                   }}
                 >
-                  <Tag color={dirty.length ? 'orange' : 'default'} style={{ marginInlineEnd: 0 }}>
+                  <Tag
+                    color={dirty.length ? 'orange' : 'default'}
+                    style={{ marginInlineEnd: 0, cursor: dirty.length ? 'pointer' : 'default' }}
+                    onClick={() => { if (dirty.length) showDirtyList() }}
+                  >
                     {dirty.length ? t('unsavedCount', { n: dirty.length }) : t('noChanges')}
                   </Tag>
                   <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={!dirty.length} onClick={handleSave}>
@@ -2724,7 +3010,7 @@ const SystemConfigPage: React.FC = () => {
                   <Button icon={<RollbackOutlined />} disabled={!dirty.length} onClick={handleDiscard}>
                     {t('discard')}
                   </Button>
-                  <Button icon={<ReloadOutlined />} onClick={loadConfig}>
+                  <Button icon={<ReloadOutlined />} onClick={handleReload}>
                     {t('reload')}
                   </Button>
                   <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>{t('effectNote')}</Text>
@@ -2735,60 +3021,57 @@ const SystemConfigPage: React.FC = () => {
           },
           {
             key: 'skills',
-            label: <span><SettingOutlined /> {t('skillManagement')}</span>,
+            label: <span><AppstoreOutlined /> {t('tabSkills')}</span>,
             children: (
             <SkillManagePanel />
             ),
           },
           {
-            key: 'cache',
-            label: <span><ReloadOutlined /> {t('cacheManagement')}</span>,
-            children: (
-            <Card title={t('clearTempFiles')}>
-              <Text style={{ display: 'block', marginBottom: 16 }}>
-                {t('tempFileDesc')}
-              </Text>
-              <Space orientation="vertical" style={{ width: '100%' }}>
-                <Alert
-                  title={t('cleanupWarning')}
-                  type="warning"
-                  showIcon
-                />
-                <Button
-                  danger
-                  type="primary"
-                  icon={<ReloadOutlined />}
-                  onClick={() => {
-                    Modal.confirm({
-                      title: t('confirmCleanup'),
-                      icon: <ExclamationCircleOutlined />,
-                      content: t('confirmCleanupContent'),
-                      okText: t('confirmCleanupOk'),
-                      okType: 'danger',
-                      cancelText: t('cancel'),
-                      onOk: async () => {
-                        try {
-                          await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
-                          message.success(t('cleanupSuccess'))
-                        } catch (e: unknown) {
-                          const err = e as { response?: { data?: { detail?: string } }; message?: string }
-                          message.error(t('cleanupFailed') + ': ' + (err?.response?.data?.detail || err?.message || t('unknownError')))
-                        }
-                      },
-                    })
-                  }}
-                >
-                  {t('cleanAllCache')}
-                </Button>
-              </Space>
-            </Card>
-            ),
-          },
-          {
             key: 'upgrade',
-            label: <span><SyncOutlined /> {t('version')}</span>,
+            label: <span><CloudUploadOutlined /> {t('tabVersion')}</span>,
             children: (
-            <UpgradePanel />
+            <>
+              <UpgradePanel />
+              {/* 缓存清理只有一个动作，不值得单独占一级 Tab，并入运维页 */}
+              <Card title={t('clearTempFiles')} style={{ marginTop: 16 }}>
+                <Text style={{ display: 'block', marginBottom: 16 }}>
+                  {t('tempFileDesc')}
+                </Text>
+                <Space orientation="vertical" style={{ width: '100%' }}>
+                  <Alert
+                    title={t('cleanupWarning')}
+                    type="warning"
+                    showIcon
+                  />
+                  <Button
+                    danger
+                    type="primary"
+                    icon={<ReloadOutlined />}
+                    onClick={() => {
+                      Modal.confirm({
+                        title: t('confirmCleanup'),
+                        icon: <ExclamationCircleOutlined />,
+                        content: t('confirmCleanupContent'),
+                        okText: t('confirmCleanupOk'),
+                        okType: 'danger',
+                        cancelText: t('cancel'),
+                        onOk: async () => {
+                          try {
+                            await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
+                            message.success(t('cleanupSuccess'))
+                          } catch (e: unknown) {
+                            const err = e as { response?: { data?: { detail?: string } }; message?: string }
+                            message.error(t('cleanupFailed') + ': ' + (err?.response?.data?.detail || err?.message || t('unknownError')))
+                          }
+                        },
+                      })
+                    }}
+                  >
+                    {t('cleanAllCache')}
+                  </Button>
+                </Space>
+              </Card>
+            </>
             ),
           },
           ]}
