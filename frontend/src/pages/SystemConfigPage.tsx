@@ -2285,9 +2285,9 @@ const SystemConfigPage: React.FC = () => {
                     <Checkbox value="exam" disabled>{t('wbsExam')}</Checkbox>
                     <Checkbox value="practice">{t('wbsPractice')}</Checkbox>
                     <Checkbox value="quick_quiz">{t('wbsQuickQuiz')}</Checkbox>
-                    <Checkbox value="class_drill">{t('wbsClassDrill')}</Checkbox>
-                    <Checkbox value="course_practice">{t('wbsCoursePractice')}</Checkbox>
-                    <Checkbox value="class_ladder">{t('wbsClassLadder')}</Checkbox>
+                    <Checkbox value="class_drill" disabled title={t('wbsTodoTip')}>{t('wbsClassDrill')}<span style={{ opacity: .6, fontSize: 12 }}>{t('wbsTodo')}</span></Checkbox>
+                    <Checkbox value="course_practice" disabled title={t('wbsTodoTip')}>{t('wbsCoursePractice')}<span style={{ opacity: .6, fontSize: 12 }}>{t('wbsTodo')}</span></Checkbox>
+                    <Checkbox value="class_ladder" disabled title={t('wbsTodoTip')}>{t('wbsClassLadder')}<span style={{ opacity: .6, fontSize: 12 }}>{t('wbsTodo')}</span></Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
               ) : field.type === 'tts_voice' ? (

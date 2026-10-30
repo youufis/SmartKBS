@@ -1416,11 +1416,13 @@
   "field_wrong_practice_avoid_recent_sets": "Avoid last N sets",
   "field_wrong_practice_avoid_recent_sets_desc": "Exclude questions served in the last N sets (0 = no exclusion). Falls back to the full pool when too few candidates remain.",
   "field_wrong_book_sources": "Mistake book sources",
-  "field_wrong_book_sources_desc": "Which activities feed the mistake book. Exams are always included and cannot be turned off; only activities whose questions map back to the bank are listed. Saved changes apply immediately and never rewrite existing rows.",
+  "field_wrong_book_sources_desc": "Which activities feed the mistake book. Exams are always on and cannot be turned off; synchronous practice and quick quiz are live, while class questioning / course practice / class ladder are marked “not wired” (the gate exists, the activity-side call does not). Changes apply on save and never rewrite existing rows.",
   "wbsExam": "Exams (always on)",
   "wbsPractice": "Synchronous practice",
   "wbsQuickQuiz": "Quick quiz",
   "wbsClassDrill": "Class questioning",
   "wbsCoursePractice": "Course practice",
-  "wbsClassLadder": "Class ladder"
+  "wbsClassLadder": "Class ladder",
+  "wbsTodo": " (not wired)",
+  "wbsTodoTip": "No ingestion path for this activity yet — ticking it has no effect until it is wired up"
 }

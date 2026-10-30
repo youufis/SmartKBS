@@ -1416,11 +1416,13 @@
   "field_wrong_practice_avoid_recent_sets": "避开最近组数",
   "field_wrong_practice_avoid_recent_sets_desc": "抽题时排除最近几组已出过的题（0 = 不排除）。可选题不足一组时自动退回全集，不会因此布置不出来。",
   "field_wrong_book_sources": "错题本接入范围",
-  "field_wrong_book_sources_desc": "哪些活动里答错的题会进错题本。考试固定接入、不可关闭；只列能追溯到题库题号的活动。改完保存即生效，不影响已入库的历史错题。",
+  "field_wrong_book_sources_desc": "哪些活动里答错的题会进错题本。考试固定接入、不可关闭；同步练习与随堂测验已可用，课堂抽问 / 课程练习 / 课堂闯关标了「待接入」（写入库已备好，缺活动侧调用）。改完保存即生效，不影响已入库的历史错题。",
   "wbsExam": "考试（固定接入）",
   "wbsPractice": "同步练习",
   "wbsQuickQuiz": "随堂测验",
   "wbsClassDrill": "课堂抽问",
   "wbsCoursePractice": "课程练习",
-  "wbsClassLadder": "课堂闯关"
+  "wbsClassLadder": "课堂闯关",
+  "wbsTodo": "（待接入）",
+  "wbsTodoTip": "该活动还没有写入链路，勾选暂不生效，接入后会自动可用"
 }
