@@ -285,6 +285,8 @@ const WrongBookPage: React.FC = () => {
   const [expBusy, setExpBusy] = useState(false)
   // 自动错题巩固的策略与该生当前状态（教师端可见）
   const [autoState, setAutoState] = useState<any>(null)
+  // 错题本接入了哪些活动（管理员在系统配置里定），页面要如实说出来
+  const [sources, setSources] = useState<{ sources?: string[]; labels?: Record<string, string> } | null>(null)
   const [autoBusy, setAutoBusy] = useState(false)
 
   /** 换学生/换筛选口径时把视图状态清干净：残留的知识点与关键词会让新对象显示成「没有错题」 */
@@ -435,6 +437,12 @@ const WrongBookPage: React.FC = () => {
       return next
     })
   }
+
+  useEffect(() => {
+    apiClient.get('/api/wrong-book/sources')
+      .then(({ data }) => setSources(data))
+      .catch(() => setSources(null))
+  }, [])
 
   // ── 派生视图数据 ──
   const flat = useMemo<FlatQuestion[]>(
@@ -658,6 +666,14 @@ const WrongBookPage: React.FC = () => {
                 {t('totalQuestions', { count: data.total_wrong })}，{t('fromExams', { count: data.exams.length })}
               </Text>
             )}
+            {/* 接入范围要一直看得见：老师还没选学生时，最需要知道"为什么这里没有某个活动" */}
+            {!!sources?.sources?.length && (
+              <Tooltip title={t('wbScopeTip')}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  · {t('wbScope')}: {sources.sources.map((s) => sources.labels?.[s] || s).join(' / ')}
+                </Text>
+              </Tooltip>
+            )}
           </Space>
           <Space wrap>
             {!isStudent && (
@@ -724,6 +740,11 @@ const WrongBookPage: React.FC = () => {
             <Space orientation="vertical" style={{ width: '100%', textAlign: 'center', padding: 40 }}>
               <BookOutlined style={{ fontSize: 48, color: 'var(--border-color-secondary)' }} />
               <Text type="secondary">{t('noWrongQuestions')}</Text>
+              {!!sources?.sources?.length && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('wbScope')}: {sources.sources.map((s) => sources.labels?.[s] || s).join(' / ')} · {t('wbScopeTip')}
+                </Text>
+              )}
             </Space>
           </Card>
         ) : (

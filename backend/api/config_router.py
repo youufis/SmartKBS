@@ -54,6 +54,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "wrong_practice_per_set": 5,         # 每组抽几道题
     "wrong_practice_interval_days": 7,   # 两组之间的间隔天数，也是"未作答会话"的挡路时限
     "wrong_practice_avoid_recent_sets": 3,  # 抽题时避开最近几组出过的题（0=不排除）
+  "wrong_book_sources": ["exam", "practice"],  # 错题本接入哪些活动（exam 固定接入不可关；其余见 wrong_book_router.WRONG_BOOK_SOURCE_LABELS）
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-plus",
     "MODEL_NAME": "qwen3.7-flash",   # 默认值统一由 backend/model_catalog.py 维护（DEFAULT_CHAT_MODEL）
@@ -461,7 +462,8 @@ _STR_LIMITS: dict[str, int] = {
 }
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
                  "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64,
-                 "HOMEWORK_ALLOWED_EXTS": 60}
+                 "HOMEWORK_ALLOWED_EXTS": 60,
+                 "wrong_book_sources": 20}
 _TITLE_LIST_KEYS = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG"}
 _EXT_RE = None
 
@@ -577,6 +579,20 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"{key} 必须是非空字符串列表")
             if len(value) > _STRLIST_KEYS[key]:
                 raise HTTPException(status_code=400, detail=f"{key} 最多 {_STRLIST_KEYS[key]} 项")
+            # 错题本接入范围只认后端登记过的活动来源：写错一个字母就静默失效，必须当场拒
+            if key == "wrong_book_sources":
+                from backend.api.wrong_book_router import ALWAYS_ON_WRONG_BOOK_SOURCES, WRONG_BOOK_SOURCE_LABELS
+                unknown = [x for x in value if x not in WRONG_BOOK_SOURCE_LABELS]
+                if unknown:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="wrong_book_sources 含未登记的活动: " + "、".join(unknown)
+                               + "（可选：" + "、".join(WRONG_BOOK_SOURCE_LABELS) + "）")
+                missing = [x for x in ALWAYS_ON_WRONG_BOOK_SOURCES if x not in value]
+                if missing:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="wrong_book_sources 必须包含 " + "、".join(missing) + "（考试是错题本的基本盘，不可关闭）")
             # 作业白名单 HOMEWORK_ALLOWED_EXTS 同样按扩展名校验，防管理员手滑写成 "docx"
             if key.endswith(("EXTENSIONS", "_EXTS")) and any(_bad_ext(x) for x in value):
                 raise HTTPException(status_code=400, detail=f"{key} 每一项需形如 .pdf（点号 + 1~10 位字母数字）")

@@ -45,7 +45,7 @@ interface ConfigField {
   key: string
   labelKey: string
   descKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size'
   group: string
   required?: boolean
   placeholderKey?: string
@@ -276,6 +276,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'wrong_practice_per_set', labelKey: 'field_wrong_practice_per_set', descKey: 'field_wrong_practice_per_set_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitItem' },
   { key: 'wrong_practice_interval_days', labelKey: 'field_wrong_practice_interval_days', descKey: 'field_wrong_practice_interval_days_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitDay' },
   { key: 'wrong_practice_avoid_recent_sets', labelKey: 'field_wrong_practice_avoid_recent_sets', descKey: 'field_wrong_practice_avoid_recent_sets_desc', type: 'number', group: 'wrongbook', required: false, unitKey: 'unitTime' },
+  { key: 'wrong_book_sources', labelKey: 'field_wrong_book_sources', descKey: 'field_wrong_book_sources_desc', type: 'wrong_book_sources', group: 'wrongbook', required: false },
 
   // ══ ③ 文件与存储 ══
   // 上传限制与类型白名单
@@ -2271,6 +2272,22 @@ const SystemConfigPage: React.FC = () => {
                     <Checkbox value="rollcall">{t('notifRollcall')}</Checkbox>
                     <Checkbox value="system">{t('notifSystem')}</Checkbox>
                     <Checkbox value="info">{t('notifInfo')}</Checkbox>
+                  </Checkbox.Group>
+                </Form.Item>
+              ) : field.type === 'wrong_book_sources' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  extra={getDesc(field)}
+                >
+                  <Checkbox.Group>
+                    {/* 考试是错题本的基本盘，勾掉也不生效，直接禁用免得出现「关了却没关」的错觉 */}
+                    <Checkbox value="exam" disabled>{t('wbsExam')}</Checkbox>
+                    <Checkbox value="practice">{t('wbsPractice')}</Checkbox>
+                    <Checkbox value="quick_quiz">{t('wbsQuickQuiz')}</Checkbox>
+                    <Checkbox value="class_drill">{t('wbsClassDrill')}</Checkbox>
+                    <Checkbox value="course_practice">{t('wbsCoursePractice')}</Checkbox>
+                    <Checkbox value="class_ladder">{t('wbsClassLadder')}</Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
               ) : field.type === 'tts_voice' ? (

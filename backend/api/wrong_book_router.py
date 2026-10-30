@@ -31,6 +31,40 @@ from backend.async_utils import spawn_bg
 
 router = APIRouter()
 
+# ── 错题本接入范围：系统配置 wrong_book_sources 决定哪些活动的答错会进错题本 ──
+# 只有"题目能追溯到 question_bank"的活动才登记在这里 —— 追不到题号的活动，
+# 进了错题本也取不到题干/选项/解析，给管理员一个死开关反而更困惑。
+WRONG_BOOK_SOURCE_LABELS = {
+    "exam": "考试",
+    "practice": "同步练习",
+    "quick_quiz": "随堂测验",
+    "class_drill": "课堂抽问",
+    "course_practice": "课程练习",
+    "class_ladder": "课堂闯关",
+}
+ALWAYS_ON_WRONG_BOOK_SOURCES = ("exam",)   # 考试是错题本的基本盘，不提供关闭入口
+WRONG_BOOK_SOURCE_DEFAULT = ["exam", "practice"]
+
+
+def wrong_book_sources() -> list[str]:
+    """当前生效的接入来源。考试永远在列；配置里未登记的来源直接忽略，不报错。"""
+    from backend.api.config_router import get_config_value
+
+    raw_cfg = get_config_value("wrong_book_sources", WRONG_BOOK_SOURCE_DEFAULT)
+    if isinstance(raw_cfg, str):
+        raw_cfg = [x.strip() for x in re.split(r"[,，、;；\s]+", raw_cfg) if x.strip()]
+    items = [str(x).strip() for x in (raw_cfg or []) if str(x).strip() in WRONG_BOOK_SOURCE_LABELS]
+    for s in ALWAYS_ON_WRONG_BOOK_SOURCES:
+        if s not in items:
+            items.append(s)
+    return items
+
+
+def is_wrong_book_source_enabled(source: str) -> bool:
+    return (source or "").strip() in wrong_book_sources()
+
+
+
 def _check_teacher_can_view_student(teacher_username: str, student_username: str):
     """检查教师是否有权限查看该学生的错题（使用统一权限服务）"""
     from backend.auth import is_admin
@@ -253,6 +287,19 @@ _SOURCE_FALLBACK_TITLES = {
 }
 
 
+@router.get("/sources", summary="错题本接入范围（哪些活动的答错会进错题本）")
+async def get_wrong_book_sources(request: Request):
+    """给前端显示用：管理员在系统配置里勾了什么，页面就如实说什么。"""
+    get_current_user(request)
+    items = wrong_book_sources()
+    return {
+        "sources": items,
+        "labels": WRONG_BOOK_SOURCE_LABELS,
+        "always_on": list(ALWAYS_ON_WRONG_BOOK_SOURCES),
+        "all_sources": list(WRONG_BOOK_SOURCE_LABELS.keys()),
+    }
+
+
 @router.get("/list", summary="获取错题本(以 wrong_book 表为唯一事实源)")
 async def get_wrong_questions(
     request: Request,
@@ -449,12 +496,10 @@ async def get_students_with_wrong(
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
 
-    # 先查有错题记录的学生用户名
-    rows = execute_query(
-        """SELECT DISTINCT ea.student_username FROM exam_attempts ea
-           WHERE ea.status = 'submitted'"""
-    )
-    usernames = [r["student_username"] for r in rows]
+    # 名单以 wrong_book 为准：只做过同步练习/抽问、没交过考试的学生也必须能被选到。
+    # 旧写法拿 exam_attempts 当"有错题的人"，这类学生的错题本在教师端永远打不开。
+    rows = db_dict("SELECT DISTINCT student_username FROM wrong_book") or []
+    usernames = [r["student_username"] for r in rows if r.get("student_username")]
     if not usernames:
         return {"students": []}
 
@@ -527,12 +572,10 @@ async def get_grades_with_wrong(request: Request):
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
 
-    # 先查有错题记录的学生用户名
-    rows = execute_query(
-        """SELECT DISTINCT ea.student_username FROM exam_attempts ea
-           WHERE ea.status = 'submitted'"""
-    )
-    usernames = [r["student_username"] for r in rows]
+    # 名单以 wrong_book 为准：只做过同步练习/抽问、没交过考试的学生也必须能被选到。
+    # 旧写法拿 exam_attempts 当"有错题的人"，这类学生的错题本在教师端永远打不开。
+    rows = db_dict("SELECT DISTINCT student_username FROM wrong_book") or []
+    usernames = [r["student_username"] for r in rows if r.get("student_username")]
     if not usernames:
         return {"grades": []}
 
@@ -585,12 +628,10 @@ async def get_classes_with_wrong(
     if not grade:
         return {"classes": []}
 
-    # 先查有错题记录的学生用户名
-    rows = execute_query(
-        """SELECT DISTINCT ea.student_username FROM exam_attempts ea
-           WHERE ea.status = 'submitted'"""
-    )
-    usernames = [r["student_username"] for r in rows]
+    # 名单以 wrong_book 为准：只做过同步练习/抽问、没交过考试的学生也必须能被选到。
+    # 旧写法拿 exam_attempts 当"有错题的人"，这类学生的错题本在教师端永远打不开。
+    rows = db_dict("SELECT DISTINCT student_username FROM wrong_book") or []
+    usernames = [r["student_username"] for r in rows if r.get("student_username")]
     if not usernames:
         return {"classes": []}
 
@@ -912,7 +953,12 @@ def _iter_graded(items: dict, want_correct: bool):
 
 def record_wrong_answers(student_username: str, source_id: int, graded_answers: dict[str, Any],
                          source: str = "exam") -> int:
-    """提交后把答错的题写入 wrong_book(考试/练习/随堂测验共用)"""
+    """提交后把答错的题写入 wrong_book(按系统配置的接入范围放行)"""
+    if not is_wrong_book_source_enabled(source):
+        # 静默丢弃最难查：管理员改了配置却看不出有没有生效，这里必须留一行
+        logger.info(f"[错题本] 来源 {source or '(空)'} 未在系统配置(错题本接入范围)中启用, "
+                    f"跳过 {student_username} 的判分记录")
+        return 0
     pairs, skipped = _iter_graded(graded_answers, want_correct=False)
     if skipped:
         logger.warning(f"错题入库跳过 {skipped} 条无效判分记录 (student={student_username})")
@@ -936,6 +982,9 @@ def record_wrong_answers(student_username: str, source_id: int, graded_answers: 
 def record_single_wrong(student_username: str, question_id: Any, wrong_answer: str,
                         source: str = "quiz", source_id: int = 0) -> int:
     """单条错题入库(随堂测验等零散场景用; 题已不在题库时只记 ID)"""
+    if not is_wrong_book_source_enabled(source):
+        logger.info(f"[错题本] 来源 {source or '(空)'} 未启用, 跳过 {student_username} qid={question_id}")
+        return 0
     qid = _to_int(question_id)
     if qid is None or not student_username:
         return 0

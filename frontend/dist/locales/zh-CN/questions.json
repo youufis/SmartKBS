@@ -592,5 +592,7 @@
   "wbForcePractice": "立即布置一组",
   "wbForceOk": "已布置一组错题巩固练习（{{count}} 题）",
   "wbForceReused": "该生还有一组未完成的练习，已直接沿用",
-  "wbForceFail": "布置失败"
+  "wbForceFail": "布置失败",
+  "wbScope": "接入范围",
+  "wbScopeTip": "错题本只收这些活动里答错的题，可在 系统配置 › 错题本与自动巩固 里增减；考试固定接入"
 }

@@ -1414,5 +1414,13 @@
   "field_wrong_practice_interval_days": "Push interval",
   "field_wrong_practice_interval_days_desc": "Minimum days between two auto sets. It also decides how long an unanswered set keeps blocking new pushes; stale sets are then closed automatically.",
   "field_wrong_practice_avoid_recent_sets": "Avoid last N sets",
-  "field_wrong_practice_avoid_recent_sets_desc": "Exclude questions served in the last N sets (0 = no exclusion). Falls back to the full pool when too few candidates remain."
+  "field_wrong_practice_avoid_recent_sets_desc": "Exclude questions served in the last N sets (0 = no exclusion). Falls back to the full pool when too few candidates remain.",
+  "field_wrong_book_sources": "Mistake book sources",
+  "field_wrong_book_sources_desc": "Which activities feed the mistake book. Exams are always included and cannot be turned off; only activities whose questions map back to the bank are listed. Saved changes apply immediately and never rewrite existing rows.",
+  "wbsExam": "Exams (always on)",
+  "wbsPractice": "Synchronous practice",
+  "wbsQuickQuiz": "Quick quiz",
+  "wbsClassDrill": "Class questioning",
+  "wbsCoursePractice": "Course practice",
+  "wbsClassLadder": "Class ladder"
 }

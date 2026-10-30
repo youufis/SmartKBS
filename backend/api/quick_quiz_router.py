@@ -362,7 +362,13 @@ def _answer_as_option_key(options: Any, raw: Any, qtype: str = "") -> str:
 
 
 def _quiz_row(row: dict[str, Any], source: str) -> dict[str, Any]:
-    """把"题目"统一成抢答内部行：选项 dict + 答案选项键 + 配图字段。"""
+    """把"题目"统一成抢答内部行：选项 dict + 答案选项键 + 配图字段 + 题库题号。"""
+    def _qid(v: Any) -> int:
+        try:
+            return int(v or 0)
+        except (TypeError, ValueError):
+            return 0
+
     opts = row.get("options")
     if isinstance(opts, str):
         try:
@@ -383,6 +389,9 @@ def _quiz_row(row: dict[str, Any], source: str) -> dict[str, Any]:
         "media_files": row.get("media_files") or "",
         "media_placeholders": row.get("media_placeholders") or "",
         "_source": source,
+        # 题库题号：现抽的题库题 id 就是它；复用房间已有题时 id 是房间本地行号，
+        # 只能取 source_question_id 列 —— 认错号会让错题本记到一个不存在的题上。
+        "_bank_qid": _qid(row.get("source_question_id")) or (_qid(row.get("id")) if source == "bank" else 0),
     }
 
 
@@ -541,7 +550,7 @@ async def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> lis
 
     existing = execute_query_dict(
         """SELECT id, sort_order, question_text, options, correct_answer, explanation,
-                  source, svg_content, has_svg, media_files, media_placeholders
+                  source, source_question_id, svg_content, has_svg, media_files, media_placeholders
            FROM quick_quiz_questions WHERE room_id=? ORDER BY sort_order""",
         (room_id,),
     )
@@ -601,12 +610,14 @@ async def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> lis
         operations.append((
             """INSERT INTO quick_quiz_questions
                (room_id, sort_order, question_text, options, correct_answer, explanation, source,
-                svg_content, has_svg, media_files, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                source_question_id, svg_content, has_svg, media_files, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (room_id, i + 1, q["question_text"],
              json.dumps(q["options"], ensure_ascii=False),
              q["correct_answer"], q.get("explanation", ""),
              q.get("_source") or (q.get("id") and "bank" or "ai"),
+             # 题库题号：随堂测验的错题要靠它才能回指主题库（缺失时错题本无法追溯，只记 0）
+             int(q.get("_bank_qid") or 0),
              _as_text(q.get("svg_content", "")), 1 if q.get("svg_content") else 0,
              _as_text(q.get("media_files", "")), _as_text(q.get("media_placeholders", ""))),
         ))

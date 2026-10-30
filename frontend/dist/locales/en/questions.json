@@ -592,5 +592,7 @@
   "wbForcePractice": "Push a set now",
   "wbForceOk": "Pushed a set of {{count}} questions",
   "wbForceReused": "Student still has an unfinished set; reused it",
-  "wbForceFail": "Failed to push the practice set"
+  "wbForceFail": "Failed to push the practice set",
+  "wbScope": "Sources",
+  "wbScopeTip": "Only mistakes from these activities are collected; change them in System settings › Mistake book. Exams are always included"
 }
