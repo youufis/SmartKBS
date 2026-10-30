@@ -3027,51 +3027,54 @@ const SystemConfigPage: React.FC = () => {
             ),
           },
           {
+            key: 'cache',
+            label: <span><DeleteOutlined /> {t('tabCache')}</span>,
+            children: (
+            <Card title={t('clearTempFiles')}>
+              <Text style={{ display: 'block', marginBottom: 16 }}>
+                {t('tempFileDesc')}
+              </Text>
+              <Space orientation="vertical" style={{ width: '100%' }}>
+                <Alert
+                  title={t('cleanupWarning')}
+                  type="warning"
+                  showIcon
+                />
+                <Button
+                  danger
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={() => {
+                    Modal.confirm({
+                      title: t('confirmCleanup'),
+                      icon: <ExclamationCircleOutlined />,
+                      content: t('confirmCleanupContent'),
+                      okText: t('confirmCleanupOk'),
+                      okType: 'danger',
+                      cancelText: t('cancel'),
+                      onOk: async () => {
+                        try {
+                          await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
+                          message.success(t('cleanupSuccess'))
+                        } catch (e: unknown) {
+                          const err = e as { response?: { data?: { detail?: string } }; message?: string }
+                          message.error(t('cleanupFailed') + ': ' + (err?.response?.data?.detail || err?.message || t('unknownError')))
+                        }
+                      },
+                    })
+                  }}
+                >
+                  {t('cleanAllCache')}
+                </Button>
+              </Space>
+            </Card>
+            ),
+          },
+          {
             key: 'upgrade',
             label: <span><CloudUploadOutlined /> {t('tabVersion')}</span>,
             children: (
-            <>
-              <UpgradePanel />
-              {/* 缓存清理只有一个动作，不值得单独占一级 Tab，并入运维页 */}
-              <Card title={t('clearTempFiles')} style={{ marginTop: 16 }}>
-                <Text style={{ display: 'block', marginBottom: 16 }}>
-                  {t('tempFileDesc')}
-                </Text>
-                <Space orientation="vertical" style={{ width: '100%' }}>
-                  <Alert
-                    title={t('cleanupWarning')}
-                    type="warning"
-                    showIcon
-                  />
-                  <Button
-                    danger
-                    type="primary"
-                    icon={<ReloadOutlined />}
-                    onClick={() => {
-                      Modal.confirm({
-                        title: t('confirmCleanup'),
-                        icon: <ExclamationCircleOutlined />,
-                        content: t('confirmCleanupContent'),
-                        okText: t('confirmCleanupOk'),
-                        okType: 'danger',
-                        cancelText: t('cancel'),
-                        onOk: async () => {
-                          try {
-                            await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
-                            message.success(t('cleanupSuccess'))
-                          } catch (e: unknown) {
-                            const err = e as { response?: { data?: { detail?: string } }; message?: string }
-                            message.error(t('cleanupFailed') + ': ' + (err?.response?.data?.detail || err?.message || t('unknownError')))
-                          }
-                        },
-                      })
-                    }}
-                  >
-                    {t('cleanAllCache')}
-                  </Button>
-                </Space>
-              </Card>
-            </>
+            <UpgradePanel />
             ),
           },
           ]}
