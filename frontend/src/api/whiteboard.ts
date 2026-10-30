@@ -261,35 +261,83 @@ export async function aiGenerateDiagramStream(
     const decoder = new TextDecoder()
     let buffer = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+    // ⚠️ currentEvent 必须跨 read 存活。SSE 一帧 = 「event: 行」+「data: 行」+ 空行，
+    // 而图示结果帧里塞着整段 SVG（动辄 5KB），公网/慢链路上一定会被拆进多次 read。
+    // 旧写法把 currentEvent 声明在 while 里面：event 行与 data 行一旦落在相邻两次
+    // read 里，data 行到达时事件名已被重置成空串，switch 全部落空 —— result 被静默
+    // 丢弃，进度框就永远停在「AI 正在生成 SVG 图示…」，而后端其实 20 秒就返回了。
+    let currentEvent = ''
+    let settled = false
 
-      buffer += decoder.decode(value, { stream: true })
+    // 静默看门狗：链路彻底不动时也要给个终点，绝不让模态框无限转。
+    // 330s 与前端其它 AI 端点的 320s 同量级，且后端已改为每 10 秒补一次进度心跳，
+    // 正常生成途中永远不会触发。
+    const IDLE_TIMEOUT_MS = 330_000
+    const readWithIdleTimeout = async (): Promise<{ done: boolean; value?: Uint8Array }> => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        return await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error('AI 响应超时：长时间没有收到任何进度，请重试')),
+              IDLE_TIMEOUT_MS,
+            )
+          }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }
+
+    const handleFrame = (payload: string) => {
+      let data: any
+      try {
+        data = JSON.parse(payload)
+      } catch {
+        return /* 半帧/脏数据：等下一帧 */
+      }
+      if (currentEvent === 'progress') {
+        callbacks.onProgress(data.phase, data.message)
+      } else if (currentEvent === 'result') {
+        settled = true
+        callbacks.onResult(data as DiagramResultEvent)
+      } else if (currentEvent === 'error') {
+        settled = true
+        callbacks.onError(data.message || '生成失败')
+      }
+    }
+
+    while (!settled) {
+      const { done, value } = await readWithIdleTimeout()
+      if (value) buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() || ''
 
-      let currentEvent = ''
       for (const line of lines) {
-        if (line.startsWith('event: ')) {
-          currentEvent = line.slice(7).trim()
-        } else if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            switch (currentEvent) {
-              case 'progress':
-                callbacks.onProgress(data.phase, data.message)
-                break
-              case 'result':
-                callbacks.onResult(data as DiagramResultEvent)
-                return
-              case 'error':
-                callbacks.onError(data.message || '生成失败')
-                return
-            }
-          } catch { /* skip parse errors */ }
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          handleFrame(line.slice(5).trim())
+          if (settled) {
+            await reader.cancel().catch(() => { /* 已结束的流取消会抛错，忽略 */ })
+            return
+          }
+        } else if (line.trim() === '') {
+          currentEvent = '' // 空行 = 一帧结束，事件名到此作废
         }
       }
+      if (done) break
+    }
+
+    // 流已结束却始终没有 result/error：把最后一段残留再试一次，
+    // 仍拿不到结果就明确报错 —— 让老师看到失败，而不是"一直在生成中"。
+    if (!settled && buffer.trim()) {
+      const tail = buffer.trim()
+      if (tail.startsWith('data:')) handleFrame(tail.slice(5).trim())
+    }
+    if (!settled) {
+      callbacks.onError('连接已结束，但没有收到生成结果（多为网络中断或代理超时），请重试')
     }
   } catch (err: any) {
     if (err.name === 'AbortError') return

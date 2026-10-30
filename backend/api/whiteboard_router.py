@@ -280,6 +280,10 @@ def _assert_room_open(room: dict, action: str = "修改板书") -> None:
         raise HTTPException(status_code=409, detail=f"该白板已结束，请先重新开启再{action}")
 
 
+# 图示生成期间 SSE 心跳间隔（秒）：模型出结果前保持链路始终有字节流动
+_DIAGRAM_HEARTBEAT_SECONDS = 10.0
+
+
 def _jm_parse(frag: str) -> dict:
     """白板 AI 动作 JSON：直解失败走统一容错层；仍失败抛异常走既有错误路径"""
     from backend import ai_json
@@ -1997,6 +2001,13 @@ async def ai_generate_diagram(request: Request):
     return StreamingResponse(
         _generate_diagram_stream(description, subject, dashscope_api_key),
         media_type="text/event-stream",
+        # SSE 必须逐帧直达浏览器：反代（IIS/nginx）一旦缓冲整条流，进度事件与结果
+        # 就会一起被压住，前端看到的是"卡住"而不是"慢"。X-Accel-Buffering 关掉 nginx
+        # 的响应缓冲，no-transform 挡住中间层改写/压缩这条 text/event-stream。
+        headers={
+            "Cache-Control": "no-cache, no-store, no-transform, must-revalidate",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -2018,8 +2029,32 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
         timeout = _get_ai_timeout()
 
         from backend.api.ai_service import call_ai_sync_with_timeout
-        result = await call_ai_sync_with_timeout(prompt, api_key, timeout=timeout, json_mode=True,
-                                      kb_query=f"{subject} {description}")
+        # 模型这一跑动辄几十秒，期间整条 SSE 一个字节都不发：慢链路/反向代理很容易
+        # 把"长时间静默"的连接掐掉，前端就再也等不到 result（表现为一直"生成中"）。
+        # 所以改成 10 秒一段地等，每段补一条进度心跳——总超时仍由
+        # call_ai_sync_with_timeout(AI_REQUEST_TIMEOUT) 兜死，这里不放宽预算。
+        ai_task = asyncio.ensure_future(call_ai_sync_with_timeout(
+            prompt, api_key, timeout=timeout, json_mode=True,
+            kb_query=f"{subject} {description}"))
+        try:
+            while True:
+                try:
+                    result = await asyncio.wait_for(asyncio.shield(ai_task),
+                                                    timeout=_DIAGRAM_HEARTBEAT_SECONDS)
+                    break
+                except asyncio.TimeoutError:
+                    # 这个 TimeoutError 有两种来源：① 心跳到点（AI 还在跑，task 未完成）；
+                    # ② call_ai_sync_with_timeout 自己的总预算用尽（task 已完成并抛错）。
+                    # Python 3.11 起 asyncio.TimeoutError is TimeoutError，类型分不出来，
+                    # 只能看 task 状态——不判这一条，真超时会在这里无限发心跳，
+                    # 永远走不到外层既有的 error 分支。
+                    if ai_task.done():
+                        raise
+                    yield _sse("progress", {"phase": "analyzing",
+                                            "message": "AI 正在生成图示内容，请稍候..."})
+        except BaseException:
+            ai_task.cancel()
+            raise
 
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
