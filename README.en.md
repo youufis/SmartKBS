@@ -62,6 +62,13 @@
 > - 📥 **Bulk import reports the reason per row**; question management is faster; editing a knowledge point's chapter now shows the chapter name and actually saves
 > - 📱 **Detail tables became cards on phones**; portrait and avatar images no longer break with 401
 >
+> **System settings rebuild**
+> - ⚙️ **105 settings regrouped by scenario**: five technical groups became four (School & Branding / Teaching & Incentives / AI Capabilities / Storage & Security), with a new "Answer Quality" section
+> - 🧭 **Master-detail layout**: a left tree switches sections, the right pane lists one section at a time; 46 everyday settings are shown, 59 advanced ones fold away
+> - 🎛️ **No more typing enum values**: rank visibility, skill injection position and ladder skin became dropdowns; quest question source and portrait period became radio groups; the question-type list became a dialog editor
+> - 📝 **Copy corrected**: "5 sections" was really 24, "no restart needed" contradicted the field notes, and stray Markdown asterisks and hard line breaks are gone
+> - 🔒 **No more lost edits**: switching sections or searching no longer clears other sections on save, and leaving with unsaved changes is blocked
+>
 > - ⚠️ **Breaking changes**: none
 >
 > 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes, including the new content-type mark table, are applied automatically at startup.
@@ -1201,6 +1208,15 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 
 - 📱 **Detail tables became cards**, fixing six places that could not be read on a narrow screen
 - 🖼️ **Avatars and portrait images broke with 401 on every client**; protected image URLs now carry the token
+
+**System administration**
+
+- ⚙️ **System settings rebuilt**: 105 settings regrouped by scenario into 4 groups and 24 sections (a new "Answer Quality" section), with a left tree switching sections and a single-column right pane; 46 everyday settings are visible, 59 advanced ones (memory budgets, grading cadence, audit thresholds) fold into "Advanced"
+- 🎛️ **Control types fixed**: rank visibility, skill injection position and default ladder skin became dropdowns instead of free text; quest question source and portrait period became radio groups instead of switches; the question-type list became a dialog editor with separate key and label fields and duplicate detection
+- 🧩 **Login gate merged into one card**: student, teacher and external logins share a single explanation; the latter two previously had none
+- 📝 **Copy fixed and terminology unified**: the panel counter reported the number of groups as sections ("5 sections" where there are 24); AI concurrency is now marked "takes effect after restart" and no longer contradicts the "no restart needed" footer; the outdated "restart required" note on subjects is gone; Markdown asterisks and hard line breaks were removed; terminology unified to login token, AI endpoint and edition name
+- 🔒 **Edits are no longer lost**: saving after switching sections or searching no longer clears other sections, leaving with unsaved changes is intercepted, "reload from server" asks for confirmation, and the unsaved counter opens a change list
+- 🧪 **New consistency check**: `scripts/check_system_config.py` verifies field counts, section membership, zh/en coverage, Markdown leftovers and enum options — a field added without a section or a translation fails loudly
 
 **Fixes**
 
