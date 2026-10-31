@@ -173,6 +173,9 @@ async def batch_has_cast(request: Request, kp_ids: str = Query("")):
     if not ids:
         return {"items": {}}
     ids = ids[:300]  # 一屏不可能有 300 个知识点，多了就是误用
+    ids = _visible_kp_ids(user, ids)  # 学生不下发别的年级的讲演标记
+    if not ids:
+        return {"items": {}}
 
     where = "" if _can_manage(user) else " AND status = 'published'"
     placeholders = ",".join("?" for _ in ids)
@@ -244,6 +247,52 @@ async def suggest_description(kp_id: int, request: Request):
 
     logger.info(f"[cast] 帮写描述 kp={kp_id} user={user['username']} {len(desc)} 字")
     return {"description": desc, "kp_id": kp_id, "kp_name": kp.get("name") or ""}
+
+
+def _course_grade_map(kp_ids: list[int]) -> dict[int, str]:
+    if not kp_ids:
+        return {}
+    placeholders = ",".join("?" for _ in kp_ids)
+    rows = execute_query(
+        f"""SELECT kp.id AS id, co.grade AS g
+            FROM knowledge_points kp
+            JOIN chapters c ON c.id = kp.chapter_id
+            JOIN courses co ON co.id = c.course_id
+            WHERE kp.id IN ({placeholders})""",
+        tuple(kp_ids),
+    )
+    return {int(r["id"]): str(r.get("g") or "") for r in rows}
+
+
+def _visible_kp_ids(user: dict[str, Any], kp_ids: list[int]) -> list[int]:
+    """按**课程树同口径**过滤：学生只能看自己年级的课程下的知识点。
+
+    课程树（curriculum_router.get_curriculum_tree）做了年级过滤，但讲演接口是按 kp_id
+    直接取的——不校验就能靠遍历 id 看别的年级的讲演，甚至给它们写进度去刷 learning 积分。
+    """
+    if _can_manage(user):
+        return kp_ids
+    grade = str(user.get("grade") or "").strip()
+    if not grade:
+        return kp_ids  # 没设年级的学生，课程树本来也不过滤
+    grades = [g.strip() for g in grade.split("|") if g.strip()]
+    if not grades:
+        return kp_ids
+    gmap = _course_grade_map(kp_ids)
+    return [i for i in kp_ids if any(g in gmap.get(i, "") for g in grades)]
+
+
+def _ensure_kp_visible(user: dict[str, Any], kp: dict[str, Any]) -> None:
+    """单个知识点越权检查。kp 需含 course_grade（_kp_of / _course_grade_map 都有）。"""
+    if _can_manage(user):
+        return
+    grade = str(user.get("grade") or "").strip()
+    if not grade:
+        return
+    grades = [g.strip() for g in grade.split("|") if g.strip()]
+    course_grade = str(kp.get("course_grade") or "")
+    if grades and not any(g in course_grade for g in grades):
+        raise HTTPException(status_code=403, detail="这个知识点不在你的年级范围内")
 
 
 class OutlineIn(BaseModel):
@@ -689,6 +738,8 @@ async def list_casts(kp_id: int, request: Request):
 async def get_cast(kp_id: int, request: Request, mode: str = Query("duo"),
                    include_draft: int = Query(0)):
     user = get_current_user(request)
+    # 学生只能看自己年级的课程下的讲演（与课程树同口径，避免遍历 kp_id 越权）
+    _ensure_kp_visible(user, _kp_of(kp_id))
     # 草稿只给教师看；学生永远只能拿到 published
     allow_draft = bool(include_draft) and _can_manage(user)
     row, fallback = _pick_cast(kp_id, L.normalize_mode(mode), include_draft=allow_draft)
@@ -760,8 +811,17 @@ async def save_progress(body: PlaybackIn, request: Request):
 
     # 完成度 → learning_progress（只对学生，且只升不降）
     total_pages = 0
-    row = execute_query_one("SELECT pages_json FROM lesson_casts WHERE id = ?", (body.cast_id,))
+    course_grade = ""
+    row = execute_query_one(
+        """SELECT lc.pages_json, co.grade AS course_grade
+           FROM lesson_casts lc
+           JOIN knowledge_points kp ON kp.id = lc.kp_id
+           JOIN chapters c ON c.id = kp.chapter_id
+           JOIN courses co ON co.id = c.course_id
+           WHERE lc.id = ?""",
+        (body.cast_id,))
     if row:
+        course_grade = str(row.get("course_grade") or "")
         try:
             total_pages = len(json.loads(row.get("pages_json") or "[]"))
         except (ValueError, TypeError):
@@ -770,6 +830,9 @@ async def save_progress(body: PlaybackIn, request: Request):
     completed = False
     if (user.get("role") == 2 and total_pages > 0
             and len(set(body.done_pages)) / total_pages >= DONE_RATIO):
+        # 只在要发分这一刻校验年级：写断点本身只影响自己的记录，无害；
+        # 但让越权的知识点算"完成"就会白拿 learning 积分
+        _ensure_kp_visible(user, {"course_grade": course_grade})
         completed = _mark_kp_completed(username, body.kp_id)
 
     return {"ok": True, "completed": completed, "total_pages": total_pages}
