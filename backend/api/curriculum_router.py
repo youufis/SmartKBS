@@ -902,25 +902,13 @@ async def get_curriculum_tree(request: Request):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
-    user_grade = user.get("grade", "")
 
-    # 查询课程列表（学生按年级匹配）
-    if role == 2 and user_grade:
-        grades = [g.strip() for g in user_grade.split("|")]
-        conditions = []
-        params = []
-        for g in grades:
-            conditions.append("grade LIKE ?")
-            params.append(f"%{g}%")
-        where = " OR ".join(conditions)
-        courses = execute_query(
-            f"SELECT * FROM courses WHERE status='active' AND ({where}) ORDER BY sort_order, id",
-            tuple(params),
-        )
-    else:
-        courses = execute_query(
-            "SELECT * FROM courses WHERE status='active' ORDER BY sort_order, id",
-        )
+    # 课程对所有学生和教师可见：**适用年级只是标签，不用于过滤**。
+    # 真正的范围控制放在资源层（知识点绑定资源的共享范围 check_share_visibility），
+    # 不放在课程层 —— 否则同一位老师给不同年级准备的内容会被学生互相看不见。
+    courses = execute_query(
+        "SELECT * FROM courses WHERE status='active' ORDER BY sort_order, id",
+    )
 
     result = []
     for course in courses:
