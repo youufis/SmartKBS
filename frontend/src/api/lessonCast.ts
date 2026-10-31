@@ -64,7 +64,8 @@ export interface CastPage {
   points?: string[];
   left?: CastSide;
   right?: CastSide;
-  steps?: [string, string][];
+  /** [标题, 说明, 可选补充]：后端目前只给两段，第三段留着兼容旧数据 */
+  steps?: [string, string, string?][];
   cards?: [string, string][];
   /** 整页公式（LaTeX 本体，不带 $ 定界符） */
   formula?: string;
@@ -114,6 +115,8 @@ export interface CastDetail {
   /** 大纲改过但音频还是旧的 */
   stale: boolean;
   pages: CastPage[];
+  /** 指定讲法没有时回退到另一版（页面会提示"该讲法暂无，已用另一版"） */
+  fallback?: boolean;
   updated_at: string;
 }
 
