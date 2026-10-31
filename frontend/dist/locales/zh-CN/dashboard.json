@@ -613,7 +613,8 @@
     "viewAll": "完整清单",
     "empty": "暂无紧急待办，先随处逛逛吧 🎉",
     "go": "去处理",
-    "streak": "连续学习 {{n}} 天"
+    "streak": "连续学习 {{n}} 天",
+    "others": "其他"
   },
   "statsS": {
     "unitRank": "排名 {{rank}}",
@@ -628,6 +629,9 @@
     "pendingTodoSuffix": "逾期{{overdue}} · 紧急{{urgent}}",
     "wrongPending": "待复习错题",
     "wrongSuffix": "共{{total}} · 已掌握{{mastered}}",
+    "wrongMastered": "已掌握错题",
+    "practiceDone": "完成练习",
+    "unitPending": "待完成 {{n}}",
     "myScore": "我的积分",
     "myScoreSuffix": "排名 {{rank}}"
   },
@@ -676,6 +680,7 @@
     "rate": "得分率",
     "avgLine": "平均 {{v}}%",
     "avgRate": "均分率 {{v}}%",
+    "avgHint": "金色竖线为你的平均得分率",
     "total": "总分",
     "mine": "得分"
   },
@@ -716,6 +721,11 @@
     "tasks": "进行中作业",
     "exams": "进行中考试",
     "clear": "全部处理完毕，今天辛苦了 🎉",
+    "ongoingInline": "进行中 {{n}} 项",
+    "metricPending": "待处理",
+    "metricOngoing": "进行中",
+    "metricNextExam": "下一场考试",
+    "metricNone": "暂无",
     "activeToday": "今日活跃学生 {{n}} 人",
     "nextExam": "「{{title}}」正在进行中",
     "go": "查看",
