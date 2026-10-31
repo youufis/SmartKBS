@@ -27,8 +27,9 @@ const PendingExamsCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) 
         return (
           <div
             key={exam.id}
+            className="dash-row"
             style={{
-              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 6px', margin: '0 -6px',
               borderBottom: idx === exams.length - 1 ? 'none' : '1px solid rgba(128,128,128,0.12)',
             }}
           >

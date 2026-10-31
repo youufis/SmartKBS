@@ -47,7 +47,7 @@ const DailyQuoteCard: React.FC = () => {
       title={
         <Space size={6}>
           <span style={{ fontSize: 15 }}>💡</span>
-          <span style={{ fontSize: 13 }}>{t('quote.title')}</span>
+          <span style={{ fontSize: 14, fontWeight: 500 }}>{t('quote.title')}</span>
         </Space>
       }
       extra={

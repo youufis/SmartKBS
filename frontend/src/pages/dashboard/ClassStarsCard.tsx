@@ -29,12 +29,12 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
   return (
     <Card
       size="small"
-      className="dash-card"
+      className="dash-card dash-fill-card"
       style={{ height: '100%' }}
       title={
         <Space size={6}>
           <CrownOutlined style={{ color: '#faad14' }} />
-          <span style={{ fontSize: 13 }}>{t('stars.title')}</span>
+          <span style={{ fontSize: 14, fontWeight: 500 }}>{t('stars.title')}</span>
           <Text type="secondary" style={{ fontSize: 11, fontWeight: 400 }}>{t('stars.sub')}</Text>
         </Space>
       }
@@ -42,7 +42,8 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
       styles={{ body: { padding: '0 16px 8px' } }}
     >
       {stars.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+        // 空态也撑满卡片：同行另两张卡更高时，空态文字不会贴在上半部分
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '20px 0' }}>
           <Text type="secondary" style={{ fontSize: 12 }}>{t('stars.empty')}</Text>
           <div style={{ marginTop: 6 }}>
             <Button size="small" type="primary" ghost onClick={() => navigate('/interaction')}>

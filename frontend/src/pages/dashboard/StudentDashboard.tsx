@@ -2,9 +2,9 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Card, Col, Empty, Row, Typography } from 'antd'
+import { Col, Empty, Row } from 'antd'
 import {
-  BookOutlined, CheckCircleOutlined, FileAddOutlined, TrophyOutlined,
+  BookOutlined, CheckCircleOutlined, FileAddOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import { getTaskTodo, type TaskTodoResponse } from '../../api/taskTodo'
 import { useCompanionStore } from '../../stores/companionStore'
@@ -26,8 +26,6 @@ import DashboardSkeleton from './DashboardSkeleton'
 import { useChartTheme } from './chartTheme'
 import StatCard from './StatCard'
 import './dashboard.css'
-
-const { Text } = Typography
 
 const StudentDashboard: React.FC = () => {
   const navigate = useNavigate()
@@ -69,8 +67,8 @@ const StudentDashboard: React.FC = () => {
     <div>
       <WelcomeBanner summary={summary} todoTotal={todoTotal} isStudent isTeacher={false} isAdmin={false} />
 
-      {/* 今日要事 + 成长档案 */}
-      <Row gutter={[16, 16]} className="dash-stagger" style={{ marginBottom: 16 }}>
+      {/* 今日要事 + 成长档案：两列各自高度，不互相拉齐（原来左卡被右卡撑高，4 条待办下方留了 100px 空白） */}
+      <Row gutter={[16, 16]} align="top" className="dash-stagger" style={{ marginBottom: 16 }}>
         <Col xs={24} lg={16}>
           <TodoFocusCard todo={todo} loading={todoLoading} />
         </Col>
@@ -79,7 +77,7 @@ const StudentDashboard: React.FC = () => {
         </Col>
       </Row>
 
-      {/* 关键数字 */}
+      {/* 关键数字：错题卡讲「还没巩固的」，这里讲「已经掌握的」，不重复同一组数字 */}
       <Row gutter={[16, 16]} className="dash-stagger" style={{ marginBottom: 16 }}>
         <StatCard
           title={t('statsS.todoExams')} value={summary.pending_exam_count ?? 0} color={ct.primary}
@@ -95,24 +93,21 @@ const StudentDashboard: React.FC = () => {
           ]}
         />
         <StatCard
-          title={t('statsS.wrongPending')} value={summary.wrong_book_pending ?? 0} color={(summary.wrong_book_pending ?? 0) > 0 ? ct.danger : ct.success}
+          title={t('statsS.wrongMastered')} value={summary.wrong_book_mastered ?? 0} color={ct.success}
           icon={<BookOutlined />} onGo={() => navigate('/wrong-book')}
-          parts={[
-            (summary.wrong_book_total ?? 0) > 0 && t('statsS.unitTotal', { n: summary.wrong_book_total ?? 0 }),
-            (summary.wrong_book_mastered ?? 0) > 0 && t('statsS.unitMastered', { n: summary.wrong_book_mastered ?? 0 }),
-          ]}
+          parts={[(summary.wrong_book_total ?? 0) > 0 && t('statsS.unitTotal', { n: summary.wrong_book_total ?? 0 })]}
         />
         <StatCard
-          title={t('statsS.myScore')} value={summary.total_score ?? 0} color={ct.success}
-          icon={<TrophyOutlined />} onGo={() => navigate('/score')}
-          parts={[summary.rank ? t('statsS.unitRank', { rank: summary.rank }) : '']}
+          title={t('statsS.practiceDone')} value={summary.completed_practice_count ?? 0} color={ct.purple}
+          icon={<ThunderboltOutlined />} onGo={() => navigate('/practice')}
+          parts={[(summary.pending_practice_count ?? 0) > 0 && t('statsS.unitPending', { n: summary.pending_practice_count ?? 0 })]}
         />
       </Row>
 
-      {/* 数据看板：真实趋势 + 能力画像 + 成绩 */}
+      {/* 数据看板：三张卡等宽。雷达图原来只有 1/4 宽，四个轴标签挤在一起、图形缩成小三角 */}
       <Row gutter={[16, 16]} className="dash-stagger" style={{ marginBottom: 16 }}>
-        <Col xs={24} lg={10}><TrendCard /></Col>
-        <Col xs={24} md={12} lg={6}><AbilityRadarCard summary={summary} /></Col>
+        <Col xs={24} lg={8}><TrendCard /></Col>
+        <Col xs={24} md={12} lg={8}><AbilityRadarCard summary={summary} /></Col>
         <Col xs={24} md={12} lg={8}><ExamScoresCard summary={summary} /></Col>
       </Row>
 
@@ -126,8 +121,9 @@ const StudentDashboard: React.FC = () => {
         <Col xs={24} lg={8}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <CompanionCard />
-            <DailyQuoteCard />
             <ActivityTimelineCard activities={activities} loading={activityLoading} error={activityError} onRefresh={fetchActivities} />
+            {/* 每日一句没有操作价值，放最末：先看到学伴留言与动态，装饰性内容垫底 */}
+            <DailyQuoteCard />
           </div>
         </Col>
       </Row>

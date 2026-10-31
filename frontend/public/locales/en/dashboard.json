@@ -613,7 +613,8 @@
     "viewAll": "Full list",
     "empty": "Nothing pressing today. Enjoy your day 🎉",
     "go": "Go",
-    "streak": "{{n}}-day study streak"
+    "streak": "{{n}}-day study streak",
+    "others": "other"
   },
   "statsS": {
     "unitRank": "rank {{rank}}",
@@ -628,6 +629,9 @@
     "pendingTodoSuffix": "{{overdue}} overdue · {{urgent}} urgent",
     "wrongPending": "Review Mistakes",
     "wrongSuffix": "{{total}} total · {{mastered}} mastered",
+    "wrongMastered": "Mistakes Mastered",
+    "practiceDone": "Practice Done",
+    "unitPending": "{{n}} to do",
     "myScore": "My Points",
     "myScoreSuffix": "Rank {{rank}}"
   },
@@ -676,6 +680,7 @@
     "rate": "Score rate",
     "avgLine": "avg {{v}}%",
     "avgRate": "Avg rate {{v}}%",
+    "avgHint": "Gold tick marks your average score rate",
     "total": "Total",
     "mine": "Score"
   },
@@ -716,6 +721,11 @@
     "tasks": "Homework in progress",
     "exams": "Live exams",
     "clear": "All caught up. Great job today 🎉",
+    "ongoingInline": "{{n}} live now",
+    "metricPending": "To do",
+    "metricOngoing": "Live",
+    "metricNextExam": "Next exam",
+    "metricNone": "None",
     "activeToday": "{{n}} students active today",
     "nextExam": "\"{{title}}\" is in progress",
     "go": "View",

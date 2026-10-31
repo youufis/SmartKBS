@@ -1,22 +1,27 @@
-/** 学生近期考试成绩：按得分率画柱 + 均线参考，跨不同总分的考试才可比 */
+/**
+ * 学生近期考试成绩：每场一条「标题 + 得分率条 + 百分比」
+ *
+ * 原来用纵向柱状图：几个中文标题挤在 200px 内互相重叠、末尾被截断；换横向条形后，
+ * recharts 在这个尺寸下条根本不渲染（只剩类目标签和均分虚线）。
+ * 这个卡片要回答的问题只有一个——「最近几场考得怎么样、比平时高还是低」，
+ * 用 4 行进度条比坐标轴更直接，窄屏也不会被压扁。
+ */
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Card, Space, Tag, Typography } from 'antd'
-import {
-  Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer,
-  Tooltip as RTooltip, XAxis, YAxis,
-} from 'recharts'
+import { Card, Space, Tag, Tooltip, Typography } from 'antd'
 import { FileAddOutlined } from '@ant-design/icons'
 import type { DashboardSummary } from '../../api/dashboard'
-import { tooltipStyle, useChartTheme } from './chartTheme'
+import { useChartTheme } from './chartTheme'
 
 const { Text } = Typography
 
 const ExamScoresCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
-  const results = (summary.exam_results ?? []).slice(0, 6).map((r) => ({
-    name: r.title.length > 6 ? r.title.slice(0, 6) + '…' : r.title,
+  // 卡片只放最近 4 场，再多就没有「最近」的意思了
+  const results = (summary.exam_results ?? []).slice(0, 4).map((r) => ({
+    id: r.id,
+    title: r.title,
     rate: r.total_score > 0 ? Math.round((r.score / r.total_score) * 100) : 0,
     score: Math.round(r.score),
     total: Math.round(r.total_score),
@@ -27,12 +32,12 @@ const ExamScoresCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) =>
   return (
     <Card
       size="small"
-      className="dash-card"
+      className="dash-card dash-fill-card dash-center-body"
       style={{ height: '100%' }}
       title={
         <Space size={6}>
           <FileAddOutlined style={{ color: '#1677ff', fontSize: 14 }} />
-          <Text style={{ fontSize: 13 }}>{t('recentScores')}</Text>
+          <Text style={{ fontSize: 14, fontWeight: 500 }}>{t('recentScores')}</Text>
         </Space>
       }
       extra={avg != null && (
@@ -40,41 +45,46 @@ const ExamScoresCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) =>
           {t('scores.avgRate', { v: avg })}
         </Tag>
       )}
-      styles={{ body: { padding: '4px 8px 0', minHeight: 190 } }}
+      styles={{ body: { padding: '8px 14px 10px', minHeight: 190 } }}
     >
       {results.length > 0 ? (
-        <ResponsiveContainer width="100%" height={170}>
-          <BarChart data={results} margin={{ top: 10, right: 2, left: -14, bottom: 0 }}>
-            <CartesianGrid stroke={ct.grid} vertical={false} strokeDasharray="3 3" />
-            <XAxis dataKey="name" tick={{ fontSize: 10, fill: ct.tick }} axisLine={false} tickLine={false} interval={0} />
-            <YAxis
-              domain={[0, 100]} unit="%" tick={{ fontSize: 10, fill: ct.tick }}
-              axisLine={false} tickLine={false} width={34}
-            />
-            <RTooltip
-              contentStyle={tooltipStyle(ct)}
-              formatter={(_v: unknown, _n: unknown, item?: { payload?: { score: number; total: number } }) => {
-                const d = item?.payload
-                return d ? [`${d.score} / ${d.total}`, t('scores.mine')] : []
-              }}
-            />
-            {/* 均线：只看单场分数看不出进退，有一条平均线才知道这根比平时高还是低 */}
-            {avg != null && (
-              <ReferenceLine
-                y={avg} stroke="#faad14" strokeDasharray="4 3"
-                label={{ value: t('scores.avgLine', { v: avg }), position: 'insideTopRight', fontSize: 10, fill: '#faad14' }}
-              />
-            )}
-            <Bar
-              dataKey="rate" radius={[3, 3, 0, 0]} maxBarSize={22}
-              name={t('scores.rate')} isAnimationActive animationDuration={600}
-            >
-              {results.map((entry, idx) => (
-                <Cell key={idx} fill={entry.passed ? '#52c41a' : '#ff7a45'} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        <div>
+          {results.map((r) => (
+            <Tooltip key={r.id} title={`${r.title} · ${r.score}/${r.total}`}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+                <Text ellipsis style={{ width: 76, flexShrink: 0, fontSize: 11, color: ct.tick }}>
+                  {r.title}
+                </Text>
+                {/* 条背景 + 均分竖线：每行都标同一位置，连起来就是一条贯穿的参考线 */}
+                <span style={{ position: 'relative', flex: 1, height: 8, borderRadius: 4, overflow: 'hidden', background: ct.track }}>
+                  <span
+                    className="dash-bar-fill"
+                    style={{
+                      display: 'block', height: '100%', width: `${r.rate}%`, borderRadius: 4,
+                      background: r.passed ? ct.success : ct.warning,
+                    }}
+                  />
+                  {avg != null && (
+                    <span
+                      aria-hidden
+                      style={{
+                        position: 'absolute', top: 0, bottom: 0,
+                        left: `${Math.max(0, Math.min(100, avg))}%`,
+                        width: 1.5, background: ct.gold, opacity: 0.9,
+                      }}
+                    />
+                  )}
+                </span>
+                <strong style={{ width: 34, flexShrink: 0, textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                  {r.rate}%
+                </strong>
+              </div>
+            </Tooltip>
+          ))}
+          {avg != null && (
+            <Text type="secondary" style={{ fontSize: 11 }}>{t('scores.avgHint')}</Text>
+          )}
+        </div>
       ) : (
         <div style={{ textAlign: 'center', padding: '56px 0', color: ct.empty, fontSize: 12 }}>
           {t('chart.noExamData')}

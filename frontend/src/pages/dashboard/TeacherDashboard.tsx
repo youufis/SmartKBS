@@ -94,12 +94,10 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
     : (todo?.pending_task_grades ?? 0) > 0 ? '/tasks?grading=pending'
     : (todo?.pending_questions ?? 0) + (todo?.pending_answer_reviews ?? 0) > 0 ? '/student-questions'
     : '/exam?grading=pending'
-  const ongoingTarget = (todo?.active_quizzes ?? 0) > 0 ? '/interaction'
-    : (todo?.active_quick_quiz_rooms ?? 0) > 0 ? '/quick-quiz'
-    : (todo?.active_discussions ?? 0) > 0 ? '/discussion'
-    : (todo?.active_polls ?? 0) > 0 ? '/quick-poll'
-    : (todo?.active_tasks ?? 0) > 0 ? '/tasks'
-    : '/exam'
+  // 「进行中的活动」是聚合概念（测验/讨论/投票/作业/考试都算），不能挑一个类别跳：
+  // 原来只要有用测验就固定去随堂测验，点了"进行中"却看不到讨论和投票，像是数据丢了。
+  // 统一去活动监控，那里能一次看全。
+  const ongoingTarget = '/activity-monitor'
 
   return (
     <div>
@@ -150,8 +148,8 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
       <Row gutter={[16, 16]} className="dash-stagger" style={{ marginBottom: 16 }}>
         <Col xs={24} lg={10}><TrendCard /></Col>
         <Col xs={24} md={12} lg={6}>
-          <Card size="small" style={{ height: '100%' }}
-            title={<Text style={{ fontSize: 13 }}>{t('chart.examStatus')}</Text>}
+          <Card size="small" className="dash-card dash-fill-card dash-center-body" style={{ height: '100%' }}
+            title={<Text style={{ fontSize: 14, fontWeight: 500 }}>{t('chart.examStatus')}</Text>}
             styles={{ body: { padding: '0 4px 8px', minHeight: 226 } }}>
             <SegmentBar
               emptyText={t('chart.noTeachingData')}
@@ -173,7 +171,7 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           {(summary.recent_exams?.length ?? 0) > 0 && (
             <Card size="small"
               style={{ marginBottom: 16 }}
-              title={<span style={{ fontSize: 13 }}><FireOutlined style={{ color: '#fa8c16', marginRight: 6 }} />{t('recentCreatedExams')}</span>}
+              title={<span style={{ fontSize: 14, fontWeight: 500 }}><FireOutlined style={{ color: '#fa8c16', marginRight: 6 }} />{t('recentCreatedExams')}</span>}
               extra={<a onClick={() => navigate('/exam')}>{t('manage')} →</a>}
               styles={{ body: { padding: '2px 16px 8px' } }}
             >
@@ -187,8 +185,9 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
                 return (
                   <div
                     key={exam.id}
+                    className="dash-row"
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0',
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '7px 6px', margin: '0 -6px',
                       borderBottom: idx === arr.length - 1 ? 'none' : '1px solid rgba(128,128,128,0.12)',
                     }}
                   >

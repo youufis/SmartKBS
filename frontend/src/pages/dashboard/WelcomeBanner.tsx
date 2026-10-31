@@ -123,11 +123,11 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
               · {t('welcome.rank')} {summary.rank ?? '-'}
             </Text>
             {summary.title_name && summary.next_title_name && (
-              <Progress percent={summary.title_progress ?? 0} size="small" strokeColor="#fff"
+              <Progress className="dash-mobile-hide" percent={summary.title_progress ?? 0} size="small" strokeColor="#fff"
                 railColor="rgba(255,255,255,0.3)" format={() => ''}
                 style={{ width: 80, display: 'inline-flex', marginLeft: 8, verticalAlign: 'middle' }} />
             )}
-            <Text style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>|</Text>
+            <Text className="dash-mobile-hide" style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>|</Text>
             <Button size="small" type="text" style={{ color: '#fff', padding: 0 }} icon={<span>📋</span>}
               onClick={() => navigate('/task-todo')}>
               {t('welcome.taskList')}
@@ -135,8 +135,8 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
                 {todoTotal}
               </Tag>
             </Button>
-            <Text style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>|</Text>
-            <Button size="small" type="text" style={{ color: '#fff', padding: 0 }} icon={<span>🧠</span>}
+            <Text className="dash-mobile-hide" style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>|</Text>
+            <Button className="dash-mobile-hide" size="small" type="text" style={{ color: '#fff', padding: 0 }} icon={<span>🧠</span>}
               onClick={() => navigate('/chat?companion=1')}>
               {t('welcome.aiCompanion')}
             </Button>

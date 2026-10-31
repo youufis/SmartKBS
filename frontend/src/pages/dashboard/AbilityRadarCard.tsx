@@ -26,11 +26,11 @@ const AbilityRadarCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) 
   return (
     <Card
       size="small"
-      className="dash-card"
+      className="dash-card dash-fill-card dash-center-body"
       style={{ height: '100%' }}
       title={
         <Space size={4}>
-          <Text style={{ fontSize: 13 }}>{t('radar.title')}</Text>
+          <Text style={{ fontSize: 14, fontWeight: 500 }}>{t('radar.title')}</Text>
           <Tooltip title={t('radar.hint')}>
             <QuestionCircleOutlined style={{ color: ct.tick, fontSize: 12 }} />
           </Tooltip>

@@ -49,7 +49,7 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
       title={
         <Space size={6}>
           <span>🌱</span>
-          <span style={{ fontSize: 13 }}>{t('growth.title')}</span>
+          <span style={{ fontSize: 14, fontWeight: 500 }}>{t('growth.title')}</span>
         </Space>
       }
       extra={

@@ -35,6 +35,49 @@
   transform: translateY(-1px);
 }
 
+/* 列表行（待办 / 考试 / 公告 / 动态）的可点反馈：
+   整卡有 hover、行内却是死的，会让人以为只有按钮能点 */
+.dash-row {
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+.dash-row:hover {
+  background-color: rgba(128, 128, 128, 0.07);
+}
+
+/* 同行卡片高度由最高的那张决定，内容少的卡会在底部留一大块空白。
+   这两条让卡片内部可以"吃满"高度：内容区 flex:1，图表/空态自己撑开或居中。 */
+.dash-fill-card {
+  display: flex;
+  flex-direction: column;
+}
+.dash-fill-card > .ant-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 行内文字链接：看着是灰字，但要能看出可点 */
+.dash-inline-link {
+  cursor: pointer;
+  padding: 1px 3px;
+  margin: 0 -3px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.dash-inline-link:hover,
+.dash-inline-link:focus-visible {
+  color: var(--primary-color);
+  background-color: rgba(22, 119, 255, 0.08);
+  outline: none;
+}
+
+/* 内容少的卡：空白上下均分，而不是全堆在下半部分 */
+.dash-center-body > .ant-card-body {
+  justify-content: center;
+}
+
 /* 条形/进度：宽度补间，数据刷新时是"长过去"而不是"跳过去" */
 .dash-bar-fill {
   transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
@@ -60,5 +103,13 @@
   }
   .dash-heat-cell:hover {
     transform: none;
+  }
+}
+
+/* 窄屏：横幅里"称号进度条 + AI 学伴"与底部 TabBar、称号徽章重复，
+   留着只会把首屏高度顶到 190px。任务清单保留（底部没有对应入口）。 */
+@media (max-width: 575px) {
+  .dash-mobile-hide {
+    display: none !important;
   }
 }

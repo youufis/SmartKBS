@@ -23,7 +23,7 @@ const CompanionCard: React.FC = () => {
       title={
         <Space size={6}>
           <span style={{ fontSize: 16 }}>🧠</span>
-          <span style={{ fontSize: 13 }}>{t('companion.title')}</span>
+          <span style={{ fontSize: 14, fontWeight: 500 }}>{t('companion.title')}</span>
           {unreadCount > 0 && <Badge count={unreadCount} size="small" />}
         </Space>
       }

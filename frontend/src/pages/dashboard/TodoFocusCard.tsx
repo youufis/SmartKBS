@@ -30,7 +30,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
         if (da !== db) return da - db
         return (b.priority ?? 0) - (a.priority ?? 0)
       })
-      .slice(0, 4)
+      .slice(0, 6)
   }, [todo])
 
   const streak = todo?.stats?.streak_days ?? 0
@@ -97,8 +97,9 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
           return (
             <div
               key={item.id}
+              className="dash-row"
               style={{
-                display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0',
+                display: 'flex', alignItems: 'center', gap: 10, padding: '7px 6px', margin: '0 -6px',
                 borderBottom: '1px solid rgba(128,128,128,0.12)', cursor: 'pointer',
               }}
               role="button"
@@ -120,11 +121,6 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
                 {dlText && (
                   <div><Text type="secondary" style={{ fontSize: 11, color: dotColor }}>{dlText}</Text></div>
                 )}
-          {restCount > 0 && (
-            <Tooltip title={restTypes.map(([kk, cc]) => `${t(`todo.type.${kk}`, { defaultValue: kk })} ${cc}`).join('、')}>
-              <span>+{restCount}</span>
-            </Tooltip>
-          )}
               </div>
               <Button size="small" type="primary" ghost style={{ flexShrink: 0 }}
                 onClick={(e) => { e.stopPropagation(); navigate(item.url) }}>
@@ -134,7 +130,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
           )
         })
       )}
-      {items.length > 0 && typeSummary.length > 0 && (
+      {items.length > 0 && (typeSummary.length > 0 || restCount > 0) && (
         <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, color: ct.tick }}>
           {typeSummary.map(([k, c]) => (
             <span key={k}>
@@ -142,6 +138,14 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
               <strong style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{c}</strong>
             </span>
           ))}
+          {restCount > 0 && (
+            <Tooltip title={restTypes.map(([kk, cc]) => `${t(`todo.type.${kk}`, { defaultValue: kk })} ${cc}`).join('、')}>
+              <span style={{ cursor: 'help' }}>
+                {t('todoCard.others')}
+                <strong style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{restCount}</strong>
+              </span>
+            </Tooltip>
+          )}
         </div>
       )}
 
