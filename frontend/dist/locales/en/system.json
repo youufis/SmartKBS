@@ -1224,6 +1224,15 @@
   "placeholder_PODCAST_DURATION_OPTIONS": "e.g. 3,4,5",
   "field_PODCAST_MAX_SECONDS": "Podcast hard cap (seconds)",
   "field_PODCAST_MAX_SECONDS_desc": "Scripts longer than this are truncated so no oversized page is produced (60-1800 seconds, default 300). Keep it at least the largest option × 60.",
+  "field_CAST_DURATION_OPTIONS": "Lesson cast duration options",
+  "field_CAST_DURATION_OPTIONS_desc": "Comma separated, in minutes. Independent from podcast options; takes effect immediately. e.g. 3,4,5",
+  "placeholder_CAST_DURATION_OPTIONS": "3,4,5",
+  "field_CAST_DEFAULT_MINUTES": "Default cast duration",
+  "field_CAST_DEFAULT_MINUTES_desc": "Default option when opening the AI lesson cast dialog; must be one of the options above",
+  "field_CAST_MAX_SECONDS": "Max cast audio length",
+  "field_CAST_MAX_SECONDS_desc": "Hard limit in seconds for one cast. Overflow is trimmed by whole pages, never mid-page",
+  "field_CAST_MAX_PAGES": "Max cast pages",
+  "field_CAST_MAX_PAGES_desc": "Maximum pages per cast (8-10 recommended). Extra pages are dropped",
   "ttsGroupAuto": "Auto (pick by model)",
   "ttsVoiceAuto": "Auto (pick by model)",
   "field_TTS_ENABLED_desc": "Master switch. When off, no billable request is made anywhere and rollcall voice announcements are disabled too.",
@@ -1481,5 +1490,6 @@
   "qtypeLabelPlaceholder": "Label, e.g. Single choice",
   "qtypeAddRow": "Add a row",
   "qtypeDupKey": "Duplicate keys: {{keys}}",
-  "saveShort": "Save"
+  "saveShort": "Save",
+  "unitPage": "pages"
 }

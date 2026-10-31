@@ -37,6 +37,14 @@
 
 > 📌 **Highlights of V9.0.0**
 >
+> **AI lesson cast (new)**
+> - 🎬 **A knowledge point becomes a micro-lesson that talks**: paginated slides with one voice clip per sentence — each clip ends, the page turns, the subtitle follows. No video file, so fixing one line re-records one line
+> - 🎙️ **One narrator or two**: two-host dialogue by default for self-study (a conversation holds attention), single narrator for classroom projection (the teacher adds their own commentary, a second host would talk over them). Both versions can coexist for the same topic
+> - 🖥️ **A second screen for presenting**: the projected screen shows only the slide; the teacher's screen shows the next slide, the script and the clock. Space pauses, arrows turn pages, digits jump
+> - ✏️ **Editing one line costs one line**: rewrite lines, switch speaker, reorder or delete pages; a single page can be re-synthesised on its own
+> - 🎨 **Four slide themes**: clean white / warm sand / ink / pale green — Ink is for dim classrooms
+> - ⚙️ **Four knobs in system settings**: duration options, default duration, hard length cap and page cap, sharing the TTS master switch with the podcast
+>
 > **Mistake book and auto consolidation**
 > - 📕 **The mistake book is now card-based**: one question reads top to bottom — stem, your answer against the correct one, explanation, knowledge points — with the figure beside the stem and dropping below it on narrow screens
 > - 🧠 **Mistakes finally carry explanations**: existing bank explanations show in a collapsible block; missing ones can be AI-generated straight into the bank — **empty slots only, never overwriting a teacher's text**
@@ -1166,6 +1174,16 @@ Git-based online incremental upgrade system:
 Current version **9.0.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.9.0 is merged into one outline section below.
 
 ### v9.0.0
+
+**AI lesson cast**
+
+- 🎬 **One click turns a knowledge point into a talking micro-lesson**: paginated slides plus one voice clip per sentence; each clip ends, the page turns, the subtitle follows. Not a video file, so fixing one line re-records one line
+- 🎙️ **Two narration styles**: two-host dialogue (self-study, holds attention) or single narrator (classroom projection, does not talk over the teacher); both can exist for the same topic and are picked by context
+- 🖥️ **Classroom presentation**: full-screen mode with space / arrows / digit keys; the presenter view puts the next slide and the script on the teacher's own screen
+- ✏️ **Editable outline, single-page re-record**: rewrite lines, switch speaker, reorder or delete pages; changing one page re-synthesises only that page
+- 🎨 **Four slide themes**: clean white / warm sand / ink / pale green; Ink is for dim classrooms, and a theme only affects the slide
+- ▶ **Play and edit are separate entries**: play straight from the knowledge-point row; "AI edit" lives in the AI tools menu
+- ⚙️ **Parameters in system settings**: duration options, default duration, hard cap and page cap, sharing the TTS master switch with the podcast
 
 **Security**
 

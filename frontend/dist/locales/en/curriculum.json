@@ -478,5 +478,9 @@
   "kpUnbindConfirm": "Unbind this resource?",
   "kpResExpand": "Showing the first {{shown}} - expand all {{count}}",
   "kpResCollapse": "Collapse list",
-  "kpViewStatsTip": "Unique viewers / total views"
+  "kpViewStatsTip": "Unique viewers / total views",
+  "aiCast": "AI lesson cast",
+  "watchCast": "Watch lesson",
+  "playCast": "Lesson",
+  "editCast": "AI edit"
 }
