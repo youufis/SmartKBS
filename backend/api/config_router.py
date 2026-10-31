@@ -148,6 +148,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "PODCAST_VOICE_B": "",
     "PODCAST_DURATION_OPTIONS": "3,4,5",   # 弹窗可选时长档位（分钟）
     "PODCAST_MAX_SECONDS": 300,            # 硬上限（秒）：超了按上限截断，不产出超标页面
+    # ── AI 讲演（backend/lesson_cast_service.py）──
+    # 必须写在这里：部署机升级时 system_config.json 会保留旧文件，新键不存在，
+    # 只有靠 load_config() 的 DEFAULT_CONFIG 合并才能让配置页显示出值。
+    "CAST_DURATION_OPTIONS": "3,4,5",      # 讲演可选档位（分钟），与播客同值
+    "CAST_DEFAULT_MINUTES": 5,             # 默认档位：讲演要讲完一个完整知识点，取 5 而不是播客的 3
+    "CAST_MAX_SECONDS": 300,               # 硬上限（秒），超出按整页截断
+    "CAST_MAX_PAGES": 10,                  # 页数上限，5 分钟约 9 页
     # ── 课堂抽问（backend/api/class_drill_router.py）──
     # 页面上的「AI 生题」开关是否可用：关掉后课堂抽问只从题库取题，不再调用大模型（零 AI 计费）。
     # 页面开关是当堂临时选择，这里是全校总闸；两者都开才走 AI。
@@ -463,6 +470,7 @@ _STR_LIMITS: dict[str, int] = {
     "CHAT_SKILL_SEGMENT_MODE": 16,
     "TTS_MODEL": 80, "TTS_VOICE": 128,
     "PODCAST_VOICE_A": 128, "PODCAST_VOICE_B": 128, "PODCAST_DURATION_OPTIONS": 32,
+    "CAST_DURATION_OPTIONS": 32,
 }
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
                  "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64,
