@@ -1135,8 +1135,9 @@ def call_multimodal_sync(
         if resp.status_code == 200:
             data = resp.json()
             return data["choices"][0]["message"]["content"]
-        logger.error(f"多模态同步调用失败: status={resp.status_code}, {resp.text[:300]}")
-        raise Exception(f"AI 多模态调用失败 (HTTP {resp.status_code})")
+        # 把响应体带进异常：只报"HTTP 404"时，日志里看不出是模型名写错、鉴权失败还是端点不对
+        logger.error(f"多模态同步调用失败: status={resp.status_code}, model={model}, {resp.text[:300]}")
+        raise Exception(f"AI 多模态调用失败 (HTTP {resp.status_code}: {resp.text[:160]})")
     except Exception as e:
         logger.error(f"多模态同步调用异常: {e}")
         raise

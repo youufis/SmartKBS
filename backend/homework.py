@@ -355,6 +355,12 @@ VL_IMAGE_PROMPT = """下面是学生提交的作业图片（可能是手写稿�
 【要点】3-6 条，每条一句话"""
 
 
+def _is_model_missing(err: str) -> bool:
+    """模型名在当前端点上不存在（而不是鉴权失败、超时）"""
+    low = (err or "").lower()
+    return "404" in low or "model_not_found" in low or "model not exist" in low
+
+
 def vl_digest_images(image_paths: list[str], api_key: str, extra_hint: str = "") -> tuple[str, str]:
     """一张/多张图片 → VL 结构化摘要。返回 (status, text)；status ∈ ok|failed|skipped"""
     if not image_paths:
@@ -362,17 +368,31 @@ def vl_digest_images(image_paths: list[str], api_key: str, extra_hint: str = "")
     if not api_key:
         return "failed", ""
     from backend.api.ai_service import call_multimodal_sync
-    from backend.model_catalog import DEFAULT_VL_MODEL
+    from backend.model_catalog import VL_MODELS, resolve_vl_model
     from backend.config import ai_api_base
-    model = str(get_config_value("MODEL_VL_NAME", DEFAULT_VL_MODEL) or DEFAULT_VL_MODEL)
+
+    configured = resolve_vl_model(get_config_value("MODEL_VL_NAME", ""))
+    # 配置值优先，其后是清单里其余实测可用的模型。配置里填了一个已下线的名字时自动换下一个 ——
+    # 否则一个名字写错，整批作业图片都会被判成"无法解析"，学生直接吃 0 分。
+    candidates = [configured] + [m["id"] for m in VL_MODELS if m["id"] != configured]
     prompt = VL_IMAGE_PROMPT + (f"\n\n补充背景：{extra_hint}" if extra_hint else "")
-    try:
-        text = call_multimodal_sync(prompt, api_key, model, ai_api_base(), image_paths)
-    except Exception as e:
-        logger.warning(f"[作业VL] 图片预解读失败: {e}")
-        return "failed", ""
-    text = (text or "").strip()
-    return ("ok", text[:PER_FILE_CHARS]) if text else ("failed", "")
+    for model in candidates:
+        try:
+            text = call_multimodal_sync(prompt, api_key, model, ai_api_base(), image_paths)
+        except Exception as e:
+            msg = str(e)
+            logger.warning(f"[作业VL] 模型 {model} 调用失败: {msg}")
+            # 只有"模型不存在"才值得换名字；鉴权失败/网络超时换模型也是同样结果，直接放弃
+            if not _is_model_missing(msg):
+                return "failed", ""
+            continue
+        text = (text or "").strip()
+        if text:
+            if model != configured:
+                logger.warning(
+                    f"[作业VL] 配置的视觉模型 {configured} 不可用，已回退到 {model}，建议在系统配置里改正")
+            return "ok", text[:PER_FILE_CHARS]
+    return "failed", ""
 
 
 # ════════════════════════════════════════════════════════════

@@ -45,9 +45,26 @@ LONG_MODELS: list[dict[str, str]] = [
 ]
 
 VL_MODELS: list[dict[str, str]] = [
-    {"id": "qwen3-vl-plus", "tier": "recommended", "note": "识别更准，题目图片解析用（当前默认）"},
-    {"id": "qwen3-vl-flash", "tier": "recommended", "note": "便宜快速，日常看图够用"},
+    {"id": "qwen3-vl-plus", "tier": "recommended", "note": "识别更准，题目图片与作业图片解析都用它（当前默认）"},
+    {"id": "qwen-vl-ocr", "tier": "recommended", "note": "专用 OCR，试卷/手写稿逐字转录更稳（只回文字）"},
 ]
+# 注意：曾经列过 qwen3-vl-flash，实测在两个端点上都是 404 model_not_found
+# （2026-10-31 用 /compatible-mode/v1/models 复查，账号可见的视觉模型只有
+#   qwen3-vl-plus / qwen-vl-ocr / qwen-vl-ocr-2025-11-20 三条）。
+# 清单里放一个不存在的名字，管理员一选就会让图片解析、作业批改、白板识图全部 404，
+# 所以这里只保留实测可用的条目；新增候选前务必先真发一次请求验证。
+
+# 曾经出现在清单里、但实测不存在的模型名。存量配置里如果还写着它，
+# 读取时直接换成默认值 —— 部署机各自有一份 system_config.json，改代码改不到它们。
+RETIRED_VL_MODELS: set[str] = {"qwen3-vl-flash"}
+
+
+def resolve_vl_model(name: str | None) -> str:
+    """把配置里的视觉模型名归一到可用值；留空或已下线就回到默认"""
+    n = (name or "").strip()
+    if not n or n in RETIRED_VL_MODELS:
+        return DEFAULT_VL_MODEL
+    return n
 
 # ── 生图模型候选 ──
 # endpoint 决定调用哪条通道，两代的参数与返回结构都不同，跨端点调用实测 400：

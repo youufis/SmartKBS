@@ -17,6 +17,13 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
 from backend.logger import logger
+# 模型默认值只认 model_catalog 一份。以前这四行是手写字面量（注释还写着"由 model_catalog 维护"），
+# 改清单默认模型时这里不会跟着变，升级后配置缺键就补出旧模型名 —— 正是 404 的来源。
+from backend.model_catalog import (
+    DEFAULT_CHAT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_LONG_MODEL, DEFAULT_VL_MODEL,
+)
+# 语音模型/音色同样只有一份清单（tts_voices），配置默认值跟着它走
+from backend.tts_voices import DEFAULT_MODEL as TTS_DEFAULT_MODEL, DEFAULT_VOICE as TTS_DEFAULT_VOICE
 
 router = APIRouter()
 
@@ -55,9 +62,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "wrong_practice_interval_days": 7,   # 两组之间的间隔天数，也是"未作答会话"的挡路时限
     "wrong_practice_avoid_recent_sets": 3,  # 抽题时避开最近几组出过的题（0=不排除）
   "wrong_book_sources": ["exam", "practice"],  # 错题本接入哪些活动（exam 固定接入不可关；其余见 wrong_book_router.WRONG_BOOK_SOURCE_LABELS）
-    "MODEL_LONG_NAME": "qwen-long",
-    "MODEL_VL_NAME": "qwen3-vl-plus",
-    "MODEL_NAME": "qwen3.7-flash",   # 默认值统一由 backend/model_catalog.py 维护（DEFAULT_CHAT_MODEL）
+    "MODEL_LONG_NAME": DEFAULT_LONG_MODEL,
+    "MODEL_VL_NAME": DEFAULT_VL_MODEL,
+    "MODEL_NAME": DEFAULT_CHAT_MODEL,
     # 多模态模型开关（当默认对话模型是支持图片输入的模型时开启，
     # 开启后对话支持图片+文本同时输入，走多模态 API 格式）
     "ENABLE_MULTIMODAL": False,
@@ -129,7 +136,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enabled_notification_types": ["exam", "system", "task"],
     # 图片生成（通义万相，与对话模型共享 API Key）
     "IMAGE_GEN_ENABLED": True,
-    "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
+    "IMAGE_GEN_MODEL": DEFAULT_IMAGE_MODEL,
     "IMAGE_GEN_SIZE": "auto",   # auto = 不传尺寸、用模型默认值；也可选按模型联动的具体档位
     "IMAGE_GEN_MAX_PLACEHOLDERS": 1,   # 单题默认只自动生成 1 张实拍配图，控住成本
     # ── 语音合成（backend/tts_service.py；两代模型见 backend/tts_voices.py）──
@@ -137,8 +144,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 音色与模型必须配对（跨模型混用实测报 411），保存时有跨键校验、页面上换模型会带出
     # 对应音色清单，所以这两个默认值必须成对出现。
     "TTS_ENABLED": False,
-    "TTS_MODEL": "qwen-audio-3.0-tts-flash",
-    "TTS_VOICE": "qwen-audio-3.0-tts-flash-longnixiwei",   # 新闻联播·男（权威播报）
+    "TTS_MODEL": TTS_DEFAULT_MODEL,
+    "TTS_VOICE": TTS_DEFAULT_VOICE,   # 新闻联播·男（权威播报）
     "TTS_SPEECH_RATE": 1.0,
     "TTS_VOLUME": 50,
     # ── AI 播客（backend/podcast_service.py）──

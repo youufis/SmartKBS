@@ -16,7 +16,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 from backend.config import ai_api_base
-from backend.model_catalog import DEFAULT_CHAT_MODEL, DEFAULT_LONG_MODEL, DEFAULT_VL_MODEL
+from backend.model_catalog import DEFAULT_CHAT_MODEL, DEFAULT_LONG_MODEL, resolve_vl_model
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import get_user_role
@@ -249,7 +249,7 @@ class FileSummaryCache:
                     f'{ai_api_base()}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": get_config_value("MODEL_VL_NAME", DEFAULT_VL_MODEL),
+                        "model": resolve_vl_model(get_config_value("MODEL_VL_NAME", "")),
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -821,7 +821,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     import requests as sync_requests
     try:
         encoded_image = encode_image_to_base64(file_path)
-        model_name = get_config_value("MODEL_VL_NAME", DEFAULT_VL_MODEL)
+        model_name = resolve_vl_model(get_config_value("MODEL_VL_NAME", ""))
         payload = {
             "model": model_name,
             "messages": [{

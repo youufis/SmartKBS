@@ -54,7 +54,9 @@ SUPPORTED_MODELS = {m["id"]: m["note"] for m in options_for("image")}
 
 # 降级链：主模型失败后按此顺序尝试（去重后追加到调用链尾部）。
 # 两个都是"实测仍可用"的老端点模型，留作最后兜底 —— 新端点模型万一账号没开通还能出图。
-FALLBACK_MODEL_CHAIN = ["wan2.2-t2i-flash", "wanx2.1-t2i-turbo"]
+# 主模型用常量（改清单即生效），老端点模型仍写死作最后兜底：它不在推荐位上，
+# 但账号没开通新模型时是唯一能出图的路径。
+FALLBACK_MODEL_CHAIN = [DEFAULT_IMAGE_MODEL, "wanx2.1-t2i-turbo"]
 
 DEFAULT_MODEL = DEFAULT_IMAGE_MODEL
 
