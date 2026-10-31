@@ -4,10 +4,10 @@
 >
 > **An AI-powered smart teaching platform for primary, junior secondary and senior secondary schools** — subjects, grades and classes are all configuration-driven, **with no subject hard-coded anywhere**.
 >
-> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 48 feature areas and 50+ capabilities:
+> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 49 feature areas and 50+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -154,7 +154,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 11 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI lesson cast, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 12 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 11 |
@@ -182,7 +182,7 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 
 #### Desktop only
 
-Question bank management and paper composing, question maintenance, user management, system configuration, roll call, class drill, class ladder, AI podcast generation, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
+Question bank management and paper composing, question maintenance, user management, system configuration, roll call, class drill, class ladder, AI podcast and lesson cast generation, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
 
 <a id="ch-home"></a>
 
@@ -238,7 +238,7 @@ Student-specific task aggregation board:
 
 ## Teaching and Resources
 
-The teacher's full path from preparation to shared resources: syllabus, authoring, composing, exams, AI-generated and shared content.
+The teacher's full path from preparation to shared resources: syllabus, AI lesson cast, authoring, composing, exams, AI-generated and shared content.
 
 ### Course Syllabus (Course Guide)
 
@@ -362,6 +362,24 @@ One click turns a knowledge point into an HTML podcast page you can actually lis
 
 ---
 
+### AI Lesson Cast (Paginated Slides + Per-Sentence Voice)
+
+Turns one knowledge point into a micro-lesson you can **watch and hear**: slides advance page by page, the voice plays sentence by sentence, the subtitle follows. **No video file is produced**, so fixing one line re-records only that line.
+
+- 🎬 **The page turns when the sentence ends**: one sentence is one audio clip, and the page waits for it to finish — no cutting a sentence in half; the current subtitle highlights, the previous one fades
+- 🎙️ **Two narration styles**: two-host dialogue for self-study (question and answer keep the pace), single narrator for classroom projection (does not talk over the teacher); both versions can coexist for the same topic and are picked by context
+- 📐 **Formulas and diagrams on demand**: a main formula, a sequence of steps, a numeric comparison or a classification gets a formula page or a flow / bar / tree diagram; narrative pages stay clean, at most two diagrams per cast
+- 🖥️ **Classroom presentation**: full-screen mode with space to pause, arrow keys to turn pages and digit keys to jump; the **presenter view** puts the next slide, the script and the clock on the teacher's own screen
+- 🎨 **Four slide themes**: clean white / warm sand / ink / pale green — Ink is for dim classrooms; a theme only affects the slide, never the rest of the app
+- ⏱ **Three durations**: 3 / 4 / 5 minutes (same as the podcast), 5 by default; over-length is trimmed by whole pages, never mid-page
+- ✏️ **Editable outline, single-page re-record**: rewrite lines, switch speaker, reorder or delete pages; changing one page re-synthesises only that page
+- 💾 **Resume where you left off**: reopen and continue from the exact page and sentence; finishing 80% of the pages marks the topic as studied
+- 🔒 **Shares the TTS master switch with the podcast**: generation stops when the switch is off, but **already generated casts keep playing**, so students are not cut off mid-course
+
+> **Admins and teachers can generate; students can watch (requires the TTS master switch to be on)**
+
+---
+
 ### AI-Generated HTML Resources
 
 Use AI directly in the Resource Center to generate HTML teaching resources:
@@ -451,7 +469,7 @@ Download directory file management:
 
 ## Learning and Practice
 
-The student side: knowledge Q&A, the AI companion, syllabus and targeted practice, wrong-answer review, wider reading and hands-on coding.
+The student side: watching AI lesson casts, knowledge Q&A, the AI companion, syllabus and targeted practice, wrong-answer review, wider reading and hands-on coding.
 
 ### AI Chat (Knowledge Q&A)
 
@@ -1088,7 +1106,7 @@ Centralized management of all system configuration parameters:
 - **🤖 Model Configuration**: APPID, API address, default chat model, long-text model, vision model, multimodal switch (all chosen from dropdowns)
 - **💬 AI Chat Settings**: Chat permission roles, daily request quota (switch plus limit)
 - **⚙️ System Limits**: File size limit, token validity, online timeout, IP protection and login gates
-- **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test
+- **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test; duration options plus length and page caps for both AI podcast and AI lesson cast live here too
 - **📚 Course Settings**: Course name list, question types
 - **🔔 Notifications**: Enabled notification types
 - **📁 File Type Whitelist**: Image/document extensions
@@ -1414,9 +1432,10 @@ SmartKBS/
 │   ├── whiteboard_ws.py          # whiteboard WebSocket manager
 │   ├── ws_manager.py             # discussion WebSocket manager
 │   ├── tts_service.py            # speech synthesis (roll-call voice)
+│   ├── lesson_cast_service.py    # AI lesson cast: paginated script, per-sentence TTS, figures
 │   ├── model_catalog.py          # model catalogue and capability limits
 │   ├── skill_engine.py           # AI skill injection engine
-│   ├── api/                      # 49 modules: business routers + AI invocation and image service
+│   ├── api/                      # 50 modules: business routers + AI invocation and image service
 │   │   ├── ai_service.py         # unified AI invocation (three modes)
 │   │   ├── image_gen_service.py  # Wanxiang image generation
 │   │   └── *_router.py           # exams / bank / interaction / analytics / whiteboard …
@@ -1533,6 +1552,8 @@ SmartKBS/
 | AI Resource Recommendations | ❌ | ✅ | ✅ |
 | AI-Generated HTML Resources | ❌ | ✅ | ✅ |
 | AI Podcast (generate) | ❌ | ✅ | ✅ |
+| AI Lesson Cast (generate) | ❌ | ✅ | ✅ |
+| AI Lesson Cast (watch) | ✅ | ✅ | ✅ |
 | Data Export | ❌ | ✅ | ✅ |
 | User Management | Change Password Only | ✅ Partial | ✅ Full |
 | System Announcements | ✅ View | ✅ Publish | ✅ Publish |
