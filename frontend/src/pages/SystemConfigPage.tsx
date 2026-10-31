@@ -350,6 +350,11 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'PODCAST_VOICE_B', labelKey: 'field_PODCAST_VOICE_B', descKey: 'field_PODCAST_VOICE_B_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
   { key: 'PODCAST_DURATION_OPTIONS', labelKey: 'field_PODCAST_DURATION_OPTIONS', descKey: 'field_PODCAST_DURATION_OPTIONS_desc', type: 'text', group: 'tts', required: false, placeholderKey: 'placeholder_PODCAST_DURATION_OPTIONS' },
   { key: 'PODCAST_MAX_SECONDS', labelKey: 'field_PODCAST_MAX_SECONDS', descKey: 'field_PODCAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
+  // AI 讲演：与播客共用语音总闸和音色，档位与上限独立可调（改完即生效，无需重启）
+  { key: 'CAST_DURATION_OPTIONS', labelKey: 'field_CAST_DURATION_OPTIONS', descKey: 'field_CAST_DURATION_OPTIONS_desc', type: 'text', group: 'tts', required: false, placeholderKey: 'placeholder_CAST_DURATION_OPTIONS' },
+  { key: 'CAST_DEFAULT_MINUTES', labelKey: 'field_CAST_DEFAULT_MINUTES', descKey: 'field_CAST_DEFAULT_MINUTES_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitMinute' },
+  { key: 'CAST_MAX_SECONDS', labelKey: 'field_CAST_MAX_SECONDS', descKey: 'field_CAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
+  { key: 'CAST_MAX_PAGES', labelKey: 'field_CAST_MAX_PAGES', descKey: 'field_CAST_MAX_PAGES_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitPage' },
 
   // ══ ④ 存储与安全 ══
   // 上传限制与类型白名单
@@ -2410,7 +2415,9 @@ const SystemConfigPage: React.FC = () => {
                 <Form.Item
                   name={field.key}
                   label={getLabelNode(field)}
-                  rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
+                  // 以前这里硬编码 required:true，导致显式声明 required:false 的数字项也顶着红色星号
+                  rules={field.required === false ? undefined
+                    : [{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
                   extra={descNode(field)}
                 >
                   <InputNumber

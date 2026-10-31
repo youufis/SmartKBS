@@ -21,7 +21,7 @@ import { Card, Space, Tag, Tooltip, Typography, Button, Dropdown, Empty, message
 import {
   NodeIndexOutlined, SettingOutlined, FormOutlined, BulbOutlined, DownOutlined,
   CheckCircleOutlined, ClockCircleOutlined, PlusOutlined, EditOutlined, CloseOutlined,
-  RobotOutlined, FileOutlined, SoundOutlined,
+  RobotOutlined, FileOutlined, SoundOutlined, PlayCircleOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { KnowledgePoint, CurriculumResource } from '../types'
@@ -49,6 +49,8 @@ interface KpDetailPanelProps {
   isStudent: boolean
   lessonPlanLoading?: boolean
   podcastDisabled?: boolean
+  /** 该知识点是否已有 AI 讲演：决定按钮是"播放"还是"生成"，也决定下拉项文案 */
+  hasCast?: boolean
   /** card = 自带标题与收起按钮的内联卡片；plain = 只出内容，交给外层 Drawer */
   variant?: 'card' | 'plain'
   onClose: () => void
@@ -66,6 +68,7 @@ const RES_COLLAPSE_AT = 6
 
 const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
   kp, resources, loading, isTeacherOrAdmin, isStudent, lessonPlanLoading, podcastDisabled,
+  hasCast = false,
   variant = 'card',
   onClose, onEdit, onLink, onAiPractice, onAiTool, onProgress, onManageBindings, onResourcesChanged,
 }) => {
@@ -143,6 +146,15 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
       label: podcastDisabled ? `${t('aiPodcast')}（${t('podcastTtsOffShort')}）` : t('aiPodcast'),
       disabled: podcastDisabled,
     },
+    {
+      // 与播客共用同一个语音合成总闸：没讲演时生成不了；已有讲演则仍可打开改文字
+      key: 'cast',
+      icon: <PlayCircleOutlined />,
+      label: hasCast
+        ? t('editCast')
+        : (podcastDisabled ? `${t('aiCast')}（${t('podcastTtsOffShort')}）` : t('aiCast')),
+      disabled: !hasCast && podcastDisabled,
+    },
   ]
 
   const body = (
@@ -151,6 +163,13 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
       <Space wrap size={4} style={{ marginBottom: 16 }}>
         {isTeacherOrAdmin && (
           <>
+            {/* 有讲演时把"播放"提成一级按钮：看是高频动作，生成/改是低频动作 */}
+            {hasCast && (
+              <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                onClick={() => navigate(`/learn/${kp.id}`)}>
+                {t('playCast')}
+              </Button>
+            )}
             <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(kp)}>{t('edit')}</Button>
             <Tooltip title={t('kpLinkTip')}>
               <Button size="small" icon={<SettingOutlined />} onClick={() => onLink(kp)}>{t('kpLink')}</Button>
@@ -167,6 +186,14 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
         )}
         {isStudent && (
           <>
+            {/* 讲演入口放最前：这是学生真正"学"的地方，比标记完成更主要。
+                没有讲演时不显示，避免点进去看到空态。 */}
+            {hasCast && (
+              <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                onClick={() => navigate(`/learn/${kp.id}`)}>
+                {t('watchCast')}
+              </Button>
+            )}
             {kp.progress_status !== 'completed' && (
               <Button type="primary" size="small" icon={<CheckCircleOutlined />} onClick={() => onProgress(kp.id, 'completed')}>
                 {t('cyMarkDone')}

@@ -400,6 +400,10 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "SHOWCASE_MIN_POINTS": (0, 100000),
     "SHOWCASE_AUTO_INTERVAL_MIN": (5, 1440),
     "PODCAST_MAX_SECONDS": (60, 1800),
+    # ── AI 讲演（与播客共用语音总闸，档位与上限独立）──
+    "CAST_DEFAULT_MINUTES": (1, 30),
+    "CAST_MAX_SECONDS": (60, 1800),
+    "CAST_MAX_PAGES": (3, 20),
     "REWARD_DAILY_QUIZ_SESSIONS": (0, 20),
     "REWARD_DAILY_ACADEMIC_POINTS": (0, 500),
     "REWARD_DAILY_CLASS_POINTS": (0, 500),

@@ -275,6 +275,7 @@ from backend.api.analytics_router import router as analytics_router
 from backend.api.interaction_router import router as interaction_router
 from backend.api.discussion_router import router as discussion_router
 from backend.api.curriculum_router import router as curriculum_router
+from backend.api.lesson_cast_router import router as lesson_cast_router
 from backend.api.wrong_book_router import router as wrong_book_router
 from backend.api.practice_router import router as practice_router
 from backend.api.recommend_router import router as recommend_router
@@ -319,6 +320,7 @@ app.include_router(analytics_router, prefix="/api/analytics", tags=["学情分�
 app.include_router(interaction_router, prefix="/api/interaction", tags=["课堂互动"])
 app.include_router(discussion_router, prefix="/api/interaction", tags=["分组讨论"])
 app.include_router(curriculum_router, prefix="/api/curriculum", tags=["课程大纲"])
+app.include_router(lesson_cast_router, prefix="/api/curriculum/lesson-cast", tags=["AI 讲演"])
 app.include_router(wrong_book_router, prefix="/api/wrong-book", tags=["错题本"])
 app.include_router(practice_router, prefix="/api/practice", tags=["自适应出题"])
 app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源推荐"])

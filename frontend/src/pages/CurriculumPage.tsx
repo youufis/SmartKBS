@@ -17,7 +17,7 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined,
   RightOutlined, DownOutlined, SettingOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
-  EyeOutlined, BulbOutlined, SoundOutlined, ThunderboltOutlined,
+  EyeOutlined, BulbOutlined, SoundOutlined, ThunderboltOutlined, PlayCircleOutlined,
   RestOutlined, InboxOutlined, StopOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -29,6 +29,8 @@ import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 import KpDetailPanel from '../components/KpDetailPanel'
+import { CastGenerateModal } from '../components/lessoncast/CastGenerateModal'
+import { getCastBatch, type CastBatch } from '../api/lessonCast'
 import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
@@ -172,6 +174,11 @@ const CurriculumPage: React.FC = () => {
 
   // ── 知识点详情（右侧面板） ──
   const [selectedKp, setSelectedKp] = useState<KnowledgePoint | null>(null)
+  // AI 讲演生成弹窗（两步式：大纲 → 音频）
+  const [castModalOpen, setCastModalOpen] = useState(false)
+  const [castKp, setCastKp] = useState<KnowledgePoint | null>(null)
+  // 哪些知识点已经有讲演：行内播放按钮与面板按钮文案都看它
+  const [castMap, setCastMap] = useState<CastBatch>({})
   // ── 挂接教材知识点（一对多；只到知识点级，不允许挂章节） ──
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkKp, setLinkKp] = useState<KnowledgePoint | null>(null)
@@ -765,6 +772,18 @@ const CurriculumPage: React.FC = () => {
     try {
       const data = await curriculumApi.getCurriculumTree()
       setCourses(data)
+      // 顺带问一句"哪些知识点已有讲演"，供行内播放按钮使用（不阻塞列表渲染）
+      const kpIds: number[] = []
+      const walk = (ch: ChapterTreeNode) => {
+        ;(ch.knowledge_points || []).forEach((k) => kpIds.push(k.id))
+        ;(ch.children || []).forEach(walk)
+      }
+      (data || []).forEach((c: Course) => (c.chapters || []).forEach(walk))
+      if (kpIds.length) {
+        getCastBatch(kpIds)
+          .then((r) => setCastMap(r.items || {}))
+          .catch(() => { /* 拿不到就不显示播放按钮，不影响课程列表 */ })
+      }
       // 开关开着时一起刷新：否则编辑停用课程的章节/知识点后，侧栏与统计不会跟进
       if (showInactive && isTeacherOrAdmin) await loadInactiveCourses()
     } catch (err: unknown) {
@@ -1176,6 +1195,10 @@ const CurriculumPage: React.FC = () => {
     else if (key === 'recommend') handleAiRecommend(selectedKp.id)
     else if (key === 'courseware') handleAiCourseware(selectedKp.id)
     else if (key === 'podcast') handleAiPodcast(selectedKp.id)
+    else if (key === 'cast') {
+      setCastKp(selectedKp)
+      setCastModalOpen(true)
+    }
   }
 
   // 收起右侧知识点详情面板
@@ -1358,10 +1381,28 @@ const CurriculumPage: React.FC = () => {
     </Space>
   )
 
-  const renderKpTitle = (kp: KnowledgePoint) => (
+  const renderKpTitle = (kp: KnowledgePoint) => {
+    const brief = castMap[String(kp.id)]
+    const hasCast = !!(brief?.duo || brief?.single)
+    const castMinutes = Math.max(1, Math.round(
+      ((brief?.duo || brief?.single)?.total_seconds || 0) / 60,
+    ))
+    return (
     <Space size="small" style={{ width: '100%' }}>
       <span style={{ fontSize: 12 }}>•</span>
       <Typography.Text>{kp.name}</Typography.Text>
+      {hasCast && (
+        <Tooltip title={`播放 AI 讲演（约 ${castMinutes} 分钟）`}>
+          <Button
+            type="text"
+            size="small"
+            className="kp-cast-play"
+            icon={<PlayCircleOutlined />}
+            style={{ color: 'var(--primary-color)' }}
+            onClick={(e) => { e.stopPropagation(); navigate(`/learn/${kp.id}`) }}
+          />
+        </Tooltip>
+      )}
       <Tag color={DIFFICULTY_COLORS[kp.difficulty]} style={{ fontSize: 11, lineHeight: '18px' }}>
         {t(DIFFICULTY_LABELS[kp.difficulty]) || kp.difficulty}
       </Tag>
@@ -1405,7 +1446,8 @@ const CurriculumPage: React.FC = () => {
         </Space>
       )}
     </Space>
-  )
+    )
+  }
 
   // ── 当前课程 ──
   const activeCourse = findCourseById(activeCourseId)
@@ -1450,6 +1492,7 @@ const CurriculumPage: React.FC = () => {
     isStudent,
     lessonPlanLoading,
     podcastDisabled,
+    hasCast: !!(castMap[String(selectedKp.id)]?.duo || castMap[String(selectedKp.id)]?.single),
     onClose: handleCloseKpPanel,
     onEdit: handleEditKp,
     onLink: openKpLink,
@@ -2517,6 +2560,19 @@ const CurriculumPage: React.FC = () => {
           </Space>
         )}
       </Modal>
+      {/* ── AI 讲演生成（两步式：先大纲、后音频）── */}
+      <CastGenerateModal
+        open={castModalOpen}
+        kp={castKp ? {
+          id: castKp.id,
+          name: castKp.name,
+          description: castKp.description || '',
+          learning_objectives: castKp.learning_objectives || '',
+        } : null}
+        onClose={() => setCastModalOpen(false)}
+        onDone={(kpId) => navigate(`/learn/${kpId}`)}
+      />
+
     </Layout>
   )
 }

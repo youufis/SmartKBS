@@ -1224,6 +1224,15 @@
   "placeholder_PODCAST_DURATION_OPTIONS": "例如：3,4,5",
   "field_PODCAST_MAX_SECONDS": "播客硬上限（秒）",
   "field_PODCAST_MAX_SECONDS_desc": "超过这个时长的脚本会被截断，保证不产出超标页面（60~1800 秒，默认 300）。建议不小于最大档位 × 60。",
+  "field_CAST_DURATION_OPTIONS": "讲演时长档位",
+  "field_CAST_DURATION_OPTIONS_desc": "用逗号分隔，单位分钟。与播客档位独立，改完即生效。示例：3,4,5",
+  "placeholder_CAST_DURATION_OPTIONS": "3,4,5",
+  "field_CAST_DEFAULT_MINUTES": "讲演默认时长",
+  "field_CAST_DEFAULT_MINUTES_desc": "打开「AI 讲演」弹窗时的默认档位，必须在上面的档位里，否则自动取第二档",
+  "field_CAST_MAX_SECONDS": "讲演音频总长上限",
+  "field_CAST_MAX_SECONDS_desc": "单节讲演的总时长硬上限（秒）。超出时按整页截断，不会切在半页",
+  "field_CAST_MAX_PAGES": "讲演页数上限",
+  "field_CAST_MAX_PAGES_desc": "单节讲演最多几页（8~10 较合适）。超出的页会被丢弃",
   "ttsGroupAuto": "自动（按模型挑选）",
   "ttsVoiceAuto": "自动（按模型挑选）",
   "field_TTS_ENABLED_desc": "总开关。关闭时全线不产生任何计费请求，智能点名的语音播报也会一并停用。",
@@ -1481,5 +1490,6 @@
   "qtypeLabelPlaceholder": "显示名，如 单选题",
   "qtypeAddRow": "添加一行",
   "qtypeDupKey": "标识重复：{{keys}}",
-  "saveShort": "保存"
+  "saveShort": "保存",
+  "unitPage": "页"
 }

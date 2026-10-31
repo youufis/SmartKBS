@@ -66,6 +66,8 @@ import DiscussionPage from './pages/DiscussionPage'
 import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 import CurriculumPage from './pages/CurriculumPage'
+import LessonCastPage from './pages/LessonCastPage'
+import PresenterPage from './pages/PresenterPage'
 import WrongBookPage from './pages/WrongBookPage'
 import SharedCenterPage from './pages/SharedCenterPage'
 import StudentExamTaskPage from './pages/StudentExamTaskPage'
@@ -151,6 +153,10 @@ function App() {
         <Routes>
           <Route path="/login" element={isLoggedIn ? <Navigate to="/dashboard" /> : <LoginPage />} />
           <Route path="/exam-take/:examId" element={isLoggedIn && user?.role === 'student' ? <ExamTakePage /> : <Navigate to={isLoggedIn ? '/chat' : '/login'} />} />
+          {/* AI 讲演播放页：与考试作答页同级，脱离主布局做沉浸式（舞台 + 右栏目录 + 字幕） */}
+          <Route path="/learn/:kpId" element={isLoggedIn ? <LessonCastPage /> : <Navigate to="/login" />} />
+          {/* 演讲者视图：投屏时放在老师自己屏幕上，显示下一页与逐字稿 */}
+          <Route path="/learn/:kpId/presenter" element={isLoggedIn ? <PresenterPage /> : <Navigate to="/login" />} />
           <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
             <Route index element={<DashboardPage />} />
             <Route path="dashboard" element={<DashboardPage />} />

@@ -1340,6 +1340,62 @@ def init_db():
                 pass
 
             # ═══════════════════════════════════════════════
+            # AI 讲演模块（知识点级「音频 + 分页画面」）
+            # 设计见 docs/ai-lessoncast/00-方案建议.md
+            # ═══════════════════════════════════════════════
+
+            # ── 讲演主表：一个知识点每种讲述风格最多一版（换档位=覆盖当前版）──
+            # pages_json 存分页大纲（含未合成的台词），segments_json 存音频段
+            # （page/speaker/text/url/seconds）。页面由前端版式模板渲染，不落 HTML 文件。
+            c.execute("""CREATE TABLE IF NOT EXISTS lesson_casts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kp_id INTEGER NOT NULL REFERENCES knowledge_points(id),
+                course_id INTEGER DEFAULT NULL,
+                chapter_id INTEGER DEFAULT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'draft',
+                speaker_mode TEXT NOT NULL DEFAULT 'duo',
+                title TEXT DEFAULT '',
+                summary TEXT DEFAULT '',
+                name_a TEXT DEFAULT '主讲',
+                name_b TEXT DEFAULT '互动',
+                voice_a TEXT DEFAULT '',
+                voice_b TEXT DEFAULT '',
+                minutes INTEGER DEFAULT 5,
+                pages_json TEXT DEFAULT '[]',
+                segments_json TEXT DEFAULT '[]',
+                total_seconds REAL DEFAULT 0,
+                plan_hash TEXT DEFAULT '',
+                audio_hash TEXT DEFAULT '',
+                created_by TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+
+            # ── 播放断点：与学生「知识点掌握状态」分开，避免污染进度统计口径 ──
+            # 不加 users 外键：断点是可随时重建的附属数据，不该挡住用户删除。
+            c.execute("""CREATE TABLE IF NOT EXISTS cast_playback (
+                kp_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                cast_id INTEGER NOT NULL,
+                page_idx INTEGER DEFAULT 0,
+                seg_idx INTEGER DEFAULT 0,
+                pos REAL DEFAULT 0,
+                done_pages TEXT DEFAULT '[]',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (kp_id, username)
+            )""")
+
+            try:
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cast_kp_mode_ver "
+                          "ON lesson_casts(kp_id, speaker_mode, version)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cast_kp_status ON lesson_casts(kp_id, status)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cast_course ON lesson_casts(course_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cast_play_user ON cast_playback(username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ═══════════════════════════════════════════════
             # 资源分组模块（v2.7）
             # ═══════════════════════════════════════════════
 

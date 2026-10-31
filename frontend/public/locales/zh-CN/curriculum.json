@@ -478,5 +478,9 @@
   "kpUnbindConfirm": "确认解绑该资源？",
   "kpResExpand": "已显示前 {{shown}} 个，展开全部 {{count}} 个",
   "kpResCollapse": "收起列表",
-  "kpViewStatsTip": "去重人数 / 总浏览次数"
+  "kpViewStatsTip": "去重人数 / 总浏览次数",
+  "aiCast": "AI 讲演",
+  "watchCast": "看讲演",
+  "playCast": "讲演",
+  "editCast": "AI 编辑"
 }
