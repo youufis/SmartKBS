@@ -327,7 +327,23 @@ CAST_SCRIPT_PROMPT = """你是一位擅长做「微课」的教学设计师。�
 - **每一句台词不超过 60 字**。一句 = 一个字幕单元 = 一次语音合成，写长了字幕会跟不上
 - 每页 90~140 字（约 22~35 秒讲完）
 - 第一页必须是 `cover`（封面），最后一页建议 `summary`（收束）
-- 中间页在 `bullets` / `compare` / `steps` 页型里选最贴合内容的一种；`cards` 用于并列的几条结论
+- 中间页在 `bullets` / `compare` / `steps` / `formula` / `figure` 里选最贴合内容的一种；`cards` 用于并列的几条结论
+
+## 公式与图示：只在"非它不可"时才加
+
+按**内容信号**判断，不是按页数凑：
+- 出现**主公式、定理、关系式** → `layout:"formula"`，公式写进 `formula`，再用 `formulaNote` 一句话说清它表达什么
+- 出现**步骤、阶段、先后** → `layout:"figure"` + `figure.kind:"flow"`（2~4 步）
+- 出现**数量对比、占比、倍数** → `figure.kind:"bars"`（2~4 条，给真实数值）
+- 出现**分类、包含关系** → `figure.kind:"tree"`（一个父项 + 2~4 个子项）
+- 只是叙述、举例、观点 → **不要加图**。图多必碎
+
+硬约束：
+- 整节**最多 2 个 `figure`、1 个 `formula` 页**
+- 有图的页，台词字数**减少约 25%**（图占了版面，话就别再说了）
+- 公式只出现在**画面**：行内写成 `$v_0$`，整页放进 `formula` 字段
+- **台词里绝对不能出现 `$`、`\`、`{`、`}`**。公式要用嘴说：
+  "速度等于初速度加上加速度乘时间"，不要念成"v 等于 v 零加 a t"
 
 ## 画面文字（points / left / right / steps / cards）
 - 画面只放**关键词**，不放整句：每条 ≤18 字，3~4 条
@@ -352,17 +368,26 @@ CAST_SCRIPT_PROMPT = """你是一位擅长做「微课」的教学设计师。�
 - pages：页数组，每页字段见下
 
 每页必需字段：
-- layout：只能是 cover / bullets / compare / steps / cards / figure / summary 之一
+- layout：只能是 cover / bullets / compare / steps / cards / figure / formula / summary 之一
 - title：页面标题（≤16 字）
-- lines：台词数组，元素为 {{"speaker":"A"或"B","text":"一句台词"}}
+- lines：台词数组，元素为 {{"speaker":"A"或"B","text":"一句台词"}}（**台词里不能有 $ \ {{ }}**）
 
 按 layout 追加的字段：
 - cover：subtitle（一句话副标题）
-- bullets / summary：points（字符串数组，3~4 条）
+- bullets / summary：points（字符串数组，3~4 条，可含行内公式，如 $v_0$）
 - compare：left 与 right，各为 {{"head":"标题","items":["条目1","条目2","条目3"]}}
 - steps：steps，元素为 {{"n":"第一步","t":"短标题","d":"一句话说明"}}，共 3 步
 - cards：cards，元素为 {{"k":"一","v":"一句结论"}}，共 3 条
-- figure：caption（图注，≤30 字）。image 留空，由老师后续选配图
+- formula：formula（LaTeX 本体，**不带 $ 定界符**，如 "v = v_0 + at"）、formulaNote（它表达什么，≤30 字）
+- figure：figure 对象，按 kind 给不同字段（见下）
+
+figure 的四种 kind：
+- {{"kind":"flow","caption":"图注","direction":"h","steps":[{{"label":"短标题","note":"补充"}}]}}   2~4 步
+- {{"kind":"bars","caption":"图注","unit":"%","items":[{{"label":"甲","value":20}}]}}                 2~4 条，value 填数字
+- {{"kind":"tree","caption":"图注","root":"总类","children":[{{"label":"子类","note":"补充"}}]}}        2~4 个分支
+- {{"kind":"svg","caption":"图注","svg":"<svg viewBox=\"0 0 800 450\" …>…</svg>"}}
+  **svg 是最后手段**：只有当上面的三种都表达不了时才用。要求只用 rect / circle / line / path / text，
+  文字 font-size ≥ 24，不要写 script、不要引用外部图片、不要用 CSS class
 
 ## 示例（只演示字段写法，**不要照抄页数、不要照抄内容**）
 
@@ -371,4 +396,32 @@ CAST_SCRIPT_PROMPT = """你是一位擅长做「微课」的教学设计师。�
 {{"layout":"bullets","title":"价值，是对谁的价值？","points":["对人：满足需要","对社会：推动产业","对自然：改造环境"],"lines":[{{"speaker":"B","text":"老师，我们天天说技术有价值，那到底是对谁有价值？"}},{{"speaker":"A","text":"至少三个方向：对人、对社会、对自然。"}},{{"speaker":"A","text":"三条要一起看，只看一条就容易片面。"}}]}},
 {{"layout":"summary","title":"带走这三句话","points":["价值不是先进，是满足正当需要","看对象、看后果、看范围","技术越强，越要问它对自然做了什么"],"lines":[{{"speaker":"A","text":"记住这三句话，我们进入下一个知识点。"}}]}}
 ]}}
+
+图示页的写法（只演示结构）：
+{{"layout":"figure","title":"溶解的三个阶段","figure":{{"kind":"flow","caption":"从入水到饱和","steps":[
+{{"label":"扩散","note":"分子进入水分子之间"}},{{"label":"水合","note":"被水分子包围"}},{{"label":"饱和","note":"不能再溶解"}}]}},
+"lines":[{{"speaker":"A","text":"整个过程分三步。"}}]}}
+"""
+
+
+#: 帮老师写"这个知识点讲什么"。产出是**草稿**，写回数据库发生在老师确认后的建大纲那一步，
+#: 这里只回文本，不落库 —— 老师改了才作数。
+CAST_DESCRIBE_PROMPT = """请为下面这个知识点写一段「这节课讲什么」的说明，供老师确认后作为生成讲稿的依据。
+
+## 知识点信息
+- 课程：{course_name}
+- 章节：{chapter_name}
+- 知识点：{kp_name}
+- 学习目标：{learning_objectives}
+- 学段：{grade_hint}
+
+## 要求
+- 1~2 句话，40~80 字
+- 说清三件事：讲什么概念、用什么例子或场景切入、学生要理解到什么
+- 像老师在办公室跟同事介绍这节课，不要写「本课将引导学生……」这类教案套话
+- 不要编号、不要分点、不要引号、不要「这段说明：」之类的前缀
+- 只输出这段说明本身
+
+## 示例（只示范语气和结构，不要照抄内容）
+通过电灯、流水线、一次性餐具三个例子，理解技术对人、对社会、对自然的价值，重点分清「有用」和「有价值」的区别。
 """

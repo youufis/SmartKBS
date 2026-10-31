@@ -8,6 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Input, Modal, Radio, Select, Spin, message } from 'antd';
+import { BulbOutlined } from '@ant-design/icons';
 import {
   createCastOutline,
   getCastMeta,
@@ -15,6 +16,7 @@ import {
   publishCast,
   regenCastPage,
   saveCastOutline,
+  suggestCastDescription,
   synthesizeCastAudio,
   type CastMeta,
   type CastPage,
@@ -54,8 +56,13 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
   const [regenIdx, setRegenIdx] = useState<number | null>(null);
   const [err, setErr] = useState('');
   const [tip, setTip] = useState('');
+  const [descLoading, setDescLoading] = useState(false);
 
   const originalRef = useRef<string>('');
+  /** 记录"已经为哪个知识点自动生成过描述"，避免 StrictMode 双挂载打两次 */
+  const descGenRef = useRef<number | null>(null);
+  /** 老师是否已经动过输入框：动过就别让晚到的 AI 结果把他写的内容冲掉 */
+  const descTouchedRef = useRef(false);
 
   useEffect(() => {
     if (!open || !kp) return;
@@ -70,6 +77,8 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
     setRegenIdx(null);
     setDesc('');
     setNeedDesc(!kp.description && !kp.learning_objectives);
+    descGenRef.current = null;
+    descTouchedRef.current = false;
 
     setMetaLoading(true);
     getCastMeta(kp.id)
@@ -107,6 +116,32 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
     () => pages.reduce((s, p) => s + (p.lines?.length || 0), 0),
     [pages],
   );
+
+  /** AI 帮写"讲什么"：只是草稿，老师改完、点生成大纲时才写回知识点。
+   *  force=false 时（自动拟稿）若老师已经开始打字，就不覆盖他的内容。 */
+  const genDesc = async (force = false) => {
+    if (!kp) return;
+    setDescLoading(true);
+    setErr('');
+    try {
+      const r = await suggestCastDescription(kp.id);
+      if (force || !descTouchedRef.current) setDesc(r.description || '');
+    } catch (e: any) {
+      const d = e?.response?.data?.detail;
+      setErr(typeof d === 'string' ? d : 'AI 生成失败，请重试');
+    } finally {
+      setDescLoading(false);
+    }
+  };
+
+  // 描述为空时，打开弹窗就先拟一版草稿 —— 别让老师卡在"写一句"这道门槛上
+  useEffect(() => {
+    if (!open || !kp || !needDesc) return;
+    if (descGenRef.current === kp.id) return;
+    descGenRef.current = kp.id;
+    void genDesc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, kp, needDesc]);
 
   const doOutline = async () => {
     if (!kp) return;
@@ -288,19 +323,36 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
 
               {needDesc ? (
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 13, marginBottom: 4 }}>
-                    这个知识点讲什么？<span style={{ color: 'var(--error-color)' }}>（必填，会写回知识点描述）</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 13 }}>这个知识点讲什么？</span>
+                    <span style={{ fontSize: 12, color: 'var(--error-color)' }}>（必填，会写回知识点描述）</span>
+                    <span style={{ flex: 1 }} />
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<BulbOutlined />}
+                      loading={descLoading}
+                      onClick={() => genDesc(true)}
+                      style={{ color: 'var(--primary-color)', paddingInline: 4 }}
+                    >
+                      {desc ? '换一个' : 'AI 帮我写'}
+                    </Button>
                   </div>
                   <Input.TextArea
                     rows={3}
                     value={desc}
                     onChange={(e) => setDesc(e.target.value)}
-                    placeholder="例：通过电灯、流水线、一次性餐具三个例子，理解技术对人、对社会、对自然的价值"
+                    placeholder={descLoading
+                      ? '正在按课程、章节与学习目标拟一版…'
+                      : '例：通过电灯、流水线、一次性餐具三个例子，理解技术对人、对社会、对自然的价值'}
                     maxLength={200}
                     showCount
+                    disabled={descLoading}
                   />
                   <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                    补这一次，AI 课件 / 播客 / 教案也会跟着变准。
+                    {descLoading
+                      ? 'AI 正在拟稿，稍等一下…'
+                      : '这是 AI 拟的草稿，可以直接改。补这一次，AI 课件 / 播客 / 教案也会跟着变准。'}
                   </div>
                 </div>
               ) : null}

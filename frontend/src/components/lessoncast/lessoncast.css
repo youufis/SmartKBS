@@ -531,3 +531,119 @@
   .lc-back-text { display: none; }
   .lc-back { padding: 0; width: 30px; justify-content: center; }
 }
+
+/* ── 行内公式（画面里的 $...$）── */
+.lc-rt { display: inline; }
+.lc-rt .katex { font-size: 1em; }
+.lc-rt p { display: inline; margin: 0; }
+.lc-rt .katex-display { display: inline; margin: 0; }
+
+/* ── 版式：整页公式 ── */
+.lc-s-formula {
+  margin: 1.2em 0 .2em; display: flex; justify-content: center;
+  font-size: 1.65em; color: var(--s-ink); max-width: 100%; overflow-x: auto;
+}
+.lc-s-formula .katex-display { margin: 0; }
+.lc-s-formula .katex { font-size: 1em; }
+/* 语法错时 KaTeX 会吐出 .katex-error（红色源码），保证可见而不是白屏 */
+.lc-s-formula .katex-error {
+  color: var(--error-color); font-size: .5em; font-family: monospace;
+  white-space: pre-wrap; word-break: break-all;
+}
+.lc-s-formula-note {
+  font-size: 1.02em; color: var(--s-muted); text-align: center;
+  margin-top: 1.1em; line-height: 1.7;
+}
+
+/* ── 参数化图示 ── */
+.lc-fig { margin-top: 1.5em; display: flex; flex-direction: column; gap: .9em; }
+.lc-fig-cap { font-size: .88em; color: var(--s-muted); text-align: center; }
+
+/* flow：节点紧排、箭头独立成段（均分步宽会让箭头悬空） */
+.lc-fig-flow { display: flex; align-items: flex-start; justify-content: center; }
+.lc-fig-flow.is-v { flex-direction: column; align-items: center; }
+.lc-fig-step {
+  flex: 0 1 auto; min-width: 5.2em; max-width: 9em; position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: .35em;
+}
+.lc-fig-arrow { flex: 0 0 1.5em; height: 1.5em; position: relative; margin-top: .5em; }
+.lc-fig-arrow::before {
+  content: ''; position: absolute; left: .1em; right: .42em; top: 50%;
+  height: 2px; margin-top: -1px; background: var(--s-accent); opacity: .45;
+}
+.lc-fig-arrow::after {
+  content: ''; position: absolute; right: .1em; top: 50%; margin-top: -3.5px;
+  border-left: 5px solid var(--s-accent);
+  border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
+  opacity: .6;
+}
+.lc-fig-flow.is-v .lc-fig-arrow { margin: 0; transform: rotate(90deg); }
+.lc-fig-pill {
+  display: flex; align-items: center; gap: .5em; max-width: 100%;
+  padding: .5em .85em; border-radius: 99px;
+  background: var(--s-accent-soft); color: var(--s-strong); font-weight: 600;
+  font-size: .98em;
+}
+.lc-fig-pill .idx {
+  width: 1.35em; height: 1.35em; flex: 0 0 auto; border-radius: 50%;
+  background: var(--s-accent); color: var(--s-bg);
+  display: grid; place-items: center; font-size: .74em; font-weight: 700;
+}
+.lc-fig-pill .lb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-fig-note { font-size: .8em; color: var(--s-muted); text-align: center; line-height: 1.5; }
+
+/* bars：按最大值归一，永不溢出 */
+.lc-fig-bars { display: flex; flex-direction: column; gap: .6em; }
+.lc-fig-bar { display: flex; align-items: center; gap: .7em; font-size: .95em; }
+.lc-fig-bar .lb {
+  flex: 0 0 5.2em; text-align: right; color: var(--s-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lc-fig-bar .track {
+  flex: 1; height: .78em; border-radius: 99px;
+  background: var(--s-fill); overflow: hidden;
+}
+.lc-fig-bar .track i { display: block; height: 100%; border-radius: 99px; background: var(--s-accent); }
+.lc-fig-bar .vl {
+  flex: 0 0 3.6em; color: var(--s-strong); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* tree：父项 + 分支，连线用伪元素 */
+.lc-fig-tree { display: flex; flex-direction: column; align-items: center; gap: .55em; }
+.lc-fig-root {
+  padding: .45em 1.2em; border-radius: 8px;
+  background: var(--s-accent); color: var(--s-bg);
+  font-weight: 600; font-size: .96em;
+}
+.lc-fig-kids { display: flex; gap: 1.3em; position: relative; padding-top: .7em; }
+.lc-fig-kids::before {
+  content: ''; position: absolute; top: 0; left: 22%; right: 22%;
+  height: 1.5px; background: color-mix(in srgb, var(--s-accent) 38%, transparent);
+}
+.lc-fig-kid {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: .15em;
+  padding: .45em .85em; border: 1px solid var(--s-line); border-radius: 8px;
+  background: var(--s-soft); font-size: .92em;
+}
+.lc-fig-kid::before {
+  content: ''; position: absolute; top: -.7em; left: 50%;
+  width: 1.5px; height: .7em; background: color-mix(in srgb, var(--s-accent) 38%, transparent);
+}
+.lc-fig-kid .nt { font-size: .82em; color: var(--s-muted); }
+
+/* svg（模型直出、后端已净化） */
+.lc-fig-svg { display: flex; justify-content: center; max-height: 8.5em; }
+.lc-fig-svg svg { max-width: 100%; max-height: 100%; height: auto; }
+
+/* 编辑器里的图示/公式标记与"含公式"提醒 */
+.lc-editor-tag.is-fig {
+  background: color-mix(in srgb, var(--warning-color) 16%, transparent);
+  color: #a06000;
+}
+.lc-editor-warn {
+  flex: 0 0 auto; width: 16px; height: 16px; margin-top: 5px;
+  border-radius: 50%; background: var(--warning-color); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 16px; text-align: center;
+  cursor: help;
+}

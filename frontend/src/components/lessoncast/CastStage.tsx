@@ -6,7 +6,19 @@
  */
 import { useEffect, useRef } from 'react';
 import type { CastPage, SpeakerMode } from '../../api/lessonCast';
+import FormulaRenderer from '../FormulaRenderer';
+import { FigureView } from './FigureViews';
 import type { CastTheme } from './themes';
+
+/** 画面文字：含 $ 才走公式渲染，纯文本保持原样（避免给每行都套一层 Markdown） */
+function RichText({ text }: { text: string }) {
+  if (!text.includes('$')) return <>{text}</>;
+  return (
+    <span className="lc-rt">
+      <FormulaRenderer content={text} inline />
+    </span>
+  );
+}
 
 interface CastStageProps {
   page?: CastPage;
@@ -37,8 +49,8 @@ function Bullets({ page }: { page: CastPage }) {
             <div className="lc-s-item" key={i}>
               <span className="lc-s-num">{i + 1}</span>
               <div>
-                <span className="lc-s-key">{key}</span>
-                {dim ? <span className="lc-s-dim">{dim}</span> : null}
+                <span className="lc-s-key"><RichText text={key} /></span>
+                {dim ? <span className="lc-s-dim"><RichText text={dim} /></span> : null}
               </div>
             </div>
           );
@@ -60,7 +72,7 @@ function Compare({ page }: { page: CastPage }) {
         {sides.map(({ side, cls }, i) => (
           <div className={`lc-s-col ${cls}`} key={i}>
             <div className="lc-s-col-h"><i />{side?.head || (i === 0 ? '一方面' : '另一方面')}</div>
-            <ul>{((side?.items) || []).map((it, j) => <li key={j}>{it}</li>)}</ul>
+            <ul>{((side?.items) || []).map((it, j) => <li key={j}><RichText text={it} /></li>)}</ul>
           </div>
         ))}
       </div>
@@ -104,16 +116,36 @@ function Cards({ page }: { page: CastPage }) {
   );
 }
 
+/** 整页公式：交块级 KaTeX 渲染。语法错时 KaTeX 会输出 .katex-error（可见的红色原文），不会白屏 */
+function FormulaPage({ page }: { page: CastPage }) {
+  return (
+    <>
+      <div className="lc-s-h2">{page.title}</div>
+      <div className="lc-s-formula">
+        <FormulaRenderer content={`$$${page.formula || ''}$$`} />
+      </div>
+      {page.formulaNote ? <div className="lc-s-formula-note">{page.formulaNote}</div> : null}
+    </>
+  );
+}
+
 function Figure({ page }: { page: CastPage }) {
   return (
     <>
       <div className="lc-s-h2">{page.title}</div>
-      <div className="lc-s-figure">
-        {page.image
-          ? <img src={page.image} alt={page.caption || page.title} />
-          : <div className="ph">此页建议配一张图</div>}
-        {page.caption ? <div className="cap">{page.caption}</div> : null}
-      </div>
+      {page.figure ? <FigureView fig={page.figure} /> : null}
+      {!page.figure && page.image ? (
+        <div className="lc-s-figure">
+          <img src={page.image} alt={page.caption || page.title} />
+          {page.caption ? <div className="cap">{page.caption}</div> : null}
+        </div>
+      ) : null}
+      {!page.figure && !page.image ? (
+        <div className="lc-s-figure">
+          <div className="ph">此页建议配一张图</div>
+          {page.caption ? <div className="cap">{page.caption}</div> : null}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -135,6 +167,8 @@ function LayoutBody({ page }: { page: CastPage }) {
       return <Steps page={page} />;
     case 'cards':
       return <Cards page={page} />;
+    case 'formula':
+      return <FormulaPage page={page} />;
     case 'figure':
       return <Figure page={page} />;
     case 'summary':

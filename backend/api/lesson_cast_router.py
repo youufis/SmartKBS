@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -192,6 +193,57 @@ async def batch_has_cast(request: Request, kp_ids: str = Query("")):
 
 
 # ══════════════════════════ 大纲 ══════════════════════════
+
+
+def _clean_description(raw: str) -> str:
+    """把 AI 写的描述压成一行纯文本：去代码块、去引号、去"这段说明："前缀。"""
+    s = str(raw or "").strip()
+    s = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", s).strip()
+    s = re.sub(r"^(这段说明|描述|说明|课堂内容)[：:]\s*", "", s)
+    s = s.strip("\"'“”『』「」《》 \n")
+    s = re.sub(r"\s*\n+\s*", "", s)
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    return s[:200]
+
+
+@router.post("/{kp_id}/describe", summary="AI 帮写知识点描述（草稿，老师可改）")
+async def suggest_description(kp_id: int, request: Request):
+    """老师没写知识点描述时，别让他卡在"讲什么"这一步上。
+
+    只回文本、**不落库**：写回数据库发生在老师确认后建大纲那一步。老师改过的才算数。
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+
+    kp = _kp_of(kp_id)
+    keys = get_api_keys(user["username"])
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    from backend.prompts.teaching import CAST_DESCRIBE_PROMPT
+
+    prompt = (CAST_DESCRIBE_PROMPT
+              .replace("{course_name}", str(kp.get("course_name") or ""))
+              .replace("{chapter_name}", str(kp.get("chapter_name") or ""))
+              .replace("{kp_name}", str(kp.get("name") or ""))
+              .replace("{learning_objectives}", str(kp.get("learning_objectives") or "（未填写）"))
+              .replace("{grade_hint}", str(kp.get("course_grade") or "中学")))
+
+    try:
+        raw = await call_ai_async(prompt, api_key, max_tokens=300,
+                                  kb_query=str(kp.get("name") or ""))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[cast] 帮写描述失败 kp={kp_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)[:120]}")
+
+    desc = _clean_description(raw)
+    if not desc:
+        raise HTTPException(status_code=502, detail="AI 没有给出有效内容，请重试")
+
+    logger.info(f"[cast] 帮写描述 kp={kp_id} user={user['username']} {len(desc)} 字")
+    return {"description": desc, "kp_id": kp_id, "kp_name": kp.get("name") or ""}
 
 
 class OutlineIn(BaseModel):

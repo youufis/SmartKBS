@@ -25,7 +25,11 @@ interface OutlineEditorProps {
 
 const LAYOUT_LABEL: Record<string, string> = {
   cover: '封面', bullets: '要点', compare: '对比', steps: '步骤',
-  cards: '卡片', figure: '配图', summary: '小结',
+  cards: '卡片', figure: '配图', formula: '公式', summary: '小结',
+};
+
+const FIGURE_LABEL: Record<string, string> = {
+  flow: '流程', bars: '对比', tree: '分类', svg: '示意图',
 };
 
 /** 一句台词建议长度：超过就不像"一句话"，字幕会分两行 */
@@ -90,6 +94,10 @@ export function OutlineEditor({
               </button>
               <span className="lc-editor-idx">{i + 1}</span>
               <span className="lc-editor-tag">{LAYOUT_LABEL[p.layout] || p.layout}</span>
+              {p.figure ? (
+                <span className="lc-editor-tag is-fig">图·{FIGURE_LABEL[p.figure.kind] || p.figure.kind}</span>
+              ) : null}
+              {p.formula ? <span className="lc-editor-tag is-fig">含公式</span> : null}
               <Input
                 size="small"
                 value={p.title}
@@ -138,6 +146,11 @@ export function OutlineEditor({
                         onChange={(e) => patchLine(i, li, { text: e.target.value })}
                         status={long ? 'warning' : undefined}
                       />
+                      {ln.warn ? (
+                        <Tooltip title="原文含公式符号，已自动转成口语，建议改写成更自然的说法">
+                          <span className="lc-editor-warn">!</span>
+                        </Tooltip>
+                      ) : null}
                       <span className={`lc-editor-len${long ? ' over' : ''}`}>{ln.text.length}</span>
                       <Tooltip title="删除这一句">
                         <button type="button" className="lc-editor-mini danger"

@@ -12,11 +12,48 @@ export interface CastSegment {
   seconds: number;
 }
 
-export type CastLayout = 'cover' | 'bullets' | 'compare' | 'steps' | 'cards' | 'figure' | 'summary';
+export type CastLayout =
+  | 'cover' | 'bullets' | 'compare' | 'steps' | 'cards' | 'figure' | 'formula' | 'summary';
 
 export interface CastSide {
   head: string;
   items: string[];
+}
+
+/** 参数化图形：坐标由前端算，AI 只给结构与数值（这样不会画歪、也能跟着主题变色） */
+export type CastFigureKind = 'flow' | 'bars' | 'tree' | 'svg';
+
+export interface CastFigureStep {
+  label: string;
+  note?: string;
+}
+
+export interface CastFigureItem {
+  label: string;
+  value: number;
+}
+
+export interface CastFigure {
+  kind: CastFigureKind;
+  caption?: string;
+  /** flow */
+  steps?: CastFigureStep[];
+  direction?: 'h' | 'v';
+  /** bars */
+  items?: CastFigureItem[];
+  unit?: string;
+  /** tree */
+  root?: string;
+  children?: CastFigureStep[];
+  /** svg：后端已 sanitize + is_usable_svg 校验，为空表示这张图被丢弃 */
+  svg?: string;
+}
+
+/** 一句台词。warn=true 表示原文含公式符号、已转成口语，建议老师改写 */
+export interface CastLine {
+  speaker: 'A' | 'B';
+  text: string;
+  warn?: boolean;
 }
 
 export interface CastPage {
@@ -29,9 +66,14 @@ export interface CastPage {
   right?: CastSide;
   steps?: [string, string][];
   cards?: [string, string][];
+  /** 整页公式（LaTeX 本体，不带 $ 定界符） */
+  formula?: string;
+  formulaNote?: string;
+  figure?: CastFigure;
+  /** 旧数据兼容：单张图片 */
   image?: string;
   caption?: string;
-  lines?: { speaker: 'A' | 'B'; text: string }[];
+  lines?: CastLine[];
   audio: CastSegment[];
 }
 
@@ -134,6 +176,15 @@ export async function getCastBatch(kpIds: number[]): Promise<{ items: CastBatch 
   const { data } = await apiClient.get('/api/curriculum/lesson-cast/batch', {
     params: { kp_ids: kpIds.join(',') },
   });
+  return data;
+}
+
+/** AI 帮写知识点描述：只回文本、不落库，老师改过之后建大纲时才写回 */
+export async function suggestCastDescription(kpId: number): Promise<{
+  description: string; kp_id: number; kp_name: string;
+}> {
+  const { data } = await apiClient.post(
+    `/api/curriculum/lesson-cast/${kpId}/describe`, null, { timeout: 60000 });
   return data;
 }
 

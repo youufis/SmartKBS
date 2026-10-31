@@ -40,8 +40,8 @@ CHARS_PER_MINUTE = {"single": 270, "duo": 240}
 #: 页数 ≈ 分钟 × 1.8（5 分钟 ≈ 9 页）
 PAGES_PER_MINUTE = 1.8
 
-#: 允许的版式（与前端 components/lessoncast/layouts 一一对应）
-LAYOUTS = {"cover", "bullets", "compare", "steps", "figure", "summary", "cards"}
+#: 允许的版式（与前端 components/lessoncast 里的渲染分支一一对应）
+LAYOUTS = {"cover", "bullets", "compare", "steps", "figure", "formula", "summary", "cards"}
 
 
 class CastDisabled(Exception):
@@ -148,29 +148,91 @@ def plan_pages(minutes: int) -> int:
 
 # ══════════════════════════ 脚本 ══════════════════════════
 
-_MD_JUNK = re.compile(r"[*_`#>]+")
 _STAGE_WHISPER = re.compile(r"[（(]\s*(?:笑|停顿|停一下|背景音乐|音乐|音效|语气|旁白)[^)）]{0,6}[)）]")
 _SPACE = re.compile(r"\s+")
+#: 画面文字：可以带公式，所以 **不能删 `_` 与 `^`**（它们是 LaTeX 的下标和上标）
+_MD_JUNK_MATH = re.compile(r"[*`#>]+")
+#: 台词：要朗读，下划线纯属噪音
+_MD_JUNK_SPEECH = re.compile(r"[*_`#>]+")
+
+#: 台词里的公式转成口语。顺序不能乱：先分数，再上标，最后兜底删命令。
+_MATH_TO_SPEECH: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}"), r"\1除以\2"),
+    (re.compile(r"\\times|\\cdot"), "乘"),
+    (re.compile(r"\\div"), "除以"),
+    (re.compile(r"\\pm"), "正负"),
+    (re.compile(r"\\geq?|≥"), "大于等于"),
+    (re.compile(r"\\leq?|≤"), "小于等于"),
+    (re.compile(r"\^\{?2\}?"), "的平方"),
+    (re.compile(r"\^\{?3\}?"), "的立方"),
+    (re.compile(r"\^\{?([A-Za-z0-9]+)\}?"), r"的\1次方"),
+    (re.compile(r"\\[A-Za-z]+"), ""),
+]
 
 
-def _clean_line(text: Any, limit: int = 200) -> str:
-    """清掉 Markdown 残留、舞台提示与多余空白（模型偶尔还是会加）。"""
+def _clean_text(text: Any, limit: int = 200, allow_math: bool = False) -> str:
+    """清掉 Markdown 残留、舞台提示与多余空白。
+
+    allow_math=True 时保留 `_ ^ { } \\` —— 画面上的公式靠它们活着，
+    按台词的规则清一遍会把 `x_1^2` 变成 `x12`，公式就废了。
+    """
     s = str(text or "")
     s = _STAGE_WHISPER.sub("", s)
-    s = _MD_JUNK.sub("", s)
+    s = (_MD_JUNK_MATH if allow_math else _MD_JUNK_SPEECH).sub("", s)
     s = _SPACE.sub(" ", s).strip()
-    # 半角引号在中文里很刺眼，统一成全角
     s = s.replace('"', "“").replace("'", "‘")
     return s[:limit]
 
 
-def _clean_list(items: Any, limit: int = 26, max_items: int = 4) -> list[str]:
+def _clean_line(text: Any, limit: int = 200) -> str:
+    """画面/通用文本（不保留公式字符）"""
+    return _clean_text(text, limit, allow_math=False)
+
+
+def _speech_of(text: Any, limit: int = 200) -> tuple[str, bool]:
+    """把一句台词洗成"能念出来的话"，返回 (文本, 是否含过公式)。
+
+    公式绝不能进 TTS：`\\frac{a}{b}` 会被念成"反斜杠 f r a c"。这里做保守转换，
+    转不干净的交由前端标黄提醒老师改（静默丢弃会破坏上下文）。
+    """
+    raw = str(text or "")
+    had_math = ("$" in raw) or ("\\" in raw) or ("{" in raw)
+    s = _STAGE_WHISPER.sub("", raw)
+    s = s.replace("$$", "").replace("$", "")
+    for pat, rep in _MATH_TO_SPEECH:
+        s = pat.sub(rep, s)
+    s = re.sub(r"[{}_\\]", "", s)
+    s = _MD_JUNK_SPEECH.sub("", s)
+    s = _SPACE.sub(" ", s).strip()
+    s = s.replace('"', "“").replace("'", "‘")
+    return s[:limit], had_math
+
+
+def _clean_formula(text: Any, limit: int = 300) -> str:
+    """整页公式：只去掉定界符与首尾空白，**不做任何字符清理**（会破坏 LaTeX）。"""
+    s = str(text or "").strip()
+    if s.startswith("$$") and s.endswith("$$") and len(s) > 4:
+        s = s[2:-2]
+    elif s.startswith("$") and s.endswith("$") and len(s) > 2:
+        s = s[1:-1]
+    return s.strip()[:limit]
+
+
+def _as_number(v: Any) -> float | None:
+    """条形图的值：容忍 "60%"、"1.2 倍" 这类写法，只取数字部分。"""
+    if isinstance(v, (int, float)):
+        return float(v)
+    m = re.search(r"-?\d+(?:\.\d+)?", str(v or ""))
+    return float(m.group()) if m else None
+
+
+def _clean_list(items: Any, limit: int = 26, max_items: int = 4,
+                allow_math: bool = False) -> list[str]:
     out: list[str] = []
     for it in items or []:
         if isinstance(it, dict):
-            # 容错：模型有时给 {"title":..,"desc":..} 而不是字符串
             it = "：".join(str(v) for v in it.values() if v)
-        line = _clean_line(it, limit)
+        line = _clean_text(it, limit, allow_math=allow_math)
         if line:
             out.append(line)
         if len(out) >= max_items:
@@ -190,8 +252,8 @@ def _clean_pairs(items: Any, max_items: int = 6) -> list[list[str]]:
             vals = [str(it)]
         if not vals:
             continue
-        head = _clean_line(vals[0], 16)
-        desc = _clean_line(vals[1], 40) if len(vals) > 1 else ""
+        head = _clean_text(vals[0], 16, allow_math=True)
+        desc = _clean_text(vals[1], 40, allow_math=True) if len(vals) > 1 else ""
         if head:
             out.append([head, desc])
         if len(out) >= max_items:
@@ -200,12 +262,95 @@ def _clean_pairs(items: Any, max_items: int = 6) -> list[list[str]]:
 
 
 def _clean_side(side: Any) -> dict[str, Any]:
-    """compare 的一栏：{head, items[]}。"""
+    """compare 的一栏：{head, items[]}（允许行内公式）。"""
     if not isinstance(side, dict):
         return {"head": "", "items": []}
-    head = _clean_line(side.get("head") or side.get("title") or "", 12)
-    items = _clean_list(side.get("items") or side.get("points") or [], 30, 4)
+    head = _clean_text(side.get("head") or side.get("title") or "", 12, allow_math=True)
+    items = _clean_list(side.get("items") or side.get("points") or [], 30, 4, allow_math=True)
     return {"head": head, "items": items}
+
+
+#: 参数化图形的种类。svg 只在参数化覆盖不到时才用，且必须过安全校验。
+FIGURE_KINDS = {"flow", "bars", "tree", "svg"}
+
+
+def _clean_figure(raw: Any) -> dict[str, Any] | None:
+    """图示：优先参数化（坐标由前端算），SVG 只在确实给了可用代码时接受。
+
+    参数化图形不追求好看，追求"关系准确、文字不溢出、换主题跟着变色"。
+    """
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind") or "").strip().lower()
+    if kind not in FIGURE_KINDS:
+        return None
+    caption = _clean_text(raw.get("caption") or "", 60, allow_math=True)
+    fig: dict[str, Any] = {"kind": kind}
+    if caption:
+        fig["caption"] = caption
+
+    if kind == "flow":
+        steps: list[dict[str, str]] = []
+        for it in raw.get("steps") or []:
+            if isinstance(it, dict):
+                label = _clean_text(it.get("label") or it.get("t") or it.get("title") or "", 14,
+                                    allow_math=True)
+                note = _clean_text(it.get("note") or it.get("d") or it.get("desc") or "", 30,
+                                   allow_math=True)
+            else:
+                label, note = _clean_text(it, 14, allow_math=True), ""
+            if label:
+                steps.append({"label": label, "note": note})
+        if len(steps) < 2:
+            return None
+        fig["steps"] = steps[:5]
+        fig["direction"] = "v" if str(raw.get("direction") or "").lower() == "v" else "h"
+        return fig
+
+    if kind == "bars":
+        items: list[dict[str, Any]] = []
+        for it in raw.get("items") or []:
+            if isinstance(it, dict):
+                label = _clean_text(it.get("label") or it.get("k") or "", 10, allow_math=True)
+                value = _as_number(it.get("value") if "value" in it else it.get("v"))
+            else:
+                label, value = _clean_text(it, 10, allow_math=True), None
+            if label and value is not None:
+                items.append({"label": label, "value": value})
+        if len(items) < 2:
+            return None
+        fig["items"] = items[:6]
+        unit = _clean_text(raw.get("unit") or "", 4)
+        if unit:
+            fig["unit"] = unit
+        return fig
+
+    if kind == "tree":
+        root = _clean_text(raw.get("root") or raw.get("label") or "", 12, allow_math=True)
+        children: list[dict[str, str]] = []
+        for it in raw.get("children") or []:
+            if isinstance(it, dict):
+                label = _clean_text(it.get("label") or it.get("k") or "", 12, allow_math=True)
+                note = _clean_text(it.get("note") or it.get("v") or "", 24, allow_math=True)
+            else:
+                label, note = _clean_text(it, 12, allow_math=True), ""
+            if label:
+                children.append({"label": label, "note": note})
+        if not root or len(children) < 2:
+            return None
+        fig["root"] = root
+        fig["children"] = children[:6]
+        return fig
+
+    # svg：模型直出的图形，必须过安全与可用性两道关，否则当作没有图
+    from backend.svg_safety import is_usable_svg, sanitize_svg
+
+    svg = sanitize_svg(str(raw.get("svg") or ""))
+    if not is_usable_svg(svg):
+        logger.warning("[cast] 丢弃一张不可用的 AI 生成 SVG 图")
+        return None
+    fig["svg"] = svg
+    return fig
 
 
 #: 讲述者称呼固定，不交给 AI 起名。模型看到示例会照抄"林老师"，而讲演面对的是学生，
@@ -213,6 +358,9 @@ def _clean_side(side: Any) -> dict[str, Any]:
 #: 在这里换成查 users 表的显示名即可（只有显示用，名字不进音频，改完无需重新合成）。
 SPEAKER_A = "老师"
 SPEAKER_B = "同学"
+
+#: 整节图示上限：图多必碎，5 分钟撑不住 3 张图
+MAX_FIGURES_PER_CAST = 2
 
 
 def parse_cast(raw: str, speaker_mode: str = "duo") -> dict[str, Any]:
@@ -235,12 +383,13 @@ def parse_cast(raw: str, speaker_mode: str = "duo") -> dict[str, Any]:
 
     mode = normalize_mode(speaker_mode)
     pages: list[dict[str, Any]] = []
+    figure_count = 0
 
     for raw_page in pages_in:
         if not isinstance(raw_page, dict):
             continue
 
-        lines: list[dict[str, str]] = []
+        lines: list[dict[str, Any]] = []
         for item in raw_page.get("lines") or []:
             if not isinstance(item, dict):
                 continue
@@ -249,13 +398,19 @@ def parse_cast(raw: str, speaker_mode: str = "duo") -> dict[str, Any]:
                 spk = "B"
             else:
                 spk = "A"
-            text = _clean_line(item.get("text") or item.get("line"))
-            if text:
-                lines.append({"speaker": spk, "text": text})
+            text, had_math = _speech_of(item.get("text") or item.get("line"))
+            if not text:
+                continue
+            line: dict[str, Any] = {"speaker": spk, "text": text}
+            if had_math:
+                # 清洗过公式：前端标黄，提示老师改写这一句
+                line["warn"] = True
+            lines.append(line)
 
         # 单主讲：不论模型给了什么，一律归到 A（否则会去解析一个没配的音色）
         if mode == "single":
-            lines = [{"speaker": "A", "text": ln["text"]} for ln in lines]
+            lines = [{"speaker": "A", "text": ln["text"], **({"warn": True} if ln.get("warn") else {})}
+                     for ln in lines]
 
         if not lines:
             continue  # 没有台词的页留着也播不出声音，直接丢
@@ -266,30 +421,57 @@ def parse_cast(raw: str, speaker_mode: str = "duo") -> dict[str, Any]:
 
         page: dict[str, Any] = {
             "layout": layout,
-            "title": _clean_line(raw_page.get("title") or "", 30) or f"第 {len(pages) + 1} 页",
+            "title": _clean_text(raw_page.get("title") or "", 30, allow_math=True)
+                     or f"第 {len(pages) + 1} 页",
             "lines": lines,
         }
-        kicker = _clean_line(raw_page.get("kicker") or "", 16)
+        kicker = _clean_text(raw_page.get("kicker") or "", 16, allow_math=True)
         if kicker:
             page["kicker"] = kicker
-        subtitle = _clean_line(raw_page.get("subtitle") or "", 40)
+        subtitle = _clean_text(raw_page.get("subtitle") or "", 40, allow_math=True)
         if subtitle:
             page["subtitle"] = subtitle
 
         if layout in ("bullets", "summary"):
-            page["points"] = _clean_list(raw_page.get("points"), 26, 4)
+            # 画面允许行内公式，条目上限放宽到 36 字（18 字装不下一个公式）
+            page["points"] = _clean_list(raw_page.get("points"), 36, 4, allow_math=True)
         elif layout == "compare":
             page["left"] = _clean_side(raw_page.get("left"))
             page["right"] = _clean_side(raw_page.get("right"))
             if not page["left"]["items"] and not page["right"]["items"]:
-                page["points"] = _clean_list(raw_page.get("points"), 26, 4)
+                page["points"] = _clean_list(raw_page.get("points"), 36, 4, allow_math=True)
         elif layout == "steps":
             page["steps"] = _clean_pairs(raw_page.get("steps"), 5)
         elif layout == "cards":
             page["cards"] = _clean_pairs(raw_page.get("cards"), 4)
+        elif layout == "formula":
+            formula = _clean_formula(raw_page.get("formula") or raw_page.get("latex") or "")
+            note = _clean_text(raw_page.get("formulaNote") or raw_page.get("note") or "", 60,
+                               allow_math=True)
+            if formula:
+                page["formula"] = formula
+                if note:
+                    page["formulaNote"] = note
+            else:
+                # 给了公式页却没给公式：退回要点页，别留一张空白画布
+                page["layout"] = "bullets"
+                page["points"] = _clean_list(raw_page.get("points"), 36, 4, allow_math=True)
         elif layout == "figure":
-            page["image"] = str(raw_page.get("image") or "").strip()
-            page["caption"] = _clean_line(raw_page.get("caption") or "", 60)
+            fig = _clean_figure(raw_page.get("figure"))
+            if fig and figure_count >= MAX_FIGURES_PER_CAST:
+                fig = None  # 超出整节上限就退回文字，图多必碎
+            if fig:
+                figure_count += 1
+                page["figure"] = fig
+            else:
+                # 兼容旧数据/模型给 image 的情况
+                image = str(raw_page.get("image") or "").strip()
+                if image:
+                    page["image"] = image
+                    page["caption"] = _clean_text(raw_page.get("caption") or "", 60, allow_math=True)
+                if not page.get("figure") and not page.get("image"):
+                    page["layout"] = "bullets"
+                    page["points"] = _clean_list(raw_page.get("points"), 36, 4, allow_math=True)
 
         pages.append(page)
         if len(pages) >= max_pages():
@@ -300,13 +482,13 @@ def parse_cast(raw: str, speaker_mode: str = "duo") -> dict[str, Any]:
 
     points: list[str] = []
     for p in data.get("key_points") or []:
-        line = _clean_line(p, 24)
+        line = _clean_text(p, 24, allow_math=True)
         if line:
             points.append(line)
 
     return {
-        "title": _clean_line(data.get("title") or "", 40) or "AI 讲演",
-        "summary": _clean_line(data.get("summary") or "", 120),
+        "title": _clean_text(data.get("title") or "", 40, allow_math=True) or "AI 讲演",
+        "summary": _clean_text(data.get("summary") or "", 120, allow_math=True),
         "speaker_mode": mode,
         "name_a": SPEAKER_A,
         "name_b": "" if mode == "single" else SPEAKER_B,
