@@ -487,5 +487,6 @@
   "collapseAll": "收起全部",
   "expandChapter": "展开本章",
   "collapseChapter": "收起本章",
-  "treeExpandHint": "可一键展开全部章节，或点章节名旁的箭头展开本章全部知识点"
+  "treeExpandHint": "可一键展开全部章节，或点章节名旁的箭头展开本章全部知识点",
+  "viewCast": "查看讲演"
 }
