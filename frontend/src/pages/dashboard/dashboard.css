@@ -78,6 +78,14 @@
   justify-content: center;
 }
 
+/* 内容贴顶：从标题下方直接开始排，视线不断裂。
+   图表卡与数据卡一律用它——内容浮在卡中间会让人找不到「标题 → 内容」的阅读起点，
+   卡片被同行更高的卡撑高时尤其明显（原来考试状态卡上下各空 70px）。
+   与 .dash-center-body 互斥，写在后面，同时命中时以贴顶为准。 */
+.dash-top-body > .ant-card-body {
+  justify-content: flex-start;
+}
+
 /* 条形/进度：宽度补间，数据刷新时是"长过去"而不是"跳过去" */
 .dash-bar-fill {
   transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
