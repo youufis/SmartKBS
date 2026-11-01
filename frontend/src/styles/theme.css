@@ -23,6 +23,11 @@
   --success-color: #52c41a;
   --warning-color: #faad14;
   --error-color: #ff4d4f;
+  /* 代码控制台：浅色/深色主题下都保持暗底，保证等宽输出的可读性 */
+  --code-console-bg: #1e1e1e;
+  --code-console-fg: #d4d4d4;
+  --code-diff-add-bg: rgba(82, 196, 26, 0.16);
+  --code-diff-del-bg: rgba(255, 77, 79, 0.16);
 }
 
 /* 主题切换平滑过渡 */

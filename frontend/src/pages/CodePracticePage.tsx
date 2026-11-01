@@ -1,395 +1,223 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import ScopeTag from '../components/ScopeTag'
-
 import {
-  Card, Typography, Button, Space, Tag, Modal, Spin,
-  message, Tabs, Empty, Select, Statistic, Row, Col,
-  Table, Progress, Descriptions, Divider, Input, Alert, InputNumber,
-  Pagination,
+  Card, Typography, Button, Space, Tag, Modal, Spin, message, Tabs, Empty, Select,
+  Table, Descriptions, Input, Alert, InputNumber, Pagination, Grid, Switch, Tooltip,
+  Row, Col, Statistic, Segmented, Progress,
 } from 'antd'
 import {
-  PlayCircleOutlined, SendOutlined, RobotOutlined,
-  HistoryOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  ClockCircleOutlined, FileTextOutlined,
-  BarChartOutlined, ArrowLeftOutlined,
-  EditOutlined, DeleteOutlined,
-  PlusSquareOutlined, MinusSquareOutlined,
+  PlayCircleOutlined, RobotOutlined, FileTextOutlined, BarChartOutlined,
+  EditOutlined, DeleteOutlined, PlusSquareOutlined, MinusSquareOutlined,
+  DownloadOutlined, ReloadOutlined, SearchOutlined,
 } from '@ant-design/icons'
-import FormulaRenderer from '../components/FormulaRenderer'
 import apiClient from '../api/client'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
-import { pollAiTask } from '../api/aiTask'
-import { useAuthStore } from '../stores/authStore'
-import CodeEditor from '../components/CodeEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
-import { reportLoadError } from '../utils/loadError'
-import { RowList, RowItem } from '../components/RowList'
+import ScopeTag from '../components/ScopeTag'
+import CodeWorkspace, { DiffBlock } from '../components/code/CodeWorkspace'
+import TestCaseEditor from '../components/code/TestCaseEditor'
+import { type EditableTestCase } from '../components/code/constants'
+import { STATUS_MAP } from '../components/code/constants'
+import { pollAiTask } from '../api/aiTask'
+import { useAuthStore } from '../stores/authStore'
 
 const { Title, Text } = Typography
-const { TextArea } = Input
 
-// ── 状态标签映射 ──
-const STATUS_MAP: Record<string, { labelKey: string; color: string; icon: React.ReactNode }> = {
-  pending:        { labelKey: 'statusPending',   color: 'default',   icon: <ClockCircleOutlined /> },
-  running:        { labelKey: 'statusRunning',   color: 'processing', icon: <Spin size="small" /> },
-  accepted:       { labelKey: 'statusAccepted',   color: 'success',   icon: <CheckCircleOutlined /> },
-  wrong_answer:   { labelKey: 'statusWrongAnswer', color: 'error',     icon: <CloseCircleOutlined /> },
-  runtime_error:  { labelKey: 'statusRuntimeError', color: 'error',   icon: <CloseCircleOutlined /> },
-  time_limit:     { labelKey: 'statusTimeLimit',   color: 'warning',   icon: <ClockCircleOutlined /> },
-  compile_error:  { labelKey: 'statusCompileError', color: 'error',    icon: <CloseCircleOutlined /> },
-  failed:         { labelKey: 'statusFailed', color: 'default',    icon: <CloseCircleOutlined /> },
+interface CreateFormState {
+  title: string
+  description: string
+  subject: string
+  knowledge_points: string
+  difficulty: string
+  language: string
+  template_code: string
+  reference_solution: string
+  time_limit: number
+  status: string
+  target_scope: string
+  target_grade: string
+  target_class: string
+  target_users: string
+  test_cases: EditableTestCase[]
 }
 
-// ── 紧凑型代码练习视图（用于表格展开行） ──
-const CompactCodeView: React.FC<{
-  problemId: number
-  starterCode?: string
-  language?: string
-  supportedLanguages?: { value: string; label: string; available: boolean }[]
-}> = ({ problemId, starterCode, language: initLang = 'python', supportedLanguages }) => {
-  const { t } = useTranslation('practice')
-  const [code, setCode] = useState(starterCode || t('defaultCode'))
-  const [lang, setLang] = useState(initLang)
-  const [customInput, setCustomInput] = useState('')
-  const [runResult, setRunResult] = useState<any>(null)
-  const [runHistory, setRunHistory] = useState<any[]>([])
-  const [runLoading, setRunLoading] = useState(false)
-  const [submitLoading, setSubmitLoading] = useState(false)
-  const [submissionResult, setSubmissionResult] = useState<any>(null)
-  const [pollingSubmission, setPollingSubmission] = useState(false)
-  const [problemData, setProblemData] = useState<any>(null)
-  const [descCollapsed, setDescCollapsed] = useState(false)
+const defaultTemplate = '# 在此编写你的代码\n\ndef solution():\n    pass\n\n\nif __name__ == "__main__":\n    solution()\n'
 
-  // 加载题目信息（描述 + 样例输入）
-  useEffect(() => {
-    apiClient.get(`/api/code/problems/${problemId}`).then(({ data }) => {
-      setProblemData(data)
-      if (data?.sample_cases?.length > 0 && data.sample_cases[0].input) {
-        setCustomInput(data.sample_cases[0].input)
-      }
-      if (data?.starter_code) setCode(data.starter_code)
-    }).catch((err) => { reportLoadError(err, { key: 'codePractice.problem' }) })
-  }, [problemId])
+const emptyCreateForm = (subject = ''): CreateFormState => ({
+  title: '',
+  description: '',
+  subject,
+  knowledge_points: '',
+  difficulty: 'medium',
+  language: 'python',
+  template_code: defaultTemplate,
+  reference_solution: '',
+  time_limit: 5,
+  status: 'active',
+  target_scope: 'teacher_classes',
+  target_grade: '',
+  target_class: '',
+  target_users: '',
+  test_cases: [],
+})
 
-  const handleRun = async () => {
-    if (!code.trim()) { message.warning(t('writeCode')); return }
-    setRunLoading(true)
-    setRunResult(null)
-    try {
-      const { data } = await apiClient.post('/api/code/run', {
-        problem_id: problemId, language: lang, source_code: code, input_data: customInput,
-      })
-      setRunResult(data)
-      // 累积运行历史（保留最近 10 条）
-      setRunHistory(prev => {
-        const entry = { id: Date.now(), ...data, input_data: customInput, createdAt: new Date().toLocaleTimeString() }
-        return [entry, ...prev].slice(0, 10)
-      })
-    } catch (e: any) { message.error(e.response?.data?.detail || t('runFailed')) }
-    finally { setRunLoading(false) }
-  }
+const toApiCases = (cases: EditableTestCase[]) => cases.map((c) => ({
+  input: c.input || '',
+  expected_output: c.expected || '',
+  description: c.description || '',
+  score: Number(c.score) || 0,
+  is_sample: !!c.is_sample,
+}))
 
-  const handleSubmit = async () => {
-    if (!code.trim()) { message.warning(t('writeCode')); return }
-    setSubmitLoading(true)
-    setSubmissionResult(null)
-    try {
-      const { data } = await apiClient.post('/api/code/submit', {
-        problem_id: problemId, language: lang, source_code: code,
-      })
-      message.success(t('submitSuccessGrading'))
-      setPollingSubmission(true)
-      pollResult(data.submission_id)
-    } catch (e: any) { message.error(e.response?.data?.detail || t('submitFailed')) }
-    finally { setSubmitLoading(false) }
-  }
-
-  const pollResult = async (subId: number) => {
-    const start = Date.now()
-    while (Date.now() - start < 60000) {
-      try {
-        const { data } = await apiClient.get(`/api/code/submissions/${subId}`)
-        if (['accepted','wrong_answer','runtime_error','time_limit','compile_error','failed'].includes(data.status)) {
-          setSubmissionResult(data)
-          setPollingSubmission(false)
-          return
-        }
-      } catch { /* ignore */ }
-      await new Promise(r => setTimeout(r, 1000))
-    }
-    setPollingSubmission(false)
-    message.warning(t('gradingTimeout'))
-  }
-
-  return (
-    <div style={{ display: 'flex', gap: 12 }}>
-      {/* 左面板：题目描述（可折叠） */}
-      {problemData && (
-        <div style={{
-          width: descCollapsed ? 36 : '35%',
-          minWidth: descCollapsed ? 36 : 260,
-          maxHeight: 400, overflow: 'auto',
-          background: 'var(--bg-layout)', borderRadius: 6,
-          padding: descCollapsed ? '8px 4px' : 12,
-          border: '1px solid var(--border-color)',
-          cursor: descCollapsed ? 'pointer' : 'default',
-          transition: 'width 0.2s, minWidth 0.2s, padding 0.2s',
-          flexShrink: 0,
-        }} onClick={() => { if (descCollapsed) setDescCollapsed(false) }}>
-          {descCollapsed ? (
-            <div style={{ writingMode: 'vertical-rl', fontSize: 13, color: 'var(--text-tertiary)', userSelect: 'none' }}>
-              <span onClick={(e) => { e.stopPropagation(); setDescCollapsed(false) }} style={{ cursor: 'pointer', color: '#1677ff' }}>📄 {t('problemTitle')}</span>
-            </div>
-          ) : (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <Text strong style={{ fontSize: 14 }}>{problemData.title}</Text>
-                <Button type="text" size="small" icon={<MinusSquareOutlined />} onClick={() => setDescCollapsed(true)} style={{ color: 'var(--text-tertiary)' }} />
-              </div>
-              <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: '#555' }}>
-                <FormulaRenderer content={problemData.description || ''} />
-              </div>
-              {problemData.sample_cases?.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  <Text strong style={{ fontSize: 12 }}>{t('example')}：</Text>
-                  {problemData.sample_cases.map((sc: any, i: number) => (
-                    <div key={sc.id || i} style={{ background: 'var(--bg-container)', padding: 6, borderRadius: 4, marginTop: 4, fontSize: 12, border: '1px solid var(--border-color-secondary)' }}>
-                      <Text type="secondary">{t('explanation')} {i + 1}</Text>
-                      {sc.description && <Text type="secondary"> — {sc.description}</Text>}
-                      <pre style={{ margin: 2, fontSize: 11 }}>{t('input')}：{sc.input || t('cpNone')}{'\n'}{t('output')}：{sc.expected_output}</pre>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-      {/* 右面板：编辑器 + 工具栏 */}
-      <div style={{ flex: 1 }}>
-        <CodeEditor
-          language={lang}
-          value={code}
-          onChange={setCode}
-          showToolbar={false}
-          height="280px"
-        />
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={runLoading}>{t('runCode')}</Button>
-          <Button size="small" type="primary" ghost icon={<SendOutlined />} onClick={handleSubmit} loading={submitLoading || pollingSubmission}>
-            {pollingSubmission ? t('grading') : t('submitCode')}
-          </Button>
-          <Select size="small" value={lang} onChange={setLang} style={{ width: 100 }}
-            options={supportedLanguages && supportedLanguages.length > 0
-              ? supportedLanguages
-              : [{ value: 'python', label: 'Python', available: true }, { value: 'javascript', label: 'JavaScript', available: true }]} />
-          <Input size="small" placeholder={t('input')} value={customInput}
-            onChange={e => setCustomInput(e.target.value)} style={{ width: 160, fontSize: 12 }} />
-          {/* 结果与按钮同行显示 */}
-          {submissionResult && (
-            <span style={{ fontSize: 12, color: submissionResult.status === 'accepted' ? '#52c41a' : '#f48771' }}>
-              {t(STATUS_MAP[submissionResult.status]?.labelKey ?? '') || submissionResult.status}
-              {' | '}{submissionResult.score}{t('scoreUnit')} | {t('passed')} {submissionResult.passed_cases ?? 0}/{submissionResult.total_cases ?? 0} {t('testCaseUnit')}
-            </span>
-          )}
-          {runResult && !submissionResult && (
-            <span style={{ fontSize: 12, color: runResult.exit_code === 0 ? '#52c41a' : '#f48771' }}>
-              Exit {runResult.exit_code} | {runResult.execution_time}s
-            </span>
-          )}
-        </div>
-        {/* 运行结果输出区域（完整显示 stdout/stderr） */}
-        {runResult && !submissionResult && (
-          <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, marginTop: 6, fontFamily: 'monospace', fontSize: 12, maxHeight: 160, overflow: 'auto' }}>
-            {runResult.error ? (
-              <span style={{ color: '#f48771' }}>⚠ {runResult.error}</span>
-            ) : (
-              <>
-                {runResult.stdout ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre> : <span style={{ color: 'var(--text-tertiary)' }}>{t('noOutput')}</span>}
-                {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 4 }}>{runResult.stderr}</pre>}
-              </>
-            )}
-          </div>
-        )}
-        {/* 运行历史记录 */}
-        {runHistory.length > 1 && !submissionResult && (
-          <div style={{ marginTop: 6 }}>
-            <details style={{ fontSize: 12 }}>
-              <summary style={{ cursor: 'pointer', color: 'var(--text-tertiary)', userSelect: 'none' }}>
-                {t('runHistory')}（{runHistory.length} {t('countRuns')}）
-              </summary>
-              <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 4 }}>
-                {runHistory.map((entry, idx) => (
-                  <div key={entry.id} style={{
-                    background: '#1e1e1e', color: '#d4d4d4', padding: '4px 8px',
-                    borderRadius: 4, marginBottom: 4, fontFamily: 'monospace', fontSize: 11,
-                    borderLeft: `3px solid ${entry.exit_code === 0 ? '#52c41a' : '#f48771'}`,
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <span style={{ color: 'var(--text-tertiary)' }}>#{runHistory.length - idx} {entry.createdAt}</span>
-                      <span style={{ color: entry.exit_code === 0 ? '#52c41a' : '#f48771' }}>
-                        Exit {entry.exit_code} | {entry.execution_time}s
-                      </span>
-                    </div>
-                    {entry.input_data && <div style={{ color: '#69b1ff' }}>↳ {t('input')}: {entry.input_data}</div>}
-                    <pre style={{ margin: '2px 0 0', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
-                      {entry.stdout || (entry.error ? entry.error.slice(0, 60) : `(${t('noOutput')})`)}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            </details>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
+const fromApiCases = (cases: any[]): EditableTestCase[] => (cases || []).map((c) => ({
+  input: c.input || '',
+  expected: c.expected_output || '',
+  description: c.description || '',
+  score: Number(c.score) || 1,
+  is_sample: !!c.is_sample,
+}))
 
 const CodePracticePage: React.FC = () => {
   const { t } = useTranslation('practice')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
+  const screens = Grid.useBreakpoint()
+  const narrow = !screens.md
 
-  // ── 状态 ──
+  // ── 列表 ──
   const [problemList, setProblemList] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
-
-  const [currentProblem, setCurrentProblem] = useState<any>(null)
-
-  const [sourceCode, setSourceCode] = useState('')
-  const [language, setLanguage] = useState('python')
-
-  // 运行结果
-  const [runResult, setRunResult] = useState<any>(null)
-  const [runHistory, setRunHistory] = useState<any[]>([])
-  const [runLoading, setRunLoading] = useState(false)
-
-  // 提交评分
-  const [submitLoading, setSubmitLoading] = useState(false)
-  const [submissionResult, setSubmissionResult] = useState<any>(null)
-  const [pollingSubmission, setPollingSubmission] = useState(false)
-
-  // 提交历史
-  const [submissions, setSubmissions] = useState<any[]>([])
-  const [submissionsLoading, setSubmissionsLoading] = useState(false)
-
-  // AI 审查
-  const [aiReview, setAiReview] = useState<any>(null)
-  const [aiReviewLoading, setAiReviewLoading] = useState(false)
-
-  // 自定义输入
-  const [customInput, setCustomInput] = useState('')
-
-  // 支持的語言
-  const [supportedLangs, setSupportedLangs] = useState<{value:string;label:string;available:boolean}[]>([])
-
-  // 科目列表（从系统配置动态加载）
-  const [subjectOptions, setSubjectOptions] = useState<string[]>([])
-
-  // ── 展开控制（每次只展开一个题目） ──
   const [expandedRowKeys, setExpandedRowKeys] = useState<number[]>([])
+  const [currentProblemId, setCurrentProblemId] = useState<number | null>(null)
 
-  // ── 教师端：创建题目 ──
+  // ── 筛选 ──
+  const [searchInput, setSearchInput] = useState('')
+  const [keyword, setKeyword] = useState('')
+  const [subjectFilter, setSubjectFilter] = useState('')
+  const [difficultyFilter, setDifficultyFilter] = useState('')
+  const [myStatusFilter, setMyStatusFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+  const [supportedLangs, setSupportedLangs] = useState<{ value: string; label: string; available: boolean }[]>([])
+
+  // ── 创建 ──
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
+  const [createForm, setCreateForm] = useState<CreateFormState>(emptyCreateForm())
 
-  // ── 教师端：提交统计弹窗 ──
-  const [statsModalOpen, setStatsModalOpen] = useState(false)
-  const [statsProblemTitle, setStatsProblemTitle] = useState('')
-  const [statsDetail, setStatsDetail] = useState<any[]>([])
-  const [statsLoading, setStatsLoading] = useState(false)
-
-  // 加载提交详情
-  const loadStatsDetail = async (problemId: number, title: string) => {
-    setStatsProblemTitle(title)
-    setStatsLoading(true)
-    setStatsDetail([])
-    setStatsModalOpen(true)
-    try {
-      const { data } = await apiClient.get(`/api/code/problems/${problemId}/submissions/detail`)
-      setStatsDetail(data.submissions || [])
-    } catch {
-      message.error(t('loadDetailFailed'))
-    } finally {
-      setStatsLoading(false)
-    }
-  }
-  const [createForm, setCreateForm] = useState({
-    title: '',
-    description: '',
-    subject: '',
-    knowledge_points: '',
-    difficulty: 'medium' as string,
-    language: 'python',
-    template_code: '# 在此编写你的代码\n\ndef solution():\n    pass\n',
-    starter_code: '',
-    time_limit: 5,
-    test_cases: [] as any[],
-    target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '',
-  })
-  const [newTestCase, setNewTestCase] = useState({ input: '', expected: '', description: '', score: 1, is_sample: false })
-
-  // ── 教师端：编辑/删除题目 ──
+  // ── 编辑 ──
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [editLoading, setEditLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<number | null>(null)
-  const [editForm, setEditForm] = useState({
-    title: '', description: '', subject: '', knowledge_points: '',
-    difficulty: 'medium' as string, language: 'python' as string,
-    template_code: '', starter_code: '', time_limit: 5,
-  })
-  const [editTestCases, setEditTestCases] = useState<any[]>([])
+  const [editForm, setEditForm] = useState<CreateFormState>(emptyCreateForm())
+  const [validating, setValidating] = useState(false)
+  const [validateResult, setValidateResult] = useState<any>(null)
 
-  // ═══════════════════════════════════════════════════════════
-  // 所有 const 函数必须先声明，再在 useEffect 中调用
-  // ═══════════════════════════════════════════════════════════
+  // ── 统计 ──
+  const [statsModalOpen, setStatsModalOpen] = useState(false)
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [statsTitle, setStatsTitle] = useState('')
+  const [statsProblemId, setStatsProblemId] = useState<number | null>(null)
+  const [statsData, setStatsData] = useState<any>(null)
+  const [statsTab, setStatsTab] = useState('overview')
+  const [rosterFilter, setRosterFilter] = useState<'all' | 'unsubmitted' | 'submitted'>('all')
+  const [regrading, setRegrading] = useState(false)
+  const [detailCache, setDetailCache] = useState<Record<number, any>>({})
+  const [reviewModalOpen, setReviewModalOpen] = useState(false)
+  const [reviewModalLoading, setReviewModalLoading] = useState(false)
+  const [reviewModalData, setReviewModalData] = useState<any>(null)
+
+  // ── AI 生成 ──
+  const [aiGenModal, setAiGenModal] = useState(false)
+  const [aiGenTopic, setAiGenTopic] = useState('')
+  const [aiGenSubject, setAiGenSubject] = useState('')
+  const [aiGenLanguage, setAiGenLanguage] = useState('python')
+  const [aiGenDifficulty, setAiGenDifficulty] = useState('medium')
+  const [aiGenLoading, setAiGenLoading] = useState(false)
+  const [aiGenResult, setAiGenResult] = useState<any>(null)
+
+  // 搜索防抖：输入停下 400ms 再请求，避免每敲一个字打一次接口
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setKeyword(searchInput.trim())
+      setPage(1)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  const loadProblems = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/code/problems', {
+        params: {
+          page,
+          page_size: pageSize,
+          subject: subjectFilter || undefined,
+          difficulty: difficultyFilter || undefined,
+          my_status: myStatusFilter || undefined,
+          status: statusFilter || undefined,
+          keyword: keyword || undefined,
+        },
+      })
+      setProblemList(data.items || [])
+      setTotal(data.total || 0)
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || t('loadFailed'))
+    } finally {
+      setLoading(false)
+    }
+  }, [page, pageSize, subjectFilter, difficultyFilter, myStatusFilter, statusFilter, keyword, t])
+
+  useEffect(() => {
+    loadProblems()
+  }, [loadProblems])
+
+  useEffect(() => {
+    apiClient.get('/api/code/languages').then(({ data }) => {
+      if (data?.languages) setSupportedLangs(data.languages)
+    }).catch(() => { /* 语言列表拿不到不影响 Python 题目 */ })
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) {
+        setSubjectOptions(data.subjects)
+        setAiGenSubject((prev) => prev || data.subjects[0])
+        setCreateForm((prev) => ({ ...prev, subject: prev.subject || data.subjects[0] }))
+      }
+    }).catch(() => { /* ignore */ })
+  }, [])
+
+  const resetListFilters = () => {
+    setSearchInput('')
+    setKeyword('')
+    setSubjectFilter('')
+    setDifficultyFilter('')
+    setMyStatusFilter('')
+    setStatusFilter('all')
+    setPage(1)
+  }
+
 
   // ── 创建题目 ──
   const handleCreateProblem = async () => {
-    if (!createForm.title.trim()) {
-      message.warning(t('inputTitle'))
-      return
-    }
-    if (createForm.test_cases.length === 0) {
-      message.warning(t('addAtLeastOneTestCase'))
+    if (!createForm.title.trim()) { message.warning(t('inputTitle')); return }
+    if (createForm.test_cases.length === 0) { message.warning(t('addAtLeastOneTestCase')); return }
+    if (createForm.test_cases.some((c) => !c.input.trim() && !c.expected.trim() && !c.description.trim())) {
+      message.warning(t('emptyTestCaseWarning'))
       return
     }
     setCreateLoading(true)
     try {
       await apiClient.post('/api/code/problems', {
         ...createForm,
-        test_cases: createForm.test_cases.map((tc) => ({
-          input: tc.input,
-          expected_output: tc.expected,
-          description: tc.description,
-          score: tc.score,
-          is_sample: tc.is_sample,
-        })),
-        target_scope: createForm.target_scope || 'teacher_classes',
-        target_grade: createForm.target_grade || '',
-        target_class: createForm.target_class || '',
-        target_users: createForm.target_users || '',
+        test_cases: toApiCases(createForm.test_cases),
       })
       message.success(t('createSuccess'))
       setCreateModalOpen(false)
-      setCreateForm({
-        title: '', description: '',
-        // 学科仍默认第一个：以前这里复位成空，建完一题再开弹窗就没科目了
-        subject: subjectOptions[0] || '',
-        knowledge_points: '',
-        difficulty: 'medium', language: 'python',
-        template_code: '# 在此编写你的代码\n\ndef solution():\n    pass\n',
-        starter_code: '', time_limit: 5, test_cases: [],
-        target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '',
-      })
+      setCreateForm(emptyCreateForm(subjectOptions[0] || ''))
       loadProblems()
-      apiClient.get('/api/code/teachers/statistics').then(() => {}).catch(() => {})
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('createFailed'))
     } finally {
@@ -397,36 +225,33 @@ const CodePracticePage: React.FC = () => {
     }
   }
 
-  // ── 编辑题目（打开弹窗并加载数据） ──
+  // ── 打开编辑 ──
   const handleEditProblem = async (problemId: number) => {
     setEditLoading(true)
     try {
-      const { data } = await apiClient.get(`/api/code/problems/${problemId}`)
+      const [{ data: p }, tcRes] = await Promise.all([
+        apiClient.get(`/api/code/problems/${problemId}`),
+        apiClient.get(`/api/code/problems/${problemId}/test-cases`),
+      ])
       setEditTarget(problemId)
+      setValidateResult(null)
       setEditForm({
-        title: data.title || '',
-        description: data.description || '',
-        subject: data.subject || '',
-        knowledge_points: data.knowledge_points || '',
-        difficulty: data.difficulty || 'medium',
-        language: data.language || 'python',
-        template_code: data.template_code || data.starter_code || '',
-        starter_code: data.starter_code || '',
-        time_limit: data.time_limit || 5,
+        title: p.title || '',
+        description: p.description || '',
+        subject: p.subject || '',
+        knowledge_points: p.knowledge_points || '',
+        difficulty: p.difficulty || 'medium',
+        language: p.language || 'python',
+        template_code: p.template_code || p.initial_code || '',
+        reference_solution: p.reference_solution || '',
+        time_limit: p.time_limit || 5,
+        status: p.status || 'active',
+        target_scope: p.target_scope || 'teacher_classes',
+        target_grade: p.target_grade || '',
+        target_class: p.target_class || '',
+        target_users: p.target_users || '',
+        test_cases: fromApiCases(tcRes.data.test_cases),
       })
-      // 加载所有测试用例
-      if (isTeacherOrAdmin) {
-        try {
-          const tcRes = await apiClient.get(`/api/code/problems/${problemId}/test-cases`)
-          setEditTestCases((tcRes.data.test_cases || []).map((tc: any) => ({
-            input: tc.input || '',
-            expected: tc.expected_output || '',
-            description: tc.description || '',
-            score: tc.score || 1,
-            is_sample: !!tc.is_sample,
-          })))
-        } catch { setEditTestCases([]) }
-      }
       setEditModalOpen(true)
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('loadFailed'))
@@ -435,26 +260,22 @@ const CodePracticePage: React.FC = () => {
     }
   }
 
-  // ── 保存编辑 ──
   const handleSaveEdit = async () => {
-    if (!editForm.title.trim()) { message.warning(t('inputTitle')); return }
     if (!editTarget) return
+    if (!editForm.title.trim()) { message.warning(t('inputTitle')); return }
+    if (editForm.test_cases.length === 0) { message.warning(t('addAtLeastOneTestCase')); return }
     setEditLoading(true)
     try {
-      await apiClient.put(`/api/code/problems/${editTarget}`, {
-        title: editForm.title,
-        description: editForm.description,
-        subject: editForm.subject,
-        knowledge_points: editForm.knowledge_points,
-        difficulty: editForm.difficulty,
-        language: editForm.language,
-        template_code: editForm.template_code,
-        starter_code: editForm.starter_code,
-        time_limit: editForm.time_limit,
+      const { data } = await apiClient.put(`/api/code/problems/${editTarget}`, {
+        ...editForm,
+        test_cases: toApiCases(editForm.test_cases),
       })
       message.success(t('updateSuccess'))
       setEditModalOpen(false)
       loadProblems()
+      if (data?.needs_regrade) {
+        message.info(t('needsRegradeHint'))
+      }
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('updateFailed'))
     } finally {
@@ -462,7 +283,29 @@ const CodePracticePage: React.FC = () => {
     }
   }
 
-  // ── 删除题目 ──
+  const handleValidateSolution = async (form: CreateFormState) => {
+    if (!form.reference_solution.trim()) { message.warning(t('validateNeedsRef')); return }
+    if (form.test_cases.length === 0) { message.warning(t('addAtLeastOneTestCase')); return }
+    setValidating(true)
+    setValidateResult(null)
+    try {
+      // 用弹窗里的当前用例验证，不依赖是否已保存——创建和编辑走同一条链路
+      const { data } = await apiClient.post('/api/code/validate', {
+        language: form.language,
+        time_limit: form.time_limit,
+        source_code: form.reference_solution,
+        test_cases: toApiCases(form.test_cases),
+      }, { timeout: 70000 })
+      setValidateResult(data)
+      if (data.all_pass) message.success(t('allCasesPass'))
+      else message.warning(t('casesFailed', { count: (data.total || 0) - (data.passed || 0) }))
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || t('validateFailed'))
+    } finally {
+      setValidating(false)
+    }
+  }
+
   const handleDeleteProblem = (problemId: number) => {
     Modal.confirm({
       title: t('confirmDelete'),
@@ -475,7 +318,6 @@ const CodePracticePage: React.FC = () => {
           await apiClient.delete(`/api/code/problems/${problemId}`)
           message.success(t('deletedSuccess'))
           loadProblems()
-          apiClient.get('/api/code/teachers/statistics').then(() => {}).catch(() => {})
         } catch (e: any) {
           message.error(e.response?.data?.detail || t('deleteFailed'))
         }
@@ -483,13 +325,14 @@ const CodePracticePage: React.FC = () => {
     })
   }
 
-  // ── AI 生成题目（教师端） ──
-  const [aiGenModal, setAiGenModal] = useState(false)
-  const [aiGenTopic, setAiGenTopic] = useState('')
-  const [aiGenSubject, setAiGenSubject] = useState('')
-  const [aiGenLoading, setAiGenLoading] = useState(false)
-  const [aiGenResult, setAiGenResult] = useState<any>(null)
-  const [, setAiGenTaskId] = useState<string | null>(null)
+  // ── AI 生成题目 ──
+  // 打开 AI 弹窗时对齐创建表单当前的语言/难度/科目，避免两处选择漂移
+  const openAiGenModal = () => {
+    setAiGenLanguage(createForm.language || 'python')
+    setAiGenDifficulty(createForm.difficulty || 'medium')
+    setAiGenSubject(createForm.subject || aiGenSubject || subjectOptions[0] || '')
+    setAiGenModal(true)
+  }
 
   const handleAiGenerate = async () => {
     if (!aiGenTopic.trim()) { message.warning(t('inputTopic')); return }
@@ -497,40 +340,19 @@ const CodePracticePage: React.FC = () => {
     setAiGenResult(null)
     try {
       const { data } = await apiClient.post('/api/code/ai-generate', {
-        topic: aiGenTopic, subject: aiGenSubject, language: 'python', difficulty: 'medium',
+        topic: aiGenTopic,
+        subject: aiGenSubject,
+        language: aiGenLanguage,
+        difficulty: aiGenDifficulty,
       })
-      if (data.task_id) {
-        setAiGenTaskId(data.task_id)
-        message.info(t('aiGeneratingWait'))
-        const result = await pollAiTask(data.task_id, 180000)
-        if (result?.status === 'ok' && result.data) {
-          setAiGenResult(result.data)
-          // 自动填入表单
-          const d = result.data
-          setCreateForm(prev => ({
-            ...prev,
-            // 学科是老师在 AI 弹窗里选的，AI 结果里不带它 —— 必须自己带进表单，
-            // 否则"AI 生成 → 保存"出来的题目 subject 为空（#2/#4 两条老题即如此）
-            subject: aiGenSubject || prev.subject,
-            title: d.title || prev.title,
-            description: d.description || prev.description,
-            // 知识点：AI 自带标签时以它为准（常是 2-3 个更细的标签）；AI 没给就退回
-            // 老师在弹窗里选/输的主题，免得存出一道没有知识点的题（老 #2/#4 就是这样）
-            knowledge_points: d.knowledge_points || aiGenTopic.trim() || prev.knowledge_points,
-            template_code: d.template_code || d.starter_code || prev.template_code,
-            starter_code: d.starter_code || '',
-            test_cases: (d.test_cases || []).map((tc: any) => ({
-              input: tc.input || '',
-              expected: tc.expected_output || '',
-              description: tc.description || '',
-              score: tc.score || 1,
-              is_sample: !!tc.is_sample,
-            })),
-          }))
-          message.success(t('aiGenerateDone'))
-        } else {
-          message.error(t('aiGenerateFailed'))
-        }
+      if (!data.task_id) { message.error(t('aiGenerateFailed')); return }
+      message.info(t('aiGeneratingWait'))
+      const result = await pollAiTask(data.task_id, 180000)
+      if (result?.status === 'ok' && result.data) {
+        setAiGenResult(result.data)
+        message.success(t('aiGenerateDone'))
+      } else {
+        message.error(t('aiGenerateFailed'))
       }
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('aiGenerateRequestFailed'))
@@ -539,241 +361,390 @@ const CodePracticePage: React.FC = () => {
     }
   }
 
-  // ── 加载题目列表 ──
-  const loadProblems = async () => {
-    setLoading(true)
+  const applyAiGenResult = () => {
+    if (!aiGenResult) return
+    const d = aiGenResult
+    setCreateForm((prev) => ({
+      ...prev,
+      subject: aiGenSubject || prev.subject,
+      language: aiGenLanguage || prev.language,
+      difficulty: aiGenDifficulty || prev.difficulty,
+      title: d.title || prev.title,
+      description: d.description || prev.description,
+      knowledge_points: d.knowledge_points || aiGenTopic.trim() || prev.knowledge_points,
+      template_code: d.template_code || d.starter_code || prev.template_code,
+      reference_solution: d.reference_solution || '',
+      time_limit: prev.time_limit,
+      test_cases: fromApiCases(d.test_cases || []),
+    }))
+    setAiGenModal(false)
+    setAiGenResult(null)
+    setValidateResult(null)
+    setCreateModalOpen(true)
+    message.success(t('contentFilled'))
+  }
+
+  // ── 教师统计 ──
+  const openStats = async (problemId: number, title: string) => {
+    setStatsProblemId(problemId)
+    setStatsTitle(title)
+    setStatsData(null)
+    setDetailCache({})
+    setStatsTab('overview')
+    setRosterFilter('all')
+    setStatsModalOpen(true)
+    setStatsLoading(true)
     try {
-      const { data } = await apiClient.get('/api/code/problems', {
-        params: { page, page_size: pageSize },
-      })
-      setProblemList(data.items || [])
-      setTotal(data.total || 0)
-    } catch {
-      message.error(t('loadFailed'))
+      const { data } = await apiClient.get(`/api/code/problems/${problemId}/submissions/detail`)
+      setStatsData(data)
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || t('loadDetailFailed'))
     } finally {
-      setLoading(false)
+      setStatsLoading(false)
     }
   }
 
-  // ── 加载提交历史 ──
-  const loadSubmissions = async (problemId: number) => {
-    setSubmissionsLoading(true)
+  const loadSubmissionDetail = async (submissionId: number) => {
+    if (detailCache[submissionId]) return
     try {
-      const { data } = await apiClient.get(`/api/code/my-submissions/${problemId}`)
-      setSubmissions(data.submissions || [])
-    } catch {
-      // silent
-    } finally {
-      setSubmissionsLoading(false)
-    }
-  }
-
-  // ── 加载题目详情 ──
-  const loadProblem = async (problemId: number) => {
-    setRunResult(null)
-    setRunHistory([])
-    setSubmissionResult(null)
-    setAiReview(null)
-    setSubmissions([])
-    try {
-      const { data } = await apiClient.get(`/api/code/problems/${problemId}`)
-      setCurrentProblem(data)
-      // 自动填充自定义输入：优先用第一个示例用例的输入
-      if (data.sample_cases?.length > 0 && data.sample_cases[0].input) {
-        setCustomInput(data.sample_cases[0].input)
-      } else {
-        setCustomInput('')
-      }
-      // 设置代码：优先用最佳提交，其次用模板/初始代码
-      if (data.best_submission?.source_code) {
-        setSourceCode(data.best_submission.source_code)
-      } else {
-        setSourceCode(data.starter_code || data.template_code || '# 在此编写你的代码\n\ndef solution():\n    pass\n\n\nif __name__ == "__main__":\n    solution()\n')
-      }
-      setLanguage(data.language || 'python')
-      // 同时加载提交历史
-      loadSubmissions(problemId)
+      const { data } = await apiClient.get(`/api/code/submissions/${submissionId}`)
+      setDetailCache((prev) => ({ ...prev, [submissionId]: data }))
     } catch {
       message.error(t('loadFailed'))
     }
   }
 
-  // ── 运行代码 ──
-  const handleRun = async () => {
-    if (!sourceCode.trim()) {
-      message.warning(t('writeCode'))
-      return
-    }
-    setRunLoading(true)
-    setRunResult(null)
+  const handleRegrade = async () => {
+    if (!statsProblemId) return
+    setRegrading(true)
     try {
-      const { data } = await apiClient.post('/api/code/run', {
-        problem_id: currentProblem?.problem_id,
-        language,
-        source_code: sourceCode,
-        input_data: customInput,
-      })
-      setRunResult(data)
-      // 累积运行记录
-      setRunHistory(prev => {
-        const entry = { id: Date.now(), ...data, input_data: customInput, createdAt: new Date().toLocaleTimeString() }
-        return [entry, ...prev].slice(0, 10)
-      })
+      const { data } = await apiClient.post(`/api/code/problems/${statsProblemId}/regrade`)
+      message.success(data?.message || t('regradeDone'))
+      // 稍等一两秒再刷新，给后台任务一点落库时间
+      setTimeout(() => { openStats(statsProblemId, statsTitle) }, 1500)
     } catch (e: any) {
-      message.error(e.response?.data?.detail || t('runFailed'))
+      message.error(e.response?.data?.detail || t('regradeFailed'))
     } finally {
-      setRunLoading(false)
+      setRegrading(false)
     }
   }
 
-  // ── 提交评分 ──
-  const handleSubmit = async () => {
-    if (!sourceCode.trim()) {
-      message.warning(t('writeCode'))
-      return
-    }
-    if (!currentProblem?.problem_id) {
-      message.error(t('selectProblemFirst'))
-      return
-    }
-    setSubmitLoading(true)
-    setSubmissionResult(null)
+  const openAiReview = async (submissionId: number) => {
+    setReviewModalOpen(true)
+    setReviewModalLoading(true)
+    setReviewModalData(null)
     try {
-      const { data } = await apiClient.post('/api/code/submit', {
-        problem_id: currentProblem.problem_id,
-        language,
-        source_code: sourceCode,
-      })
-      message.success(t('submitSuccessGrading'))
-      setPollingSubmission(true)
-      pollSubmissionResult(data.submission_id)
-    } catch (e: any) {
-      message.error(e.response?.data?.detail || t('submitFailed'))
-    } finally {
-      setSubmitLoading(false)
-    }
-  }
-
-  // ── 轮询评分结果 ──
-  const pollSubmissionResult = async (submissionId: number) => {
-    const maxWait = 60000  // 最多等 60 秒
-    const start = Date.now()
-    while (Date.now() - start < maxWait) {
-      try {
-        const { data } = await apiClient.get(`/api/code/submissions/${submissionId}`)
-        if (data.status === 'accepted' || data.status === 'wrong_answer' ||
-            data.status === 'runtime_error' || data.status === 'time_limit' ||
-            data.status === 'failed' || data.status === 'compile_error') {
-          setSubmissionResult(data)
-          setPollingSubmission(false)
-          // 刷新列表和提交历史
-          loadProblems()
-          if (currentProblem) loadSubmissions(currentProblem.problem_id)
-          return
-        }
-      } catch {
-        // 继续等待
-      }
-      await new Promise(r => setTimeout(r, 1000))
-    }
-    setPollingSubmission(false)
-    message.warning(t('gradingTimeoutRefresh'))
-  }
-
-  // ── AI 代码审查 ──
-  const handleAiReview = async () => {
-    if (!submissionResult?.id) {
-      message.warning(t('submitAndWaitForGrading'))
-      return
-    }
-    setAiReviewLoading(true)
-    setAiReview(null)
-    try {
-      const { data } = await apiClient.post(`/api/code/submissions/${submissionResult.id}/review`)
-      if (data.task_id) {
-          message.info(t('aiReviewSubmitted'))
-        const result = await pollAiTask(data.task_id, 120000)
-        if (result && !result.error) {
-          setAiReview(result)
-        } else {
-          // 尝试直接查询
-          await pollAiReviewResult(submissionResult.id)
-        }
-      }
+      const { data } = await apiClient.get(`/api/code/submissions/${submissionId}/review`)
+      setReviewModalData(data)
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('aiReviewRequestFailed'))
     } finally {
-      setAiReviewLoading(false)
+      setReviewModalLoading(false)
     }
   }
 
-  const pollAiReviewResult = async (submissionId: number) => {
-    const maxWait = 120000
-    const start = Date.now()
-    while (Date.now() - start < maxWait) {
-      try {
-        const { data } = await apiClient.get(`/api/code/submissions/${submissionId}/review`)
-        if (data.status === 'completed' && data.review) {
-          setAiReview(data.review)
-          return
+  const exportRosterCsv = () => {
+    if (!statsData?.roster) return
+    const header = ['username', 'name', 'grade', 'class', 'submitted', 'status', 'score', 'max_score', 'passed_cases', 'total_cases', 'submitted_at']
+    const lines = [header.join(',')]
+    for (const r of statsData.roster) {
+      const vals = [
+        r.username, r.name, r.grade, r.class,
+        r.submitted ? '1' : '0', r.status || '', r.score ?? '', r.max_score ?? '',
+        r.passed_cases ?? '', r.total_cases ?? '', r.submitted_at || '',
+      ].map((v) => `"${String(v).replace(/"/g, '""')}"`)
+      lines.push(vals.join(','))
+    }
+    const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${statsTitle || 'code'}_roster.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+
+  const renderSubmissionDetail = (data: any) => {
+    if (!data) return <div style={{ padding: 16, textAlign: 'center' }}><Spin /></div>
+    return (
+      <div style={{ padding: '6px 0' }}>
+        <Text strong style={{ fontSize: 13 }}>{t('submittedCode')}</Text>
+        <pre style={{
+          background: 'var(--code-console-bg, #1e1e1e)', color: 'var(--code-console-fg, #d4d4d4)',
+          padding: 10, borderRadius: 6, fontSize: 12, maxHeight: 240, overflow: 'auto', marginTop: 4,
+        }}>
+          <code>{data.source_code || t('codeNotVisible')}</code>
+        </pre>
+        {(data.details || []).length > 0 && (
+          <>
+            <Text strong style={{ fontSize: 13, display: 'block', marginTop: 10 }}>{t('testCaseDetail')}</Text>
+            <Table
+              size="small"
+              dataSource={data.details}
+              rowKey={(r: any) => String(r.case_id ?? r.case_index)}
+              pagination={false}
+              expandable={{
+                rowExpandable: (r: any) => !r.is_pass,
+                expandedRowRender: (r: any) => (
+                  <DiffBlock expected={r.expected || ''} actual={r.actual || ''} error={r.error || ''} />
+                ),
+              }}
+              columns={[
+                { title: t('cpColCase'), dataIndex: 'description', render: (v: string, r: any) => v || `#${(r.case_index ?? 0) + 1}` },
+                {
+                  title: t('testResult'), dataIndex: 'is_pass', width: 80,
+                  render: (v: boolean, r: any) => (
+                    <Tag color={v ? 'success' : 'error'}>{v ? t('passed') : (r.error ? t('statusRuntimeError') : t('failed'))}</Tag>
+                  ),
+                },
+                { title: t('score'), dataIndex: 'score', width: 60 },
+              ]}
+            />
+          </>
+        )}
+      </div>
+    )
+  }
+
+  const renderAiReviewBody = (payload: any) => {
+    if (!payload) return null
+    if (payload.status !== 'completed' || !payload.review) {
+      return (
+        <Alert
+          type={payload.status === 'failed' ? 'error' : 'info'}
+          showIcon
+          title={payload.status === 'failed' ? t('aiReviewFailed') : t('aiReviewPending')}
+          description={payload.error || undefined}
+        />
+      )
+    }
+    const r = payload.review
+    return (
+      <div>
+        <Row gutter={16} style={{ marginBottom: 12 }}>
+          <Col span={12}><Statistic title={t('cpOverallScore')} value={r.overall_score} suffix="/100" /></Col>
+          <Col span={12}><Statistic title={t('cpRating')} value={r.overall_rating} /></Col>
+        </Row>
+        {r.strengths?.length > 0 && (
+          <>
+            <Text strong style={{ color: 'var(--success-color)' }}>{t('strengths')}</Text>
+            <ul>{r.strengths.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+          </>
+        )}
+        {r.weaknesses?.length > 0 && (
+          <>
+            <Text strong style={{ color: 'var(--error-color)' }}>{t('improvements')}</Text>
+            <ul>{r.weaknesses.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+          </>
+        )}
+        {r.suggestions?.length > 0 && (
+          <>
+            <Text strong style={{ color: 'var(--primary-color)' }}>{t('suggestions')}</Text>
+            <ul>{r.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+          </>
+        )}
+        {r.improved_code && (
+          <pre style={{ background: 'var(--bg-layout)', padding: 10, borderRadius: 6, fontSize: 12, overflow: 'auto' }}>
+            <code>{r.improved_code}</code>
+          </pre>
+        )}
+      </div>
+    )
+  }
+
+  // ── 详情页：整页代码工作区 ──
+  if (currentProblemId !== null) {
+    return (
+      <Card style={{ borderRadius: 8, height: '100%' }} styles={{ body: { height: '100%' } }}>
+        <div style={{ height: narrow ? 'auto' : 'calc(100vh - 145px)' }}>
+          <CodeWorkspace
+            problemId={currentProblemId}
+            variant="full"
+            onBack={() => { setCurrentProblemId(null); loadProblems() }}
+            onSubmitted={loadProblems}
+          />
+        </div>
+      </Card>
+    )
+  }
+
+  const filteredRoster = (statsData?.roster || []).filter((r: any) => {
+    if (rosterFilter === 'unsubmitted' && r.submitted) return false
+    if (rosterFilter === 'submitted' && !r.submitted) return false
+    return true
+  })
+
+  const columns: any[] = [
+    {
+      dataIndex: 'title',
+      render: (text: string, record: any) => (
+        <Space wrap size={4}>
+          <Text strong style={{ cursor: 'pointer', color: 'var(--primary-color)' }}
+            onClick={() => setCurrentProblemId(record.problem_id)}>
+            {text}
+          </Text>
+          <Tag color={record.difficulty === 'easy' ? 'green' : record.difficulty === 'hard' ? 'red' : 'orange'}>
+            {record.difficulty === 'easy' ? t('easy') : record.difficulty === 'hard' ? t('hard') : t('medium')}
+          </Tag>
+          {record.status === 'paused' && <Tag>{t('statusPaused')}</Tag>}
+        </Space>
+      ),
+    },
+    {
+      title: t('subject'), dataIndex: 'subject', width: 100, responsive: ['md'],
+      render: (v: string) => v || '-',
+    },
+    {
+      title: t('gradeClass'), key: 'scope', width: 160, responsive: ['lg'],
+      render: (_: any, record: any) => (
+        <ScopeTag scope={record.target_scope} grade={record.target_grade}
+          classes={record.target_class} users={record.target_users} />
+      ),
+    },
+  ]
+
+  if (isTeacherOrAdmin) {
+    columns.push({
+      title: t('studentProgress'), key: 'stats', width: 160, responsive: ['md'],
+      render: (_: any, record: any) => (
+        <Space size={4}>
+          <Tooltip title={t('submissionCount')}>
+            <Tag>{record.total_students || 0}{t('peopleUnit')}</Tag>
+          </Tooltip>
+          <Tooltip title={t('passRate')}>
+            <Tag color={(record.pass_rate || 0) >= 60 ? 'green' : (record.pass_rate || 0) > 0 ? 'orange' : 'default'}>
+              {record.pass_rate || 0}%
+            </Tag>
+          </Tooltip>
+        </Space>
+      ),
+    })
+  } else {
+    columns.push({
+      title: t('myStatus'), key: 'my', width: 140,
+      render: (_: any, record: any) => {
+        if (!record.my_status) return <Tag>{t('notStarted')}</Tag>
+        const st = STATUS_MAP[record.my_status]
+        if (record.my_status === 'accepted') {
+          return <Tag color="success">{record.my_score ?? 0}/{record.max_score ?? 0}</Tag>
         }
-        if (data.status === 'failed') {
-          message.error(t('aiReviewFailed'))
-          return
-        }
-      } catch {
-        // ignore
-      }
-      await new Promise(r => setTimeout(r, 2000))
-    }
-    message.warning(t('aiReviewTimeout'))
+        return <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || record.my_status}</Tag>
+      },
+    })
   }
 
-  // ── 返回列表 ──
-  const handleBack = () => {
-    setCurrentProblem(null)
-    setSourceCode('')
-    setRunResult(null)
-    setSubmissionResult(null)
-    setAiReview(null)
-    setSubmissions([])
-  }
+  columns.push({
+    key: 'actions',
+    width: isTeacherOrAdmin ? 320 : 100,
+    style: { whiteSpace: 'nowrap' },
+    render: (_: any, record: any) => (
+      <Space size={2} wrap>
+        {isTeacherOrAdmin && (
+          <>
+            <Text type="secondary" style={{ fontSize: 12 }}>{record.creator_name || record.creator_username}</Text>
+            <Tag>{record.language?.toUpperCase()}</Tag>
+          </>
+        )}
+        {isTeacherOrAdmin && (
+          <Tooltip title={t('viewSubmissionDetails')}>
+            <Button type="text" size="small" icon={<BarChartOutlined />}
+              onClick={(e) => { e.stopPropagation(); openStats(record.problem_id, record.title) }} />
+          </Tooltip>
+        )}
+        <Button type="link" size="small" icon={<PlayCircleOutlined />}
+          onClick={(e) => { e.stopPropagation(); setCurrentProblemId(record.problem_id) }}>
+          {t('start')}
+        </Button>
+        {isTeacherOrAdmin && (
+          <>
+            <Tooltip title={t('edit')}>
+              <Button type="text" size="small" icon={<EditOutlined />}
+                onClick={(e) => { e.stopPropagation(); handleEditProblem(record.problem_id) }} />
+            </Tooltip>
+            <ResetActivityButton activityType="code" activityId={record.problem_id}
+              iconOnly stopPropagation onSuccess={loadProblems} />
+            <Tooltip title={t('delete')}>
+              <Button type="text" size="small" danger icon={<DeleteOutlined />}
+                onClick={(e) => { e.stopPropagation(); handleDeleteProblem(record.problem_id) }} />
+            </Tooltip>
+          </>
+        )}
+      </Space>
+    ),
+  })
 
-  // ── 初始化（必须放在所有 const 函数声明之后） ──
-  useEffect(() => {
-    loadProblems()
-    apiClient.get('/api/code/languages').then(({ data }) => {
-      if (data?.languages) setSupportedLangs(data.languages)
-    }).catch(() => { /* ignore */ })
-    apiClient.get('/api/config/subjects').then(({ data }) => {
-      if (data?.subjects?.length > 0) {
-        setSubjectOptions(data.subjects)
-        // 学科默认取第一个（与随堂测验 AI 弹窗一致）：默认留空太容易漏填，
-        // 生成出来的题目 subject 就是空的，活动监控/列表的"科目"列只能显示"-"
-        const first = data.subjects[0]
-        setAiGenSubject(prev => prev || first)
-        setCreateForm(prev => ({ ...prev, subject: prev.subject || first }))
-      }
-    }).catch(() => {})
-    if (isTeacherOrAdmin) {
-      apiClient.get('/api/code/teachers/statistics').then(() => {}).catch(() => {})
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
-
-  // ── 渲染: 题目列表视图 ──
-  const renderProblemList = () => (
+  const listView = (
     <>
-
-      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Space>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <Space wrap size={6}>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder={t('searchProblems')}
+            style={{ width: narrow ? 180 : 220 }}
+          />
+          <Select
+            allowClear
+            value={subjectFilter || undefined}
+            onChange={(v) => { setSubjectFilter(v || ''); setPage(1) }}
+            placeholder={t('selectSubject')}
+            style={{ width: 120 }}
+            options={subjectOptions.map((s) => ({ value: s, label: s }))}
+          />
+          <Select
+            allowClear
+            value={difficultyFilter || undefined}
+            onChange={(v) => { setDifficultyFilter(v || ''); setPage(1) }}
+            placeholder={t('selectDifficulty')}
+            style={{ width: 110 }}
+            options={[
+              { value: 'easy', label: t('easy') },
+              { value: 'medium', label: t('medium') },
+              { value: 'hard', label: t('hard') },
+            ]}
+          />
           {isTeacherOrAdmin && (
-            <>
-              <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGenModal(true)}>{t('aiGenerate')}</Button>
-              <Button size="small" type="primary" icon={<FileTextOutlined />} onClick={() => setCreateModalOpen(true)}>{t('createProblem')}</Button>
-            </>
+            <Select
+              value={statusFilter}
+              onChange={(v) => { setStatusFilter(v); setPage(1) }}
+              style={{ width: 110 }}
+              options={[
+                { value: 'all', label: t('allStatus') },
+                { value: 'active', label: t('statusActive') },
+                { value: 'paused', label: t('statusPaused') },
+              ]}
+            />
+          )}
+          {!isTeacherOrAdmin && (
+            <Select
+              allowClear
+              value={myStatusFilter || undefined}
+              onChange={(v) => { setMyStatusFilter(v || ''); setPage(1) }}
+              placeholder={t('myStatus')}
+              style={{ width: 120 }}
+              options={[
+                { value: 'accepted', label: t('filterAccepted') },
+                { value: 'unaccepted', label: t('filterUnaccepted') },
+                { value: 'untried', label: t('filterUntried') },
+              ]}
+            />
+          )}
+          {(searchInput || subjectFilter || difficultyFilter || myStatusFilter || (isTeacherOrAdmin && statusFilter !== 'all')) && (
+            <Button size="small" onClick={resetListFilters}>{t('clearFilter')}</Button>
           )}
         </Space>
+
+        {isTeacherOrAdmin && (
+          <Space size={6}>
+            <Button size="small" icon={<RobotOutlined />} onClick={openAiGenModal}>{t('aiGenerate')}</Button>
+            <Button size="small" type="primary" icon={<FileTextOutlined />} onClick={() => { setValidateResult(null); setCreateModalOpen(true) }}>
+              {t('createProblem')}
+            </Button>
+          </Space>
+        )}
       </div>
 
       <Spin spinning={loading}>
@@ -781,383 +752,504 @@ const CodePracticePage: React.FC = () => {
           dataSource={problemList}
           rowKey="problem_id"
           pagination={false}
-          size="middle"
-          showHeader={false}
+          size={narrow ? 'small' : 'middle'}
+          showHeader={!narrow}
+          scroll={{ x: 'max-content' }}
           expandable={{
             expandedRowRender: (record: any) => (
-              <div style={{ padding: '12px 0' }}>
-                <CompactCodeView
-                  problemId={record.problem_id}
-                  starterCode={record.starter_code}
-                  language={record.language || 'python'}
-                  supportedLanguages={supportedLangs}
-                />
+              <div style={{ padding: '8px 0' }}>
+                <CodeWorkspace problemId={record.problem_id} onSubmitted={loadProblems} />
               </div>
             ),
             rowExpandable: () => true,
             expandedRowKeys,
-            onExpand: (expanded, record) => {
-              setExpandedRowKeys(expanded ? [record.problem_id] : [])
-            },
+            onExpand: (expanded, record) => setExpandedRowKeys(expanded ? [record.problem_id] : []),
             expandIcon: ({ expanded, onExpand, record }: any) => (
               <Button
                 type="text"
                 size="small"
                 icon={expanded ? <MinusSquareOutlined /> : <PlusSquareOutlined />}
                 onClick={(e) => { e.stopPropagation(); onExpand(record, e) }}
-                style={{ marginRight: 8 }}
+                style={{ marginRight: 6 }}
               />
             ),
           }}
-          columns={[
-            {
-              dataIndex: 'title',
-              render: (text: string, record: any) => (
-                <Space>
-                  <Text strong style={{ cursor: 'pointer', color: '#1677ff' }}
-                    onClick={() => loadProblem(record.problem_id)}>
-                    {text}
-                  </Text>
-                  <Tag color={record.difficulty === 'easy' ? 'green' : record.difficulty === 'hard' ? 'red' : 'orange'}>
-                    {record.difficulty === 'easy' ? t('easy') : record.difficulty === 'hard' ? t('hard') : t('medium')}
-                  </Tag>
-                </Space>
-              ),
-            },
-            // 科目：创建/AI 生成时选的（code_problems.subject），列表以前没展示
-            { title: t('subject'), dataIndex: 'subject', width: 100,
-              render: (v: string) => v || '-' },
-            {
-              title: t('gradeClass'),
-              key: 'scope',
-              width: 160,
-              render: (_: any, record: any) => (
-                <ScopeTag scope={record.target_scope} grade={record.target_grade}
-                  classes={record.target_class} users={record.target_users} />
-              ),
-            },
-            {
-              width: 400,
-              style: { whiteSpace: 'nowrap' },
-              render: (_: any, record: any) => (
-                <Space size="small" style={{ justifyContent: 'flex-end' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{record.creator_username || record.creator_name}</Text>
-                  <Tag>{record.language?.toUpperCase()}</Tag>
-                  {isTeacherOrAdmin && record.total_submissions != null && (
-                    <Button type="text" size="small" icon={<BarChartOutlined />}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        loadStatsDetail(record.problem_id, record.title)
-                      }}
-                      title={t('viewSubmissionDetails')}
-                    />
-                  )}
-                  {record.my_status && (
-                    <Tag color={record.my_status === 'accepted' ? 'success' : 'error'}>
-                      {record.my_status === 'accepted' ? `${record.my_score}${t('scoreUnit')}` : t(STATUS_MAP[record.my_status]?.labelKey ?? '') || record.my_status}
-                    </Tag>
-                  )}
-                  {isTeacherOrAdmin && (
-                    <>
-                      <Button type="link" size="small" icon={<EditOutlined />}
-                        onClick={(e) => { e.stopPropagation(); handleEditProblem(record.problem_id) }}
-                      />
-                      <ResetActivityButton activityType="code" activityId={record.problem_id}
-                        iconOnly stopPropagation onSuccess={loadProblems} />
-                      <Button type="link" size="small" danger icon={<DeleteOutlined />}
-                        onClick={(e) => { e.stopPropagation(); handleDeleteProblem(record.problem_id) }}
-                      />
-                    </>
-                  )}
-                </Space>
-              ),
-            },
-          ]}
+          columns={columns}
           locale={{ emptyText: <Empty description={isTeacherOrAdmin ? t('noProblemsHint') : t('noProblems')} /> }}
         />
       </Spin>
 
-      {/* 分页 */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
         <Pagination
           current={page}
           total={total}
           pageSize={pageSize}
-          onChange={(p) => { setPage(p); setTimeout(loadProblems, 0) }}
-          onShowSizeChange={(_p, size) => { setPageSize(size); setPage(1); setTimeout(loadProblems, 0) }}
+          onChange={(p, size) => {
+            setPage(p)
+            if (size && size !== pageSize) setPageSize(size)
+            setExpandedRowKeys([])
+          }}
+          onShowSizeChange={(_p, size) => { setPageSize(size); setPage(1) }}
           showSizeChanger
           pageSizeOptions={['5', '10', '20', '50']}
-          showTotal={(total) => t('totalProblems', { count: total })}
+          showTotal={(count) => t('totalProblems', { count })}
           hideOnSinglePage={false}
         />
       </div>
+    </>
+  )
 
-      {/* ── 提交统计弹窗 ── */}
-      <Modal
-        title={t('submissionDetailTitle', { title: statsProblemTitle })}
-        open={statsModalOpen}
-        onCancel={() => setStatsModalOpen(false)}
-        footer={null}
-        width={900}
-      >
-        <Spin spinning={statsLoading}>
-          {statsDetail.length === 0 ? (
-            <Empty description={t('noStudentSubmissions')} />
-          ) : (
-            <Table
-              dataSource={statsDetail}
-              rowKey="id"
+
+  // ── 教师统计弹窗 ──
+  const statsModal = (
+    <Modal
+      title={t('submissionDetailTitle', { title: statsTitle })}
+      open={statsModalOpen}
+      onCancel={() => setStatsModalOpen(false)}
+      footer={null}
+      width={narrow ? '96%' : 1000}
+    >
+      <Spin spinning={statsLoading}>
+        {statsData ? (
+          <>
+            <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+              <Col xs={12} sm={6}>
+                <Statistic title={t('targetStudents')} value={statsData.summary?.target_count ?? 0} />
+              </Col>
+              <Col xs={12} sm={6}>
+                <Statistic title={t('submittedStudents')} value={statsData.summary?.submitted_count ?? 0} />
+              </Col>
+              <Col xs={12} sm={6}>
+                <Statistic title={t('passRate')} value={statsData.summary?.pass_rate ?? 0} suffix="%" />
+              </Col>
+              <Col xs={12} sm={6}>
+                <Statistic title={t('avgScore')} value={statsData.summary?.avg_score ?? 0} />
+              </Col>
+            </Row>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
+              <Button size="small" icon={<DownloadOutlined />} onClick={exportRosterCsv}>{t('exportRoster')}</Button>
+              <Button size="small" icon={<ReloadOutlined />} loading={regrading} onClick={handleRegrade}>
+                {t('regrade')}
+              </Button>
+            </div>
+
+            <Tabs
               size="small"
-              pagination={false}
-              expandable={{
-                expandedRowRender: (record: any) => (
-                  <div style={{ padding: '8px 0' }}>
-                    <Text strong style={{ fontSize: 13 }}>{t('submittedCode')}</Text>
-                    <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontSize: 12, overflow: 'auto', maxHeight: 300, marginTop: 4 }}>
-                      <code>{record.source_code || t('codeNotVisible')}</code>
-                    </pre>
-                  </div>
-                ),
-                rowExpandable: () => true,
-              }}
-              columns={[
-                { title: t('studentName'), dataIndex: 'student_name', width: 100 },
-                { title: t('studentId'), dataIndex: 'student_username', width: 100, ellipsis: true },
-                { title: t('studentGrade'), dataIndex: 'student_grade', width: 90, render: (v: string) => v || '-' },
-                { title: t('studentClass'), dataIndex: 'student_class', width: 100, render: (v: string) => v || '-' },
+              activeKey={statsTab}
+              onChange={setStatsTab}
+              items={[
                 {
-                  title: t('status'), dataIndex: 'status', width: 100,
-                  render: (v: string) => {
-                    const st = STATUS_MAP[v]
-                    return <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || v}</Tag>
-                  },
+                  key: 'overview',
+                  label: t('tabOverview'),
+                  children: (
+                    <div>
+                      <Descriptions size="small" bordered column={narrow ? 1 : 2} style={{ marginBottom: 12 }}>
+                        <Descriptions.Item label={t('targetStudents')}>{statsData.summary?.target_count ?? 0}</Descriptions.Item>
+                        <Descriptions.Item label={t('submittedStudents')}>{statsData.summary?.submitted_count ?? 0}</Descriptions.Item>
+                        <Descriptions.Item label={t('acceptedStudents')}>{statsData.summary?.accepted_count ?? 0}</Descriptions.Item>
+                        <Descriptions.Item label={t('passRate')}>{statsData.summary?.pass_rate ?? 0}%</Descriptions.Item>
+                      </Descriptions>
+                      <Text strong style={{ fontSize: 13 }}>{t('caseStats')}</Text>
+                      {(statsData.case_stats || []).length === 0 ? (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('noData')} />
+                      ) : (
+                        <Table
+                          size="small"
+                          style={{ marginTop: 6 }}
+                          dataSource={statsData.case_stats}
+                          rowKey="case_id"
+                          pagination={false}
+                          columns={[
+                            { title: '#', dataIndex: 'case_id', width: 50 },
+                            {
+                              title: t('description'), dataIndex: 'description',
+                              render: (v: string, r: any) => v || (r.is_sample ? t('cpSampleTag') : t('cpCasePrefix')),
+                            },
+                            { title: t('score'), dataIndex: 'score', width: 60 },
+                            {
+                              title: t('passRate'), key: 'rate', width: 180,
+                              render: (_: any, r: any) => (
+                                <Progress percent={r.pass_rate || 0} size="small" />
+                              ),
+                            },
+                            {
+                              title: t('passedCount'), key: 'count', width: 100,
+                              render: (_: any, r: any) => `${r.passed || 0}/${r.judged || 0}`,
+                            },
+                          ]}
+                        />
+                      )}
+                    </div>
+                  ),
                 },
-                { title: t('score'), dataIndex: 'score', width: 60 },
-                { title: t('passedCases'), render: (_: any, r: any) => `${r.passed_cases || 0}/${r.total_cases || 0}`, width: 90 },
-                { title: t('runTime'), dataIndex: 'execution_time', render: (v: number) => v ? `${v}s` : '-', width: 70 },
-                { title: t('submitTime'), dataIndex: 'created_at', render: (v: string) => v?.slice(5, 16) || '', width: 120 },
+                {
+                  key: 'submissions',
+                  label: t('submitted'),
+                  children: (
+                    <Table
+                      size="small"
+                      dataSource={statsData.submissions || []}
+                      rowKey="id"
+                      pagination={{ pageSize: 10, showSizeChanger: false }}
+                      scroll={{ x: 'max-content' }}
+                      expandable={{
+                        onExpand: (expanded, record: any) => { if (expanded) loadSubmissionDetail(record.id) },
+                        expandedRowRender: (record: any) => renderSubmissionDetail(detailCache[record.id]),
+                      }}
+                      columns={[
+                        { title: t('studentName'), dataIndex: 'student_name', width: 90 },
+                        { title: t('studentId'), dataIndex: 'student_username', width: 100, ellipsis: true },
+                        { title: t('studentClass'), dataIndex: 'student_class', width: 90, responsive: ['md'] },
+                        {
+                          title: t('status'), dataIndex: 'status', width: 110,
+                          render: (v: string) => {
+                            const st = STATUS_MAP[v]
+                            return <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || v}</Tag>
+                          },
+                        },
+                        {
+                          title: t('score'), key: 'score', width: 80,
+                          render: (_: any, r: any) => `${r.score ?? 0}/${r.max_score ?? 0}`,
+                        },
+                        { title: t('passedCases'), key: 'passed', width: 80, render: (_: any, r: any) => `${r.passed_cases || 0}/${r.total_cases || 0}` },
+                        { title: t('runTime'), dataIndex: 'execution_time', width: 70, render: (v: number) => v ? `${v}s` : '-' },
+                        { title: t('submitTime'), dataIndex: 'created_at', width: 110, render: (v: string) => v?.slice(5, 16) || '' },
+                        {
+                          title: 'AI', key: 'ai', width: 70,
+                          render: (_: any, r: any) => (
+                            <Button type="link" size="small" disabled={r.ai_review_status !== 'completed'}
+                              onClick={() => openAiReview(r.id)}>
+                              {t('view')}
+                            </Button>
+                          ),
+                        },
+                      ]}
+                    />
+                  ),
+                },
+                {
+                  key: 'roster',
+                  label: t('tabRoster'),
+                  children: (
+                    <div>
+                      <div style={{ marginBottom: 8 }}>
+                        <Segmented
+                          size="small"
+                          value={rosterFilter}
+                          onChange={(v) => setRosterFilter(v as any)}
+                          options={[
+                            { value: 'all', label: `${t('all')} (${(statsData.roster || []).length})` },
+                            { value: 'unsubmitted', label: `${t('unsubmitted')} (${(statsData.roster || []).filter((r: any) => !r.submitted).length})` },
+                            { value: 'submitted', label: `${t('submitted')} (${(statsData.roster || []).filter((r: any) => r.submitted).length})` },
+                          ]}
+                        />
+                      </div>
+                      <Table
+                        size="small"
+                        dataSource={filteredRoster}
+                        rowKey="username"
+                        pagination={{ pageSize: 15, showSizeChanger: false }}
+                        scroll={{ x: 'max-content' }}
+                        columns={[
+                          { title: t('studentName'), dataIndex: 'name', width: 100 },
+                          { title: t('studentId'), dataIndex: 'username', width: 110 },
+                          { title: t('studentClass'), dataIndex: 'class', width: 90, render: (v: string) => v || '-' },
+                          {
+                            title: t('submitted'), dataIndex: 'submitted', width: 90,
+                            render: (v: boolean) => v ? <Tag color="success">{t('submitted')}</Tag> : <Tag color="default">{t('unsubmitted')}</Tag>,
+                          },
+                          {
+                            title: t('status'), dataIndex: 'status', width: 110,
+                            render: (v: string) => {
+                              if (!v) return '-'
+                              const st = STATUS_MAP[v]
+                              return <Tag color={st?.color}>{st ? t(st.labelKey) : v}</Tag>
+                            },
+                          },
+                          {
+                            title: t('score'), key: 'score', width: 80,
+                            render: (_: any, r: any) => r.submitted ? `${r.score ?? 0}/${r.max_score ?? 0}` : '-',
+                          },
+                          { title: t('submitTime'), dataIndex: 'submitted_at', width: 120, render: (v: string) => v?.slice(5, 16) || '' },
+                        ]}
+                      />
+                    </div>
+                  ),
+                },
               ]}
             />
-          )}
-          <div style={{ marginTop: 12, textAlign: 'center' }}>
-            <Text type="secondary">{t('totalStudentsSubmitted', { count: statsDetail.length })}</Text>
-          </div>
-        </Spin>
-      </Modal>
+          </>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('noStudentSubmissions')} />
+        )}
+      </Spin>
+    </Modal>
+  )
 
-      {/* ── 创建题目弹窗 ── */}
-      <Modal maskClosable={false}
+  // ── 创建 / 编辑共用字段 ──
+  const renderFormTabs = (form: CreateFormState, setForm: React.Dispatch<React.SetStateAction<CreateFormState>>) => (
+    <Tabs items={[
+      {
+        key: 'basic',
+        label: t('basicInfo'),
+        children: (
+          <Space orientation="vertical" style={{ width: '100%' }}>
+            <Input
+              placeholder={t('problemTitlePlaceholder')}
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+            <Input.TextArea
+              rows={5}
+              placeholder={t('problemDescriptionPlaceholder')}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+            <Space wrap>
+              <Select
+                value={form.subject || undefined}
+                onChange={(v) => setForm({ ...form, subject: v })}
+                style={{ width: 140 }}
+                placeholder={t('selectSubject')}
+                options={subjectOptions.map((s) => ({ value: s, label: s }))}
+              />
+              <Select
+                value={form.difficulty}
+                onChange={(v) => setForm({ ...form, difficulty: v })}
+                style={{ width: 100 }}
+                options={[
+                  { value: 'easy', label: t('easy') },
+                  { value: 'medium', label: t('medium') },
+                  { value: 'hard', label: t('hard') },
+                ]}
+              />
+              <Select
+                value={form.language}
+                onChange={(v) => setForm({ ...form, language: v })}
+                style={{ width: 120 }}
+                options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]}
+              />
+              <InputNumber
+                min={1}
+                max={60}
+                value={form.time_limit}
+                onChange={(v) => setForm({ ...form, time_limit: Number(v) || 5 })}
+                addonAfter={t('timeLimitLabel')}
+                style={{ width: 160 }}
+              />
+              <Space size={4}>
+                <Switch
+                  checked={form.status === 'active'}
+                  onChange={(checked) => setForm({ ...form, status: checked ? 'active' : 'paused' })}
+                />
+                <Text type="secondary">{form.status === 'active' ? t('statusActive') : t('statusPaused')}</Text>
+              </Space>
+            </Space>
+            <KnowledgePointSelect
+              subject={form.subject}
+              style={{ width: 260 }}
+              value={splitKps(form.knowledge_points)}
+              onChange={(v) => setForm({ ...form, knowledge_points: joinKps(v as string[]) })}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('problemDescHint')}</Text>
+          </Space>
+        ),
+      },
+      {
+        key: 'code',
+        label: t('codeTemplate'),
+        children: (
+          <>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('codeTemplateDescription')}</Text>
+            <Input.TextArea
+              rows={14}
+              value={form.template_code}
+              onChange={(e) => setForm({ ...form, template_code: e.target.value })}
+              style={{ fontFamily: 'Consolas, "Courier New", monospace', fontSize: 13 }}
+            />
+          </>
+        ),
+      },
+      {
+        key: 'cases',
+        label: <span>{t('testCases')} <Tag style={{ marginLeft: 4 }}>{form.test_cases.length}</Tag></span>,
+        children: (
+          <TestCaseEditor
+            value={form.test_cases}
+            onChange={(cases) => setForm({ ...form, test_cases: cases })}
+          />
+        ),
+      },
+      {
+        key: 'reference',
+        label: t('referenceSolution'),
+        children: (
+          <>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('referenceSolutionHint')}</Text>
+            <Input.TextArea
+              rows={12}
+              value={form.reference_solution}
+              onChange={(e) => setForm({ ...form, reference_solution: e.target.value })}
+              style={{ fontFamily: 'Consolas, "Courier New", monospace', fontSize: 13 }}
+            />
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Button type="primary" icon={<PlayCircleOutlined />} loading={validating}
+                onClick={() => handleValidateSolution(form)}>
+                {t('validateSolution')}
+              </Button>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('validateHint')}</Text>
+            </div>
+            {validateResult && (
+              <div style={{ marginTop: 10 }}>
+                <Alert
+                  type={validateResult.all_pass ? 'success' : 'warning'}
+                  showIcon
+                  title={validateResult.all_pass
+                    ? t('allCasesPass')
+                    : t('validateSummary', { passed: validateResult.passed, total: validateResult.total })}
+                  style={{ marginBottom: 8 }}
+                />
+                <Table
+                  size="small"
+                  dataSource={validateResult.details || []}
+                  rowKey={(r: any) => String(r.case_id ?? r.case_index)}
+                  pagination={false}
+                  expandable={{
+                    rowExpandable: (r: any) => !r.is_pass,
+                    expandedRowRender: (r: any) => (
+                      <DiffBlock expected={r.expected || ''} actual={r.actual || ''} error={r.error || ''} />
+                    ),
+                  }}
+                  columns={[
+                    { title: t('cpColCase'), dataIndex: 'description', render: (v: string, r: any) => v || `#${(r.case_index ?? 0) + 1}` },
+                    {
+                      title: t('testResult'), dataIndex: 'is_pass', width: 90,
+                      render: (v: boolean) => (
+                        <Tag color={v ? 'success' : 'error'}>{v ? t('passed') : t('failed')}</Tag>
+                      ),
+                    },
+                    { title: t('score'), dataIndex: 'score', width: 70 },
+                  ]}
+                />
+              </div>
+            )}
+          </>
+        ),
+      },
+      {
+        key: 'scope',
+        label: t('targetScope'),
+        children: (
+          <div style={{ padding: '8px 0' }}>
+            <ActivityScopeSelector
+              value={{
+                target_scope: (form.target_scope || 'teacher_classes') as any,
+                target_grade: form.target_grade || '',
+                target_class: form.target_class || '',
+                target_users: form.target_users || '',
+              }}
+              onChange={(val) => setForm({
+                ...form,
+                target_scope: val.target_scope,
+                target_grade: val.target_grade,
+                target_class: val.target_class,
+                target_users: val.target_users,
+              })}
+              showAllOption={user?.role === 'admin'}
+            />
+          </div>
+        ),
+      },
+    ]} />
+  )
+
+
+  return (
+    <Card style={{ borderRadius: 8, height: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div>
+          <Title level={4} style={{ margin: 0 }}>{t('codePractice')}</Title>
+          <Text type="secondary" style={{ fontSize: 13 }}>{t('codePracticeIntro')}</Text>
+        </div>
+      </div>
+
+      {listView}
+
+      {/* ── 创建题目 ── */}
+      <Modal
+        maskClosable={false}
         title={t('createCodeProblem')}
         open={createModalOpen}
         onCancel={() => setCreateModalOpen(false)}
         onOk={handleCreateProblem}
         confirmLoading={createLoading}
-        width={800}
+        width={narrow ? '96%' : 860}
         okText={t('saveProblem')}
+        destroyOnHidden
       >
-        <Tabs items={[
-          {
-            key: 'basic',
-            label: t('basicInfo'),
-            children: (
-              <Space orientation="vertical" style={{ width: '100%' }}>
-                <Input
-                  placeholder={t('problemTitlePlaceholder')}
-                  value={createForm.title}
-                  onChange={e => setCreateForm({ ...createForm, title: e.target.value })}
-                />
-                <Input.TextArea
-                  rows={4}
-                  placeholder={t('problemDescriptionPlaceholder')}
-                  value={createForm.description}
-                  onChange={e => setCreateForm({ ...createForm, description: e.target.value })}
-                />
-                <Space>
-                  <Select
-                    value={createForm.subject}
-                    onChange={v => setCreateForm({ ...createForm, subject: v })}
-                    style={{ width: 140 }}
-                    options={subjectOptions.map(s => ({ value: s, label: s }))}
-                  />
-                  <Select
-                    value={createForm.difficulty}
-                    onChange={v => setCreateForm({ ...createForm, difficulty: v })}
-                    style={{ width: 100 }}
-                    options={[
-                      { value: 'easy', label: t('easy') },
-                      { value: 'medium', label: t('medium') },
-                      { value: 'hard', label: t('hard') },
-                    ]}
-                  />
-                  <Select
-                    value={createForm.language}
-                    onChange={v => setCreateForm({ ...createForm, language: v })}
-                    style={{ width: 120 }}
-                    options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]}
-                  />
-                  {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输） */}
-                  <KnowledgePointSelect subject={createForm.subject} style={{ width: 200 }}
-                    value={splitKps(createForm.knowledge_points)}
-                    onChange={(v) => setCreateForm({ ...createForm, knowledge_points: joinKps(v as string[]) })} />
-                </Space>
-              </Space>
-            ),
-          },
-          {
-            key: 'code',
-            label: t('codeTemplate'),
-            children: (
-              <>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('codeTemplateDescription')}</Text>
-                <Input.TextArea
-                  rows={12}
-                  value={createForm.template_code}
-                  onChange={e => setCreateForm({ ...createForm, template_code: e.target.value })}
-                  style={{ fontFamily: 'monospace', fontSize: 13 }}
-                />
-              </>
-            ),
-          },
-          {
-            key: 'cases',
-            label: (
-              <span>
-                {t('testCases')}
-                <Tag style={{ marginLeft: 4 }}>{createForm.test_cases.length}</Tag>
-              </span>
-            ),
-            children: (
-              <>
-                {/* 新增测试用例 */}
-                <Card size="small" style={{ marginBottom: 12 }}>
-                  <Space orientation="vertical" style={{ width: '100%' }}>
-                    <Text strong>{t('addTestCase')}</Text>
-                    <Space>
-                      <Input
-                        placeholder={t('standardInput')}
-                        value={newTestCase.input}
-                        onChange={e => setNewTestCase({ ...newTestCase, input: e.target.value })}
-                        style={{ width: 180 }}
-                      />
-                      <Input
-                        placeholder={t('expectedOutput')}
-                        value={newTestCase.expected}
-                        onChange={e => setNewTestCase({ ...newTestCase, expected: e.target.value })}
-                        style={{ width: 180 }}
-                      />
-                      <Input
-                        placeholder={t('testCaseDescription')}
-                        value={newTestCase.description}
-                        onChange={e => setNewTestCase({ ...newTestCase, description: e.target.value })}
-                        style={{ width: 160 }}
-                      />
-                      <InputNumber
-                        placeholder={t('scorePlaceholder')}
-                        value={newTestCase.score}
-                        onChange={v => setNewTestCase({ ...newTestCase, score: v || 1 })}
-                        min={0.5} max={10} step={0.5}
-                        style={{ width: 70 }}
-                      />
-                      <Button
-                        type="primary" size="small"
-                        onClick={() => {
-                          if (!newTestCase.expected.trim()) { message.warning(t('inputExpectedOutput')); return }
-                          setCreateForm({
-                            ...createForm,
-                            test_cases: [...createForm.test_cases, { ...newTestCase, is_sample: createForm.test_cases.length < 2 }],
-                          })
-                          setNewTestCase({ input: '', expected: '', description: '', score: 1, is_sample: false })
-                        }}
-                      >
-                        {t('add')}
-                      </Button>
-                    </Space>
-                  </Space>
-                </Card>
-
-                {/* 测试用例列表 */}
-                {createForm.test_cases.length === 0 ? (
-                  <Text type="secondary">{t('noTestCasesYet')}</Text>
-                ) : (
-                  <Table
-                    size="small"
-                    dataSource={createForm.test_cases}
-                    rowKey={(_, i) => String(i)}
-                    pagination={false}
-                    columns={[
-                      { title: '#', render: (_: any, __: any, i: number) => i + 1, width: 40 },
-                      { title: t('input'), dataIndex: 'input', render: (v: string) => <code>{v || t('empty')}</code> },
-                      { title: t('expectedOutput'), dataIndex: 'expected', render: (v: string) => <code>{v}</code> },
-                      { title: t('description'), dataIndex: 'description' },
-                      { title: t('score'), dataIndex: 'score', width: 60 },
-                      { title: t('example'), dataIndex: 'is_sample', render: (v: boolean) => v ? <Tag color="blue">{t('example')}</Tag> : null, width: 60 },
-                      { title: t('actions'), width: 60, render: (_: any, __: any, i: number) => (
-                        <Button type="link" danger size="small" onClick={() => {
-                          setCreateForm({
-                            ...createForm,
-                            test_cases: createForm.test_cases.filter((_, idx) => idx !== i),
-                          })
-                        }}>{t('delete')}</Button>
-                      )},
-                    ]}
-                  />
-                )}
-              </>
-            ),
-          },
-          {
-            key: 'scope',
-            label: t('targetScope'),
-            children: (
-              <div style={{ padding: '8px 0' }}>
-                <ActivityScopeSelector
-                  value={{
-                    target_scope: createForm.target_scope as any || 'teacher_classes',
-                    target_grade: createForm.target_grade || '',
-                    target_class: createForm.target_class || '',
-                    target_users: createForm.target_users || '',
-                  }}
-                  onChange={(val) => setCreateForm({
-                    ...createForm,
-                    target_scope: val.target_scope,
-                    target_grade: val.target_grade,
-                    target_class: val.target_class,
-                    target_users: val.target_users,
-                  })}
-                  showAllOption={isTeacherOrAdmin && user?.role === 'admin'}
-                />
-              </div>
-            ),
-          },
-        ]} />
+        {renderFormTabs(createForm, setCreateForm)}
       </Modal>
 
-      {/* ── AI 生成弹窗 ── */}
-      <Modal maskClosable={false}
+      {/* ── 编辑题目 ── */}
+      <Modal
+        maskClosable={false}
+        title={t('cpEditTitle')}
+        open={editModalOpen}
+        onCancel={() => setEditModalOpen(false)}
+        onOk={handleSaveEdit}
+        confirmLoading={editLoading}
+        width={narrow ? '96%' : 860}
+        okText={t('cpSaveChanges')}
+        destroyOnHidden
+      >
+        {renderFormTabs(editForm, setEditForm)}
+      </Modal>
+
+      {/* ── AI 生成 ── */}
+      <Modal
+        maskClosable={false}
         title={t('aiGenerateCodeProblem')}
         open={aiGenModal}
         onCancel={() => { setAiGenModal(false); setAiGenResult(null) }}
         footer={null}
-        width={500}
+        width={narrow ? '96%' : 560}
       >
         <Space orientation="vertical" style={{ width: '100%' }}>
           <Text>{t('aiGenerateDesc')}</Text>
-          <Space>
-            {/* 主题即知识点：与「创建题目」用同一个控件（下拉选课程知识点 + 手输），
-                这样出题的口径与课程树一致，后面按知识点统计/复用才对得上 */}
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('aiApplyHint')}</Text>
+          <Space wrap>
             <KnowledgePointSelect
               multiple={false}
               subject={aiGenSubject}
               value={aiGenTopic}
               onChange={(v) => setAiGenTopic(String(v || ''))}
               placeholder={t('aiGenTopicPlaceholder')}
-              style={{ width: 300 }}
+              style={{ width: 280 }}
             />
             <Select
               value={aiGenSubject}
               onChange={setAiGenSubject}
               style={{ width: 120 }}
-              options={subjectOptions.map(s => ({ value: s, label: s }))}
+              options={subjectOptions.map((s) => ({ value: s, label: s }))}
+            />
+          </Space>
+          <Space wrap>
+            <Select
+              value={aiGenLanguage}
+              onChange={setAiGenLanguage}
+              style={{ width: 130 }}
+              options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]}
+            />
+            <Select
+              value={aiGenDifficulty}
+              onChange={setAiGenDifficulty}
+              style={{ width: 110 }}
+              options={[
+                { value: 'easy', label: t('easy') },
+                { value: 'medium', label: t('medium') },
+                { value: 'hard', label: t('hard') },
+              ]}
             />
             <Button type="primary" onClick={handleAiGenerate} loading={aiGenLoading}>
               {t('generate')}
@@ -1169,490 +1261,41 @@ const CodePracticePage: React.FC = () => {
               type="success"
               showIcon
               title={t('aiGenerateComplete')}
-              description={
+              description={(
                 <div>
                   <Text strong>{t('title')}：</Text>{aiGenResult.title}<br />
-                  <Text strong>{t('knowledgePoints')}：</Text>{aiGenResult.knowledge_points}<br />
-                  <Text strong>{t('testCases')}：</Text>{t('countCases', { count: aiGenResult.test_cases?.length || 0 })}
+                  <Text strong>{t('knowledgePoints')}：</Text>{aiGenResult.knowledge_points || '-'}<br />
+                  <Text strong>{t('testCases')}：</Text>{t('countCases', { count: aiGenResult.test_cases?.length || 0 })}<br />
+                  <Text strong>{t('referenceSolution')}：</Text>
+                  {aiGenResult.reference_solution ? t('hasReferenceSolution') : t('noReferenceSolution')}
                 </div>
-              }
-              action={
-                <Button size="small" type="primary" onClick={() => {
-                  setAiGenModal(false)
-                  setAiGenResult(null)
-                  message.success(t('contentFilled'))
-                }}>
+              )}
+              action={(
+                <Button size="small" type="primary" onClick={applyAiGenResult}>
                   {t('cpConfirmEdit')}
                 </Button>
-              }
+              )}
               style={{ marginTop: 8 }}
             />
           )}
         </Space>
       </Modal>
 
-      {/* ── 编辑题目弹窗 ── */}
-      <Modal maskClosable={false}
-        title={t('cpEditTitle')}
-        open={editModalOpen}
-        onCancel={() => setEditModalOpen(false)}
-        onOk={handleSaveEdit}
-        confirmLoading={editLoading}
-        width={800}
-        okText={t('cpSaveChanges')}
+      {/* ── 教师统计 ── */}
+      {statsModal}
+
+      {/* ── AI 审查详情 ── */}
+      <Modal
+        title={t('aiReview')}
+        open={reviewModalOpen}
+        onCancel={() => setReviewModalOpen(false)}
+        footer={null}
+        width={narrow ? '96%' : 720}
       >
-        <Tabs items={[
-          {
-            key: 'basic',
-            label: t('cpBasics'),
-            children: (
-              <Space orientation="vertical" style={{ width: '100%' }}>
-                <Input placeholder={t('cpTitlePh')} value={editForm.title}
-                  onChange={e => setEditForm({ ...editForm, title: e.target.value })} />
-                <Input.TextArea rows={4} placeholder={t('cpDescPh')} value={editForm.description}
-                  onChange={e => setEditForm({ ...editForm, description: e.target.value })} />
-                <Space>
-                  <Select value={editForm.subject} onChange={v => setEditForm({ ...editForm, subject: v })}
-                    style={{ width: 140 }}
-                    options={subjectOptions.map(s => ({ value: s, label: s }))} />
-                  <Select value={editForm.difficulty} onChange={v => setEditForm({ ...editForm, difficulty: v })}
-                    style={{ width: 100 }}
-                    options={[{ value: 'easy', label: t('easy') }, { value: 'medium', label: t('medium') }, { value: 'hard', label: t('hard') }]} />
-                  <Select value={editForm.language} onChange={v => setEditForm({ ...editForm, language: v })}
-                    style={{ width: 120 }}
-                    options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]} />
-                  <KnowledgePointSelect subject={editForm.subject} style={{ width: 200 }}
-                    value={splitKps(editForm.knowledge_points)}
-                    onChange={(v) => setEditForm({ ...editForm, knowledge_points: joinKps(v as string[]) })} />
-                </Space>
-              </Space>
-            ),
-          },
-          {
-            key: 'code',
-            label: t('cpTemplate'),
-            children: (
-              <>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('starterCodeHint')}</Text>
-                <Input.TextArea rows={12} value={editForm.template_code}
-                  onChange={e => setEditForm({ ...editForm, template_code: e.target.value })}
-                  style={{ fontFamily: 'monospace', fontSize: 13 }} />
-              </>
-            ),
-          },
-          {
-            key: 'cases',
-            label: <span>{t('testCases')} <Tag style={{ marginLeft: 4 }}>{editTestCases.length}</Tag></span>,
-            children: (
-              <>
-                {editTestCases.length === 0 ? (
-                  <Text type="secondary">{t('noTestCases')}</Text>
-                ) : (
-                  <Table size="small" dataSource={editTestCases} rowKey={(_, i) => String(i)} pagination={false}
-                    columns={[
-                      { title: '#', render: (_: any, __: any, i: number) => i + 1, width: 40 },
-                          { title: t('cpColInput'), dataIndex: 'input', render: (v: string) => <code>{v || t('cpEmpty')}</code> },
-                          { title: t('cpColExpected'), dataIndex: 'expected', render: (v: string) => <code>{v}</code> },
-                          { title: t('cpColDesc'), dataIndex: 'description' },
-                          { title: t('cpColScore'), dataIndex: 'score', width: 60 },
-                          { title: t('cpColSample'), dataIndex: 'is_sample', render: (v: boolean) => v ? <Tag color="blue">{t('cpSampleTag')}</Tag> : null, width: 60 },
-                    ]}
-                  />
-                )}
-                <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-                  {t('cpTestCaseHint')}
-                </Text>
-              </>
-            ),
-          },
-        ]} />
+        <Spin spinning={reviewModalLoading}>
+          {renderAiReviewBody(reviewModalData)}
+        </Spin>
       </Modal>
-    </>
-  )
-
-  // ── 渲染: 代码编辑器视图 ──
-  const renderCodeEditor = () => {
-    if (!currentProblem) return null
-
-    const statusInfo = submissionResult ? STATUS_MAP[submissionResult.status] : null
-
-    return (
-      <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 180px)' }}>
-        {/* 左面板：题目描述 */}
-        <div style={{ width: '40%', overflow: 'auto', background: 'var(--bg-container)', borderRadius: 8, padding: 16, border: '1px solid var(--border-color)' }}>
-          <Space style={{ marginBottom: 12 }}>
-            <Button icon={<ArrowLeftOutlined />} onClick={handleBack} size="small">{t('start')}</Button>
-            <Title level={5} style={{ margin: 0 }}>{currentProblem.title}</Title>
-            <Tag color={currentProblem.difficulty === 'easy' ? 'green' : currentProblem.difficulty === 'hard' ? 'red' : 'orange'}>
-              {currentProblem.difficulty === 'easy' ? t('easy') : currentProblem.difficulty === 'hard' ? t('hard') : t('medium')}
-            </Tag>
-          </Space>
-
-          <div className="markdown-content" style={{ fontSize: 14, lineHeight: 1.7 }}>
-            <FormulaRenderer content={currentProblem.description || ''} />
-          </div>
-
-          {/* 示例测试用例 */}
-          {currentProblem.sample_cases?.length > 0 && (
-            <>
-              <Divider>{t('explanation')}</Divider>
-              {currentProblem.sample_cases.map((sc: any, i: number) => (
-                <Card key={sc.id} size="small" style={{ marginBottom: 8 }}>
-                  <Text strong>{t('explanation')} {i + 1}</Text>
-                  {sc.description && <Text type="secondary"> — {sc.description}</Text>}
-                  <pre style={{ background: 'var(--bg-layout)', padding: 8, borderRadius: 4, marginTop: 4, fontSize: 12 }}>
-                    <Text strong>{t('input')}：</Text>{sc.input || t('cpNone')}{'\n'}
-                    <Text strong>{t('output')}：</Text>{sc.expected_output}
-                  </pre>
-                </Card>
-              ))}
-            </>
-          )}
-
-          {/* 提交历史 */}
-          <Divider>
-            <Space>
-              <HistoryOutlined />
-              <span>{t('submitCode')}</span>
-            </Space>
-          </Divider>
-          <Spin spinning={submissionsLoading}>
-            {submissions.length === 0 ? (
-              <Text type="secondary">{t('noHistory')}</Text>
-            ) : (
-              <RowList
-                items={submissions}
-                renderItem={(s: any) => {
-                  const st = STATUS_MAP[s.status]
-                  return (
-                    <RowItem
-                      dense
-                      style={{ cursor: 'pointer', width: '100%' }}
-                      onClick={async () => {
-                        try {
-                          const { data } = await apiClient.get(`/api/code/submissions/${s.id}`)
-                          setSubmissionResult(data)
-                        } catch { /* ignore */ }
-                      }}
-                      title={(
-                        <Space>
-                          <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || s.status}</Tag>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{t('scorePoints', { score: s.score })}</Text>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{s.created_at?.slice(5, 16)}</Text>
-                        </Space>
-                      )}
-                    />
-                  )
-                }}
-              />
-            )}
-          </Spin>
-        </div>
-
-        {/* 右面板：代码编辑器 + 结果 */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* 编辑器 */}
-          <div style={{ flex: 1 }}>
-            <CodeEditor
-              language={language}
-              value={sourceCode}
-              onChange={setSourceCode}
-              showLanguageSelector={false}
-              supportedLanguages={supportedLangs}
-            />
-          </div>
-
-          {/* 工具栏 */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={handleRun}
-              loading={runLoading}
-            >
-              {t('runCode')}
-            </Button>
-            <Button
-              type="primary"
-              ghost
-              icon={<SendOutlined />}
-              onClick={handleSubmit}
-              loading={submitLoading || pollingSubmission}
-            >
-              {pollingSubmission ? t('testResult') : t('submitCode')}
-            </Button>
-            {isTeacherOrAdmin && (
-              <Button
-                icon={<RobotOutlined />}
-                onClick={handleAiReview}
-                loading={aiReviewLoading}
-                disabled={!submissionResult}
-              >
-                {t('runCode')}
-              </Button>
-            )}
-            <div style={{ flex: 1 }} />
-            <Select
-              size="small"
-              value={language}
-              onChange={setLanguage}
-              style={{ width: 120 }}
-              options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]}
-            />
-          </div>
-
-          {/* 自定义输入 */}
-          <div>
-            <Text type="secondary" style={{ fontSize: 12 }}>{t('input')}：</Text>
-            <TextArea
-              rows={2}
-              value={customInput}
-              onChange={e => setCustomInput(e.target.value)}
-              placeholder={t('cpStdinPh')}
-              style={{ fontSize: 12, marginTop: 4 }}
-            />
-          </div>
-
-          {/* 结果区域 */}
-          {(runResult || submissionResult || aiReview) && (
-            <Tabs
-              size="small"
-              defaultActiveKey={runResult ? 'output' : submissionResult ? 'result' : 'review'}
-              items={[
-                ...(runResult ? [{
-                  key: 'output',
-                  label: <span><PlayCircleOutlined />{t('runOutput')}</span>,
-                  children: (
-                    <div>
-                      {/* 当前运行结果 */}
-                      <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 13, maxHeight: 200, overflow: 'auto' }}>
-                        {runResult.error ? (
-                          <div style={{ color: '#f48771' }}>
-                            <div>{t('errorPrefix')}{runResult.error}</div>
-                            {runResult.stderr && <pre style={{ margin: 0, color: '#f48771' }}>{runResult.stderr}</pre>}
-                          </div>
-                        ) : (
-                          <>
-                            <div style={{ color: 'var(--text-tertiary)', marginBottom: 4 }}>Exit Code: {runResult.exit_code} | Time: {runResult.execution_time}s | {t('cpInputLabel')}: {customInput || t('cpEmpty')}</div>
-                            {runResult.stdout ? (
-                              <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre>
-                            ) : (
-                              <div style={{ color: 'var(--text-tertiary)' }}>{t('noOutput')}</div>
-                            )}
-                            {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 8 }}>{runResult.stderr}</pre>}
-                          </>
-                        )}
-                      </div>
-                      {/* 运行历史 */}
-                      {runHistory.length > 1 && (
-                        <details style={{ marginTop: 8, fontSize: 13 }}>
-                          <summary style={{ cursor: 'pointer', color: 'var(--text-tertiary)', userSelect: 'none' }}>
-                            {t('runHistory')}（{runHistory.length} {t('countRuns')}）
-                          </summary>
-                          <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 4 }}>
-                            {runHistory.map((entry, idx) => (
-                              <div key={entry.id} style={{
-                                background: '#1e1e1e', color: '#d4d4d4', padding: '6px 10px',
-                                borderRadius: 4, marginBottom: 4, fontFamily: 'monospace', fontSize: 12,
-                                borderLeft: `3px solid ${entry.exit_code === 0 ? '#52c41a' : '#f48771'}`,
-                              }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                                  <span style={{ color: 'var(--text-tertiary)' }}>#{runHistory.length - idx} {entry.createdAt}</span>
-                                  <span style={{ color: entry.exit_code === 0 ? '#52c41a' : '#f48771' }}>
-                                    Exit {entry.exit_code} | {entry.execution_time}s
-                                  </span>
-                                </div>
-                                {entry.input_data && <div style={{ color: '#69b1ff' }}>↳ {t('input')}: {entry.input_data}</div>}
-                                <pre style={{ margin: '2px 0 0', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
-                                  {entry.stdout || (entry.error ? entry.error.slice(0, 80) : `(${t('noOutput')})`)}
-                                </pre>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  ),
-                }] : []),
-                ...(submissionResult ? [{
-                  key: 'result',
-                  label: <span><BarChartOutlined />{t('scoreResult')}</span>,
-                  children: (
-                    <div>
-                      <Row gutter={16} style={{ marginBottom: 12 }}>
-                        <Col span={6}>
-                          <Statistic
-                            title={t('status')}
-                            value={statusInfo ? t(statusInfo.labelKey) || submissionResult.status : submissionResult.status}
-                            styles={{ content: { fontSize: 16, color: statusInfo?.color === 'success' ? '#52c41a' : '#ff4d4f' } }}
-                          />
-                        </Col>
-                        <Col span={6}>
-                          <Statistic title={t('cpScore')} value={submissionResult.score} suffix={`/ ${submissionResult.total_cases}`} styles={{ content: { fontSize: 16 } }} />
-                        </Col>
-                        <Col span={6}>
-                          <Statistic title={t('cpPassedCases')} value={`${submissionResult.passed_cases || 0} / ${submissionResult.total_cases || 0}`} styles={{ content: { fontSize: 16 } }} />
-                        </Col>
-                        <Col span={6}>
-                          <Statistic title={t('cpRuntime')} value={submissionResult.execution_time || 0} suffix="s" styles={{ content: { fontSize: 16 } }} />
-                        </Col>
-                      </Row>
-
-                      {/* 测试用例详情 */}
-                      {submissionResult.details?.length > 0 && (
-                        <>
-                          <Divider>{t('testCaseDetail')}</Divider>
-                          <Table
-                            size="small"
-                            dataSource={submissionResult.details}
-                            rowKey="case_id"
-                            pagination={false}
-                            columns={[
-                                  { title: t('cpColCase'), dataIndex: 'description', render: (v: string, r: any) => v || (r.is_sample ? t('cpSampleTag') : `${t('cpCasePrefix')} #${r.case_id}`) },
-                                  { title: t('cpColInput'), dataIndex: 'input', render: (v: string) => <code style={{ fontSize: 12 }}>{(v || t('cpEmpty')).slice(0, 50)}</code> },
-                                  { title: t('cpColExpected'), dataIndex: 'expected', render: (v: string) => <code style={{ fontSize: 12 }}>{v.slice(0, 80)}</code> },
-                                  { title: t('cpColActual'), dataIndex: 'actual', render: (v: string, r: any) => (
-                                <span style={{ color: r.is_pass ? '#52c41a' : '#ff4d4f' }}>
-                                  <code style={{ fontSize: 12 }}>{v ? v.slice(0, 80) : t('cpEmpty')}</code>
-                                </span>
-                              )},
-                              { title: t('testResult'), dataIndex: 'is_pass', render: (v: boolean) => v ? <Tag color="success">{t('passed')}</Tag> : <Tag color="error">{t('failed')}</Tag> },
-                              { title: t('score'), dataIndex: 'score', render: (v: number) => v || 0 },
-                            ]}
-                          />
-                        </>
-                      )}
-                    </div>
-                  ),
-                }] : []),
-                ...(aiReview ? [{
-                  key: 'review',
-                  label: <span><RobotOutlined />{t('aiReview')}</span>,
-                  children: (
-                    <div>
-                      <Row gutter={16} style={{ marginBottom: 12 }}>
-                        <Col span={6}>
-                          <Statistic title={t('cpOverallScore')} value={aiReview.overall_score} suffix="/100" styles={{ content: { fontSize: 16 } }} />
-                        </Col>
-                        <Col span={6}>
-                          <Statistic title={t('cpRating')} value={aiReview.overall_rating} styles={{ content: { fontSize: 16 } }} />
-                        </Col>
-                      </Row>
-
-                      <Descriptions column={2} size="small" bordered style={{ marginBottom: 12 }}>
-                        {aiReview.dimensions?.correctness && (
-                          <Descriptions.Item label={t('cpDimCorrect')} span={1}>
-                            <Progress percent={aiReview.dimensions.correctness.score} size="small" />
-                          </Descriptions.Item>
-                        )}
-                        {aiReview.dimensions?.code_quality && (
-                          <Descriptions.Item label={t('cpDimQuality')} span={1}>
-                            <Progress percent={aiReview.dimensions.code_quality.score} size="small" />
-                          </Descriptions.Item>
-                        )}
-                        {aiReview.dimensions?.efficiency && (
-                          <Descriptions.Item label={t('cpDimEfficiency')} span={1}>
-                            <Progress percent={aiReview.dimensions.efficiency.score} size="small" />
-                          </Descriptions.Item>
-                        )}
-                        {aiReview.dimensions?.style && (
-                          <Descriptions.Item label={t('cpDimStyle')} span={1}>
-                            <Progress percent={aiReview.dimensions.style.score} size="small" />
-                          </Descriptions.Item>
-                        )}
-                      </Descriptions>
-
-                      {/* 优点 */}
-                      {aiReview.strengths?.length > 0 && (
-                        <>
-                          <Text strong style={{ color: '#52c41a' }}>{t('strengths')}</Text>
-                          <ul style={{ margin: '4px 0 12px' }}>
-                            {aiReview.strengths.map((s: string, i: number) => <li key={i}><Text>{s}</Text></li>)}
-                          </ul>
-                        </>
-                      )}
-
-                      {/* 不足 */}
-                      {aiReview.weaknesses?.length > 0 && (
-                        <>
-                          <Text strong style={{ color: '#ff4d4f' }}>{t('improvements')}</Text>
-                          <ul style={{ margin: '4px 0 12px' }}>
-                            {aiReview.weaknesses.map((w: string, i: number) => <li key={i}><Text>{w}</Text></li>)}
-                          </ul>
-                        </>
-                      )}
-
-                      {/* 改进建议 */}
-                      {aiReview.suggestions?.length > 0 && (
-                        <>
-                          <Text strong style={{ color: '#1677ff' }}>{t('suggestions')}</Text>
-                          <ul style={{ margin: '4px 0 12px' }}>
-                            {aiReview.suggestions.map((s: string, i: number) => <li key={i}><Text>{s}</Text></li>)}
-                          </ul>
-                        </>
-                      )}
-
-                      {/* 改进代码 */}
-                      {aiReview.improved_code && (
-                        <>
-                          <Divider>{t('reference')}</Divider>
-                          <pre style={{ background: '#f6ffed', padding: 12, borderRadius: 6, fontSize: 13, overflow: 'auto' }}>
-                            <code>{aiReview.improved_code}</code>
-                          </pre>
-                        </>
-                      )}
-                    </div>
-                  ),
-                }] : []),
-              ]}
-            />
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  // ── 代码随机名言 ──
-  const codeQuotes = [
-    'Talk is cheap. Show me the code.',
-    '代码如诗，简洁为美',
-    '写好每一行代码，解决每一个问题',
-    '编程是思考的艺术',
-    'Debug 是一种修行',
-    '用代码改变世界',
-    '每一次提交，都是进步',
-    'Clear code, clear mind',
-    'Code. Eat. Sleep. Repeat.',
-    '键盘敲烂，月入过万 💪',
-    '编译器不会骗你，但 debug 会 🐛',
-    '先跑起来，再优化',
-    'Programming is the art of logic',
-    '简单的代码最优雅',
-  ]
-  const [codeQuote] = useState(() => codeQuotes[Math.floor(Math.random() * codeQuotes.length)])
-
-  // ── 主渲染 ──
-  return (
-    <Card style={{ borderRadius: 8, height: '100%' }}>
-      <div style={{
-        padding: '12px 24px',
-        marginBottom: 16,
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        borderRadius: 6,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-      }}>
-        <div style={{ color: '#fff' }}>
-          <span style={{ fontSize: 15, fontWeight: 500, opacity: 0.95 }}>
-            {codeQuote}
-          </span>
-        </div>
-        <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>
-          {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-        </div>
-      </div>
-      {currentProblem ? renderCodeEditor() : renderProblemList()}
     </Card>
   )
 }

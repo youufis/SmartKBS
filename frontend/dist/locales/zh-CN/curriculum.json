@@ -482,5 +482,10 @@
   "aiCast": "AI 讲演",
   "watchCast": "看讲演",
   "playCast": "讲演",
-  "editCast": "AI 编辑"
+  "editCast": "AI 编辑",
+  "expandAll": "展开全部",
+  "collapseAll": "收起全部",
+  "expandChapter": "展开本章",
+  "collapseChapter": "收起本章",
+  "treeExpandHint": "可一键展开全部章节，或点章节名旁的箭头展开本章全部知识点"
 }

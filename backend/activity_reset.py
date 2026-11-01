@@ -20,7 +20,6 @@
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Any
 
@@ -229,6 +228,10 @@ RESET_SCOPES: dict[str, dict[str, Any]] = {
     "code": Scope(
         "code", "代码练习", db=DB_QDB, master="code_problems",
         targets=[
+            # 先删逐用例明细：它靠 submission_id 关联，提交主记录删掉后就找不到了
+            Target("code_submission_cases",
+                   "submission_id IN (SELECT id FROM code_submissions WHERE problem_id = :aid)",
+                   "逐用例判题明细", DB_QDB, student_col="student_username"),
             Target("code_submissions", "problem_id = :aid", "代码提交（含判题结果与 AI 点评）",
                    DB_QDB, student_col="student_username"),
             Target("code_runs", "problem_id = :aid", "调试运行记录", DB_QDB,

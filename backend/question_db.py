@@ -390,6 +390,7 @@ def init_question_db():
                 target_grade TEXT DEFAULT '',
                 target_class TEXT DEFAULT '',
                 target_users TEXT DEFAULT '',
+                reference_solution TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )""")
@@ -423,9 +424,31 @@ def init_question_db():
                 error_message TEXT DEFAULT '',
                 ai_review TEXT DEFAULT '',
                 ai_review_status TEXT DEFAULT 'pending',
+                ai_review_error TEXT DEFAULT '',
+                max_score REAL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 is_best INTEGER DEFAULT 0,
                 FOREIGN KEY (problem_id) REFERENCES code_problems(id)
+            )""")
+
+            # ── 逐用例判题明细（独立表：详情可能很长，不能再塞 error_message）──
+            c.execute("""CREATE TABLE IF NOT EXISTS code_submission_cases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                submission_id INTEGER NOT NULL,
+                student_username TEXT DEFAULT '',
+                case_id INTEGER,
+                case_index INTEGER DEFAULT 0,
+                description TEXT DEFAULT '',
+                is_sample INTEGER DEFAULT 0,
+                input TEXT DEFAULT '',
+                expected TEXT DEFAULT '',
+                actual TEXT DEFAULT '',
+                is_pass INTEGER DEFAULT 0,
+                score REAL DEFAULT 0,
+                execution_time REAL DEFAULT 0,
+                error TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (submission_id) REFERENCES code_submissions(id)
             )""")
 
             # ── 运行记录表（非评分的「运行一下」功能）──
@@ -450,6 +473,8 @@ def init_question_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cs_student ON code_submissions(student_username, problem_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cs_best ON code_submissions(problem_id, is_best)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cr_student ON code_runs(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_csc_submission ON code_submission_cases(submission_id, case_index)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_csc_student ON code_submission_cases(student_username)")
             except sqlite3.OperationalError:
                 pass
 
@@ -459,11 +484,39 @@ def init_question_db():
                 ("target_grade", "TEXT DEFAULT ''"),
                 ("target_class", "TEXT DEFAULT ''"),
                 ("target_users", "TEXT DEFAULT ''"),
+                ("reference_solution", "TEXT DEFAULT ''"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE code_problems ADD COLUMN {col_def[0]} {col_def[1]}")
                 except sqlite3.OperationalError:
                     pass  # 字段已存在
+
+            # ── 字段迁移：code_submission_cases 补学生列（活动重置按学生清理要用）──
+            try:
+                c.execute("ALTER TABLE code_submission_cases ADD COLUMN student_username TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            # 旧明细补学生名，活动重置按学生清理时才不会漏
+            try:
+                c.execute(
+                    """UPDATE code_submission_cases
+                       SET student_username=COALESCE(
+                           (SELECT cs.student_username FROM code_submissions cs
+                            WHERE cs.id=code_submission_cases.submission_id), '')
+                       WHERE IFNULL(student_username,'')=''"""
+                )
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 字段迁移：code_submissions 新增判题元数据（兼容旧表）──
+            for col_def in [
+                ("max_score", "REAL DEFAULT 0"),
+                ("ai_review_error", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE code_submissions ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cp_target ON code_problems(target_scope, target_grade, target_class)")
             except sqlite3.OperationalError:

@@ -37,6 +37,13 @@
 
 > 📌 **Highlights of V9.0.0**
 >
+> **Code practice and course management (this build)**
+> - 🧑‍🏫 **Unified AI generate / create / edit**: one five-tab form (basics, template, test cases, reference solution, scope); AI output fills it directly and the reference can be validated against the current unsaved cases
+> - ⚙️ **Judging engine rebuilt**: async execution no longer blocks the class, per-problem time limits, concurrent cases, per-case details in their own table; syntax errors, timeouts and runtime errors are reported separately
+> - 🛡️ **Teacher tools filled in**: submission details, missing-student roster, per-case pass rates, CSV export and regrade; students get draft autosave, sample runs with diffs, and load-back of past code
+> - 📚 **Course tree**: one expand/collapse-all toggle in the header and per-chapter expand; editing a course, chapter or knowledge point updates only that node and keeps the tree's expanded state
+> - 🩹 **Fixes**: admin/student problem counts no longer differ because of legacy deleted rows; the notification type "Task" is now "Homework"; the `{{name}}` placeholder in system settings is fixed
+>
 > **AI lesson cast (new)**
 > - 🎬 **A knowledge point becomes a micro-lesson that talks**: paginated slides with one voice clip per sentence — each clip ends, the page turns, the subtitle follows. No video file, so fixing one line re-records one line
 > - 🎙️ **One narrator or two**: two-host dialogue by default for self-study (a conversation holds attention), single narrator for classroom projection (the teacher adds their own commentary, a second host would talk over them). Both versions can coexist for the same topic
@@ -79,7 +86,7 @@
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes, including the new content-type mark table, are applied automatically at startup.
+> 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes, including the new content-type mark table and the code-practice per-case detail table, are applied automatically at startup.
 
 ---
 
@@ -1192,6 +1199,15 @@ Git-based online incremental upgrade system:
 Current version **9.0.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.9.0 is merged into one outline section below.
 
 ### v9.0.0
+
+**Code practice and course management (this build)**
+
+- 🧑‍🏫 **Unified AI generate / create / edit**: one five-tab form (basics, template, test cases, reference solution, scope); AI output fills it directly and the reference can be validated against the current unsaved cases
+- ⚙️ **Judging engine rebuilt**: async execution no longer blocks the class, per-problem time limits, concurrent cases, per-case details in their own table; UTF-8, compile errors, timeouts and runtime errors are separated
+- 🛡️ **Permissions and teaching stats**: student visibility/length/rate checks, teachers manage only their own problems; submission details, missing-student roster, per-case pass rates, CSV export and regrade
+- ✍️ **Student experience**: draft autosave, one-click sample runs with diffs, load-back of past code, locked language, offline Monaco and dark theme
+- 📚 **Course tree**: one expand/collapse-all toggle in the header and per-chapter expand; editing a course, chapter or knowledge point updates only that node and keeps the expanded state
+- 🩹 **Fixes**: admin/student problem counts no longer differ because of legacy deleted rows; the notification type "Task" is now "Homework"; the `{{name}}` placeholder in system settings is fixed
 
 **AI lesson cast**
 

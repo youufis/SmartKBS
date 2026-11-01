@@ -1,7 +1,9 @@
 import React, { useRef, useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import MonacoEditor from '@monaco-editor/react'
-import { Select, Space, Typography, Button } from 'antd'
-import { CodeOutlined, ExpandOutlined, CompressOutlined } from '@ant-design/icons'
+import { Select, Space, Typography, Button, theme, Spin } from 'antd'
+import { CodeOutlined, ExpandOutlined, CompressOutlined, UndoOutlined } from '@ant-design/icons'
+import { useThemeStore } from '../stores/themeStore'
 
 interface CodeEditorProps {
   language?: string
@@ -14,6 +16,11 @@ interface CodeEditorProps {
   showLanguageSelector?: boolean
   onLanguageChange?: (lang: string) => void
   supportedLanguages?: { value: string; label: string; available: boolean }[]
+  /** Ctrl+Enter / 工具栏「运行」都会触发；不传则不显示运行提示 */
+  onRun?: () => void
+  /** 传了才显示「重置为初始代码」 */
+  onReset?: () => void
+  runDisabled?: boolean
 }
 
 // 语言映射：后端语言名 → Monaco Editor 语言标识
@@ -40,12 +47,37 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   showLanguageSelector = true,
   onLanguageChange,
   supportedLanguages,
+  onRun,
+  onReset,
+  runDisabled = false,
 }) => {
+  const { t } = useTranslation('practice')
+  const { token } = theme.useToken()
+  const themeName = useThemeStore((s) => s.current)
+  const isDark = themeName === 'midnight'
+
   const [internalCode, setInternalCode] = useState(defaultValue)
   const [currentLang, setCurrentLang] = useState(language)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // Monaco 体积较大：等真正用到编辑器时再异步加载，避免拖慢应用首屏
+  const [monacoReady, setMonacoReady] = useState(false)
   const editorRef = useRef<any>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const onRunRef = useRef(onRun)
+  const onResetRef = useRef(onReset)
+  const runDisabledRef = useRef(runDisabled)
+
+  useEffect(() => { onRunRef.current = onRun }, [onRun])
+  useEffect(() => { onResetRef.current = onReset }, [onReset])
+  useEffect(() => { runDisabledRef.current = runDisabled }, [runDisabled])
+  useEffect(() => {
+    let cancelled = false
+    import('../utils/monacoSetup')
+      .then(() => { if (!cancelled) setMonacoReady(true) })
+      .catch(() => { if (!cancelled) setMonacoReady(true) })
+    return () => { cancelled = true }
+  }, [])
+  useEffect(() => { setCurrentLang(language) }, [language])
 
   // 受控/非受控模式
   const isControlled = value !== undefined
@@ -53,7 +85,17 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
 
   const handleEditorMount = (editor: any, monaco: any) => {
     editorRef.current = editor
-    // Ctrl+Enter 快捷键提示在 UI 中展示
+    // 提示过的快捷键要真的能用：Ctrl/Cmd+Enter 运行
+    editor.addAction({
+      id: 'smartkb-run-code',
+      label: t('runCode'),
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0,
+      run: () => {
+        if (!runDisabledRef.current) onRunRef.current?.()
+      },
+    })
   }
 
   const handleChange = (newValue: string | undefined) => {
@@ -67,6 +109,12 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   const handleLanguageChange = (lang: string) => {
     setCurrentLang(lang)
     onLanguageChange?.(lang)
+  }
+
+  const handleReset = () => {
+    if (!onResetRef.current) return
+    onResetRef.current()
+    if (!isControlled) setInternalCode(defaultValue)
   }
 
   const toggleFullscreen = () => {
@@ -101,14 +149,19 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
         { value: 'javascript', label: 'JavaScript' },
       ]
 
+  const editorHeight = isFullscreen ? 'calc(100vh - 44px)' : height
+
   return (
     <div
       ref={containerRef}
       style={{
-        border: '1px solid #d9d9d9',
-        borderRadius: 8,
+        border: isFullscreen ? 'none' : `1px solid ${token.colorBorderSecondary}`,
+        borderRadius: isFullscreen ? 0 : 8,
         overflow: 'hidden',
-        background: '#fff',
+        background: token.colorBgContainer,
+        ...(isFullscreen
+          ? { position: 'fixed', inset: 0, zIndex: 1200, display: 'flex', flexDirection: 'column' }
+          : null),
       }}
     >
       {showToolbar && (
@@ -118,14 +171,15 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '6px 12px',
-            background: '#fafafa',
-            borderBottom: '1px solid #f0f0f0',
+            background: token.colorFillQuaternary,
+            borderBottom: `1px solid ${token.colorBorderSecondary}`,
+            flexShrink: 0,
           }}
         >
           <Space>
-            <CodeOutlined style={{ color: '#1677ff' }} />
+            <CodeOutlined style={{ color: token.colorPrimary }} />
             <Typography.Text strong style={{ fontSize: 13 }}>
-              代码编辑器
+              {t('editorTitle')}
             </Typography.Text>
             {showLanguageSelector && (
               <Select
@@ -138,34 +192,53 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
             )}
           </Space>
           <Space size="small">
-            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              Ctrl+Enter 运行
-            </Typography.Text>
+            {onRun && (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                {t('editorRunHint')}
+              </Typography.Text>
+            )}
+            {onReset && !readOnly && (
+              <Button
+                type="text"
+                size="small"
+                icon={<UndoOutlined />}
+                onClick={handleReset}
+                title={t('editorReset')}
+              />
+            )}
             <Button
               type="text"
               size="small"
               icon={isFullscreen ? <CompressOutlined /> : <ExpandOutlined />}
               onClick={toggleFullscreen}
-              title={isFullscreen ? '退出全屏' : '全屏编辑'}
+              title={isFullscreen ? t('editorExitFullscreen') : t('editorFullscreen')}
             />
           </Space>
         </div>
       )}
-      <div style={{ minHeight: height }}>
+      <div style={{ flex: 1, minHeight: isFullscreen ? 0 : height }}>
+        {!monacoReady ? (
+          <div style={{ height: editorHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: token.colorTextSecondary }}>
+            <Spin size="small" /> {t('editorLoading')}
+          </div>
+        ) : (
         <MonacoEditor
-          height={isFullscreen ? 'calc(100vh - 120px)' : height}
+          height={editorHeight}
           language={LANG_TO_MONACO[currentLang] || 'python'}
           value={displayCode}
           onChange={handleChange}
           onMount={handleEditorMount}
-          theme="vs"
+          theme={isDark ? 'vs-dark' : 'vs'}
+          loading={<div style={{ padding: 16, color: token.colorTextSecondary }}>…</div>}
           options={{
             minimap: { enabled: !isFullscreen },
             fontSize: 14,
+            lineHeight: 21,
             lineNumbers: 'on',
             scrollBeyondLastLine: false,
             automaticLayout: true,
             tabSize: 4,
+            insertSpaces: true,
             readOnly,
             wordWrap: 'on',
             padding: { top: 8 },
@@ -176,9 +249,16 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
             folding: true,
             foldingHighlight: true,
             renderWhitespace: 'selection',
+            renderLineHighlight: 'all',
             bracketPairColorization: { enabled: true },
+            autoClosingBrackets: 'always',
+            autoClosingQuotes: 'always',
+            suggestOnTriggerCharacters: true,
+            quickSuggestions: true,
+            smoothScrolling: true,
           }}
         />
+        )}
       </div>
     </div>
   )

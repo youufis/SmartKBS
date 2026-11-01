@@ -83,6 +83,10 @@ const flattenChapterOptions = (
 const collectChapterIds = (ch: ChapterTreeNode | null | undefined): number[] =>
   ch ? [ch.id, ...(ch.children || []).flatMap(collectChapterIds)] : []
 
+// 课程树「展开全部」用的章节 key（知识点是叶子，展开所属章节即可见）
+const collectAllChapterKeys = (list: ChapterTreeNode[] | undefined): React.Key[] =>
+  (list || []).flatMap((ch) => [`ch_${ch.id}`, ...collectAllChapterKeys(ch.children)])
+
 const CurriculumPage: React.FC = () => {
   const { t } = useTranslation('curriculum')
   const navigate = useNavigate()
@@ -171,6 +175,12 @@ const CurriculumPage: React.FC = () => {
   const [kpForm] = Form.useForm()
   const [savingChapter, setSavingChapter] = useState(false)
   const [savingKp, setSavingKp] = useState(false)
+
+  // ── 课程树展开/收起 ──
+  // 受控 expandedKeys：支持「展开全部 / 收起全部」和章节级「展开本章」。
+  // treeCourseRef 用来区分「切课程」和「同一课程数据刷新」，后者不能把用户手动收起的状态重置掉。
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
+  const treeCourseRef = useRef<number | null>(null)
 
   // ── 知识点详情（右侧面板） ──
   const [selectedKp, setSelectedKp] = useState<KnowledgePoint | null>(null)
@@ -863,13 +873,24 @@ const CurriculumPage: React.FC = () => {
       setSavingCourse(true)
       if (editingCourse) {
         await curriculumApi.updateCourse(editingCourse.id, values)
+        // 只改当前课程对象：侧栏名称、课程头、分组都会跟着变，章节树不重拉
+        const patch: Partial<Course> = {}
+        for (const [key, value] of Object.entries(values)) {
+          if (value !== undefined) (patch as Record<string, unknown>)[key] = value
+        }
+        // 只改名称/描述/科目等展示字段时局部更新；改排序号会影响侧栏顺序，退回一次全量
+        if (values.sort_order !== undefined && Number(values.sort_order) !== Number(editingCourse.sort_order)) {
+          await loadTree()
+        } else {
+          patchCourseLocal(editingCourse.id, patch)
+        }
         message.success(t('courseUpdated'))
       } else {
         await curriculumApi.createCourse(values)
         message.success(t('courseCreated'))
       }
       setCourseModal(false)
-      loadTree()
+      if (!editingCourse) await loadTree()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       if (detail) {
@@ -973,13 +994,27 @@ const CurriculumPage: React.FC = () => {
       setSavingChapter(true)
       if (editingChapter) {
         await curriculumApi.updateChapter(editingChapter.id, values)
+        const sameCourse = Number(values.course_id) === editingChapter.course_id
+        const sameParent = (values.parent_id ?? null) === (editingChapter.parent_id ?? null)
+        if (sameCourse && sameParent) {
+          const patch: Partial<ChapterTreeNode> = { name: values.name }
+          if (values.description !== undefined) patch.description = values.description
+          if (values.sort_order !== undefined) patch.sort_order = values.sort_order
+          patchChaptersLocal(
+            editingChapter.course_id,
+            (list) => sortChapterTree(patchChapterNode(list, editingChapter.id, patch)),
+          )
+        } else {
+          // 换课程/换父章节属于结构移动，局部拼接容易出错，退回一次全量
+          await loadTree()
+        }
         message.success(t('chapterUpdated'))
       } else {
         await curriculumApi.createChapter(values)
         message.success(t('chapterCreated'))
+        await loadTree()
       }
       setChapterModal(false)
-      loadTree()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       if (detail) {
@@ -992,9 +1027,26 @@ const CurriculumPage: React.FC = () => {
 
   const handleDeleteChapter = async (chapterId: number) => {
     try {
+      const courseId = findCourseIdOfChapter(chapterId)
+      const owner = [...courses, ...inactiveCourses].find((c) => c.id === courseId)
+      const removed = owner ? findChapterById(owner.chapters || [], chapterId) : null
       await curriculumApi.deleteChapter(chapterId)
       message.success(t('chapterDeleted'))
-      loadTree()
+      if (courseId) {
+        patchChaptersLocal(courseId, (list) => removeChapterNode(list, chapterId))
+      } else {
+        await loadTree()
+      }
+      // 删掉的章节里正好包含当前打开的知识点：面板一并收起
+      if (selectedKp && collectKpIds(removed).includes(selectedKp.id)) {
+        setSelectedKp(null)
+        setKpResources([])
+      }
+      // 清掉被删章节及其后代的展开键，避免 expandedKeys 里留死 key
+      const removedKeys = collectChapterIds(removed).map((id) => `ch_${id}`)
+      if (removedKeys.length) {
+        setExpandedKeys((prev) => prev.filter((k) => !removedKeys.includes(String(k))))
+      }
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(detail || t('deleteFailed'))
@@ -1034,6 +1086,85 @@ const CurriculumPage: React.FC = () => {
     }
     return null
   }
+
+  // ── 局部更新工具：编辑单个课程/章节/知识点时只改对应节点，不整树重拉 ──
+  const patchCourseLocal = (courseId: number, patch: Partial<Course>) => {
+    const apply = (c: Course) => (c.id === courseId ? { ...c, ...patch } : c)
+    setCourses((prev) => prev.map(apply))
+    setInactiveCourses((prev) => prev.map(apply))
+  }
+
+  const patchChaptersLocal = (
+    courseId: number,
+    updater: (chapters: ChapterTreeNode[]) => ChapterTreeNode[],
+  ) => {
+    const apply = (c: Course) => (c.id === courseId ? { ...c, chapters: updater(c.chapters || []) } : c)
+    setCourses((prev) => prev.map(apply))
+    setInactiveCourses((prev) => prev.map(apply))
+  }
+
+  // 章节/KP 列表按 sort_order 排一下，手工改排序号后本地顺序也能立刻对上
+  const sortChapterTree = (list: ChapterTreeNode[]): ChapterTreeNode[] =>
+    [...list]
+      .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+      .map((ch) => ({
+        ...ch,
+        children: ch.children ? sortChapterTree(ch.children) : ch.children,
+        knowledge_points: ch.knowledge_points
+          ? [...ch.knowledge_points].sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+          : ch.knowledge_points,
+      }))
+
+  const patchChapterNode = (
+    list: ChapterTreeNode[], chapterId: number, patch: Partial<ChapterTreeNode>,
+  ): ChapterTreeNode[] =>
+    list.map((ch) => (
+      ch.id === chapterId
+        ? { ...ch, ...patch }
+        : { ...ch, children: ch.children ? patchChapterNode(ch.children, chapterId, patch) : ch.children }
+    ))
+
+  const removeChapterNode = (list: ChapterTreeNode[], chapterId: number): ChapterTreeNode[] =>
+    list
+      .filter((ch) => ch.id !== chapterId)
+      .map((ch) => ({ ...ch, children: ch.children ? removeChapterNode(ch.children, chapterId) : ch.children }))
+
+  const patchKpNode = (
+    list: ChapterTreeNode[], kpId: number, patch: Partial<KnowledgePoint>,
+  ): ChapterTreeNode[] =>
+    list.map((ch) => ({
+      ...ch,
+      knowledge_points: (ch.knowledge_points || []).map((kp) => (kp.id === kpId ? { ...kp, ...patch } : kp)),
+      children: ch.children ? patchKpNode(ch.children, kpId, patch) : ch.children,
+    }))
+
+  const removeKpNode = (list: ChapterTreeNode[], kpId: number): ChapterTreeNode[] =>
+    list.map((ch) => ({
+      ...ch,
+      knowledge_points: (ch.knowledge_points || []).filter((kp) => kp.id !== kpId),
+      children: ch.children ? removeKpNode(ch.children, kpId) : ch.children,
+    }))
+
+  const findCourseIdOfChapter = (chapterId: number): number | null => {
+    const hasChapter = (list: ChapterTreeNode[]): boolean =>
+      list.some((ch) => ch.id === chapterId || (ch.children ? hasChapter(ch.children) : false))
+    return [...courses, ...inactiveCourses].find((c) => hasChapter(c.chapters || []))?.id ?? null
+  }
+
+  const findCourseIdOfKp = (kpId: number): number | null => {
+    const hasKp = (list: ChapterTreeNode[]): boolean =>
+      list.some((ch) => (ch.knowledge_points || []).some((kp) => kp.id === kpId)
+        || (ch.children ? hasKp(ch.children) : false))
+    return [...courses, ...inactiveCourses].find((c) => hasKp(c.chapters || []))?.id ?? null
+  }
+
+  const collectKpIds = (chapter: ChapterTreeNode | null | undefined): number[] =>
+    chapter
+      ? [
+          ...(chapter.knowledge_points || []).map((kp) => kp.id),
+          ...(chapter.children || []).flatMap(collectKpIds),
+        ]
+      : []
 
   const orderBetween = (prev: number | null, next: number | null): number => {
     if (prev === null && next === null) return SORT_GAP
@@ -1222,13 +1353,29 @@ const CurriculumPage: React.FC = () => {
       setSavingKp(true)
       if (editingKp) {
         await curriculumApi.updateKnowledgePoint(editingKp.id, values)
+        const sameChapter = Number(values.chapter_id) === editingKp.chapter_id
+        const courseId = findCourseIdOfKp(editingKp.id)
+        if (sameChapter && courseId) {
+          const patch: Partial<KnowledgePoint> = { name: values.name }
+          for (const field of ['description', 'learning_objectives', 'difficulty', 'estimated_minutes'] as const) {
+            if (values[field] !== undefined) patch[field] = values[field]
+          }
+          if (values.sort_order !== undefined) patch.sort_order = values.sort_order
+          patchChaptersLocal(
+            courseId,
+            (list) => sortChapterTree(patchKpNode(list, editingKp.id, patch)),
+          )
+        } else {
+          // 换章节属于结构移动，退回一次全量
+          await loadTree()
+        }
         message.success(t('kpUpdated'))
       } else {
         await curriculumApi.createKnowledgePoint(values)
         message.success(t('kpCreated'))
+        await loadTree()
       }
       setKpModal(false)
-      loadTree()
       // 编辑的正是当前打开的知识点时，刷新右侧面板，别显示旧内容
       if (editingKp && selectedKp?.id === editingKp.id) {
         try {
@@ -1248,9 +1395,14 @@ const CurriculumPage: React.FC = () => {
 
   const handleDeleteKp = async (kpId: number) => {
     try {
+      const courseId = findCourseIdOfKp(kpId)
       await curriculumApi.deleteKnowledgePoint(kpId)
       message.success(t('kpDeleted'))
-      loadTree()
+      if (courseId) {
+        patchChaptersLocal(courseId, (list) => removeKpNode(list, kpId))
+      } else {
+        await loadTree()
+      }
       if (selectedKp?.id === kpId) {
         setSelectedKp(null)
         setKpResources([])
@@ -1336,10 +1488,35 @@ const CurriculumPage: React.FC = () => {
     </>
   )
 
+  // 某一章是否已「展开到最深层」：本章 + 所有子章节都在 expandedKeys 里
+  const isChapterFullyOpen = (ch: ChapterTreeNode) =>
+    collectChapterIds(ch).every((id) => expandedKeys.includes(`ch_${id}`))
+
+  // 章节级展开/收起：一次展开本章所有子章节；知识点是叶子，随所属章节展开
+  const toggleChapterExpand = (ch: ChapterTreeNode) => {
+    const keys = collectChapterIds(ch).map((id) => `ch_${id}`)
+    const allOpen = keys.every((k) => expandedKeys.includes(k))
+    setExpandedKeys((prev) => (
+      allOpen
+        ? prev.filter((k) => !keys.includes(String(k)))
+        : Array.from(new Set([...prev, ...keys]))
+    ))
+  }
+
   const renderChapterTitle = (ch: ChapterTreeNode) => (
     <Space size="small">
       <MenuOutlined style={{ fontSize: 12, opacity: 0.5 }} />
       <Typography.Text strong>{ch.name}</Typography.Text>
+      {(ch.children?.length || ch.knowledge_points?.length) ? (
+        <Tooltip title={isChapterFullyOpen(ch) ? t('collapseChapter') : t('expandChapter')}>
+          <Button
+            type="text"
+            size="small"
+            icon={isChapterFullyOpen(ch) ? <DownOutlined /> : <RightOutlined />}
+            onClick={(e) => { e.stopPropagation(); toggleChapterExpand(ch) }}
+          />
+        </Tooltip>
+      ) : null}
       {isTeacherOrAdmin && showActions && (
         <Space size="small" style={{ marginLeft: 8 }}>
           {renderMoveButtons('ch', ch)}
@@ -1453,6 +1630,27 @@ const CurriculumPage: React.FC = () => {
   const activeCourse = findCourseById(activeCourseId)
   // 停用提示条要用这份统计，别再对同一棵树遍历两遍
   const activeCourseCounts = countCourseNodes(activeCourse)
+
+  // 切换到新课程（或课程章节首次加载完成）时默认展开全部；
+  // 同一课程后续刷新数据时保留用户手动收起的状态。
+  useEffect(() => {
+    if (!activeCourse) {
+      treeCourseRef.current = null
+      setExpandedKeys([])
+      return
+    }
+    if (treeCourseRef.current === activeCourse.id) return
+    const keys = collectAllChapterKeys(activeCourse.chapters)
+    if (keys.length) {
+      setExpandedKeys(keys)
+      treeCourseRef.current = activeCourse.id
+    }
+  }, [activeCourse])
+
+  // 顶栏「展开/收起」用：当前课程全部章节 key；全部已展开时按钮变成「收起全部」
+  const allChapterKeys = collectAllChapterKeys(activeCourse?.chapters)
+  const allChaptersExpanded = allChapterKeys.length > 0
+    && allChapterKeys.every((k) => expandedKeys.includes(k))
 
   // 章节下拉：所属章节、父章节都用拍平后的整棵树，保证任何 chapter_id 都能显示成名字而不是数字
   const chapterOptions = flattenChapterOptions(activeCourse?.chapters)
@@ -1894,6 +2092,17 @@ const CurriculumPage: React.FC = () => {
                     }
                     extra={
                       <Space wrap>
+                        {allChapterKeys.length > 0 && (
+                          <Tooltip title={allChaptersExpanded ? t('collapseAll') : t('expandAll')}>
+                            <Button
+                              size="small"
+                              icon={allChaptersExpanded ? <RightOutlined /> : <DownOutlined />}
+                              onClick={() => setExpandedKeys(allChaptersExpanded ? [] : allChapterKeys)}
+                            >
+                              {allChaptersExpanded ? t('collapseAll') : t('expandAll')}
+                            </Button>
+                          </Tooltip>
+                        )}
                         {isTeacherOrAdmin && (
                           <>
                             <Button size="small" icon={<EditOutlined />} onClick={() => handleEditCourse(activeCourse)}>
@@ -1953,10 +2162,11 @@ const CurriculumPage: React.FC = () => {
                         {activeCourse.description}
                       </Typography.Paragraph>
                     )}
-                    {/* 课程树 */}
+                    {/* 课程树：顶栏「展开全部/收起全部」，章节级展开在章节名旁 */}
                     <Tree
                       treeData={buildTreeData(activeCourse)}
-                      defaultExpandAll
+                      expandedKeys={expandedKeys}
+                      onExpand={(keys) => setExpandedKeys(keys)}
                       showLine={{ showLeafIcon: false }}
                       onSelect={handleTreeSelect}
                       draggable={isTeacherOrAdmin}

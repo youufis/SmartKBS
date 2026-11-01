@@ -43,6 +43,12 @@ async def lifespan(app: FastAPI):
     init_db()
     init_question_db()
     try:
+        # 代码练习：判题任务只活在本进程，重启后把残留的「评分中」标记失败
+        from backend.code_grader import recover_stale_submissions
+        recover_stale_submissions()
+    except Exception as e:
+        print(f"[main] 代码练习残留判题回收失败: {e}", file=sys.stderr)
+    try:
         # 压缩中间件自检：gzip 会把 SSE 攒到整条流结束才吐，症状只是“对话没有流式输出”。
         # 它依赖 Starlette 的私有压缩钩子，钩子改过名、也就静默失效过一次，
         # 所以启动时用一条真实的 text/event-stream 响应实测一遍；不通过就整体不压缩。
