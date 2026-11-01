@@ -719,8 +719,13 @@ async def submit_answer(quest_id: int, request: Request):
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
 
-    correct_answer = question["correct_answer"].strip().upper()
-    is_correct = 1 if answer == correct_answer else 0
+    correct_answer = str(question["correct_answer"] or "").strip()
+    from backend.answer_norm import answers_equal  # 统一判分口径（判断题/字母/大小写）
+    try:
+        _q_opts = json.loads(question["options"]) if question.get("options") else None
+    except (json.JSONDecodeError, TypeError):
+        _q_opts = None
+    is_correct = 1 if answers_equal(answer, correct_answer, _q_opts, "") else 0
     lifeline_used = question["lifeline_used"] or ""
     lifelines_on_this = [l.strip() for l in lifeline_used.split(",") if l.strip()]
 

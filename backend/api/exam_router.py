@@ -1964,7 +1964,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     # 获取所有题目信息（含 question_text 用于 AI 批改）
     questions = execute_query(
-        """SELECT q.id, q.type, q.question_text, q.correct_answer, eq.score
+        """SELECT q.id, q.type, q.question_text, q.correct_answer, q.options, eq.score
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'""",
@@ -3244,7 +3244,7 @@ def _exam_fetch_jobs(limit: int) -> list[GradingJob]:
         if eid not in qcache:
             qcache[eid] = {
                 str(q["id"]): q for q in execute_query(
-                    """SELECT q.id, q.type, q.question_text, q.correct_answer, eq.score
+                    """SELECT q.id, q.type, q.question_text, q.correct_answer, q.options, eq.score
                        FROM exam_questions eq
                        JOIN question_bank q ON q.id = eq.question_id
                        WHERE eq.exam_id=?""",

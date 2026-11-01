@@ -991,7 +991,9 @@ async def _apply_answer(run_id: int, user: dict, body: dict) -> dict:
     selected = str(body.get("selected") or "").strip()
     correct_answer = str(snap.get("correct_answer") or "").strip()
     is_timeout = str(body.get("reason") or "") == "timeout"
-    ok = (not is_timeout) and bool(selected) and selected.upper() == correct_answer.upper()
+    from backend.answer_norm import answers_equal  # 统一判分口径（判断题/字母选项）
+    ok = (not is_timeout) and bool(selected) and answers_equal(
+        selected, correct_answer, snap.get("options"), str(snap.get("question_type") or ""))
     lby = _decode(run.get("lifeline_by_level"), {})
     lifelines = list(lby.get(str(level), []))
     score = _score_with_lifelines(level, lifelines) if ok else 0

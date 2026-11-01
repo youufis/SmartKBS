@@ -506,7 +506,10 @@ async def judge(request: Request):
         correct_answer = str(question.get("answer") or "").strip()
         if not correct_answer:
             raise HTTPException(status_code=400, detail="当前题目没有答案，无法自动判定")
-        result = ("correct" if student_answer.upper() == correct_answer.upper()
+        from backend.answer_norm import answers_equal  # 统一判分口径（判断题/字母/下标/多选等价）
+        result = ("correct" if answers_equal(student_answer, correct_answer,
+                                             question.get("options"),
+                                             str(question.get("type") or ""))
                   else "incorrect")
     if result not in ("correct", "incorrect", "skip"):
         raise HTTPException(status_code=400, detail="判定结果不合法")

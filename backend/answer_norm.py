@@ -70,7 +70,7 @@ def normalize_answer(value: Any, options: Any = None, qtype: str = "") -> str:
     low = raw.lower()
 
     # 先认选项键：单个字母（X/T/F/A…）优先当作选项，别被判断词规则吃掉
-    if len(raw) == 1 and (not keys or raw.upper() in keys):
+    if len(raw) == 1 and (raw.upper() in keys if keys else raw.isascii() and raw.isalpha()):
         return raw.upper()
 
     if low in _TRUE_WORDS or low in _FALSE_WORDS:
