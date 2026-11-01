@@ -21,7 +21,7 @@ import { Card, Space, Tag, Tooltip, Typography, Button, Dropdown, Empty, message
 import {
   NodeIndexOutlined, SettingOutlined, FormOutlined, BulbOutlined, DownOutlined,
   CheckCircleOutlined, ClockCircleOutlined, PlusOutlined, EditOutlined, CloseOutlined,
-  RobotOutlined, FileOutlined, SoundOutlined, PlayCircleOutlined,
+  RobotOutlined, FileOutlined, SoundOutlined, PlayCircleOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { KnowledgePoint, CurriculumResource } from '../types'
@@ -51,6 +51,8 @@ interface KpDetailPanelProps {
   podcastDisabled?: boolean
   /** 该知识点是否已有 AI 讲演：决定按钮是"播放"还是"生成"，也决定下拉项文案 */
   hasCast?: boolean
+  /** 已有讲演时当前用户能否编辑（方案 1：教师只能改自己创建的，管理员不限） */
+  castEditable?: boolean
   /** card = 自带标题与收起按钮的内联卡片；plain = 只出内容，交给外层 Drawer */
   variant?: 'card' | 'plain'
   onClose: () => void
@@ -69,6 +71,7 @@ const RES_COLLAPSE_AT = 6
 const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
   kp, resources, loading, isTeacherOrAdmin, isStudent, lessonPlanLoading, podcastDisabled,
   hasCast = false,
+  castEditable = true,
   variant = 'card',
   onClose, onEdit, onLink, onAiPractice, onAiTool, onProgress, onManageBindings, onResourcesChanged,
 }) => {
@@ -147,12 +150,13 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
       disabled: podcastDisabled,
     },
     {
-      // 与播客共用同一个语音合成总闸：没讲演时生成不了；已有讲演则仍可打开改文字
+      // 与播客共用同一个语音合成总闸：没讲演时生成不了；已有讲演则仍可打开改文字。
+      // 但别人的讲演只能看 —— 方案 1：教师只能改自己创建的，管理员不限。
       key: 'cast',
-      icon: <PlayCircleOutlined />,
-      label: hasCast
-        ? t('editCast')
-        : (podcastDisabled ? `${t('aiCast')}（${t('podcastTtsOffShort')}）` : t('aiCast')),
+      icon: hasCast && !castEditable ? <EyeOutlined /> : <PlayCircleOutlined />,
+      label: !hasCast
+        ? (podcastDisabled ? `${t('aiCast')}（${t('podcastTtsOffShort')}）` : t('aiCast'))
+        : (castEditable ? t('editCast') : t('viewCast')),
       disabled: !hasCast && podcastDisabled,
     },
   ]

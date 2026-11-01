@@ -57,6 +57,8 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
   const [err, setErr] = useState('');
   const [tip, setTip] = useState('');
   const [descLoading, setDescLoading] = useState(false);
+  /** 属主冲突时可一键切到的另一种讲法（方案 1：教师只能改自己创建的） */
+  const [conflictMode, setConflictMode] = useState<SpeakerMode | null>(null);
 
   const originalRef = useRef<string>('');
   /** 记录"已经为哪个知识点自动生成过描述"，避免 StrictMode 双挂载打两次 */
@@ -77,6 +79,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
     setRegenIdx(null);
     setDesc('');
     setNeedDesc(!kp.description && !kp.learning_objectives);
+    setConflictMode(null);
     descGenRef.current = null;
     descTouchedRef.current = false;
 
@@ -174,6 +177,10 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
       if (status === 409 && (detail?.code === 'need_description' || detail === 'need_description')) {
         setNeedDesc(true);
         setErr('请先用一句话说明这个知识点讲什么');
+      } else if (status === 409 && typeof detail === 'string' && detail.includes('换另一种讲法')) {
+        // 同知识点同风格已被别人占了：把可用的另一种讲法做成按钮，别让老师自己找
+        setConflictMode(mode === 'duo' ? 'single' : 'duo');
+        setErr(detail);
       } else {
         setErr(typeof detail === 'string' ? detail : '大纲生成失败，请重试');
       }
@@ -282,7 +289,22 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
             />
           ) : null}
 
-          {err ? <Alert type="error" showIcon style={{ marginBottom: 12 }} message={err} /> : null}
+          {err ? (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={err}
+              action={conflictMode ? (
+                <Button
+                  size="small"
+                  onClick={() => { setMode(conflictMode); setConflictMode(null); setErr(''); void doOutline(); }}
+                >
+                  改用{conflictMode === 'duo' ? '双主播' : '单主讲'}
+                </Button>
+              ) : undefined}
+            />
+          ) : null}
           {tip ? <Alert type="success" showIcon style={{ marginBottom: 12 }} message={tip} /> : null}
 
           {step === 'form' && (

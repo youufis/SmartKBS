@@ -487,5 +487,6 @@
   "collapseAll": "Collapse all",
   "expandChapter": "Expand chapter",
   "collapseChapter": "Collapse chapter",
-  "treeExpandHint": "Expand every chapter at once, or use the arrow beside a chapter to expand all its knowledge points."
+  "treeExpandHint": "Expand every chapter at once, or use the arrow beside a chapter to expand all its knowledge points.",
+  "viewCast": "View lesson"
 }

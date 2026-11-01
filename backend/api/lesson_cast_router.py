@@ -44,6 +44,35 @@ def _can_manage(user: dict[str, Any]) -> bool:
     return user.get("role", 2) in (0, 1)
 
 
+def _display_name_of(username: str) -> str:
+    u = str(username or "")
+    if not u:
+        return "其他教师"
+    row = execute_query_one("SELECT name FROM users WHERE username = ?", (u,))
+    return str((row.get("name") if row else "") or u)
+
+
+def _can_edit_cast(user: dict[str, Any], row: dict[str, Any]) -> bool:
+    """管理员可改任何讲演；教师只能改自己创建的（方案 1：严格属主）。
+
+    课程本身没有归属者（courses 表无 created_by），所以「谁能讲这门课」不构成依据；
+    这里只认讲演这一层的创建人，避免同事之间互相覆盖改过的台词。
+    """
+    if user.get("role", 2) == 0:
+        return True
+    return str(row.get("created_by") or "") == str(user.get("username") or "")
+
+
+def _ensure_can_edit(user: dict[str, Any], row: dict[str, Any]) -> None:
+    if _can_edit_cast(user, row):
+        return
+    owner = _display_name_of(row.get("created_by") or "")
+    raise HTTPException(
+        status_code=403,
+        detail=f"这节讲演由「{owner}」创建，你只能查看。要改请让管理员移交，或换一种讲法重新生成。",
+    )
+
+
 def _kp_of(kp_id: int) -> dict[str, Any]:
     """取讲演要用的知识点信息（含课程/章节 id，供落库时冗余）。"""
     row = execute_query_one(
@@ -118,6 +147,8 @@ def _cast_payload(row: dict[str, Any], *, with_audio: bool = True) -> dict[str, 
         "minutes": int(row.get("minutes") or 5),
         "total_seconds": float(row.get("total_seconds") or 0),
         "status": row.get("status") or "draft",
+        "created_by": row.get("created_by") or "",
+        "created_by_name": _display_name_of(row.get("created_by") or ""),
         "version": int(row.get("version") or 1),
         "stale": bool(row.get("audio_hash")) and row.get("audio_hash") != row.get("plan_hash"),
         "pages": pages,
@@ -148,10 +179,19 @@ async def lesson_cast_meta(request: Request, kp_id: int | None = Query(None)):
     }
     if kp_id:
         rows = execute_query(
-            "SELECT id, speaker_mode, status FROM lesson_casts WHERE kp_id = ?", (kp_id,))
-        # 给 id 而不只是状态：前端据此直接打开"编辑已有讲演"，不用再查一次
+            "SELECT id, speaker_mode, status, created_by FROM lesson_casts WHERE kp_id = ?",
+            (kp_id,))
+        # 给 id 而不只是状态：前端据此直接打开"编辑已有讲演"，不用再查一次。
+        # created_by 决定面板上显示「AI 编辑」还是「查看讲演」（方案 1：教师只能改自己的）
         payload["has_cast"] = {
-            r["speaker_mode"]: {"id": r["id"], "status": r["status"]} for r in rows
+            r["speaker_mode"]: {
+                "id": r["id"],
+                "status": r["status"],
+                "created_by": r.get("created_by") or "",
+                "mine": (user.get("role", 2) == 0
+                         or str(r.get("created_by") or "") == str(user["username"])),
+            }
+            for r in rows
         }
     return payload
 
@@ -177,7 +217,7 @@ async def batch_has_cast(request: Request, kp_ids: str = Query("")):
     where = "" if _can_manage(user) else " AND status = 'published'"
     placeholders = ",".join("?" for _ in ids)
     rows = execute_query(
-        f"""SELECT id, kp_id, speaker_mode, status, minutes, total_seconds
+        f"""SELECT id, kp_id, speaker_mode, status, minutes, total_seconds, created_by
             FROM lesson_casts WHERE kp_id IN ({placeholders}){where}""",
         tuple(ids),
     )
@@ -188,6 +228,9 @@ async def batch_has_cast(request: Request, kp_ids: str = Query("")):
             "status": r["status"],
             "minutes": int(r.get("minutes") or 5),
             "total_seconds": float(r.get("total_seconds") or 0),
+            "created_by": r.get("created_by") or "",
+            "mine": (user.get("role", 2) == 0
+                     or str(r.get("created_by") or "") == str(user["username"])),
         }
     return {"items": items}
 
@@ -268,6 +311,22 @@ async def create_outline(kp_id: int, body: OutlineIn, request: Request):
     kp = _kp_of(kp_id)
     mode = L.normalize_mode(body.speaker_mode)
     minutes = L.normalize_minutes(body.minutes)
+
+    # 方案 1：同一知识点同一风格已有**别人的**版本时，既不覆盖、也别白花一次 LLM 调用
+    existing = execute_query_one(
+        "SELECT * FROM lesson_casts WHERE kp_id = ? AND speaker_mode = ?", (kp_id, mode))
+    if existing and not _can_edit_cast(user, existing):
+        other_mode = "single" if mode == "duo" else "duo"
+        other = execute_query_one(
+            "SELECT id FROM lesson_casts WHERE kp_id = ? AND speaker_mode = ?",
+            (kp_id, other_mode))
+        label = "双主播" if mode == "duo" else "单主讲"
+        hint = ("可以换另一种讲法生成。" if not other
+                else "两种讲法都已被占用，需要这一版请联系管理员移交。")
+        raise HTTPException(
+            status_code=409,
+            detail=f"这节讲演已有「{_display_name_of(existing.get('created_by') or '')}」"
+                   f"做的{label}版，你只能查看。{hint}")
 
     desc = str(kp.get("description") or "").strip()
     objectives = str(kp.get("learning_objectives") or "").strip()
@@ -407,6 +466,7 @@ async def get_outline(cast_id: int, request: Request):
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
     row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)   # 方案 1：教师只能动自己创建的讲演
     try:
         pages = json.loads(row.get("pages_json") or "[]")
     except (ValueError, TypeError):
@@ -446,6 +506,7 @@ async def save_outline(cast_id: int, body: OutlineSaveIn, request: Request):
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
     row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)   # 方案 1：教师只能动自己创建的讲演
 
     pages = [p for p in body.pages if isinstance(p, dict) and p.get("lines")]
     if not pages:
@@ -477,6 +538,7 @@ async def synthesize_audio(cast_id: int, request: Request):
         raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
 
     row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)   # 方案 1：教师只能动自己创建的讲演
     if not L.tts_available():
         raise HTTPException(status_code=409, detail=L.disabled_detail())
 
@@ -505,9 +567,12 @@ async def synthesize_audio(cast_id: int, request: Request):
             # 截断后大纲实际变短：三个指纹必须一起用「截断后」的页重算，否则永远显示"音频过期"
             final_plan = L.plan_hash(kept_pages, row.get("voice_a") or "", row.get("voice_b") or "")
             execute_insert_update(
+                # 已经发布过的不要再降级：合成是异步任务，若发布先于它完成（重复点、
+                # 两人同时操作），降级回 audio_ready 会让这节讲演从学生端突然消失
                 """UPDATE lesson_casts SET pages_json = ?, segments_json = ?,
                         total_seconds = ?, plan_hash = ?, audio_hash = ?,
-                        status = 'audio_ready', updated_at = ? WHERE id = ?""",
+                        status = CASE WHEN status = 'published' THEN 'published' ELSE 'audio_ready' END,
+                        updated_at = ? WHERE id = ?""",
                 (json.dumps(kept_pages, ensure_ascii=False),
                  json.dumps(kept_segments, ensure_ascii=False),
                  total, final_plan, final_plan, _now(), cast_id),
@@ -572,6 +637,7 @@ async def regen_page(cast_id: int, page_idx: int, body: PageRegenIn, request: Re
         raise HTTPException(status_code=409, detail=L.disabled_detail())
 
     row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)   # 方案 1：教师只能动自己创建的讲演
     try:
         pages = json.loads(row.get("pages_json") or "[]")
         old_segments = json.loads(row.get("segments_json") or "[]")
@@ -617,7 +683,9 @@ async def regen_page(cast_id: int, page_idx: int, body: PageRegenIn, request: Re
             plan = L.plan_hash(pages, row.get("voice_a") or "", row.get("voice_b") or "")
             execute_insert_update(
                 """UPDATE lesson_casts SET pages_json = ?, segments_json = ?, total_seconds = ?,
-                        plan_hash = ?, audio_hash = ?, status = 'audio_ready', updated_at = ?
+                        plan_hash = ?, audio_hash = ?,
+                        status = CASE WHEN status = 'published' THEN 'published' ELSE 'audio_ready' END,
+                        updated_at = ?
                    WHERE id = ?""",
                 (json.dumps(pages, ensure_ascii=False), json.dumps(merged, ensure_ascii=False),
                  total, plan, plan, _now(), cast_id),
@@ -642,6 +710,7 @@ async def publish_cast(cast_id: int, request: Request):
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
     row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)   # 方案 1：教师只能动自己创建的讲演
     if not row.get("audio_hash"):
         raise HTTPException(status_code=409, detail="还没有音频，请先合成音频再发布")
     if row.get("audio_hash") != row.get("plan_hash"):

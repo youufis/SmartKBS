@@ -1327,8 +1327,16 @@ const CurriculumPage: React.FC = () => {
     else if (key === 'courseware') handleAiCourseware(selectedKp.id)
     else if (key === 'podcast') handleAiPodcast(selectedKp.id)
     else if (key === 'cast') {
-      setCastKp(selectedKp)
-      setCastModalOpen(true)
+      // 方案 1：不是自己创建的讲演只能看，直接进播放页，不打开编辑弹窗
+      const brief = castMap[String(selectedKp.id)]
+      const editable = !(brief?.duo || brief?.single)
+        || !!(brief?.duo?.mine || brief?.single?.mine)
+      if (editable) {
+        setCastKp(selectedKp)
+        setCastModalOpen(true)
+      } else {
+        navigate(`/learn/${selectedKp.id}`)
+      }
     }
   }
 
@@ -1691,6 +1699,11 @@ const CurriculumPage: React.FC = () => {
     lessonPlanLoading,
     podcastDisabled,
     hasCast: !!(castMap[String(selectedKp.id)]?.duo || castMap[String(selectedKp.id)]?.single),
+    castEditable: (() => {
+      const b = castMap[String(selectedKp.id)]
+      if (!b?.duo && !b?.single) return true
+      return !!(b.duo?.mine || b.single?.mine)
+    })(),
     onClose: handleCloseKpPanel,
     onEdit: handleEditKp,
     onLink: openKpLink,

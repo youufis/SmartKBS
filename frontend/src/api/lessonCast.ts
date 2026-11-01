@@ -94,8 +94,10 @@ export interface CastMeta {
   speaker_modes: SpeakerMode[];
   voices: { A: CastVoice; B: CastVoice };
   can_manage: boolean;
-  /** 该知识点已有的讲演版本：{ duo: {id, status}, single: {...} } */
-  has_cast: Partial<Record<SpeakerMode, { id: number; status: string }>>;
+  /** 该知识点已有的讲演版本；mine=当前用户能否编辑（管理员恒 true） */
+  has_cast: Partial<Record<SpeakerMode, {
+    id: number; status: string; created_by: string; mine: boolean;
+  }>>;
 }
 
 export interface CastDetail {
@@ -111,6 +113,9 @@ export interface CastDetail {
   minutes: number;
   total_seconds: number;
   status: 'draft' | 'audio_ready' | 'published';
+  /** 创建者；非管理员且不是自己时只能看（方案 1） */
+  created_by: string;
+  created_by_name: string;
   version: number;
   /** 大纲改过但音频还是旧的 */
   stale: boolean;
@@ -168,6 +173,10 @@ export interface CastBrief {
   status: string;
   minutes: number;
   total_seconds: number;
+  /** 创建者用户名；管理员可改任何人的，教师只能改自己的（方案 1） */
+  created_by: string;
+  /** 当前用户是否可编辑这一版 */
+  mine: boolean;
 }
 
 /** kp_id(字符串) → { duo?: CastBrief, single?: CastBrief } */
