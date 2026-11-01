@@ -37,12 +37,16 @@
 
 > 📌 **Highlights of V9.0.0**
 >
-> **Code practice and course management (this build)**
+> **Dashboard charts (this build)**
+> - 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin the one you prefer
+> - 🩹 **Three chart defects fixed**: points and chats shared one axis so the chat bars always sat on the floor (now split into separate tracks); exam-status percentages added up to 101% (now largest-remainder rounding); card content floated in the middle leaving large empty bands (now top-aligned)
+>
+> **Code practice and course management**
 > - 🧑‍🏫 **Unified AI generate / create / edit**: one five-tab form (basics, template, test cases, reference solution, scope); AI output fills it directly and the reference can be validated against the current unsaved cases
 > - ⚙️ **Judging engine rebuilt**: async execution no longer blocks the class, per-problem time limits, concurrent cases, per-case details in their own table; syntax errors, timeouts and runtime errors are reported separately
 > - 🛡️ **Teacher tools filled in**: submission details, missing-student roster, per-case pass rates, CSV export and regrade; students get draft autosave, sample runs with diffs, and load-back of past code
 > - 📚 **Course tree**: one expand/collapse-all toggle in the header and per-chapter expand; editing a course, chapter or knowledge point updates only that node and keeps the tree's expanded state
-> - 🩹 **Fixes**: admin/student problem counts no longer differ because of legacy deleted rows; the notification type "Task" is now "Homework"; the `{{name}}` placeholder in system settings is fixed
+> - 🩹 **Fixes**: admin and student problem counts no longer disagree on legacy data; the notification type "Task" is now "Homework"; placeholders in system settings no longer render literally
 >
 > **AI lesson cast (new)**
 > - 🎬 **A knowledge point becomes a micro-lesson that talks**: paginated slides with one voice clip per sentence — each clip ends, the page turns, the subtitle follows. No video file, so fixing one line re-records one line
@@ -1200,14 +1204,19 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.0.0
 
-**Code practice and course management (this build)**
+**Dashboard charts (this build)**
+
+- 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin the one you prefer
+- 🩹 **Three chart defects fixed**: points and chats shared one axis so the chat bars always sat on the floor (now split into separate tracks); exam-status percentages added up to 101% (now largest-remainder rounding); card content floated in the middle leaving large empty bands (now top-aligned)
+
+**Code practice and course management**
 
 - 🧑‍🏫 **Unified AI generate / create / edit**: one five-tab form (basics, template, test cases, reference solution, scope); AI output fills it directly and the reference can be validated against the current unsaved cases
 - ⚙️ **Judging engine rebuilt**: async execution no longer blocks the class, per-problem time limits, concurrent cases, per-case details in their own table; UTF-8, compile errors, timeouts and runtime errors are separated
 - 🛡️ **Permissions and teaching stats**: student visibility/length/rate checks, teachers manage only their own problems; submission details, missing-student roster, per-case pass rates, CSV export and regrade
 - ✍️ **Student experience**: draft autosave, one-click sample runs with diffs, load-back of past code, locked language, offline Monaco and dark theme
 - 📚 **Course tree**: one expand/collapse-all toggle in the header and per-chapter expand; editing a course, chapter or knowledge point updates only that node and keeps the expanded state
-- 🩹 **Fixes**: admin/student problem counts no longer differ because of legacy deleted rows; the notification type "Task" is now "Homework"; the `{{name}}` placeholder in system settings is fixed
+- 🩹 **Fixes**: admin and student problem counts no longer disagree on legacy data; the notification type "Task" is now "Homework"; placeholders in system settings no longer render literally
 
 **AI lesson cast**
 

@@ -104,7 +104,18 @@
     "noExamData": "No exam data",
     "noActivityData": "No activity data",
     "noChallengeData": "No challenge data",
-    "noTeachingData": "No teaching data"
+    "noTeachingData": "No teaching data",
+    "examManageLink": "All exams",
+    "goExam": "Take an exam",
+    "switchTitle": "Switch chart type",
+    "totalUnit": "total"
+  },
+  "examStatus": {
+    "view": {
+      "segment": "Segment: composition",
+      "donut": "Donut: share of total",
+      "ticks": "Ticks: one per exam"
+    }
   },
   "classUnit": "",
   "activityMonitor": {
@@ -658,31 +669,49 @@
   },
   "trend": {
     "dod": "+{{n}} vs yesterday",
+    "dodTip": "Today's points compared with yesterday",
     "heatTip": "{{day}}: {{points}} pts · {{chats}} chats · {{actions}} actions",
     "emptyHint": "Your activity trend shows up here once there is any",
     "title": "7-Day Learning Trend",
     "weekPoints": "Points this week +{{n}}",
     "points": "Points",
     "chats": "Chats",
-    "empty": "No activity in the last 7 days. Go finish a task!"
+    "activity": "Active",
+    "empty": "No activity in the last 7 days. Go finish a task!",
+    "view": {
+      "bars": "Bars: compare each day",
+      "line": "Line: follow the trend",
+      "heat": "Heat: read the intensity"
+    }
   },
   "radar": {
     "noDataHint": "Generated automatically once you answer",
     "title": "Ability Profile",
-    "hint": "Based on real accuracy/completion across exams, course practice, practice and mistake mastery",
+    "hint": "Exams, course practice and mistake mastery use real accuracy; the practice axis is a completion ratio, so don't compare the two directly",
     "exam": "Exam avg",
     "coursePractice": "Course",
-    "practice": "Practice",
+    "practice": "Practice done",
     "wrongBook": "Mastery",
-    "noData": "Complete some activities to reveal your ability profile"
+    "noData": "Complete some activities to reveal your ability profile",
+    "cta": "Try a practice set",
+    "view": {
+      "radar": "Radar: overall shape",
+      "bars": "Bars: compare axes",
+      "ring": "Rings: each axis"
+    }
   },
   "scores": {
     "rate": "Score rate",
     "avgLine": "avg {{v}}%",
     "avgRate": "Avg rate {{v}}%",
-    "avgHint": "Gold tick marks your average score rate",
+    "avgHint": "Gold dashed line marks your average score rate",
     "total": "Total",
-    "mine": "Score"
+    "mine": "Score",
+    "view": {
+      "progress": "Bars: exam by exam",
+      "bars": "Columns: compare heights",
+      "line": "Line: progress over time"
+    }
   },
   "growth": {
     "mastery": "Mastery",
@@ -740,7 +769,12 @@
     "empty": "No points recorded this week",
     "pointsUnit": "pts",
     "todayChat": "Chats today",
-    "activeToday": "Active"
+    "activeToday": "Active",
+    "view": {
+      "rank": "Ranking: avatars + places",
+      "bars": "Bars: points gap",
+      "podium": "Podium: top three"
+    }
   },
   "quick": {
     "taskTodo": "To-do List",

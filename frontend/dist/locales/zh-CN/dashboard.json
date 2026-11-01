@@ -104,7 +104,18 @@
     "noExamData": "暂无成绩",
     "noActivityData": "暂无活动数据",
     "noChallengeData": "暂无挑战数据",
-    "noTeachingData": "暂无教学数据"
+    "noTeachingData": "暂无教学数据",
+    "examManageLink": "查看全部考试",
+    "goExam": "去参加考试",
+    "switchTitle": "切换图表形式",
+    "totalUnit": "场"
+  },
+  "examStatus": {
+    "view": {
+      "segment": "分段条：看构成",
+      "donut": "环形：看占比",
+      "ticks": "点阵：一场一格"
+    }
   },
   "classUnit": "班",
   "activityMonitor": {
@@ -658,31 +669,49 @@
   },
   "trend": {
     "dod": "较昨日 {{n}}",
+    "dodTip": "今日积分相对昨日的变化",
     "heatTip": "{{day}}：积分 {{points}} · 对话 {{chats}} · 行为 {{actions}}",
     "emptyHint": "有学习记录后，这里会出现走势与活跃条",
     "title": "近7天学习动态",
     "weekPoints": "本周积分 +{{n}}",
     "points": "积分",
     "chats": "对话",
-    "empty": "近 7 天还没有动态数据，去完成一项任务吧"
+    "activity": "活跃",
+    "empty": "近 7 天还没有动态数据，去完成一项任务吧",
+    "view": {
+      "bars": "柱状：看每日高低",
+      "line": "折线：看连续走势",
+      "heat": "热力格：看活跃深浅"
+    }
   },
   "radar": {
     "noDataHint": "答题后自动生成画像",
     "title": "能力画像",
-    "hint": "基于考试、课程练习、同步练习、错题掌握的真实正确率/完成率计算",
+    "hint": "考试均分、课程练习、错题掌握取真实正确率；练习一维取完成比例，两类不宜横向比较",
     "exam": "考试均分",
     "coursePractice": "课程练习",
-    "practice": "同步练习",
+    "practice": "练习完成",
     "wrongBook": "错题掌握",
-    "noData": "完成一些活动后，这里会显示你的能力维度"
+    "noData": "完成一些活动后，这里会显示你的能力维度",
+    "cta": "去练一组题",
+    "view": {
+      "radar": "雷达：看四维形状",
+      "bars": "条形：看各维高低",
+      "ring": "环形：看各自达成"
+    }
   },
   "scores": {
     "rate": "得分率",
     "avgLine": "平均 {{v}}%",
     "avgRate": "均分率 {{v}}%",
-    "avgHint": "金色竖线为你的平均得分率",
+    "avgHint": "金色虚线为你的平均得分率",
     "total": "总分",
-    "mine": "得分"
+    "mine": "得分",
+    "view": {
+      "progress": "进度条：逐场看",
+      "bars": "柱状：看高低对比",
+      "line": "折线：看进退趋势"
+    }
   },
   "growth": {
     "mastery": "掌握度",
@@ -740,7 +769,12 @@
     "empty": "本周还没有积分记录",
     "pointsUnit": "分",
     "todayChat": "今日对话",
-    "activeToday": "活跃学生"
+    "activeToday": "活跃学生",
+    "view": {
+      "rank": "排行：头像 + 名次",
+      "bars": "条形：看分数差距",
+      "podium": "领奖台：看前三"
+    }
   },
   "quick": {
     "taskTodo": "任务清单",
