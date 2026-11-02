@@ -31,6 +31,7 @@ from backend.question_db import (
     execute_query_one as q_one,
     get_connection,
 )
+from backend.code_score import apply_split as _apply_split, split_100 as _split_100
 from backend.database import execute_query_dict as db_query_dict
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
@@ -257,6 +258,8 @@ def _insert_cases(problem_id: int, cases: list[CodeTestCasePayload], *, replace:
                 for i, case in enumerate(cases)
             ],
         )
+        # 用例分归一到合计 100：相对权重保留，满分统一（教师看到的分值可能被按比例调整）
+        _apply_split(c, problem_id)
         conn.commit()
 
 
@@ -1110,13 +1113,25 @@ async def get_problem_submission_detail(problem_id: int, request: Request):
     target_count = len(roster)
     submitted_count = sum(1 for r in roster if r["submitted"])
     accepted_count = sum(1 for r in roster if r["status"] == "accepted")
-    scores = [float(r["score"] or 0) for r in roster if r["submitted"]]
+    # 只统计能换算的提交：max_score=0 是判题失败留下的老数据，算进去会把均分拉低
+    scores = [float(r["score"] or 0) for r in roster
+              if r["submitted"] and float(r.get("max_score") or 0) > 0]
+    # 满分按用例分之和算（不是固定 100）：教师给每个用例设分，题与题之间满分可能不同
+    max_rows = q_query(
+        "SELECT COALESCE(SUM(score), 0) AS s FROM code_test_cases WHERE problem_id = ?",
+        (problem_id,))
+    max_total = round(float((max_rows[0] or {}).get("s") or 0), 2) if max_rows else 0.0
+    avg_raw = round(sum(scores) / len(scores), 2) if scores else 0.0
     summary = {
         "target_count": target_count,
         "submitted_count": submitted_count,
         "accepted_count": accepted_count,
         "pass_rate": round(accepted_count / submitted_count * 100, 1) if submitted_count else 0,
-        "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+        # 原始分：满分跟着用例走，单独看没法跨题比较
+        "avg_score": round(avg_raw, 1),
+        "max_score": max_total,
+        # 百分制：主展示用，与通过率同口径；max=0（老数据）时为 None，前端显示"—"
+        "avg_percent": round(avg_raw / max_total * 100, 1) if (scores and max_total > 0) else None,
     }
 
     # 逐用例通过率（只统计每人的最佳提交）

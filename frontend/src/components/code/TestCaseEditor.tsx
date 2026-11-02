@@ -36,6 +36,10 @@ const TestCaseEditor: React.FC<TestCaseEditorProps> = ({ value, onChange, disabl
 
   return (
     <div>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 8, lineHeight: 1.7 }}>
+        用例分值合计会自动按比例归一到 100 分，相对权重不变（例：2 / 2 / 3 会变成 29 / 29 / 42）。
+        这样每道题的满分都是 100，跨题的平均分才可比。
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <Space>
           <Text strong>{t('testCases')}</Text>

@@ -19,6 +19,14 @@ import CodeWorkspace, { DiffBlock } from '../components/code/CodeWorkspace'
 import TestCaseEditor from '../components/code/TestCaseEditor'
 import { type EditableTestCase } from '../components/code/constants'
 import { STATUS_MAP } from '../components/code/constants'
+
+/** 分数换算成百分制：满分跟着用例走（1 分制、10 分制都可能），原始分只放在 title 里 */
+function toPercent(score: any, maxScore: any): number | null {
+  const sc = Number(score) || 0;
+  const mx = Number(maxScore) || 0;
+  if (mx <= 0) return null;   // 老数据没有 max_score，别除零
+  return Math.round((sc / mx) * 1000) / 10;
+}
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 
@@ -823,7 +831,19 @@ const CodePracticePage: React.FC = () => {
                 <Statistic title={t('passRate')} value={statsData.summary?.pass_rate ?? 0} suffix="%" />
               </Col>
               <Col xs={12} sm={6}>
-                <Statistic title={t('avgScore')} value={statsData.summary?.avg_score ?? 0} />
+                {/* 主数字用百分制：满分跟着用例走（可能是 1 分也可能是 10 分），
+                    只显示原始分的话，和旁边的通过率不是一个口径，容易误读 */}
+                <Statistic
+                  title={t('avgScore')}
+                  value={statsData.summary?.avg_percent ?? '—'}
+                  precision={statsData.summary?.avg_percent == null ? 0 : 1}
+                  suffix={statsData.summary?.avg_percent == null ? undefined : '/100'}
+                />
+                {(statsData.summary?.max_score ?? 0) > 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: -4 }}>
+                    {statsData.summary?.avg_score ?? 0} / {statsData.summary.max_score}
+                  </div>
+                ) : null}
               </Col>
             </Row>
 
@@ -910,7 +930,11 @@ const CodePracticePage: React.FC = () => {
                         },
                         {
                           title: t('score'), key: 'score', width: 80,
-                          render: (_: any, r: any) => `${r.score ?? 0}/${r.max_score ?? 0}`,
+                          render: (_: any, r: any) => {
+                            const pct = toPercent(r.score, r.max_score);
+                            const raw = `${r.score ?? 0} / ${r.max_score ?? 0}`;
+                            return pct === null ? <span title={raw}>—</span> : <span title={raw}>{pct}</span>;
+                          },
                         },
                         { title: t('passedCases'), key: 'passed', width: 80, render: (_: any, r: any) => `${r.passed_cases || 0}/${r.total_cases || 0}` },
                         { title: t('runTime'), dataIndex: 'execution_time', width: 70, render: (v: number) => v ? `${v}s` : '-' },
@@ -969,7 +993,12 @@ const CodePracticePage: React.FC = () => {
                           },
                           {
                             title: t('score'), key: 'score', width: 80,
-                            render: (_: any, r: any) => r.submitted ? `${r.score ?? 0}/${r.max_score ?? 0}` : '-',
+                            render: (_: any, r: any) => {
+                              if (!r.submitted) return '-';
+                              const pct = toPercent(r.score, r.max_score);
+                              const raw = `${r.score ?? 0} / ${r.max_score ?? 0}`;
+                              return pct === null ? <span title={raw}>—</span> : <span title={raw}>{pct}</span>;
+                            },
                           },
                           { title: t('submitTime'), dataIndex: 'submitted_at', width: 120, render: (v: string) => v?.slice(5, 16) || '' },
                         ]}

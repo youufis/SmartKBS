@@ -49,6 +49,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] 代码练习残留判题回收失败: {e}", file=sys.stderr)
     try:
+        # 代码练习：用例分归一到合计 100（早期题目按每个用例 1~2 分建，满分只有 10 甚至 1 分，
+        # 学生的分数、教师看到的平均分都跟着走，跨题没法比）。历史提交按同比例换算成百分制。
+        # 注意：这里必须从 code_score 导入，不能从 api.code_router 导入 ——
+        # 后者 import 一次要 15 秒（依赖全站路由与 AI 服务），会把 startup 同步阻塞住
+        from backend.code_score import normalize_all_case_scores
+        n = normalize_all_case_scores()
+        if n:
+            print(f"[main] 代码练习用例分已归一：{n} 道题", file=sys.stderr)
+    except Exception as e:
+        print(f"[main] 代码练习用例分归一失败: {e}", file=sys.stderr)
+    try:
         # 压缩中间件自检：gzip 会把 SSE 攒到整条流结束才吐，症状只是“对话没有流式输出”。
         # 它依赖 Starlette 的私有压缩钩子，钩子改过名、也就静默失效过一次，
         # 所以启动时用一条真实的 text/event-stream 响应实测一遍；不通过就整体不压缩。
