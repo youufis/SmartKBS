@@ -11,7 +11,10 @@ import { Alert, Button, Input, Modal, Radio, Select, Spin, message } from 'antd'
 import { BulbOutlined } from '@ant-design/icons';
 import {
   createCastOutline,
+  deleteCast,
   getCastMeta,
+  getCastStats,
+  unpublishCast,
   getCastOutline,
   publishCast,
   regenCastPage,
@@ -20,6 +23,7 @@ import {
   synthesizeCastAudio,
   type CastMeta,
   type CastPage,
+  type CastStats,
   type SpeakerMode,
 } from '../../api/lessonCast';
 import { OutlineEditor } from './OutlineEditor';
@@ -28,13 +32,15 @@ interface CastGenerateModalProps {
   open: boolean;
   kp: { id: number; name: string; description: string; learning_objectives: string } | null;
   onClose: () => void;
+  /** 删除/下架后让课程页刷新（行内播放按钮、菜单文案要跟着变） */
+  onChanged?: () => void;
   /** 生成或更新完成并发布后调用，通常用来跳到播放页 */
   onDone: (kpId: number) => void;
 }
 
 type Step = 'form' | 'outline' | 'syncing';
 
-export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateModalProps) {
+export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: CastGenerateModalProps) {
   const [meta, setMeta] = useState<CastMeta | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
   const [minutes, setMinutes] = useState(5);
@@ -44,6 +50,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
 
   const [step, setStep] = useState<Step>('form');
   const [castId, setCastId] = useState<number | null>(null);
+  const [castStatus, setCastStatus] = useState('draft');
   const [title, setTitle] = useState('');
   const [pages, setPages] = useState<CastPage[]>([]);
   const [hasAudio, setHasAudio] = useState(false);
@@ -70,6 +77,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
     if (!open || !kp) return;
     setStep('form');
     setCastId(null);
+    setCastStatus('draft');
     setPages([]);
     setHasAudio(false);
     setDirty(false);
@@ -94,6 +102,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
         try {
           const o = await getCastOutline(existing.id);
           setCastId(o.cast_id);
+          setCastStatus(o.status || 'draft');
           setTitle(o.title);
           setPages(o.pages);
           setMode2(o.speaker_mode);
@@ -119,6 +128,68 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
     () => pages.reduce((s, p) => s + (p.lines?.length || 0), 0),
     [pages],
   );
+
+  /** 下架：内容和音频都留着，只是学生暂时看不到 —— 比删掉省事，也可逆 */
+  const doUnpublish = async () => {
+    if (!castId) return;
+    setBusy(true);
+    try {
+      await unpublishCast(castId);
+      setCastStatus('draft');
+      setTip('已下架：学生暂时看不到，内容还在，随时可以再发布');
+      onChanged?.();
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || '下架失败，请重试');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 硬删除：先把影响面说清楚，再让老师决定 */
+  const doDelete = async () => {
+    if (!castId) return;
+    let stats: CastStats | null = null;
+    try {
+      stats = await getCastStats(castId);
+    } catch {
+      /* 统计拿不到也能删，只是确认框少几行提示 */
+    }
+    const lastOne = !!stats && !stats.other_exists;
+    Modal.confirm({
+      title: '删除这节讲演？',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      content: (
+        <div style={{ fontSize: 13, lineHeight: 1.9 }}>
+          {stats ? (
+            <div>
+              共 {stats.pages} 页 {stats.sentences} 句
+              {stats.watchers > 0 ? `，已有 ${stats.watchers} 名学生看过` : ''}
+            </div>
+          ) : null}
+          <div style={{ color: lastOne ? 'var(--error-color)' : undefined }}>
+            {lastOne
+              ? '这是该知识点的唯一讲演，删除后学生将看不到这一节。'
+              : '删除后这一版不可恢复；另一个讲法学生仍可观看。'}
+          </div>
+          <div style={{ color: 'var(--text-tertiary)' }}>
+            学生的学习记录与积分会保留；需要时重新生成（会重新计费）。
+          </div>
+        </div>
+      ),
+      onOk: async () => {
+        try {
+          await deleteCast(castId);
+          onChanged?.();
+          onClose();
+        } catch (e: any) {
+          setErr(e?.response?.data?.detail || '删除失败，请重试');
+          throw e;
+        }
+      },
+    });
+  };
 
   /** AI 帮写"讲什么"：只是草稿，老师改完、点生成大纲时才写回知识点。
    *  force=false 时（自动拟稿）若老师已经开始打字，就不覆盖他的内容。 */
@@ -162,6 +233,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
         description: desc.trim() || undefined,
       });
       setCastId(res.cast_id);
+      setCastStatus('draft');
       setTitle(res.title);
       setPages(res.pages);
       setMode2(res.speaker_mode);
@@ -398,6 +470,17 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
                 message={`共 ${pages.length} 页 / ${totalLines} 句台词${hasAudio ? '（已有音频，可只重录改动的页）' : ''}`}
                 description="点页面左侧箭头展开，可以改标题、改每一句台词、调页序。画面上的要点文字仍由 AI 决定。"
               />
+              {castStatus === 'published' ? (
+                <Alert
+                  type="success"
+                  showIcon
+                  style={{ marginBottom: 10 }}
+                  message="已发布：学生现在可以在课程里看到这一节"
+                  action={
+                    <Button size="small" loading={busy} onClick={doUnpublish}>下架</Button>
+                  }
+                />
+              ) : null}
 
               <OutlineEditor
                 pages={pages}
@@ -414,6 +497,16 @@ export function CastGenerateModal({ open, kp, onClose, onDone }: CastGenerateMod
                 <Button onClick={resetToForm} disabled={busy || regenIdx !== null}>
                   {castId ? '重新生成' : '返回'}
                 </Button>
+                {castId ? (
+                  <Button
+                    danger
+                    type="text"
+                    onClick={doDelete}
+                    disabled={busy || regenIdx !== null}
+                  >
+                    删除讲演
+                  </Button>
+                ) : null}
                 <div style={{ flex: 1 }} />
                 {dirty ? (
                   <span style={{ fontSize: 12, color: 'var(--warning-color)' }}>有未保存的改动</span>

@@ -2794,6 +2794,7 @@ const CurriculumPage: React.FC = () => {
         } : null}
         onClose={() => setCastModalOpen(false)}
         onDone={(kpId) => navigate(`/learn/${kpId}`)}
+        onChanged={loadTree}
       />
 
     </Layout>

@@ -191,6 +191,34 @@ export async function getCastBatch(kpIds: number[]): Promise<{ items: CastBatch 
   return data;
 }
 
+/** 删除前的影响面：页数、句数、多少人看过、是否还有另一版 */
+export interface CastStats {
+  cast_id: number;
+  pages: number;
+  sentences: number;
+  total_seconds: number;
+  watchers: number;
+  other_exists: boolean;
+  status: string;
+}
+
+export async function getCastStats(castId: number): Promise<CastStats> {
+  const { data } = await apiClient.get(`/api/curriculum/lesson-cast/${castId}/stats`);
+  return data;
+}
+
+/** 下架：学生暂时看不到，内容与音频保留，可随时再发布 */
+export async function unpublishCast(castId: number): Promise<{ status: string }> {
+  const { data } = await apiClient.post(`/api/curriculum/lesson-cast/${castId}/unpublish`);
+  return data;
+}
+
+/** 硬删除：连学生断点一起清，但不动学习记录与积分 */
+export async function deleteCast(castId: number): Promise<{ deleted: boolean }> {
+  const { data } = await apiClient.delete(`/api/curriculum/lesson-cast/${castId}`);
+  return data;
+}
+
 /** AI 帮写知识点描述：只回文本、不落库，老师改过之后建大纲时才写回 */
 export async function suggestCastDescription(kpId: number): Promise<{
   description: string; kp_id: number; kp_name: string;

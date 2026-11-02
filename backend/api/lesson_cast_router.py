@@ -741,6 +741,86 @@ def _pick_cast(kp_id: int, mode: str, *, include_draft: bool) -> tuple[dict[str,
     return (row, True) if row else (None, False)
 
 
+@router.get("/{cast_id}/stats", summary="删除前的影响面（页数、句数、多少人看过）")
+async def cast_stats(cast_id: int, request: Request):
+    """删除确认框要能说清"删了会失去什么"，否则老师只能凭感觉点。"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+    row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)
+
+    try:
+        pages = json.loads(row.get("pages_json") or "[]")
+    except (ValueError, TypeError):
+        pages = []
+    sentences = sum(len(p.get("lines") or []) for p in pages)
+    watchers = execute_query_one(
+        "SELECT COUNT(*) AS c FROM cast_playback WHERE cast_id = ?", (cast_id,))
+    other = execute_query_one(
+        "SELECT id FROM lesson_casts WHERE kp_id = ? AND id != ?", (row["kp_id"], cast_id))
+    return {
+        "cast_id": cast_id,
+        "pages": len(pages),
+        "sentences": sentences,
+        "total_seconds": float(row.get("total_seconds") or 0),
+        "watchers": int((watchers or {}).get("c") or 0),
+        # 还有另一版：删掉这版学生只是换一版看；没有就是真让这个知识点空掉
+        "other_exists": bool(other),
+        "status": row.get("status") or "draft",
+    }
+
+
+@router.post("/{cast_id}/unpublish", summary="下架：学生暂时看不到，内容保留")
+async def unpublish_cast(cast_id: int, request: Request):
+    """和删除的区别：音频与台词都留着，随时可以再发布。
+
+    已发布的讲演直接删掉是浪费 —— 很多情况只是"这学期讲完了"。
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+    row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)
+    if (row.get("status") or "") != "published":
+        raise HTTPException(status_code=409, detail="这节讲演还没发布，无需下架")
+
+    execute_insert_update(
+        "UPDATE lesson_casts SET status = 'draft', updated_at = ? WHERE id = ?",
+        (_now(), cast_id))
+    logger.info(f"[cast] 下架 cast={cast_id} kp={row['kp_id']} user={user['username']}")
+    return {"cast_id": cast_id, "status": "draft"}
+
+
+@router.delete("/{cast_id}", summary="删除讲演（硬删除，不可恢复）")
+async def delete_cast(cast_id: int, request: Request):
+    """连断点一起清掉，但**不动学习记录与积分**。
+
+    学生"学完这个知识点"是既成事实，不该因为老师删了一节讲演就消失；
+    断点指向已不存在的讲演会让"继续播放"跳到空数据，所以必须删。
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+    row = _cast_of(cast_id)
+    _ensure_can_edit(user, row)
+
+    kp_id = int(row["kp_id"])
+    mode = row.get("speaker_mode") or "duo"
+    try:
+        pages = json.loads(row.get("pages_json") or "[]")
+    except (ValueError, TypeError):
+        pages = []
+    sentences = sum(len(p.get("lines") or []) for p in pages)
+
+    execute_insert_update("DELETE FROM cast_playback WHERE cast_id = ?", (cast_id,))
+    execute_insert_update("DELETE FROM lesson_casts WHERE id = ?", (cast_id,))
+    logger.info(f"[cast] 删除 cast={cast_id} kp={kp_id} mode={mode} "
+                f"{len(pages)}页/{sentences}句 user={user['username']}")
+    return {"deleted": True, "cast_id": cast_id, "kp_id": kp_id,
+            "speaker_mode": mode, "pages": len(pages), "sentences": sentences}
+
+
 @router.get("/{kp_id}/casts", summary="该知识点已有哪些版本（换个讲法用）")
 async def list_casts(kp_id: int, request: Request):
     user = get_current_user(request)
