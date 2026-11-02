@@ -9,9 +9,9 @@ import platform
 from datetime import datetime
 from pathlib import Path
 
-from backend.config import APP_VERSION, STORAGE_DIR
+from backend.config import APP_VERSION, DB_DIR
 
-_NODE_ID_FILE = STORAGE_DIR / ".node_id"   # 存用户数据目录，别放安装目录（升级会被删）
+_NODE_ID_FILE = DB_DIR / ".node_id"   # 存数据目录（Web 版仍在 <项目根>/backend，桌面版在 %APPDATA%）
 _SYNC_INTERVAL = 86400
 
 
