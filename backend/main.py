@@ -40,6 +40,14 @@ APP_VERSION = _get_app_version()
 async def lifespan(app: FastAPI):
     """应用生命周期：启动初始化 + 关闭清理"""
     # ── startup ──
+    # 桌面版升级上来时，把旧版留在安装目录里的库/配置/配图先搬到用户数据目录（幂等、失败不阻断）
+    # 必须在 init_db 之前：否则会先在空目录里建出一个空库，再「发现目标已存在」而不迁移
+    try:
+        from backend.data_migration import migrate_legacy_data
+        migrate_legacy_data()
+    except Exception as e:
+        # 注意：本函数后面有局部 `import sys`，此处不能用 sys（会被当成局部变量而未绑定）
+        print(f"[main] 历史数据迁移检查失败（已忽略，不影响启动）: {e}")
     init_db()
     init_question_db()
     try:

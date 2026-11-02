@@ -15,7 +15,7 @@ from fastapi import (APIRouter, File, HTTPException, Query, Request, UploadFile,
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend.config import BASE_DIR, ai_api_base
+from backend.config import MEDIA_ROOT, ai_api_base
 from backend.model_catalog import resolve_vl_model
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
@@ -36,7 +36,7 @@ router = APIRouter()
 # ── 白板图片资产：快照里只放 URL，绝不把 base64 塞进每 400ms 的实时消息 ──
 # 放在 question_media 下是为了让旧版 files_router 也能直接提供（登录即可读），
 # 这样前端/后端不必同时重启也能显示历史图片；路径带内容哈希，天然可长缓存。
-WB_ASSET_DIR = BASE_DIR / "question_media" / "whiteboard_assets"
+WB_ASSET_DIR = MEDIA_ROOT / "whiteboard_assets"
 WB_ASSET_DIR.mkdir(parents=True, exist_ok=True)
 _WB_ASSET_MAX_BYTES = 8 * 1024 * 1024
 _WB_ASSET_MAX_EDGE = 1600

@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
+from backend.config import STORAGE_DIR
 from backend.logger import logger
 # 模型默认值只认 model_catalog 一份。以前这四行是手写字面量（注释还写着"由 model_catalog 维护"），
 # 改清单默认模型时这里不会跟着变，升级后配置缺键就补出旧模型名 —— 正是 404 的来源。
@@ -28,7 +29,10 @@ from backend.tts_voices import DEFAULT_MODEL as TTS_DEFAULT_MODEL, DEFAULT_VOICE
 router = APIRouter()
 
 # ── 配置文件路径 ──
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "system_config.json"
+# 放在 STORAGE_DIR：Web 版 == 项目根（与历史一致）；桌面版 == %APPDATA%\<app>，
+# 不再随安装目录被覆盖，API Key 等配置升级后仍在
+STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_FILE = STORAGE_DIR / "system_config.json"
 
 
 def _backup_file() -> Path:

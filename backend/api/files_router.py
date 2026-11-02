@@ -14,7 +14,7 @@ from backend.api.auth_guard import unauthorized
 from backend.api.dependencies import get_current_user
 from backend.utils import path_within
 from backend.auth import is_admin
-from backend.config import BASE_DIR
+from backend.config import BASE_DIR, STORAGE_DIR, TEMP_UPLOAD_ROOT
 from backend.api.config_router import get_config_value
 from backend.config import ROOT_DIR, STU_DIR
 from backend.api.sharing_router import is_file_bound_to_course, is_file_shared_with_user
@@ -32,7 +32,7 @@ _DENY_TOP_DIRS = {
 # 允许匿名访问的公开文档(必须位于项目根目录)
 _PUBLIC_ROOT_FILES = {"USER_MANUAL.md", "README.md", "README.en.md"}
 
-TEMP_UPLOAD_DIR = BASE_DIR / "temp_uploads"
+TEMP_UPLOAD_DIR = TEMP_UPLOAD_ROOT
 TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def _get_allowed_extensions() -> set[str]:
@@ -156,9 +156,21 @@ async def serve_static_file(path: str, request: Request):
     
     共享覆盖：管理员共享给所有人的资源、教师共享给对应年级/班级的资源也可访问。
     """
-    base_dir_abs = os.path.realpath(str(BASE_DIR))
+    base_dir_abs = os.path.realpath(str(STORAGE_DIR))   # 用户数据根（root/、stu/、question_media/…）
+    doc_dir_abs = os.path.realpath(str(BASE_DIR))       # 随包文档根（README 等）
     # T8: 用 realpath + 路径段比较判边界(旧写法 startswith 会把兄弟目录当成前缀放行)
     requested_path = os.path.realpath(os.path.join(base_dir_abs, path))
+
+    # 随包文档（README/USER_MANUAL）不在用户数据目录里：只对白名单文件名、且确实位于
+    # 代码目录根部时放行，其余越界请求一律拒绝（与改动前的安全口径一致）
+    if not path_within(base_dir_abs, requested_path) or not os.path.exists(requested_path):
+        alt_path = os.path.realpath(os.path.join(doc_dir_abs, path))
+        if (os.path.basename(alt_path) in _PUBLIC_ROOT_FILES
+                and os.path.dirname(alt_path) == doc_dir_abs
+                and path_within(doc_dir_abs, alt_path)
+                and os.path.exists(alt_path)):
+            return FileResponse(alt_path)
+
     if not path_within(base_dir_abs, requested_path):
         raise HTTPException(status_code=403, detail="无权访问该文件")
     
@@ -169,7 +181,7 @@ async def serve_static_file(path: str, request: Request):
     user = request.state.user  # 由中间件注入
     basename = os.path.basename(requested_path)
     
-    # T7: 公开文件必须确实位于项目根目录, 不再按"任意目录同名文件"放行
+    # T7: 公开文件必须确实位于（用户数据）根目录, 不再按"任意目录同名文件"放行
     if basename in _PUBLIC_ROOT_FILES and os.path.dirname(requested_path) == base_dir_abs:
         return FileResponse(requested_path)
 

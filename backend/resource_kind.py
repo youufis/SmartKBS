@@ -27,7 +27,7 @@ import sqlite3
 import time
 from typing import Iterable
 
-from backend.config import BASE_DIR, STU_DIR
+from backend.config import STORAGE_DIR, STU_DIR
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
 from backend.resource_registry import SUBKIND_LABELS, sub_kind_of
@@ -72,7 +72,7 @@ def norm_path(path: object) -> str:
         raw = raw.lstrip("/")           # 前端偶尔会带个前导斜杠
     if os.path.isabs(raw) or is_abs_win:
         try:
-            return os.path.relpath(os.path.normpath(raw), str(BASE_DIR)).replace("\\", "/")
+            return os.path.relpath(os.path.normpath(raw), str(STORAGE_DIR)).replace("\\", "/")
         except ValueError:              # 跨盘符无法相对化：原样收敛分隔符
             return raw.replace("\\", "/")
     return raw.replace("\\", "/").lstrip("/")

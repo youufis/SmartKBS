@@ -8,10 +8,12 @@ from pathlib import Path
 
 from typing import Any
 
+from backend.config import DB_DIR
 from backend.logger import logger
 
-# 数据库文件路径（backend 目录下）
-DB_PATH = Path(__file__).resolve().parent / "questions.db"
+# 数据库文件路径：落在 DB_DIR（Web 版 = <项目根>/backend，桌面版 = <userData>/backend）
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DB_DIR / "questions.db"
 
 
 def init_question_db():

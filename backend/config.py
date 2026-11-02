@@ -12,6 +12,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # 桌面版 Electron 会将此设为 app.getPath('userData')，实现数据持久化
 DATA_DIR = Path(os.environ.get("SMARTKB_DATA_DIR", str(BASE_DIR)))
 
+# ── 用户数据根（数据库 / 配置 / 上传媒体 / 下载，全部落在这里） ──
+# 为什么必须分开：过去两个数据库与 system_config.json 是按「代码所在目录」算的，
+# 桌面版就等于放在安装目录里，覆盖安装时旧目录被整体替换 → 用户资料全丢。
+#   · Web / 源码部署：DATA_DIR == BASE_DIR，下面的路径与历史完全一致（零迁移）
+#   · 桌面版：DATA_DIR == %APPDATA%\smartkbs-desktop，数据与安装目录解耦，
+#     升级安装（甚至卸载重装）都不再影响用户数据
+STORAGE_DIR = DATA_DIR
+
+# 数据库目录：Web 版落在 <项目根>/backend（与历史路径一致），桌面版落在 <userData>/backend
+DB_DIR = Path(os.environ.get("SMARTKB_DB_DIR", str(STORAGE_DIR / "backend")))
+
+# 上传/媒体/临时文件根目录（曾硬编码在 BASE_DIR 下，桌面版会随安装目录被删）
+MEDIA_ROOT = STORAGE_DIR / "question_media"
+TEMP_UPLOAD_ROOT = STORAGE_DIR / "temp_uploads"
+
 # ── 应用版本 ──
 # 优先读取前端 package.json，桌面版回退到 version.json
 def _load_app_version() -> str:

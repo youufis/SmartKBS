@@ -22,15 +22,15 @@ _REFUSAL_WORDS = ("抱歉", "无法完成", "无法生成", "作为AI", "作为 
 def dump_failed_raw(scene: str, text: str) -> str:
     """把解析失败的原文留档到 LogFiles/ai_raw/，返回相对路径（失败返回空串）。"""
     try:
-        from backend.config import BASE_DIR
-        d = os.path.join(str(BASE_DIR), "LogFiles", "ai_raw")
+        from backend.config import STORAGE_DIR
+        d = os.path.join(str(STORAGE_DIR), "LogFiles", "ai_raw")
         os.makedirs(d, exist_ok=True)
         name = "%s_%s_%d.txt" % (datetime.now().strftime("%Y%m%d_%H%M%S"), re.sub(r"[^0-9a-zA-Z_-]", "", scene) or "raw", os.getpid())
         path = os.path.join(d, name)
         with open(path, "w", encoding="utf-8") as f:
             f.write("# scene=%s len=%d" % (scene, len(text or "")) + chr(10))
             f.write(text or "")
-        rel = os.path.relpath(path, str(BASE_DIR)).replace("\\", "/")
+        rel = os.path.relpath(path, str(STORAGE_DIR)).replace("\\", "/")
         logger.warning("AI 输出解析失败，原文已留存待复盘: %s", rel)
         return rel
     except Exception as e:  # 取证本身绝不能影响主流程

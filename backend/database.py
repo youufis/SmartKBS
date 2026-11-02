@@ -11,11 +11,13 @@ from pathlib import Path
 
 from typing import Any
 
-from backend.config import DATA_DIR, ROOT_DIR, STU_DIR
+from backend.config import DATA_DIR, DB_DIR, ROOT_DIR, STU_DIR
 from backend.logger import logger
 
-# 数据库文件路径（backend 目录下）
-DB_PATH = Path(__file__).resolve().parent / "smartkb.db"
+# 数据库文件路径：落在 DB_DIR（Web 版 = <项目根>/backend，桌面版 = <userData>/backend）
+# 关键：绝不能再按 Path(__file__).parent 算 —— 桌面版那等于放在安装目录里，覆盖安装即丢库
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DB_DIR / "smartkb.db"
 
 
 def _ensure_column(c, table: str, column: str, ddl_type: str, attempts: int = 5) -> None:

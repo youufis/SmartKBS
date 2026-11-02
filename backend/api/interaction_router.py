@@ -45,7 +45,7 @@ from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.utils import extract_json_from_text
 from backend.question_db import execute_update as qb_execute_update
-from backend.config import BASE_DIR
+from backend.config import MEDIA_ROOT
 from backend.permission_service import get_user_grade_class, check_activity_visibility
 from backend.question_ws import ADMIN_ROOM, class_room, question_ws
 
@@ -270,7 +270,7 @@ async def _persist_quiz_ai_questions(questions: list[dict[str, Any]], *, topic: 
                 placeholders = e.get("media_raw") or []
                 media_files: list[Any] = []
                 try:
-                    media_dir = BASE_DIR / "question_media" / str(e["id"])
+                    media_dir = MEDIA_ROOT / str(e["id"])
                     media_files = await generate_placeholders_batch(
                         placeholders=placeholders,
                         subject=subject,

@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backend.config import BASE_DIR
+from backend.config import MEDIA_ROOT
 from backend.utils import path_within
 
 # ── 命名空间 ──
@@ -53,8 +53,12 @@ MAX_PLACEHOLDERS_PER_QUESTION = 1
 
 
 def media_root() -> Path:
-    """配图根目录（与 files_router 静态服务基准一致：BASE_DIR）"""
-    return BASE_DIR / MEDIA_ROOT_NAME
+    """配图根目录（与 files_router 静态服务基准一致：MEDIA_ROOT / STORAGE_DIR）
+
+    Web 版 == <项目根>/question_media（与历史完全一致）；
+    桌面版 == %APPDATA%\\<app>\\question_media，不再随安装目录被删。
+    """
+    return Path(MEDIA_ROOT)
 
 
 def media_dir(source: str = SOURCE_BANK, question_id: Any = None,

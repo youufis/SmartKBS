@@ -3040,8 +3040,8 @@ async def ai_generate_courseware(kp_id: int, request: Request):
             resource_kind.mark_file(filepath, "courseware", "rule", username)
 
             # 生成访问 URL
-            from backend.config import BASE_DIR
-            rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+            from backend.config import STORAGE_DIR
+            rel_path = os.path.relpath(filepath, str(STORAGE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
             registered = False
@@ -3285,8 +3285,8 @@ async def ai_generate_podcast(kp_id: int, request: Request):
                 f.write(result["html"])
             resource_kind.mark_file(filepath, "podcast", "rule", username)  # 落盘即定类
 
-            from backend.config import BASE_DIR
-            rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+            from backend.config import STORAGE_DIR
+            rel_path = os.path.relpath(filepath, str(STORAGE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
             registered = False
@@ -3517,7 +3517,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
                                                   render_question_prompt)
     from backend.api.ai_service import call_ai_async
     from backend.utils import get_account_html_dir
-    from backend.config import BASE_DIR
+    from backend.config import STORAGE_DIR
 
     subject = subject_ov or kp.get("subject") or kp["course_name"] or ""
     # 教师手填的知识点优先：课程里那条笼统的名字（如「知识复习」）往往不是他要的主题
@@ -3751,7 +3751,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
                 f.write(html_content)
             resource_kind.mark_file(filepath, "course_practice", "rule", username)  # 落盘即定类：知识点练习，答题计分
 
-            rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+            rel_path = os.path.relpath(filepath, str(STORAGE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
             # 落盘即登记为本人私有资源，否则「我的资源」能看到（扫盘）而
@@ -4499,7 +4499,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 
     # ── 第1步：多渠道搜索题库 ──
     from backend.question_db import execute_query as q_exec, execute_insert as q_insert, execute_update as q_update
-    from backend.config import BASE_DIR
+    from backend.config import STORAGE_DIR
     # 统一分层召回（替代旧策略 A/B/C：A/B 按"最新"取题、C 剥词会造出「的描述」「流程的」
     # 这类虚词再拿去 LIKE，实测把通用技术/人工智能/生物的题混进信息科技的知识点，
     # 且三条 SQL 都没有 subject 过滤）。现在：学科族严格隔离 + 标签相等>标签子串>题干实词>
@@ -4692,7 +4692,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
     _save_practice_key(kp_id, [q.get("id") for q in final_questions if q.get("id")])  # G3
     html_content = _generate_practice_html({**kp, "name": kp_name}, final_questions, session_id, subject, kp_id)
     from backend.utils import get_account_html_dir
-    from backend.config import BASE_DIR
+    from backend.config import STORAGE_DIR
     html_dir = get_account_html_dir(username)
     os.makedirs(html_dir, exist_ok=True)
     safe_name = _safe_artifact_name(kp_name)
@@ -4703,7 +4703,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         f.write(html_content)
     resource_kind.mark_file(filepath, "course_practice", "rule", username)  # 落盘即定类：知识点练习，答题计分
 
-    rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+    rel_path = os.path.relpath(filepath, str(STORAGE_DIR)).replace("\\", "/")
     file_url = f"/api/files/{rel_path}"
 
     bank_source_count = bank_count
@@ -4808,7 +4808,7 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
 
     # 生成 HTML 答题页面
     from backend.utils import get_account_html_dir
-    from backend.config import BASE_DIR
+    from backend.config import STORAGE_DIR
 
     # 统一字段名（AI生成和题库字段名可能不同）
     for q in questions:
@@ -4834,7 +4834,7 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
         f.write(html_content)
     resource_kind.mark_file(filepath, "course_practice", "rule", username)  # 落盘即定类：知识点练习，答题计分
 
-    rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+    rel_path = os.path.relpath(filepath, str(STORAGE_DIR)).replace("\\", "/")
     file_url = f"/api/files/{rel_path}"
 
     logger.info(f"教师 {username} 从题库生成练习: session_id={session_id}")

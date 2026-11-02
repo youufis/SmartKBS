@@ -24,7 +24,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from backend.config import BASE_DIR
+from backend.config import STORAGE_DIR
 from backend.database import execute_query
 from backend.logger import logger
 from backend.permission_service import check_share_visibility
@@ -192,7 +192,7 @@ def _page_closure(page_abs: str, page_rel: str) -> tuple[frozenset[str], frozens
 
 
 # 判定全程以项目根目录为边界（也是所有 rel_path 的基准）
-_BASE_DIR = os.path.realpath(str(BASE_DIR))
+_BASE_DIR = os.path.realpath(str(STORAGE_DIR))
 
 
 def _tree_of(rel_path: str) -> str:
