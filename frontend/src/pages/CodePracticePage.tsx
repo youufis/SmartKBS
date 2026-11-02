@@ -70,10 +70,55 @@ const emptyCreateForm = (subject = ''): CreateFormState => ({
   test_cases: [],
 })
 
+/**
+ * 显式构造提交体，逐字段强类型。
+ *
+ * 不能直接 `{...createForm}`：任何一个字段变成 null（Select 清空、InputNumber 清空）
+ * 或类型不对（Excel 粘进来的数字），后端 Pydantic 都会回 422 —— 而 422 的 detail 是数组，
+ * 旧代码把它当字符串塞进 message，页面上什么也看不到，表现为「点保存没反应」。
+ */
+function buildProblemPayload(form: any) {
+  const str = (v: any, dft = '') => (v === null || v === undefined ? dft : String(v));
+  return {
+    title: str(form.title),
+    description: str(form.description),
+    subject: str(form.subject),
+    knowledge_points: str(form.knowledge_points),
+    difficulty: str(form.difficulty, 'medium'),
+    language: str(form.language, 'python'),
+    template_code: str(form.template_code),
+    reference_solution: str(form.reference_solution),
+    time_limit: Number(form.time_limit) || 5,
+    status: str(form.status, 'active'),
+    target_scope: str(form.target_scope, 'teacher_classes'),
+    target_grade: str(form.target_grade),
+    target_class: str(form.target_class),
+    target_users: str(form.target_users),
+    test_cases: toApiCases(form.test_cases || []),
+  };
+}
+
+/** 后端错误翻译成人话：422 的 detail 是数组，直接塞进 message 什么也看不到 */
+function describeApiError(e: any, fallback: string): string {
+  const d = e?.response?.data?.detail
+  if (Array.isArray(d)) {
+    const parts = d.slice(0, 3).map((x: any) => {
+      const field = Array.isArray(x?.loc) ? x.loc.filter((k: any) => k !== 'body').join('.') : '';
+      return field ? `${field}：${x?.msg || ''}` : String(x?.msg || '');
+    });
+    return `提交的数据有问题 —— ${parts.join('；') || '请检查各字段'}`;
+  }
+  if (typeof d === 'string') return d;
+  return e?.message || fallback;
+}
+
 const toApiCases = (cases: EditableTestCase[]) => cases.map((c) => ({
-  input: c.input || '',
-  expected_output: c.expected || '',
-  description: c.description || '',
+  // 一律用 String() 强制：从 Excel 粘贴、或用数字输入时，字段可能不是字符串，
+  // 而后端模型要求 str —— 那样会得到 422，且 422 的 detail 是数组，
+  // 前端旧代码把它当字符串塞进 message，等于什么也没显示
+  input: String(c.input ?? ''),
+  expected_output: String(c.expected ?? ''),
+  description: String(c.description ?? ''),
   score: Number(c.score) || 0,
   is_sample: !!c.is_sample,
 }))
@@ -233,16 +278,13 @@ const CodePracticePage: React.FC = () => {
     }
     setCreateLoading(true)
     try {
-      await apiClient.post('/api/code/problems', {
-        ...createForm,
-        test_cases: toApiCases(createForm.test_cases),
-      })
+      await apiClient.post('/api/code/problems', buildProblemPayload(createForm))
       message.success(t('createSuccess'))
       setCreateModalOpen(false)
       setCreateForm(emptyCreateForm(subjectOptions[0] || ''))
       loadProblems()
     } catch (e: any) {
-      message.error(e.response?.data?.detail || t('createFailed'))
+      message.error(describeApiError(e, t('createFailed')))
     } finally {
       setCreateLoading(false)
     }
@@ -289,10 +331,9 @@ const CodePracticePage: React.FC = () => {
     if (editForm.test_cases.length === 0) { message.warning(t('addAtLeastOneTestCase')); return }
     setEditLoading(true)
     try {
-      const { data } = await apiClient.put(`/api/code/problems/${editTarget}`, {
-        ...editForm,
-        test_cases: toApiCases(editForm.test_cases),
-      })
+      // 与创建同样走白名单构造：编辑时把 Select 清空也会得到 null，直接展开会 422
+      const { data } = await apiClient.put(`/api/code/problems/${editTarget}`,
+        buildProblemPayload(editForm))
       message.success(t('updateSuccess'))
       setEditModalOpen(false)
       loadProblems()
