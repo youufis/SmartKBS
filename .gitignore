@@ -1,4 +1,9 @@
 # ── 密钥 / 配置 ──
+# v9.0.0 起配置落在 STORAGE_DIR：Web/源码部署 == 项目根（桌面版在 %APPDATA%，不进仓库）
+/system_config.json
+/system_config.json.bak
+/system_config.json.tmp
+# 历史位置（v9.0.0 及更早），保留以防旧分支/老部署被误提交
 backend/system_config.json
 backend/system_config.json.bak
 backend/system_config.json.tmp

@@ -61,6 +61,45 @@ def _legacy_db_dir() -> Path:
     return Path(BASE_DIR) / "backend"
 
 
+def _legacy_config_candidates() -> list[Path]:
+    """旧版 system_config.json 可能的位置（按可信度排序）
+
+    · v9.0.0 及更早：`<代码目录>/backend/system_config.json`
+      —— 旧 config_router 写的是 Path(__file__).resolve().parent.parent，即 backend/ 下，
+         .gitignore 里也是这个路径，历史备份都在这里；
+    · 更早期版本：直接放 `<代码目录>/system_config.json`。
+    """
+    return [Path(BASE_DIR) / "backend" / "system_config.json",
+            Path(BASE_DIR) / "system_config.json"]
+
+
+def _migrate_config_file(records: list) -> Path | None:
+    """把旧位置的 system_config.json 搬到 STORAGE_DIR 根（只复制，绝不覆盖）。
+
+    返回实际使用的源文件，未搬迁返回 None。
+
+    为什么 Web 版也必须走这一步：新代码读 STORAGE_DIR/system_config.json，而历史配置躺在
+    `<代码目录>/backend/` 下，新位置没有文件时 load_config 会回落到出厂默认值
+    （SUBJECTS 只剩「人工智能」、API Key/知识库/版本号全空），表现成"系统配置被人改过"。
+    """
+    dst = Path(STORAGE_DIR) / "system_config.json"
+    if dst.exists():
+        return None
+    srcs = []
+    for p in _legacy_config_candidates():
+        try:
+            if p.exists() and p.resolve() != dst.resolve():
+                srcs.append(p)
+        except OSError:
+            continue
+    if not srcs:
+        return None
+    src = max(srcs, key=lambda p: p.stat().st_mtime)   # 两处都有时取较新的那份
+    _copy_file(src, dst, records)
+    logger.warning("[迁移] 旧位置配置 %s 已复制到 %s（原文件保留）", src, dst)
+    return src
+
+
 def _marker_path() -> Path:
     return Path(STORAGE_DIR) / MARKER_NAME
 
@@ -210,6 +249,16 @@ def _backup_original(paths: list, records: list) -> None:
         logger.warning("[迁移] 留底失败（不影响迁移）：%s", exc)
 
 
+def _save_history(records: list) -> None:
+    """把本轮迁移写进标记文件（只留最近 5 次，便于事后排查）"""
+    prev = _read_marker()
+    history = prev.get("history", [])
+    history.append({"at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "storage": str(STORAGE_DIR), "legacy": str(BASE_DIR),
+                    "items": records})
+    _write_marker({"version": 1, "history": history[-5:]})
+
+
 def migrate_legacy_data() -> dict:
     """把旧版落在代码目录里的用户数据迁到 STORAGE_DIR。幂等，可反复调用。
 
@@ -217,13 +266,25 @@ def migrate_legacy_data() -> dict:
     保证「迁移出问题也不影响系统正常启动」。
     """
     summary = {"desktop_layout": False, "copied": [], "skipped": None}
+    records: list = []
+
+    # ① 配置文件路径纠正：Web 版和桌面版都要做。
+    #    历史配置在 <代码目录>/backend/system_config.json，新代码读 STORAGE_DIR 根；
+    #    只搬配置这一段与"数据目录是否分离"无关，必须放在 _is_desktop_layout 判断之前，
+    #    否则 Web 版升级后新位置永远没有配置文件，load_config 静默用出厂默认值。
+    try:
+        _migrate_config_file(records)
+    except Exception as exc:
+        logger.warning("[迁移] 配置文件搬迁失败（不影响启动）：%s", exc)
 
     if not _is_desktop_layout():
-        summary["skipped"] = "Web/源码部署：数据目录与代码目录一致，无需迁移"
+        summary["skipped"] = "Web/源码部署：库与媒体目录和代码目录一致，无需搬库"
+        if records:
+            _save_history(records)
+            summary["copied"] = records
         return summary
 
     summary["desktop_layout"] = True
-    records: list = []
     try:
         legacy_db = _legacy_db_dir()
         db_targets = []
@@ -239,31 +300,19 @@ def migrate_legacy_data() -> dict:
                         "[迁移] 旧库 %s 看起来是空库（users 表无记录），仍将复制以免丢失其它数据", src)
                 _copy_file(src, dst, records)
 
-        # ② 系统配置（含 API Key）
-        cfg_src = Path(BASE_DIR) / "system_config.json"
-        cfg_dst = Path(STORAGE_DIR) / "system_config.json"
-        if cfg_src.exists() and not cfg_dst.exists():
-            _copy_file(cfg_src, cfg_dst, records)
-
-        # ③ 媒体与临时上传目录（目录合并，不覆盖已有文件）
+        # ② 媒体与临时上传目录（目录合并，不覆盖已有文件）
         _copy_tree_merge(Path(BASE_DIR) / "question_media", Path(MEDIA_ROOT), records)
         _copy_tree_merge(Path(BASE_DIR) / "temp_uploads", Path(TEMP_UPLOAD_ROOT), records)
 
-        # ④ 库内绝对路径归一（画像等历史写法，搬目录后会失效）
+        # ③ 库内绝对路径归一（画像等历史写法，搬目录后会失效）
         _normalize_absolute_paths(records)
 
-        # ⑤ 留底：确实迁移了东西，才把原件再拷一份（避免每次启动都生成新目录）
+        # ④ 留底：确实迁移了东西，才把原件再拷一份（避免每次启动都生成新目录）
         if any(item.get("type") in ("file", "dir") for item in records):
-            _backup_original(
-                db_targets + ([cfg_src] if cfg_src.exists() else []), records)
+            _backup_original(db_targets, records)
 
         if records:
-            prev = _read_marker()
-            history = prev.get("history", [])
-            history.append({"at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "storage": str(STORAGE_DIR), "legacy": str(BASE_DIR),
-                            "items": records})
-            _write_marker({"version": 1, "history": history[-5:]})
+            _save_history(records)
             summary["copied"] = records
             logger.info("[迁移] 完成：%d 项写入 %s", len(records), STORAGE_DIR)
         else:
@@ -292,7 +341,7 @@ def storage_overview() -> dict:
         "db": {name: _size(Path(DB_DIR) / name) for name in _DB_FILES},
         "legacy_db": {name: _size(_legacy_db_dir() / name) for name in _DB_FILES},
         "config": _size(Path(STORAGE_DIR) / "system_config.json"),
-        "legacy_config": _size(Path(BASE_DIR) / "system_config.json"),
+        "legacy_config": {str(p): _size(p) for p in _legacy_config_candidates()},
         "migrated_at": _read_marker().get("history", [{}])[-1].get("at") if _read_marker() else None,
     }
 

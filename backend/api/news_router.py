@@ -930,7 +930,7 @@ class NewsService:
         suggestion = ""
         if verdict == "dead":
             suggestion = ("主源全部不可用：用 python scripts/check_news_feeds.py --url 候选RSS "
-                          "验证新源，写入 backend/system_config.json 的 news_rss_feeds，"
+                          "验证新源，写入系统配置的 news_rss_feeds（系统配置页或 system_config.json），"
                           "再点一次“刷新”即生效（不用发版、不用重启）")
             if reserve_ok:
                 suggestion += f"；本次备用源 {[r['source'] for r in reserve_ok]} 可用，可先搬进主源"

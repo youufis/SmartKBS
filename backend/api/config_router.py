@@ -1,7 +1,10 @@
 """
 系统配置管理 API
 允许管理员在 UI 中集中管理系统常量（API Key、模型参数等）
-配置存储于 backend/system_config.json
+配置存储于 STORAGE_DIR/system_config.json：
+  · Web/源码部署 → <项目根>/system_config.json
+  · 桌面版       → %APPDATA%/smartkbs-desktop/system_config.json
+（v9.0.0 及更早存在 <项目根>/backend/system_config.json，升级时由 data_migration 搬过去）
 """
 import json
 import os
@@ -288,11 +291,13 @@ def load_config() -> dict[str, Any]:
     """加载系统配置（C1/C4）
 
     - 带 (mtime,size) 缓存, 配置改动即时生效但不再每次读盘解析;
-    - 文件损坏(如写入过程中掉电)时先回退上一次备份, 并记录可见状态, 不再静默丢配置;
+    - 文件缺失或损坏时先回退上一次备份, 并记录可见状态, 不再静默丢配置
+      （缺文件曾被当成"用默认值"悄悄放过：课程只剩「人工智能」就是这么来的）;
     - 合并默认值保证新字段存在。
     """
     global _cfg_cache, _cfg_cache_key
     key = _config_stat_key()
+    restore_payload: dict[str, Any] | None = None
     with _cache_lock:
         if _cfg_cache is not None and _cfg_cache_key == key:
             return dict(_cfg_cache)
@@ -302,7 +307,24 @@ def load_config() -> dict[str, Any]:
         if key is None:
             if CONFIG_FILE.exists():
                 corrupt = {"corrupt": True, "recovered_from_backup": False,
-                           "detail": "配置文件无法读取"}
+                           "detail": "配置文件无法读取（被占用或无访问权限）"}
+            else:
+                # C1: 文件不存在 ≠ 正常。先捞 .bak，捞不到才认"用默认值"，两种都要报错，
+                #     否则整站配置会静默变成出厂值，用户只会看到"课程列表少了几门"
+                backup = _read_json_config(_backup_file())
+                if backup is not None:
+                    data = backup
+                    restore_payload = backup
+                    corrupt = {
+                        "corrupt": True, "recovered_from_backup": True,
+                        "detail": f"{CONFIG_FILE.name} 不存在，已回退到上一次备份(.bak)并写回主文件",
+                    }
+                else:
+                    corrupt = {
+                        "corrupt": True, "recovered_from_backup": False,
+                        "detail": f"{CONFIG_FILE.name} 不存在且无可用备份，正在使用出厂默认值"
+                                  "（课程/密钥/知识库等均为默认值，业务表现会异常）",
+                    }
         else:
             data = _read_json_config(CONFIG_FILE)
             if data is None:
@@ -328,7 +350,31 @@ def load_config() -> dict[str, Any]:
         merged.update(data)
         _cfg_cache = merged
         _cfg_cache_key = key
-        return dict(merged)
+        result = dict(merged)
+
+    # 写回主文件必须放在锁外：save_config 的加锁顺序是 _config_lock → _cache_lock，
+    # 这里若在 _cache_lock 内再取 _config_lock 就会与之反序、可能死锁。
+    if restore_payload is not None:
+        _restore_config_from_backup(restore_payload)
+        with _cache_lock:
+            _cfg_cache_key = _config_stat_key()
+    return result
+
+
+def _restore_config_from_backup(payload: dict[str, Any]) -> None:
+    """主配置缺失但 .bak 还在时，尽量把备份写回主文件（失败只告警，继续按备份内容运行）"""
+    try:
+        with _config_lock:
+            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False, indent=2))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, CONFIG_FILE)      # 同盘原子替换
+        logger.warning(f"[配置] 已用 .bak 恢复主配置文件: {CONFIG_FILE}")
+    except OSError as e:
+        logger.warning(f"[配置] .bak 恢复主配置失败（仍按备份内容运行）: {e}")
 
 
 def save_config(config: dict[str, Any]):
@@ -370,6 +416,7 @@ def config_health() -> dict[str, Any]:
         "ok": not info.get("corrupt", False),
         "detail": info.get("detail", ""),
         "file": str(CONFIG_FILE),
+        "exists": CONFIG_FILE.exists(),
         "backup_exists": _backup_file().exists(),
     }
 

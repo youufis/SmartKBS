@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
-from backend.config import APP_VERSION, BASE_DIR
+from backend.config import APP_VERSION, BASE_DIR, DB_DIR, STORAGE_DIR
 from backend.logger import logger
 
 router = APIRouter()
@@ -1601,16 +1602,26 @@ async def create_backup(request: Request):
         tar_path = backup_path.with_suffix(".tar")
         await _run_git(["archive", "-o", str(tar_path), "HEAD"], timeout=30, capture_output=False)
 
-        # 额外备份数据库和配置（虽在 .gitignore 中，但很重要）
         prot_dir = backup_path / "protected"
         prot_dir.mkdir(parents=True, exist_ok=True)
-        for rel in ["backend/smartkb.db", "backend/questions.db", "backend/system_config.json", "backend/.node_id"]:
-            src = BASE_DIR / rel
+        # 额外备份数据库和配置（虽在 .gitignore 中，但很重要）
+        # 路径必须按实际落盘位置推：数据库在 DB_DIR，配置在 STORAGE_DIR 根
+        # （Web 版=项目根，桌面版=%APPDATA%）；backend/system_config.json 只是 v9.0.0 及更早的
+        # 历史位置，留作兼容兜底，否则升级前备份会漏掉整份配置。
+        cands = [
+            Path(DB_DIR) / "smartkb.db",
+            Path(DB_DIR) / "questions.db",
+            Path(STORAGE_DIR) / "system_config.json",
+            BASE_DIR / "backend" / "system_config.json",
+            Path(DB_DIR) / ".node_id",
+            BASE_DIR / "backend" / ".node_id",
+        ]
+        for src in dict.fromkeys(cands):      # 去重且保序
             if src.exists():
                 try:
                     shutil.copy2(src, prot_dir / src.name)
                 except Exception as copy_err:
-                    msg = f"备份 {rel} 跳过: {copy_err}"
+                    msg = f"备份 {src} 跳过: {copy_err}"
                     logger.warning(msg)
                     _state["message"] = msg
 
