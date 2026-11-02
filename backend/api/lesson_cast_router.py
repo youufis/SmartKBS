@@ -482,6 +482,10 @@ async def get_outline(cast_id: int, request: Request):
         "name_b": row.get("name_b") or "",
         "pages": pages,
         "status": row.get("status") or "draft",
+        # 音频到底在不在，只认 audio_hash，不拿 status 反推：
+        # 下架（audio_ready）与"改了台词但还没重合成"（draft）都可能有音频，
+        # 前端据此决定按钮是「重新发布」还是「合成音频并发布」——判错就是白花钱重合成。
+        "has_audio": bool(row.get("audio_hash")),
         "stale": bool(row.get("audio_hash")) and row.get("audio_hash") != row.get("plan_hash"),
     }
 
@@ -776,6 +780,8 @@ async def unpublish_cast(cast_id: int, request: Request):
     """和删除的区别：音频与台词都留着，随时可以再发布。
 
     已发布的讲演直接删掉是浪费 —— 很多情况只是"这学期讲完了"。
+    下架后的状态是 audio_ready（有音频、学生端不可见），不是 draft：
+    两者对学生效果一样（都只认 published），但 draft 会让前端以为没合成过。
     """
     user = get_current_user(request)
     if not _can_manage(user):
@@ -785,11 +791,18 @@ async def unpublish_cast(cast_id: int, request: Request):
     if (row.get("status") or "") != "published":
         raise HTTPException(status_code=409, detail="这节讲演还没发布，无需下架")
 
+    # 下架只改"学生可见性"，不能把"音频已合成"这件事抹掉：
+    # 写成 draft 会让前端（hasAudio = status !== 'draft'）误判成没合成过，
+    # 老师再点发布就整篇重新合成（重新计费）。音频还在就退回 audio_ready。
     execute_insert_update(
-        "UPDATE lesson_casts SET status = 'draft', updated_at = ? WHERE id = ?",
+        "UPDATE lesson_casts SET status = CASE WHEN audio_hash IS NULL OR audio_hash = ''"
+        " THEN 'draft' ELSE 'audio_ready' END, updated_at = ? WHERE id = ?",
         (_now(), cast_id))
-    logger.info(f"[cast] 下架 cast={cast_id} kp={row['kp_id']} user={user['username']}")
-    return {"cast_id": cast_id, "status": "draft"}
+    after = execute_query_one("SELECT status FROM lesson_casts WHERE id = ?", (cast_id,))
+    status_now = str((after or {}).get("status") or "draft")
+    logger.info(f"[cast] 下架 cast={cast_id} kp={row['kp_id']} user={user['username']} "
+                f"status->{status_now}")
+    return {"cast_id": cast_id, "status": status_now}
 
 
 @router.delete("/{cast_id}", summary="删除讲演（硬删除，不可恢复）")

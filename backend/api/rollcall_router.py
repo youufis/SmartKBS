@@ -188,6 +188,65 @@ def _save_history(teacher, grade, cls, data):
     except Exception as e:
         logger.error(f"保存点名状态失败: {e}")
         raise
+
+
+# ── 单行历史读写 ──
+# 标记结果过去走 _save_history：整班历史 DELETE 后按内存快照重插一遍。三个问题：
+#   1) 每标记一次，所有历史行的自增 id 全变 —— 台账 ref_id 挂不住，改判找不到原行；
+#   2) 同班两台大屏同时标记时互相覆盖（读旧快照 → 写回，A 的行被 B 抹掉）；
+#   3) 每次都要重写整班历史，写锁一压就把请求拖到 1 秒以上。
+# 标记本质上只动"一行"，所以这里改成定位单行 INSERT/UPDATE。
+
+def _append_history_row(teacher, grade, cls, entry) -> int:
+    """追加一行点名历史，返回行号（写进台账 ref_id，改判时按它定位）。"""
+    row = execute_insert_update(
+        "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name,"
+        " student_username, result, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (teacher, grade, cls, entry.get("student", ""), entry.get("student_username", ""),
+         entry.get("result", ""), entry.get("points", 0),
+         entry.get("time") or time.strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    return int(row or 0)
+
+
+def _update_history_row(hist_id, result, points) -> int:
+    """就地改判一行历史（结果/积分），返回受影响行数。"""
+    if not hist_id:
+        return 0
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE rollcall_history SET result=?, points=? WHERE id=?",
+            (result, points, int(hist_id)),
+        )
+        n = int(c.rowcount or 0)
+        conn.commit()
+    return n
+
+
+def _find_recent_history_row(teacher, grade, cls, student, minutes=10) -> int:
+    """老数据兜底：那次标记还没把 ref_id 写进台账时，按"同班同人最近一行"认。
+
+    只在改判时用，且限定时间窗 —— 宁可多算一行，也不要把十分钟前另一次点名
+    的历史改成这次的结果。
+    """
+    cutoff = time.strftime("%Y-%m-%d %H:%M:%S",
+                           time.localtime(time.time() - max(1, minutes) * 60))
+    rows = execute_query(
+        "SELECT id FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=?"
+        " AND student_name=? AND created_at>=? ORDER BY id DESC LIMIT 1",
+        (teacher, grade, cls, student, cutoff),
+    )
+    return int(rows[0][0]) if rows else 0
+
+
+def _history_row_count(teacher, grade, cls) -> int:
+    rows = execute_query(
+        "SELECT COUNT(*) FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=?",
+        (teacher, grade, cls),
+    )
+    return int(rows[0][0] or 0) if rows else 0
+
 # ── 抽人算法与状态已上收到 backend.pick_engine ──
 # 点名 / 课堂抽问 / 课堂闯关 共用同一份实现与同一份权重（班级作用域）。
 # 保留这两个原名，是为了不打断既有 import（含 class_drill / class_ladder 的跨模块引用）
@@ -444,85 +503,142 @@ async def api_mark(request: Request):
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="积分需为整数")
 
-    state = _load_history(teacher, grade, cls)
-    points_added = 0
-
     _pid = int(body.get("pick_id") or 0) or None
     # 先定位"这次判定对应哪一次抽人"：同班同名两人时，学号以台账行为准，
     # 否则答对 +1 的权重与历史里的学号都会记到另一个张三头上
     # （AI 生成的互动答题页面就是这么调的，它只回传姓名）
     _led = pick_engine.resolve_pick(grade, cls, pick_engine.ACT_ROLLCALL, student, pick_id=_pid)
     _key, _uname = _led["student_key"], _led["student_username"]
+    pick_row = int(_led.get("pick_id") or 0)
+    prev_result = str(_led.get("result") or "")
+    prev_points = int(_led.get("points") or 0)
+    prev_ref_id = int(_led.get("ref_id") or 0) if _led.get("ref_table") == "rollcall_history" else 0
 
-    if result == "correct":
-        # 答对回升权重：改走共用引擎（抽问/闯关答对加的是同一份权重）
+    # ── 这次判定是"首次 / 重复 / 改判"？ ──
+    # 一次抽人只该有一条历史、一笔积分：
+    #   · 重复（同结果再提交一次）→ 直接返回原状，什么都不写；
+    #   · 改判（点错了换一个结果）→ 就地改那一行，积分按差值补，不追加新行。
+    # 之前没有这层判断，连点 4 下就是 4 行历史 + 12 分。
+    decided = bool(pick_row) and prev_result not in ("", pick_engine.PENDING)
+    mode = "first"
+    if decided:
+        mode = "duplicate" if prev_result == result else "correct"
+    elif pick_row:
+        # 两个请求同时读到 pending 时，只有抢到写锁的那个算首次，另一个按"已判定"处理
+        if not pick_engine.claim(grade=grade, cls=cls, activity=pick_engine.ACT_ROLLCALL,
+                                 pick_id=pick_row, result=result):
+            _led2 = pick_engine.resolve_pick(grade, cls, pick_engine.ACT_ROLLCALL,
+                                             student, pick_id=pick_row)
+            prev_result = str(_led2.get("result") or "")
+            prev_points = int(_led2.get("points") or 0)
+            prev_ref_id = (int(_led2.get("ref_id") or 0)
+                           if _led2.get("ref_table") == "rollcall_history" else 0)
+            if prev_result and prev_result != pick_engine.PENDING:
+                mode = "duplicate" if prev_result == result else "correct"
+            else:
+                # 台账行状态既不是 pending 也不是有效结果（历史存量脏行）：按首次处理，
+                # 宁可多写一行，也不要把别的历史行当成"这次"改掉
+                mode = "first"
+
+    if mode == "duplicate":
+        logger.info(f"[点名] 重复标记已忽略 {grade}/{cls} {student} -> {result} "
+                    f"(pick#{pick_row})")
+        return {
+            "success": True,
+            "duplicate": True,
+            "corrected": False,
+            "student": student,
+            "result": result,
+            "points_added": 0,
+            "total_score": _load_scores(teacher).get(_score_key(teacher, grade, cls, student), 0),
+            "history_count": _history_row_count(teacher, grade, cls),
+            "pick_id": pick_row,
+            "teacher": teacher,
+        }
+
+    # 本次判定对应的积分（skip 不计分；首次全额，改判按差值）
+    if noScore or result not in ("correct", "incorrect"):
+        new_pts = 0
+    elif customPoints is not None:
+        new_pts = customPoints
+    else:
+        new_pts = 5 if result == "correct" else 2
+    points_added = new_pts if mode == "first" else new_pts - prev_points
+
+    if result == "correct" and mode == "first":
+        # 答对回升权重：改走共用引擎（抽问/闯关答对加的是同一份权重）。
+        # 改判不动权重：权重没有"撤销"接口，来回改会把同一份权重越加越高。
         pick_engine.bonus_for_correct(grade=grade, cls=cls, student=student, student_key=_key)
-        if not noScore:
-            scores = _load_scores(teacher)
-            sk = _score_key(teacher, grade, cls, student)
-            add_pts = customPoints if customPoints is not None else 5
-            scores[sk] = scores.get(sk, 0) + add_pts
-            _save_scores(scores, teacher)
-            points_added = add_pts
-    elif result == "incorrect":
-        if not noScore:
-            scores = _load_scores(teacher)
-            sk = _score_key(teacher, grade, cls, student)
-            add_pts = customPoints if customPoints is not None else 2
-            scores[sk] = scores.get(sk, 0) + add_pts
-            _save_scores(scores, teacher)
-            points_added = add_pts
+
+    if points_added:
+        scores = _load_scores(teacher)
+        sk = _score_key(teacher, grade, cls, student)
+        scores[sk] = scores.get(sk, 0) + points_added
+        _save_scores(scores, teacher)
 
     # ── 积分奖励（参与点名） ──
-    try:
-        if result in ("correct", "incorrect"):
-            from backend.reward_engine import award_participation, award_bonus
-            # 学号以台账行为准 —— 上面 resolve_pick 已按 pick_id 定位到"这次抽中的是谁"。
-            # 旧写法只按「姓名 + 年级 + 班级」反查 users 取第一条，同班两个"张三"永远查到
-            # 同一个学号；幂等键里用的也是姓名，于是第二个人当天被第一个人占位，静默拿不到分。
-            # 只有台账给不出学号时（只回传姓名的旧互动答题页）才退回按姓名反查。
-            _roll_stu = str(_uname or "").strip()
-            if not _roll_stu:
-                import re
-                cls_num = re.sub(r'[^\d]', '', str(cls)) if cls else ""
-                student_user = execute_query(
-                    "SELECT username FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND name=? AND grade=? AND (class=? OR class=?)",
-                    (student, grade, cls_num, f"{cls_num}班"),
-                )
-                _roll_stu = str(student_user[0][0] or "").strip() if student_user else ""
-            if _roll_stu:
-                # activity_id 带日期 = 每人每天点名计一次分。
-                # 旧口径 f"{grade}_{cls}_{student}" 不含日期，学生被点名一万次也只有 2 分，
-                # 而"点名达人/全勤标兵"徽章又依赖点名记录，两边口径互相打架。
-                _roll_day = time.strftime("%Y-%m-%d")   # 本模块只 import 了 time，别用 datetime
-                _roll_key = f"{grade}_{cls}_{_roll_stu}_{_roll_day}"
-                _roll_title = f"点名-{student}"
-                award_participation(_roll_stu, "rollcall", _roll_key, _roll_title)
-                # 答对拿"良好"档。旧口径答对答错都是同一笔参与分，教师手动账里
-                # 那 5 分学生端根本看不见，积分页上答对与答错毫无区别。
-                if result == "correct":
-                    award_bonus(_roll_stu, "rollcall", _roll_key, "good",
-                                activity_title=_roll_title)
-    except Exception as e:
-        logger.warning(f"点名积分奖励发放失败 (student={student}): {e}")
+    # 奖励幂等键带日期（每人每天一次），所以改判时再走一遍是安全的：
+    # 先标"错误"后改"正确"也能补到"良好"档，重复提交则根本走不到这里。
+    if mode != "duplicate":
+        try:
+            if result in ("correct", "incorrect"):
+                from backend.reward_engine import award_participation, award_bonus
+                # 学号以台账行为准 —— 上面 resolve_pick 已按 pick_id 定位到"这次抽中的是谁"。
+                # 旧写法只按「姓名 + 年级 + 班级」反查 users 取第一条，同班两个"张三"永远查到
+                # 同一个学号；幂等键里用的也是姓名，于是第二个人当天被第一个人占位，静默拿不到分。
+                # 只有台账给不出学号时（只回传姓名的旧互动答题页）才退回按姓名反查。
+                _roll_stu = str(_uname or "").strip()
+                if not _roll_stu:
+                    import re
+                    cls_num = re.sub(r'[^\d]', '', str(cls)) if cls else ""
+                    student_user = execute_query(
+                        "SELECT username FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND name=? AND grade=? AND (class=? OR class=?)",
+                        (student, grade, cls_num, f"{cls_num}班"),
+                    )
+                    _roll_stu = str(student_user[0][0] or "").strip() if student_user else ""
+                if _roll_stu:
+                    # activity_id 带日期 = 每人每天点名计一次分。
+                    # 旧口径 f"{grade}_{cls}_{student}" 不含日期，学生被点名一万次也只有 2 分，
+                    # 而"点名达人/全勤标兵"徽章又依赖点名记录，两边口径互相打架。
+                    _roll_day = time.strftime("%Y-%m-%d")   # 本模块只 import 了 time，别用 datetime
+                    _roll_key = f"{grade}_{cls}_{_roll_stu}_{_roll_day}"
+                    _roll_title = f"点名-{student}"
+                    award_participation(_roll_stu, "rollcall", _roll_key, _roll_title)
+                    # 答对拿"良好"档。旧口径答对答错都是同一笔参与分，教师手动账里
+                    # 那 5 分学生端根本看不见，积分页上答对与答错毫无区别。
+                    if result == "correct":
+                        award_bonus(_roll_stu, "rollcall", _roll_key, "good",
+                                    activity_title=_roll_title)
+        except Exception as e:
+            logger.warning(f"点名积分奖励发放失败 (student={student}): {e}")
 
-    state.setdefault("history", []).append({
-        "student": student,
-        "student_username": _uname,
-        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "result": result,
-        "points": points_added,
-        "teacher": teacher,
-    })
+    # ── 历史：首次追加一行，改判就地更新（一次抽人永远只有一行） ──
+    if mode == "correct":
+        hist_id = prev_ref_id or _find_recent_history_row(teacher, grade, cls, student)
+        if hist_id and _update_history_row(hist_id, result, new_pts):
+            logger.info(f"[点名] 改判 {grade}/{cls} {student}: {prev_result} -> {result} "
+                        f"(历史#{hist_id}, 积分 {prev_points}->{new_pts})")
+        else:
+            # 老数据没挂 ref_id 且找不到原行 —— 宁可多一行，也不能把改判丢掉
+            hist_id = _append_history_row(teacher, grade, cls, {
+                "student": student, "student_username": _uname,
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "result": result, "points": new_pts, "teacher": teacher,
+            })
+    else:
+        hist_id = _append_history_row(teacher, grade, cls, {
+            "student": student, "student_username": _uname,
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "result": result, "points": new_pts, "teacher": teacher,
+        })
 
-    _save_history(teacher, grade, cls, state)
-
-    # 回填台账那一次抽人（结果/积分）；键盘流直接标结果、没先抽人时补记一行
+    # 回填台账那一次抽人（结果/积分/明细指针）；键盘流直接标结果、没先抽人时补记一行
     try:
         pick_engine.finish(grade=grade, cls=cls, activity=pick_engine.ACT_ROLLCALL,
-                           student=student, result=result, points=points_added,
-                           pick_id=int(body.get("pick_id") or 0) or None,
-                           ref_table="rollcall_history", teacher=teacher)
+                           student=student, result=result, points=new_pts,
+                           pick_id=pick_row or None,
+                           ref_table="rollcall_history", ref_id=hist_id or None,
+                           teacher=teacher)
     except Exception as e:
         logger.warning(f"[点名] 抽人台账回填失败 {grade}/{cls}/{student}: {e}")
 
@@ -530,11 +646,14 @@ async def api_mark(request: Request):
     sk = _score_key(teacher, grade, cls, student)
     return {
         "success": True,
+        "duplicate": False,
+        "corrected": mode == "correct",
         "student": student,
         "result": result,
         "points_added": points_added,
         "total_score": scores.get(sk, 0),
-        "history_count": len(state["history"]),
+        "history_count": _history_row_count(teacher, grade, cls),
+        "pick_id": pick_row,
         "teacher": teacher,
     }
 

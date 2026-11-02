@@ -92,6 +92,8 @@
   "selectClassFirst": "Please select class first",
   "rollFailed": "Pick failed",
   "markFailed": "Mark failed",
+  "alreadyMarked": "This pick has already been marked",
+  "markCorrected": "Corrected {{name}}, points adjusted by {{points}}",
   "resetDone": "🔄 Reset done",
   "picked": "🎯 Picked: {{student}}",
   "scorePlus": "{{name}} {{points}} ⭐",

@@ -92,6 +92,8 @@
   "selectClassFirst": "请先选择班级",
   "rollFailed": "抽取失败",
   "markFailed": "标记失败",
+  "alreadyMarked": "这次点名已经标记过了",
+  "markCorrected": "已改判 {{name}}，积分修正 {{points}}",
   "resetDone": "🔄 已重置",
   "picked": "🎯 抽中：{{student}}",
   "scorePlus": "{{name}} {{points}} ⭐",

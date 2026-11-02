@@ -108,7 +108,10 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
           setMode2(o.speaker_mode);
           setNameA(o.name_a || '老师');
           setNameB(o.name_b || '同学');
-          setHasAudio(o.status !== 'draft');
+          // 有没有音频只认 audio_hash（后端 has_audio），不能拿 status 反推：
+          // 下架后的状态是 audio_ready、改过台词未重合成的才可能是 draft 且仍有旧音频。
+          // 以前写成 status !== 'draft'，一下架就误判成"没合成过"，再点发布就整篇重录。
+          setHasAudio(o.has_audio ?? (o.status !== 'draft'));
           originalRef.current = JSON.stringify(o.pages);
           setStep('outline');
         } catch {
@@ -134,9 +137,11 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
     if (!castId) return;
     setBusy(true);
     try {
-      await unpublishCast(castId);
-      setCastStatus('draft');
-      setTip('已下架：学生暂时看不到，内容还在，随时可以再发布');
+      const res = await unpublishCast(castId);
+      // 后端会退回 audio_ready（音频还在），照它回填状态，按钮才不会变成"重新合成"
+      setCastStatus(res?.status || 'audio_ready');
+      setHasAudio((res?.status || 'audio_ready') !== 'draft');
+      setTip('已下架：学生暂时看不到，内容还在，点「重新发布」即可恢复，不用重新合成');
       onChanged?.();
     } catch (e: any) {
       setErr(e?.response?.data?.detail || '下架失败，请重试');
@@ -264,6 +269,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
   /** 合成整篇：先保存改动，再按需合成，最后发布 */
   const doAudio = async () => {
     if (!castId) return;
+    const wasPublished = castStatus === 'published'
     setBusy(true);
     setErr('');
     setTip('');
@@ -286,7 +292,10 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
         const detail = e?.response?.data?.detail;
         setErr(typeof detail === 'string' ? detail : '音频已就绪，但自动发布失败，请稍后重试');
       }
-      message.success(needAudio ? '讲演已生成，学生可以看了' : '已保存，内容没有变化，无需重新合成');
+      message.success(
+        needAudio ? '讲演已生成，学生可以看了'
+          : wasPublished ? '已保存，内容没有变化，无需重新合成'
+          : '已重新发布，学生可以看了')
       if (kp) onDone(kp.id);
       onClose();
     } catch (e: any) {
@@ -480,6 +489,14 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
                     <Button size="small" loading={busy} onClick={doUnpublish}>下架</Button>
                   }
                 />
+              ) : hasAudio ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 10 }}
+                  message="已下架：学生看不到这一节，音频和台词都还在"
+                  description="点右下「重新发布」即可恢复，不会重新合成、不重新计费。"
+                />
               ) : null}
 
               <OutlineEditor
@@ -513,7 +530,11 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
                 ) : null}
                 <Button type="primary" loading={busy} onClick={doAudio}
                   disabled={!pages.length || regenIdx !== null}>
-                  {hasAudio ? '保存并更新' : '合成音频并发布'}
+                  {!hasAudio
+                    ? '合成音频并发布'
+                    : castStatus === 'published'
+                      ? '保存并更新'
+                      : dirty ? '保存并重新发布' : '重新发布'}
                 </Button>
               </div>
             </>

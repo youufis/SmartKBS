@@ -96,6 +96,9 @@ const RollcallTool: React.FC = () => {
   const [rolling, setRolling] = useState(false)
   const [revealed, setRevealed] = useState(false)
   const [resultType, setResultType] = useState<'correct' | 'participated' | ''>('')
+  // 标记结果请求在途：三个按钮转圈并禁用，防连点重复提交
+  const [marking, setMarking] = useState(false)
+  const markingRef = useRef(false)
 
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyVisible, setHistoryVisible] = useState(false)
@@ -354,28 +357,45 @@ const RollcallTool: React.FC = () => {
   }
 
   // ── 标记结果 ──
+  // 一次抽人只允许一条记录：请求一发出就清掉 lastPicked（三个按钮立刻变灰），
+  // 再加一把同步的 in-flight 锁。旧实现只在 await 之后清状态，请求在途时连点/连按
+  // 快捷键全都能再提交一次 —— 09:42 那次就是同一学生在 4 秒内被标了 4 次，
+  // 历史 4 行、积分 +12。后端虽然也做了幂等，前端这一层是防"发得出去"。
   const markResult = useCallback(async (result: string) => {
-    if (!lastPicked) return
+    const target = lastPicked
+    if (!target || markingRef.current) return
+    markingRef.current = true
+    setMarking(true)
+    setLastPicked('')
     try {
-      await apiClient.post('/api/rollcall/mark', {
-        grade, class: cls, student: lastPicked, result, teacher: teacherUsername,
+      const { data } = await apiClient.post('/api/rollcall/mark', {
+        grade, class: cls, student: target, result, teacher: teacherUsername,
         pick_id: lastPickId || undefined,
       })
-      if (result === 'correct') {
+      if (data?.duplicate) {
+        // 后端认出这是同一次抽人的重复提交：不追加记录、不重复加分，安静收下
+        message.info(t('alreadyMarked'))
+      } else if (data?.corrected) {
+        message.info(t('markCorrected', { name: target, points: data.points_added ?? 0 }))
+      } else if (result === 'correct') {
         setResultType('correct')
-        message.success(t('scorePlus', { name: lastPicked, points: 5 }))
+        message.success(t('scorePlus', { name: target, points: data?.points_added ?? 5 }))
         launchConfetti()
       } else if (result === 'incorrect') {
         setResultType('participated')
-        message.info(t('scorePlus', { name: lastPicked, points: 2 }))
+        message.info(t('scorePlus', { name: target, points: data?.points_added ?? 2 }))
       } else {
         message.info(t('skipped'))
       }
-      setLastPicked('')
       setRevealed(false)
-      refreshHistory()
     } catch {
+      // 只有失败才把这次抽人还回去让老师重试；成功路径绝不回填，否则又能被连点
+      setLastPicked(target)
       message.error(t('markFailed'))
+    } finally {
+      markingRef.current = false
+      setMarking(false)
+      refreshHistory()
     }
   }, [lastPicked, lastPickId, grade, cls, teacherUsername, t, refreshHistory])
 
@@ -520,7 +540,8 @@ const RollcallTool: React.FC = () => {
               size="large"
               icon={<CheckOutlined />}
               onClick={() => markResult('correct')}
-              disabled={!lastPicked}
+              loading={marking}
+              disabled={!lastPicked || marking}
               style={{ height: 48, minWidth: 100, fontSize: 16,
                 background: lastPicked ? 'linear-gradient(135deg,#66bb6a,#43a047)' : undefined,
                 borderColor: '#66bb6a', color: lastPicked ? '#fff' : undefined }}
@@ -531,7 +552,8 @@ const RollcallTool: React.FC = () => {
               size="large"
               icon={<CloseOutlined />}
               onClick={() => markResult('incorrect')}
-              disabled={!lastPicked}
+              loading={marking}
+              disabled={!lastPicked || marking}
               style={{ height: 48, minWidth: 100, fontSize: 16,
                 background: lastPicked ? 'linear-gradient(135deg,#ef5350,#e53935)' : undefined,
                 borderColor: '#ef5350', color: lastPicked ? '#fff' : undefined }}
@@ -542,7 +564,8 @@ const RollcallTool: React.FC = () => {
               size="large"
               icon={<ForwardOutlined />}
               onClick={() => markResult('skip')}
-              disabled={!lastPicked}
+              loading={marking}
+              disabled={!lastPicked || marking}
               style={{ height: 48, minWidth: 100 }}
             >
               {t('skipWithEmoji')}

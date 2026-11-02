@@ -57,6 +57,46 @@ def _rollcall_class_conditions(username: str) -> tuple[str, list]:
     return " AND (" + " OR ".join(conds) + ")", params
 
 
+#: 同一次抽人被重复标记时，几次写入彼此差不了几秒；超过这个跨度就算两次点名
+_ROLLCALL_MERGE_WINDOW_SECONDS = 120
+
+
+def _dedupe_rollcall_rows(rows, limit: int = 5,
+                          window_seconds: int = _ROLLCALL_MERGE_WINDOW_SECONDS) -> list:
+    """把"同一次抽人被标记了多次"的历史行折叠成一条。
+
+    点名历史是追加写的：连点、快捷键重复触发或请求超时重试，都会给同一个学生留下
+    好几行（同一分钟、结果还各不相同）。卡片按行 1:1 展示，于是一次点名被读成
+    "三四个点名动态"、把卡位挤满。这里按（姓名 + 班级）在时间窗内只保留最新那条
+    （row 已按时间倒序），最终结果以最后一次判定为准。
+    根因（标记幂等）已在后端 rollcall_router.api_mark 修掉，这里只做展示层兜底。
+    """
+    kept: list = []
+    seen: dict[tuple[str, str], datetime | None] = {}
+    for row in rows:
+        key = (str(row[1] or ""), str(row[3] or ""))
+        stamp = _parse_dt(row[0])
+        prev = seen.get(key)
+        if prev is not None and stamp is not None:
+            if abs((prev - stamp).total_seconds()) <= window_seconds:
+                continue           # 同一次点名的重复行，已被更新的一条代表
+        seen[key] = stamp if stamp is not None else prev
+        kept.append(row)
+        if len(kept) >= limit:
+            break
+    return kept
+
+
+def _parse_dt(raw) -> datetime | None:
+    """解析 'YYYY-MM-DD HH:MM:SS'；解析不出来返回 None（当作不同事件，宁可多显示）。"""
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+
+
 # ── 简单内存缓存（TTL 30 秒） ──
 _dashboard_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _DASHBOARD_CACHE_TTL = 30
@@ -1489,20 +1529,21 @@ async def recent_activity(request: Request):
             })
 
         # 最近的点名记录
+        # 多取一些再折叠：一次点名被重复标记时，几行重复的会把卡位全占掉
         if role == 0:
             rc_activities = _act_q(
                 """SELECT created_at, student_name, result, class_name
                    FROM rollcall_history
-                   ORDER BY created_at DESC LIMIT 5""",
+                   ORDER BY created_at DESC LIMIT 20""",
             )
         else:
             rc_activities = _act_q(
                 """SELECT created_at, student_name, result, class_name
                    FROM rollcall_history WHERE teacher_username = ?
-                   ORDER BY created_at DESC LIMIT 5""",
+                   ORDER BY created_at DESC LIMIT 20""",
                 (username,),
             )
-        for act in rc_activities:
+        for act in _dedupe_rollcall_rows(rc_activities, limit=5):
             # 点名结果实际存的是 correct/incorrect/skip 文本, 旧代码按 "1"/"0" 判定,
             # 永远落到兜底分支 -> 教师看到的是英文原文 correct
             _rc_map = {"correct": "正确", "incorrect": "错误", "skip": "跳过",

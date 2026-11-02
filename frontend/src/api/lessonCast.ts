@@ -243,6 +243,8 @@ export async function getCastOutline(castId: number): Promise<{
   cast_id: number; kp_id: number; speaker_mode: SpeakerMode; minutes: number;
   title: string; summary: string; name_a: string; name_b: string;
   pages: CastPage[]; status: string; stale: boolean;
+  /** 音频是否已合成（只认 audio_hash：下架的 audio_ready 也有音频） */
+  has_audio?: boolean;
 }> {
   const { data } = await apiClient.get(`/api/curriculum/lesson-cast/${castId}/outline`);
   return data;

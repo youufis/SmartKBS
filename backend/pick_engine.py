@@ -411,13 +411,15 @@ def _target_row(c, grade: str, cls: str, activity: str, name: str,
     存量 24 个 AI 生成的互动答题页面只回传姓名，同班两个"张三"时拿姓名去名册猜
     学号会记到错的人头上 —— 台账行里存着当初抽中者的学号，所以一律以它为准。
     """
+    # 行里连同"当前判定状态"一起取出：调用方要据此判断这次判定是首次、重复还是改判
+    cols = "id, student_key, student_username, student_name, result, points, ref_table, ref_id"
     if pick_id:
         return c.execute(
-            "SELECT id, student_key, student_username, student_name FROM pick_ledger WHERE id=?",
+            f"SELECT {cols} FROM pick_ledger WHERE id=?",
             (int(pick_id),),
         ).fetchone()
     return c.execute(
-        "SELECT id, student_key, student_username, student_name FROM pick_ledger"
+        f"SELECT {cols} FROM pick_ledger"
         " WHERE grade=? AND class_name=? AND activity=? AND result=?"
         "   AND (student_name=? OR student_username=?)"
         " ORDER BY id DESC LIMIT 1",
@@ -426,11 +428,15 @@ def _target_row(c, grade: str, cls: str, activity: str, name: str,
 
 
 def resolve_pick(grade: str, cls: str, activity: str, student: str,
-                 pick_id: int | None = None) -> dict[str, str]:
-    """查"这次判定对应哪一次抽人"，返回 {student_key, student_username, student_name}。
+                 pick_id: int | None = None) -> dict[str, Any]:
+    """查"这次判定对应哪一次抽人"，返回这次抽人的人与当前判定状态。
 
-    与 finish() 共用 _target_row，所以调用方可以在**写积分之前**就先拿到人 ——
-    答对 +1 的权重、点名历史里的学号，都记到同一个学生身上。
+    返回键：student_key / student_username / student_name，
+    以及台账行信息 pick_id / result（当前结果，未判定为 PENDING）/ points /
+    ref_table / ref_id（该次抽人对应的明细行，点名用它回写历史行）。
+
+    有了 result，调用方就能在**写任何东西之前**分辨三种情况：
+    首次判定（pending）、重复提交（同一结果）、改判（已判定但结果不同）。
     """
     name = str(student or "").strip()
     if not name:
@@ -440,9 +446,34 @@ def resolve_pick(grade: str, cls: str, activity: str, student: str,
     if row:
         return {"student_key": str(row["student_key"] or ""),
                 "student_username": str(row["student_username"] or ""),
-                "student_name": str(row["student_name"] or name)}
+                "student_name": str(row["student_name"] or name),
+                "pick_id": int(row["id"] or 0),
+                "result": str(row["result"] or ""),
+                "points": int(row["points"] or 0),
+                "ref_table": str(row["ref_table"] or ""),
+                "ref_id": int(row["ref_id"] or 0)}
     key, uname, dname = identity(grade, cls, name)
-    return {"student_key": key, "student_username": uname, "student_name": dname}
+    return {"student_key": key, "student_username": uname, "student_name": dname,
+            "pick_id": 0, "result": "", "points": 0, "ref_table": "", "ref_id": 0}
+
+
+def claim(*, grade: str, cls: str, activity: str, pick_id: int, result: str) -> bool:
+    """把一条台账行从"未判定"原子地改成"已判定"，返回这次请求是否抢到了判定权。
+
+    为什么需要它：同一次抽人在 1 秒内被点两下（连点/快捷键重复触发）时，两个请求
+    会同时读到 pending。以前两边都往下写 —— 两条历史、两笔积分。现在只有先拿到写
+    锁的那个 rowcount=1；后到的必须按"已判定"处理（重复就丢弃，改判走就地更新）。
+    条件里带活动/年级/班级，防止拿别人的 pick_id 改到自己班上。
+    """
+    if not pick_id:
+        return False
+    with _immediate() as conn:
+        cur = conn.execute(
+            "UPDATE pick_ledger SET result=? WHERE id=? AND result=?"
+            " AND activity=? AND grade=? AND class_name=?",
+            (result, int(pick_id), PENDING, activity, grade, cls),
+        )
+        return int(cur.rowcount or 0) > 0
 
 def finish(*, grade: str, cls: str, activity: str, student: str, result: str,
            points: int = 0, pick_id: int | None = None,
