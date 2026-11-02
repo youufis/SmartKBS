@@ -562,8 +562,14 @@ async def get_discussion(disc_id: int, request: Request):
         raise HTTPException(status_code=404, detail="讨论不存在")
 
     # 教师只能查看自己的讨论，管理员可以全部
-    if role == 1 and disc.get("creator_username") != user["username"]:
-        raise HTTPException(status_code=403, detail="只能查看自己创建的讨论详情")
+    # 「绑定即授权」：非创建者教师若该讨论已绑定到课程知识点，放行只读查看
+    #（管理操作 start/end/edit/delete 仍走各端点自己的创建者校验）
+    is_owner = role == 0 or disc.get("creator_username") == user["username"]
+    if role == 1 and not is_owner:
+        from backend.permission_service import can_view_bound_resource
+        if not can_view_bound_resource("discussion", disc_id, role):
+            raise HTTPException(status_code=403,
+                                detail="只能查看自己创建的讨论详情（该讨论未被绑定到课程知识点）")
 
     # 学生只能查看自己范围内的讨论(S11: 已加入本讨论的学生始终可查看)
     if role == 2 and not _is_disc_member(user["username"], disc_id):
@@ -603,6 +609,7 @@ async def get_discussion(disc_id: int, request: Request):
         (disc["creator_username"],),
     )
     disc["creator_name"] = creator_info[0][0] if creator_info and creator_info[0] and creator_info[0][0] else disc["creator_username"]
+    disc["is_owner"] = is_owner   # 非创建者教师为只读预览，前端据此隐藏管理入口
     return disc
 
 

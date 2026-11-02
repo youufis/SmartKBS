@@ -1441,3 +1441,48 @@ def is_student_account(username: str) -> bool:
         (username,),
     )
     return bool(rows)
+
+
+# ══════════════════════════════════════════════════════════════
+# 「绑定即授权」：知识点绑定资源的教师只读查看权
+# ══════════════════════════════════════════════════════════════
+
+def can_view_bound_resource(
+    resource_type: str,
+    resource_id: str | int,
+    viewer_role: int,
+) -> bool:
+    """资源绑定到课程知识点后，教师获得该资源的只读查看权。
+
+    背景：同步练习/随堂测试/考试等资源默认「创建者私有」，但绑定到课程知识点后
+    会出现在所有能看到该课程的教师面前（课程层不做范围过滤，见 curriculum_router
+    的 /tree 注释），只给名字不给内容就会造成「看得到、点开 403」的割裂体验。
+
+    规则（与资源注册表 resource_registry 的类型 key 对齐）：
+    - 仅对教师 (role=1) 放行只读查看；管理员/创建者的放行由调用方原有逻辑处理，
+      学生不经过本函数（活动类资源对学生的可见性走各自的分配/共享范围逻辑）。
+    - 课程对所有教师可见，因此判定只看「是否已绑定到任一知识点」，
+      不再逐课程查编辑权。
+    - 只读：编辑/删除/发布/批改/成绩等管理操作不经过本函数，仍保持创建者限定。
+
+    参数:
+        resource_type: 绑定类型 key（practice / exam / interaction_quiz / task ...）
+        resource_id:   资源主键（curriculum_bindings.resource_id 为 TEXT，统一按字符串比对）
+        viewer_role:   查看者角色
+    """
+    if viewer_role != ROLE_TEACHER:
+        return False
+    rid = str(resource_id if resource_id is not None else "").strip()
+    if not resource_type or not rid:
+        return False
+    try:
+        rows = execute_query_dict(
+            "SELECT 1 AS ok FROM curriculum_bindings"
+            " WHERE resource_type=? AND resource_id=? LIMIT 1",
+            (resource_type, rid),
+        )
+    except Exception as e:
+        # 绑定表缺失/查询异常时按无权处理，不能因为授权检查挂掉而放大权限
+        logger.warning(f"can_view_bound_resource 查询失败 ({resource_type}:{rid}): {e}")
+        return False
+    return bool(rows)

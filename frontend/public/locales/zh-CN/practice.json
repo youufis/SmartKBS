@@ -429,5 +429,7 @@
   "validateSummary": "{{passed}} / {{total}} 个用例通过",
   "allStatus": "全部状态",
   "stdinLabel": "输入（stdin，可多行）",
-  "aiApplyHint": "应用后会打开创建表单；目标范围、时限和上下架状态在那里统一设置。"
+  "aiApplyHint": "应用后会打开创建表单；目标范围、时限和上下架状态在那里统一设置。",
+  "readonlyPreview": "只读预览",
+  "creator": "创建者"
 }

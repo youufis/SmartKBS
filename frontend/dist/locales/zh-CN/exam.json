@@ -574,5 +574,7 @@
   "exSearchPh": "搜索考试名称",
   "exDeadline": "截止时间",
   "exDuration": "时长",
-  "exMySubmitted": "已交卷"
+  "exMySubmitted": "已交卷",
+  "readonlyPreview": "只读预览",
+  "correctAnswerLbl": "答案"
 }

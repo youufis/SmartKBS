@@ -701,5 +701,6 @@
   "pickRoundTip": "只清空本轮已抽名单（三个活动共用），权重保留——所以刚被抽过的学生不会立刻又被抽到",
   "pickRoundNeedClass": "请先选年级和班级",
   "pickRoundDone": "已开新一轮（第 {{round}} 轮）",
-  "pickRoundFailed": "重置本轮失败"
+  "pickRoundFailed": "重置本轮失败",
+  "readonlyPreview": "只读预览"
 }

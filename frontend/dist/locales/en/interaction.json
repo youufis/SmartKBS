@@ -701,5 +701,6 @@
   "pickRoundTip": "Clears only this round's picked list (shared by all three activities); weights stay, so a student just picked won't be picked again right away",
   "pickRoundNeedClass": "Pick a grade and class first",
   "pickRoundDone": "Started round {{round}}",
-  "pickRoundFailed": "Failed to start a new round"
+  "pickRoundFailed": "Failed to start a new round",
+  "readonlyPreview": "Read-only preview"
 }

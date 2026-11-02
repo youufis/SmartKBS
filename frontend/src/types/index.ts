@@ -117,6 +117,8 @@ export interface TaskInfo {
   /** 教师端列表附带：已批改与待批改份数 */
   graded_count?: number;
   pending_grade_count?: number;
+  /** 「绑定即授权」：false=他人创建但绑定到课程知识点的只读预览（提交/批改数据不透出） */
+  is_owner?: boolean;
   // ── 文件提交类作业（方案 A：提交形态是同一类作业的一个维度）──
   /** conversation=交对话记录 | file=交文件 | mixed=文件+说明 */
   submit_mode?: 'conversation' | 'file' | 'mixed';

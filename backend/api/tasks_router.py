@@ -467,6 +467,25 @@ async def get_active_tasks(request: Request):
         return {"tasks": relevant, "total": len(relevant)}
 
     tasks = all_tasks if caller_role == 0 else [t for t in all_tasks if t.get("creator") == target_user]
+
+    # 「绑定即授权」：绑定到课程知识点的作业也进入教师列表（深链 /tasks?open=id 才能解析），
+    # 只读 —— 学生提交名单不透出，逐人成绩仍走 /submissions/{id} 的创建者校验。
+    if caller_role == 1 and target_user == caller:
+        from backend.permission_service import can_view_bound_resource
+        own_ids = {t["id"] for t in tasks}
+        for t in all_tasks:
+            if t["id"] in own_ids:
+                continue
+            if can_view_bound_resource("task", t["id"], 1):
+                t = dict(t)
+                t["is_owner"] = False
+                t["submissions"] = []
+                t["submissions_names"] = []
+                t["graded_count"] = 0
+                t["pending_grade_count"] = 0
+                tasks.append(t)
+    for t in tasks:
+        t.setdefault("is_owner", True)
     all_names = {u for t in tasks for u in (t.get("submissions") or [])}
     name_map: dict[str, str] = {}
     if all_names:
@@ -488,6 +507,9 @@ async def get_active_tasks(request: Request):
             graded_map[r[0]] = r[1]
     for task in tasks:
         graded = graded_map.get(task["id"], 0)
+        # 只读预览的绑定作业不下发提交/批改统计
+        if task.get("is_owner") is False:
+            continue
         task["graded_count"] = graded
         task["pending_grade_count"] = max(0, len(task.get("submissions") or []) - graded)
     return {"tasks": tasks, "total": len(tasks)}

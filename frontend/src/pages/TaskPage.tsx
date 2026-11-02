@@ -388,6 +388,23 @@ const TaskPage: React.FC = () => {
 
   // ── 查看提交详情（同时加载批改结果） ──
   const handleViewSubmissions = async (task: TaskInfo) => {
+    // 「绑定即授权」只读预览：他人作业绑在课程知识点里，提交/批改数据仍归创建者，
+    // 不去拉 403 的提交列表，直接展示作业信息
+    if ((task as any).is_owner === false) {
+      Modal.info({
+        title: task.name,
+        width: 520,
+        content: (
+          <div style={{ marginTop: 8 }}>
+            <Tag color="orange" style={{ marginBottom: 8 }}>{t('boundTaskReadonly')}</Tag>
+            <Typography.Paragraph type="secondary" style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+              {task.description || t('boundTaskNoDesc')}
+            </Typography.Paragraph>
+          </div>
+        ),
+      })
+      return
+    }
     setViewTask(task)
     setSubmissionsDrawer(true)
     setSubmissionsLoading(true)

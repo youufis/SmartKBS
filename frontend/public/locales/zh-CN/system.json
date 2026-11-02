@@ -1491,5 +1491,7 @@
   "qtypeAddRow": "添加一行",
   "qtypeDupKey": "标识重复：{{keys}}",
   "saveShort": "保存",
-  "unitPage": "页"
+  "unitPage": "页",
+  "boundTaskReadonly": "只读预览：该作业由其他教师创建，绑定在课程知识点中",
+  "boundTaskNoDesc": "（无作业要求说明）"
 }

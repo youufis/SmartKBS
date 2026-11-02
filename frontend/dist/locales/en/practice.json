@@ -429,5 +429,7 @@
   "validateSummary": "{{passed}} / {{total}} cases passed",
   "allStatus": "All statuses",
   "stdinLabel": "Input (stdin, multi-line)",
-  "aiApplyHint": "Applying will open the create form, where scope, time limit and publish status are set together."
+  "aiApplyHint": "Applying will open the create form, where scope, time limit and publish status are set together.",
+  "readonlyPreview": "Read-only preview",
+  "creator": "Creator"
 }

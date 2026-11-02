@@ -581,8 +581,13 @@ async def get_exam(exam_id: int, request: Request):
             target_users=exam.get("target_users", ""),
         ):
             raise HTTPException(status_code=403, detail="无权查看该考试")
-    if role == 1 and exam["creator_username"] != username:
-        raise HTTPException(status_code=403, detail="无权查看其他教师的考试")
+    # 「绑定即授权」：非创建者教师若该考试已绑定到课程知识点，放行只读预览
+    # （题目内容可见；成绩/管理走 /{exam_id}/results 等端点，仍保持创建者限定）。
+    is_owner = role == 0 or exam["creator_username"] == username
+    if role == 1 and not is_owner:
+        from backend.permission_service import can_view_bound_resource
+        if not can_view_bound_resource("exam", exam_id, role):
+            raise HTTPException(status_code=403, detail="无权查看其他教师的考试（该考试未被绑定到课程知识点）")
 
     # 获取题目列表
     questions = execute_query(
@@ -614,6 +619,7 @@ async def get_exam(exam_id: int, request: Request):
         questions = _ordered_for_student(questions, exam, username)
 
     exam["questions"] = questions
+    exam["is_owner"] = is_owner   # 非创建者教师为只读预览，前端据此隐藏管理入口
 
     # 获取我的答题记录（学生）
     if role == 2:

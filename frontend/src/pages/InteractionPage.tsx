@@ -17,6 +17,7 @@ import {
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import ScopeTag from '../components/ScopeTag'
 import AnswerLine from '../components/AnswerLine'
 import { useAuthStore } from '../stores/authStore'
@@ -306,8 +307,32 @@ const InteractionPage: React.FC = () => {
       setQuizAiAnalysis(null)
       setQuizAiCached(false)
       setQuizResultTab('overview')
-    } catch { message.error(t('loadResultFailed')) }
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        // 未绑定到课程知识点的他人测验：后端 detail 已说明原因，友好提示即可
+        message.warning(err?.response?.data?.detail || t('loadResultFailed'))
+      } else {
+        message.error(t('loadResultFailed'))
+      }
+    }
   }
+
+  // 「绑定即授权」只读预览：非创建者教师可看内容与整体统计，催批/AI/逐人成绩不开放
+  const quizResultsReadonly = quizResultsView?.is_owner === false
+
+  // 从课程导学「绑定资源」点进来：/interaction?open=<测验id> 直接打开结果统计
+  // （未绑定到自己无权资源的他人测验，后端 403 + detail，这里给友好提示）
+  const [searchParams, setSearchParams] = useSearchParams()
+  const quizOpenRef = useRef(false)
+  useEffect(() => {
+    const target = searchParams.get('open')
+    if (!target || quizOpenRef.current || quizLoading) return
+    quizOpenRef.current = true
+    setSearchParams({}, { replace: true })
+    const qid = Number(target)
+    if (Number.isFinite(qid)) void handleViewQuizResults(qid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, quizLoading])
 
   // S-GRADING(P3): 弹窗打开期间若还有题在后台批改, 每 8 秒自动刷新(累计最多 12 次)
   // 没有待批改题就不建轮询 —— 旧实现关掉弹窗 8 秒后会被第一次回调"复活"再弹一次
@@ -794,7 +819,8 @@ const InteractionPage: React.FC = () => {
       </Modal>
 
       {/* ── 测验结果统计弹窗 ── */}
-      <Modal title={quizResultsView?.quiz_title ? t('ipMyScore', { title: quizResultsView.quiz_title }) : t('ipQuizResult')}
+      <Modal title={<Space wrap>{quizResultsView?.quiz_title ? t('ipMyScore', { title: quizResultsView.quiz_title }) : t('ipQuizResult')}
+        {quizResultsReadonly && <Tag color="orange">{t('readonlyPreview')}</Tag>}</Space>}
         open={!!quizResultsView}
         onCancel={closeQuizResults}
         width="min(980px, 94vw)"
@@ -803,9 +829,9 @@ const InteractionPage: React.FC = () => {
           : (
             <Space wrap>
               {/* S-GRADING(P3): 后台还没判完 / 有题判不准时, 教师可以立刻催批 */}
-              {(Number(quizResultsView?.pending_ai_total || 0) > 0
+              {!quizResultsReadonly && (Number(quizResultsView?.pending_ai_total || 0) > 0
                 || Number(quizResultsView?.pending_review_total || 0) > 0) && (
-                <>
+              <>
                   {quizResultsView?.pending_ai_total > 0 && (
                     <Tag color="blue">{t('ipGradingPendingN', { count: quizResultsView.pending_ai_total })}</Tag>
                   )}
@@ -825,12 +851,15 @@ const InteractionPage: React.FC = () => {
                   )}
                 </>
               )}
+              {/* 只读预览：AI 分析为创建者专属 */}
+              {!quizResultsReadonly && (
               <Button icon={<RobotOutlined />} size="small"
                 loading={quizAiAnalysisLoading}
                 disabled={!quizResultsView?.question_stats?.length}
                 onClick={() => handleQuizAiAnalysis(quizResultsView?.quiz?.id, !!(quizAiAnalysis || quizAiCached))}>
                 {quizAiAnalysis ? t('aiReAnalyze') : t('ipAiAnalyze')}
               </Button>
+              )}
               <Button type="primary" onClick={closeQuizResults}>{t('close')}</Button>
             </Space>
           )}>
@@ -1098,7 +1127,8 @@ const InteractionPage: React.FC = () => {
                         </>
                       ),
                     },
-                  ]}
+                  // 只读预览：学生逐人成绩为创建者的教学数据，不展示
+                  ].filter((ti: any) => !(quizResultsReadonly && ti.key === 'students'))}
                 />
               </>
             )}

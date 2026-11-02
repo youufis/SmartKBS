@@ -209,6 +209,10 @@ const ExamPage: React.FC = () => {
   const [detailData, setDetailData] = useState<any>(null)
   const [detailAttempt, setDetailAttempt] = useState<any>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+
+  // 「绑定即授权」：课程知识点绑定资源卡片深链 /exam?open=<id> → 只读预览
+  const [linkedExam, setLinkedExam] = useState<any>(null)
+  const [linkedExamLoading, setLinkedExamLoading] = useState(false)
   const handleViewMyDetail = async (attempt: ExamAttempt) => {
     setDetailModal(true)
     setDetailLoading(true)
@@ -253,6 +257,30 @@ const ExamPage: React.FC = () => {
   }, [statusFilter, keyword, myStatus, page, pageSize, isStudent, t, pendingOnly])
 
   useEffect(() => { const fn = async () => { loadExams() }; fn() }, [loadExams])
+
+  // 从课程导学「绑定资源」点进来：/exam?open=<考试id> 只读预览这场考试
+  // （未绑定到课程知识点或无权的考试，后端 403 + detail，这里给友好提示）
+  const examOpenRef = useRef(false)
+  useEffect(() => {
+    const target = searchParams.get('open')
+    if (!target || examOpenRef.current) return
+    examOpenRef.current = true
+    setSearchParams({}, { replace: true })
+    const eid = Number(target)
+    if (!Number.isFinite(eid)) return
+    setLinkedExamLoading(true)
+    examsApi.getExam(eid)
+      .then((exam: any) => setLinkedExam(exam))
+      .catch((err: any) => {
+        if (err?.response?.status === 403) {
+          message.warning(err?.response?.data?.detail || t('loadDetailFailed'))
+        } else {
+          message.error(t('loadDetailFailed'))
+        }
+      })
+      .finally(() => setLinkedExamLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   // ── 加载学生成绩 ──
   const loadMyResults = useCallback(async () => {
@@ -2370,6 +2398,46 @@ const ExamPage: React.FC = () => {
             <Typography.Text type="secondary">{t('loadingDots')}</Typography.Text>
           )}
         </Spin>
+      </Modal>
+
+      {/* ── 「绑定即授权」考试只读预览（绑定资源卡片深链） ── */}
+      <Modal
+        title={<Space wrap>{linkedExam?.title}{linkedExam?.is_owner === false && <Tag color="orange">{t('readonlyPreview')}</Tag>}</Space>}
+        open={!!linkedExam || linkedExamLoading}
+        onCancel={() => setLinkedExam(null)}
+        footer={<Button onClick={() => setLinkedExam(null)}>{t('close')}</Button>}
+        width="min(860px, 94vw)"
+        styles={{ body: { maxHeight: '68vh', overflowY: 'auto', paddingRight: 6 } }}
+      >
+        {linkedExamLoading && <Spin style={{ display: 'block', margin: '40px auto' }} />}
+        {!linkedExamLoading && linkedExam && (
+          <>
+            <Typography.Paragraph type="secondary">{linkedExam.description || ''}</Typography.Paragraph>
+            <Space wrap size={16} style={{ marginBottom: 12 }}>
+              {linkedExam.is_owner === false && (
+                <Typography.Text type="secondary">{t('creator')}：{linkedExam.creator_name || linkedExam.creator_username || '-'}</Typography.Text>
+              )}
+              <Typography.Text>{t('questions')}：{linkedExam.questions?.length ?? 0}</Typography.Text>
+              <Typography.Text>{t('totalScore')}：{linkedExam.total_score}</Typography.Text>
+              <Typography.Text>{t('duration')}：{linkedExam.duration}</Typography.Text>
+            </Space>
+            {(linkedExam.questions || []).map((q: any, i: number) => (
+              <Card key={q.id || i} size="small" style={{ marginBottom: 8 }}
+                title={<Space size={4}><Tag>{t('qLabelIdx', { no: i + 1 })}</Tag><Tag color="blue">{q.type}</Tag></Space>}>
+                <FormulaRenderer content={q.question_text} />
+                {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
+                  <div key={k} style={{ margin: '2px 0' }}>
+                    <Typography.Text>{k}. <FormulaRenderer content={v} inline /></Typography.Text>
+                  </div>
+                ))}
+                <div style={{ marginTop: 4 }}>
+                  <Typography.Text type="secondary">{t('correctAnswerLbl')}：{q.correct_answer}</Typography.Text>
+                </div>
+              </Card>
+            ))}
+            {!(linkedExam.questions || []).length && <Empty description={t('noQuestions')} />}
+          </>
+        )}
       </Modal>
     </Layout>
   )

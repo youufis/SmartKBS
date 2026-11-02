@@ -440,5 +440,6 @@
   "wbRetrying": "Reconnecting",
   "wbDisconnected": "Not connected",
   "wbSpectator": "You are spectating; view only",
-  "aiSubjectTip": "Subject used for AI requests. By default it follows the teacher's assigned subjects and the board content; you can pin one temporarily."
+  "aiSubjectTip": "Subject used for AI requests. By default it follows the teacher's assigned subjects and the board content; you can pin one temporarily.",
+  "readonlyPreview": "Read-only preview"
 }

@@ -1393,8 +1393,14 @@ async def get_quiz_results(quiz_id: int, request: Request):
     if not quiz_row:
         raise HTTPException(status_code=404, detail="测验不存在")
     # S4: 旧实现只挡学生, 任何教师都能读他人测验的逐人成绩(含学号/姓名/班级)
+    is_owner = role == 0 or (quiz_row.get("creator_username") or "") == user["username"]
     if not _can_view_activity_results(user["username"], role, quiz_row):
-        raise HTTPException(status_code=403, detail="无权查看该测验的统计")
+        # 「绑定即授权」：测验已绑定到课程知识点时，教师可查看内容与整体统计；
+        # 逐人成绩（student_answers）仍仅创建者/管理员可见，见下方响应裁剪。
+        from backend.permission_service import can_view_bound_resource
+        if not (role == 1 and can_view_bound_resource("interaction_quiz", quiz_id, role)):
+            raise HTTPException(status_code=403, detail="无权查看该测验的统计")
+        is_owner = False
 
     questions = _quiz_questions(quiz_row)
     answers = execute_query(
@@ -1475,6 +1481,9 @@ async def get_quiz_results(quiz_id: int, request: Request):
     return {
         # P2-14: 显式声明视角(前端不必再靠 quiz_title 是否存在来判断)
         "view": "teacher",
+        # 「绑定即授权」只读预览：非创建者教师不下发逐人成绩
+        "is_owner": is_owner,
+        "student_answers": student_answers if is_owner else [],
         "quiz": {
             "id": quiz_row.get("id"),
             "title": quiz_row.get("title"),
@@ -1501,7 +1510,6 @@ async def get_quiz_results(quiz_id: int, request: Request):
             1 for _a, _m, gm in parsed for v in gm.values()
             if isinstance(v, dict) and v.get("needs_review")),
         "question_stats": question_stats,
-        "student_answers": student_answers,
     }
 
 

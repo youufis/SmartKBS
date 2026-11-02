@@ -669,8 +669,14 @@ async def get_session_detail(session_id: int, request: Request):
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
-        raise HTTPException(status_code=403, detail="只能查看自己创建的练习")
+
+    # 「绑定即授权」：非创建者教师若该练习已绑定到课程知识点，放行只读预览
+    # （题目内容可见；学生作答与成绩属创建教师的教学数据，下方剥离）。
+    is_owner = role == 0 or sess["creator_username"] == username
+    if not is_owner:
+        from backend.permission_service import can_view_bound_resource
+        if not can_view_bound_resource("practice", session_id, role):
+            raise HTTPException(status_code=403, detail="只能查看自己创建的练习（该练习未被绑定到课程知识点）")
 
     questions = execute_query(
         """SELECT psq.*, qb.question_text, qb.type, qb.options, qb.correct_answer,
@@ -688,6 +694,27 @@ async def get_session_detail(session_id: int, request: Request):
                     q[field] = json.loads(q[field])
                 except (json.JSONDecodeError, TypeError):
                     q[field] = None
+
+    # 只读预览：非创建者教师可看题目内容，但学生作答/成绩/统计不下发
+    if not is_owner:
+        sess_dict = dict(sess)
+        sess_dict["target_students"] = _parse_target_students(sess.get("target_students"))
+        return {
+            "session": sess_dict,
+            "questions": questions,
+            "attempts": [],
+            "students": [],
+            "question_stats": [],
+            "stats": {
+                "student_count": 0, "submitted_count": 0, "graded_count": 0,
+                "participation_rate": 0, "total_score": float(sess.get("total_score") or 0),
+                "avg_score": 0, "avg_rate": None, "high_rate": None,
+                "low_rate": None, "pass_rate": None,
+            },
+            "pending_ai_total": 0,
+            "pending_review_total": 0,
+            "is_owner": False,
+        }
 
     attempts = execute_query(
         'SELECT * FROM practice_attempts WHERE session_id=? ORDER BY score DESC',
@@ -809,6 +836,7 @@ async def get_session_detail(session_id: int, request: Request):
         # S-GRADING: 整场练习还有多少题在后台批改 / 待人工批改
         "pending_ai_total": sum(a.get("pending_ai") or 0 for a in attempts),
         "pending_review_total": sum(a.get("pending_review") or 0 for a in attempts),
+        "is_owner": is_owner,
     }
 
 

@@ -1491,5 +1491,7 @@
   "qtypeAddRow": "Add a row",
   "qtypeDupKey": "Duplicate keys: {{keys}}",
   "saveShort": "Save",
-  "unitPage": "pages"
+  "unitPage": "pages",
+  "boundTaskReadonly": "Read-only preview: created by another teacher, bound to a course knowledge point",
+  "boundTaskNoDesc": "(No description)"
 }

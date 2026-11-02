@@ -574,5 +574,7 @@
   "exSearchPh": "Search exam title",
   "exDeadline": "Deadline",
   "exDuration": "Duration",
-  "exMySubmitted": "Submitted"
+  "exMySubmitted": "Submitted",
+  "readonlyPreview": "Read-only preview",
+  "correctAnswerLbl": "Answer"
 }

@@ -812,8 +812,17 @@ const TeacherView: React.FC = () => {
     try {
       const { data } = await apiClient.get(`/api/practice/sessions/${id}`)
       setDetail(data)
-    } catch { message.error(t('loadDetailFailed')) }
-    finally { setDetailLoading(false) }
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        // 未绑定到课程知识点的他人练习：后端 detail 已说明原因，友好提示后收起弹窗，
+        // 不再弹通用"加载失败"再跳回列表
+        message.warning(err?.response?.data?.detail || t('loadDetailFailed'))
+        setDetailOpen(false)
+        setDetailSid(null)
+      } else {
+        message.error(t('loadDetailFailed'))
+      }
+    } finally { setDetailLoading(false) }
   }
 
   // 从课程导学「绑定资源」点进来：/practice?open=<练习id> 直接看这场练习的详情
@@ -827,6 +836,9 @@ const TeacherView: React.FC = () => {
     if (Number.isFinite(sid)) void viewSessionDetail(sid)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
+
+  // 「绑定即授权」只读预览：非创建者教师可看题目内容，批改/提醒/导出/学情统计不下发
+  const detailReadonly = detail?.is_owner === false
 
   /** R1: 详情页 AI 学情分析(异步任务 → 轮询), 结果按练习 id 缓存 24h */
   const runDetailAiAnalysis = async (force = false) => {
@@ -1209,36 +1221,39 @@ const TeacherView: React.FC = () => {
 
       {/* ── S-GRADE: 练习详情(题目 + 名册 + 逐个看答卷批改) —— 居中弹窗，与随堂测验结果一致 ── */}
       <Modal
-        title={detail?.session?.title || t('detail')}
+        title={<Space wrap>{detail?.session?.title || t('detail')}{detailReadonly && <Tag color="orange">{t('readonlyPreview')}</Tag>}</Space>}
         open={detailOpen}
         onCancel={() => { setDetailOpen(false); setSheetAttempt(null) }}
         width="min(920px, 94vw)"
         styles={{ body: { maxHeight: '68vh', overflowY: 'auto', paddingRight: 6 } }}
         footer={
           <Space wrap>
+            {/* 只读预览：批改/提醒/导出/学情分析均为创建者专属，非创建者教师不显示 */}
             {/* 还有主观题在后台批改时, 教师可以立刻催批 */}
-            {Number(detail?.pending_ai_total || 0) > 0 && !detailLoading && (
+            {!detailReadonly && Number(detail?.pending_ai_total || 0) > 0 && !detailLoading && (
               <Button type="primary" ghost icon={<ThunderboltOutlined />} loading={gradingNow} onClick={gradeNow}>
                 {t('gradeNow')}
               </Button>
             )}
             {/* R1: AI 学情分析(结果缓存, 再点即重新分析) */}
-            {!detailLoading && !!detail?.question_stats?.length && (
+            {!detailReadonly && !detailLoading && !!detail?.question_stats?.length && (
               <Button icon={<RobotOutlined />} loading={detailAiLoading}
                 onClick={() => runDetailAiAnalysis(!!(detailAiAnalysis || detailAiCached))}>
                 {detailAiAnalysis ? t('aiReAnalyze') : t('aiAnalyze')}
               </Button>
             )}
             {/* P1-6: 一键提醒未交 */}
-            {!detailLoading && (detail?.students || []).some((s: any) => !s.submitted) && (
+            {!detailReadonly && !detailLoading && (detail?.students || []).some((s: any) => !s.submitted) && (
               <Button icon={<BellOutlined />} loading={notifying} onClick={notifyUnsubmitted}>
                 {t('notifyUnsubmitted')}
               </Button>
             )}
-            <Button icon={<DownloadOutlined />}
-              onClick={() => window.open(`/api/export/practice/${detailSid}`, '_blank')}>
-              {t('exportResult')}
-            </Button>
+            {!detailReadonly && (
+              <Button icon={<DownloadOutlined />}
+                onClick={() => window.open(`/api/export/practice/${detailSid}`, '_blank')}>
+                {t('exportResult')}
+              </Button>
+            )}
             <Button onClick={() => { setDetailOpen(false); setSheetAttempt(null) }}>{t('close')}</Button>
           </Space>
         }
@@ -1246,6 +1261,9 @@ const TeacherView: React.FC = () => {
         {detailLoading && <Skeleton active paragraph={{ rows: 8 }} />}
         {!detailLoading && detail && (
           <>
+            {detailReadonly && (
+              <p><Text type="secondary">{t('creator')}：{detail.session?.creator_name || detail.session?.creator_username || '-'}</Text></p>
+            )}
             <p>{t('knowledgePoints')}：{detail.session?.knowledge_points}</p>
             <p>{t('questionCountTitle')}：{detail.session?.question_count} · {t('totalScoreTitle')}：{detail.session?.total_score}</p>
             <Divider />
@@ -1362,7 +1380,8 @@ const TeacherView: React.FC = () => {
                     </>
                   ),
                 },
-              ]}
+              // 只读预览：概览统计与名册为创建者的教学数据，不展示
+              ].filter((ti: any) => !(detailReadonly && (ti.key === 'overview' || ti.key === 'roster')))}
             />
           </>
         )}

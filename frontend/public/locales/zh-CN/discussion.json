@@ -440,5 +440,6 @@
   "wbRetrying": "重连中",
   "wbDisconnected": "未连接",
   "wbSpectator": "你是旁观教师，仅可查看",
-  "aiSubjectTip": "本次 AI 提问使用的学科；默认按教师任教学科与白板内容判断，也可临时指定"
+  "aiSubjectTip": "本次 AI 提问使用的学科；默认按教师任教学科与白板内容判断，也可临时指定",
+  "readonlyPreview": "只读预览"
 }

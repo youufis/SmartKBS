@@ -11,7 +11,7 @@ import {
   FieldTimeOutlined, RobotOutlined, BulbOutlined,
   ReloadOutlined, DeleteOutlined, EyeOutlined, EditOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -31,6 +31,7 @@ const { TextArea } = Input
 const DiscussionPage: React.FC = () => {
   const { t } = useTranslation('discussion')
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const getAiRoleLabel = React.useCallback((role: string) => {
     const map: Record<string, string> = {
@@ -293,10 +294,30 @@ const DiscussionPage: React.FC = () => {
     try {
       const { data } = await apiClient.get(`/api/interaction/discussions/${id}`)
       setDetailModal(data)
-    } catch {
-      message.error(t('getDetailFail'))
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        // 未绑定到课程知识点的他人讨论：后端 detail 已说明原因，友好提示即可
+        message.warning(err?.response?.data?.detail || t('getDetailFail'))
+      } else {
+        message.error(t('getDetailFail'))
+      }
     }
   }
+
+  // 从课程导学「绑定资源」点进来：/discussion?open=<讨论id> 直接看详情
+  // （他人创建但已绑定到课程知识点的讨论，后端放行只读查看）
+  const discOpenRef = useRef(false)
+  useEffect(() => {
+    const target = searchParams.get('open')
+    if (!target || discOpenRef.current) return
+    discOpenRef.current = true
+    const next = new URLSearchParams(searchParams)
+    next.delete('open')
+    setSearchParams(next, { replace: true })
+    const did = Number(target)
+    if (Number.isFinite(did)) void handleDetail(did)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   // 进入讨论区（教师视角）
   const handleEnterGroup = (groupId: number, discussionId: number) => {
@@ -673,6 +694,8 @@ const DiscussionPage: React.FC = () => {
         {detailModal && (
           <div>
             <div style={{ marginBottom: 16 }}>
+              {/* 「绑定即授权」只读预览：他人创建但绑定到课程知识点的讨论 */}
+              {detailModal.is_owner === false && <Tag color="orange">{t('readonlyPreview')}</Tag>}
               <Tag color={STATUS_MAP[detailModal.status]?.color}>
                 {STATUS_MAP[detailModal.status]?.label}
               </Tag>
@@ -688,7 +711,7 @@ const DiscussionPage: React.FC = () => {
               </div>
             )}
 
-            {isTeacherOrAdmin && (
+            {isTeacherOrAdmin && detailModal.is_owner !== false && (
               <Button
                 icon={<TeamOutlined />}
                 style={{ marginBottom: 16 }}
