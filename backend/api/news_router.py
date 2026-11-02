@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
+from backend.config import STORAGE_DIR
 from backend.api.ai_service import call_ai_sync_direct
 from backend.async_utils import spawn_bg
 from backend.database import execute_query, execute_insert_update, execute_query_one
@@ -67,7 +68,7 @@ _ADMIN_NEWS_SELECT = (
     "n.admin_note, n.hidden_at, n.hidden_by, n.updated_at"
 )
 
-SYSTEM_CONFIG_PATH = Path(__file__).resolve().parents[1] / "system_config.json"
+SYSTEM_CONFIG_PATH = STORAGE_DIR / "system_config.json"
 
 FETCH_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

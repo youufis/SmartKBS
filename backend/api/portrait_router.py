@@ -20,8 +20,8 @@ from backend.api.image_gen_service import generate_and_save_image
 from backend.companion_memory import get_student_profile
 from backend.database import execute_query, execute_insert_update
 from backend.question_db import execute_query as q_execute_query
-from backend.config import BASE_DIR
-from backend.utils import get_user_base_dir
+from backend.config import STORAGE_DIR
+from backend.utils import get_user_base_dir, resolve_storage_path
 from backend.logger import logger
 from backend.prompts.portrait import (
     PORTRAIT_STYLES,
@@ -124,7 +124,11 @@ def _to_portrait_url(image_path: str, portrait_id: int = 0) -> str:
     if not image_path:
         return ""
     # fallback: 通过 files_router 访问（仅对自己可见）
-    rel = os.path.relpath(image_path, str(BASE_DIR)).replace("\\", "/")
+    resolved = resolve_storage_path(image_path)
+    try:
+        rel = os.path.relpath(resolved, str(STORAGE_DIR)).replace("\\", "/")
+    except ValueError:            # 跨盘符等异常存量数据：退回只取文件名
+        rel = "stu/" + os.path.basename(resolved)
     return f"/api/files/{rel}"
 
 
@@ -535,7 +539,7 @@ async def serve_portrait_image(portrait_id: int, request: Request):
         raise HTTPException(status_code=404, detail="画像不存在")
 
     rec = rows[0]
-    image_path = rec[2] or ""
+    image_path = resolve_storage_path(rec[2] or "")
     if not image_path or not os.path.exists(image_path):
         raise HTTPException(status_code=404, detail="图片文件不存在")
 

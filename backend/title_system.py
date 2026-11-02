@@ -8,12 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from backend.config import STORAGE_DIR
 from backend.database import execute_query, execute_query as _db_query, execute_insert_update
 from backend.logger import logger
 from backend.permission_service import is_student_account
 
 # ── 配置文件路径 ──
-_CONFIG_FILE = Path(__file__).resolve().parent / "system_config.json"
+_CONFIG_FILE = STORAGE_DIR / "system_config.json"
 
 # ── 默认积分主称号配置（12 级科技探索风） ──
 

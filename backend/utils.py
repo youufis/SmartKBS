@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Optional, Any
 
 from backend.config import (
-    BASE_DIR,
     DATA_DIR,
+    STORAGE_DIR,
     ROOT_DIR,
     STU_DIR,
     CHAT_HISTORY_DIR,
@@ -49,6 +49,40 @@ def _resolve_abs(path: str) -> str:
     if os.path.isabs(path):
         return path
     return str(DATA_DIR / path)
+
+
+#: 用户数据目录下的已知一级命名空间（用于把「过期绝对路径」重新挂到当前根）
+_STORAGE_TOP_DIRS = (ROOT_DIR, STU_DIR, "question_media", "temp_uploads", "LogFiles",
+                     "ChatHistory", "db_backups")
+
+
+def resolve_storage_path(stored: str) -> str:
+    """把库里存的路径还原成当前有效的绝对路径。
+
+    历史数据有两种形态：
+      · 相对路径（推荐）→ 直接拼 STORAGE_DIR；
+      · 绝对路径（student_portraits.image_path 等早期写法）→ 机器一旦换目录/换机器就失效。
+    这里对绝对路径做三级兜底：原样存在就用 → 按一级命名空间重新挂到 STORAGE_DIR →
+    原样返回（交给调用方按"不存在"处理）。**只做解析，绝不改库。**
+    """
+    if not stored:
+        return ""
+    text = str(stored)
+    if not os.path.isabs(text):
+        return str(STORAGE_DIR / text.replace("\\", "/").lstrip("/"))
+    if os.path.exists(text):
+        return text
+    norm = text.replace("\\", "/")
+    for top in _STORAGE_TOP_DIRS:
+        marker = "/" + top + "/"
+        idx = norm.find(marker)
+        if idx >= 0:
+            # 从一级命名空间开始截取（"stu/s1/portraits/x.png"），拼回当前数据根
+            rest = norm[idx + 1:]
+            candidate = str(STORAGE_DIR / rest)
+            if os.path.exists(candidate):
+                return candidate
+    return text
 
 
 def get_user_base_dir(username: str) -> str:

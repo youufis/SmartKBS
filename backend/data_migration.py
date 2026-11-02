@@ -149,6 +149,49 @@ def _copy_tree_merge(src: Path, dst: Path, records: list, limit: int = 20000) ->
     return copied
 
 
+def _normalize_absolute_paths(records: list) -> None:
+    """把库里「绝对路径」改成相对路径（只改能确认已在新位置找到的）。
+
+    历史遗留：`student_portraits.image_path` 存的是 `D:\\SmartKBS\\stu\\...` 这样的绝对路径，
+    换目录 / 换机器后直接失效。这里在数据目录结构就绪后做一次幂等归一：
+    能按新根解析到文件的，写成相对 STORAGE_DIR 的 POSIX 路径；解析不到的保持原样（不造假）。
+    """
+    db = Path(DB_DIR) / "smartkb.db"
+    if not db.exists():
+        return
+    try:
+        from backend.utils import resolve_storage_path
+    except Exception:
+        return
+    try:
+        con = sqlite3.connect(str(db), timeout=10)
+        try:
+            rows = con.execute(
+                "SELECT id, image_path FROM student_portraits "
+                "WHERE image_path IS NOT NULL AND image_path <> ''").fetchall()
+            changed = 0
+            for pid, stored in rows:
+                if not os.path.isabs(str(stored)):
+                    continue
+                resolved = resolve_storage_path(str(stored))
+                if not resolved or not os.path.exists(resolved):
+                    continue
+                rel = os.path.relpath(resolved, str(STORAGE_DIR)).replace("\\", "/")
+                if rel.startswith(".."):
+                    continue
+                con.execute("UPDATE student_portraits SET image_path=? WHERE id=?", (rel, pid))
+                changed += 1
+            if changed:
+                con.commit()
+                records.append({"type": "db_normalize", "table": "student_portraits",
+                                "rows": changed})
+                logger.info("[迁移] student_portraits.image_path 已归一为相对路径：%d 行", changed)
+        finally:
+            con.close()
+    except Exception as exc:
+        logger.warning("[迁移] 画像路径归一失败（不影响启动）：%s", exc)
+
+
 def _backup_original(paths: list, records: list) -> None:
     """迁移前把要被读的原件留一份底（不移动原件）"""
     if not paths:
@@ -206,7 +249,10 @@ def migrate_legacy_data() -> dict:
         _copy_tree_merge(Path(BASE_DIR) / "question_media", Path(MEDIA_ROOT), records)
         _copy_tree_merge(Path(BASE_DIR) / "temp_uploads", Path(TEMP_UPLOAD_ROOT), records)
 
-        # ④ 留底：确实迁移了东西，才把原件再拷一份（避免每次启动都生成新目录）
+        # ④ 库内绝对路径归一（画像等历史写法，搬目录后会失效）
+        _normalize_absolute_paths(records)
+
+        # ⑤ 留底：确实迁移了东西，才把原件再拷一份（避免每次启动都生成新目录）
         if any(item.get("type") in ("file", "dir") for item in records):
             _backup_original(
                 db_targets + ([cfg_src] if cfg_src.exists() else []), records)

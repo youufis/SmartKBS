@@ -18,7 +18,7 @@ from starlette.datastructures import UploadFile
 from backend.api.auth_guard import unauthorized
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files, is_admin, is_teacher
-from backend.config import ROOT_DIR, DEFAULT_LOGGED_IN_NAME, BASE_DIR
+from backend.config import ROOT_DIR, DEFAULT_LOGGED_IN_NAME, STORAGE_DIR
 from backend.prompts.html_generator import build_html_prompt
 from backend.utils import (
     normalize_rel_path,
@@ -45,7 +45,7 @@ MAX_UPLOAD_SIZE_MB = 5
 @router.get("/list")
 async def list_resources(request: Request):
     """获取当前用户的 HTML 文件列表"""
-    from backend.config import BASE_DIR
+    from backend.config import STORAGE_DIR
     user = get_current_user(request)
     username = user["username"]
     html_dir = get_account_html_dir(username)
@@ -56,7 +56,7 @@ async def list_resources(request: Request):
         names = [f for f in sorted(os.listdir(html_dir), key=str.lower)
                  if os.path.isfile(os.path.join(html_dir, f)) and not f.endswith((".json", ".js"))]
         # 内容类型：先批量取显式标注，再逐条回落文件名推断（一次查询，不做 N+1）
-        rels = {n: os.path.relpath(os.path.join(html_dir, n), str(BASE_DIR)).replace("\\", "/")
+        rels = {n: os.path.relpath(os.path.join(html_dir, n), str(STORAGE_DIR)).replace("\\", "/")
                 for n in names}
         marks = resource_kind.marks_for(rels.values())
         for fname in names:
@@ -606,7 +606,7 @@ def _generate_default_nav_html(html_dir: str = "") -> str:
     import html as _html
     body_section = ""
     if html_dir and os.path.exists(html_dir):
-        from backend.config import BASE_DIR
+        from backend.config import STORAGE_DIR
         files = [
             f for f in os.listdir(html_dir)
             if os.path.isfile(os.path.join(html_dir, f))
@@ -619,7 +619,7 @@ def _generate_default_nav_html(html_dir: str = "") -> str:
         if files:
             cards = []
             for f in files:
-                rel = os.path.relpath(os.path.join(html_dir, f), str(BASE_DIR)).replace("\\", "/")
+                rel = os.path.relpath(os.path.join(html_dir, f), str(STORAGE_DIR)).replace("\\", "/")
                 display = _html.escape(os.path.splitext(f)[0])
                 icon = _nav_icon_for(f)
                 href = "/api/files/" + urllib.parse.quote(rel)
@@ -684,7 +684,7 @@ from backend import resource_registry as rr
 def _html_root_rel(username: str) -> str:
     """当前用户 html 根目录相对项目根的 POSIX 路径, 如 root/html、stu/张三/html"""
     html_dir = os.path.abspath(get_account_html_dir(username))
-    return os.path.relpath(html_dir, str(BASE_DIR)).replace("\\", "/")
+    return os.path.relpath(html_dir, str(STORAGE_DIR)).replace("\\", "/")
 
 
 def _resolve_group_path(raw: str, root_rel: str) -> tuple[str, bool, bool]:
@@ -698,7 +698,7 @@ def _resolve_group_path(raw: str, root_rel: str) -> tuple[str, bool, bool]:
         return "", False, False
     if "://" in fp:  # 外链等异常存量数据, 原样保留
         return fp, False, False
-    base = str(BASE_DIR)
+    base = str(STORAGE_DIR)
     if os.path.isabs(fp) or re.match(r"^[A-Za-z]:[/\\]", fp):
         abs_p = os.path.normpath(fp)
     else:
@@ -781,7 +781,7 @@ def _purge_group_items_for_path(username: str, target_abs: str) -> int:
     """删除指向 target_abs（文件或目录, 含其子树）的分组引用, 返回删除条数"""
     root_rel = _html_root_rel(username)
     tgt = os.path.normpath(target_abs)
-    base = str(BASE_DIR)
+    base = str(STORAGE_DIR)
     hit_ids: list[int] = []
     for _gid, iid, raw in _group_item_rows(username):
         canon, _exists, resolved = _resolve_group_path((raw or "").strip(), root_rel)
@@ -797,7 +797,7 @@ def _purge_group_items_for_path(username: str, target_abs: str) -> int:
 
 def _remap_group_items_after_rename(username: str, old_abs: str, new_abs: str) -> int:
     """资源/目录改名后同步分组内引用路径, 避免旧名称残留"""
-    base = str(BASE_DIR)
+    base = str(STORAGE_DIR)
     try:
         old_canon = os.path.relpath(os.path.normpath(old_abs), base).replace("\\", "/")
         new_canon = os.path.relpath(os.path.normpath(new_abs), base).replace("\\", "/")
@@ -902,7 +902,7 @@ async def set_kind_mark(request: Request):
     canon, exists, resolved = _resolve_group_path(raw, root_rel)
     if not resolved or not exists:
         raise HTTPException(status_code=400, detail="资源不存在，请刷新后重试")
-    abs_target = os.path.join(str(BASE_DIR), *canon.split("/"))
+    abs_target = os.path.join(str(STORAGE_DIR), *canon.split("/"))
     if not path_within(os.path.abspath(get_account_html_dir(username)), abs_target):
         raise HTTPException(status_code=400, detail="只能标注本人资源目录内的资源")
 
@@ -1191,7 +1191,7 @@ async def add_to_group(group_id: int, request: Request):
     if not resolved or not exists:
         raise HTTPException(status_code=400, detail="资源不存在，请刷新后重试")
     # 只能分组自己 html 目录内的资源, 避免 ../ 等越界路径入库
-    abs_target = os.path.join(str(BASE_DIR), *canon.split("/"))
+    abs_target = os.path.join(str(STORAGE_DIR), *canon.split("/"))
     if not path_within(os.path.abspath(get_account_html_dir(username)), abs_target):
         raise HTTPException(status_code=400, detail="只能将本人资源目录内的资源加入分组")
 
@@ -1760,8 +1760,8 @@ async def ai_save_html(request: Request):
     # 刷新教师同步
     ensure_teacher_html_files(username)
 
-    from backend.config import BASE_DIR
-    rel_path = os.path.relpath(target_path, str(BASE_DIR)).replace("\\", "/")
+    from backend.config import STORAGE_DIR
+    rel_path = os.path.relpath(target_path, str(STORAGE_DIR)).replace("\\", "/")
 
     return {
         "message": f"✅ HTML 资源已保存为 {filename}",
@@ -1947,8 +1947,8 @@ def _save_resource_subdir(
         f"({saved_asset_count} 个配套文件)"
     )
 
-    from backend.config import BASE_DIR as _BASE_DIR
-    rel_path = os.path.relpath(main_path, str(_BASE_DIR)).replace("\\", "/")
+    from backend.config import STORAGE_DIR as _STORAGE_DIR
+    rel_path = os.path.relpath(main_path, str(_STORAGE_DIR)).replace("\\", "/")
 
     return main_path, rel_path
 
@@ -2019,7 +2019,7 @@ async def ai_save_multi_html(request: Request):
         single_html = candidate
 
     # 沿用现有的 ai-save 逻辑
-    from backend.config import BASE_DIR as _BASE_DIR
+    from backend.config import STORAGE_DIR as _STORAGE_DIR
     filename = f"{_sanitize_filename(dir_name or 'AI资源')}.html"
     filename = filename if filename.lower().endswith(".html") else filename + ".html"
     target_path = os.path.join(html_dir, filename)
@@ -2034,7 +2034,7 @@ async def ai_save_multi_html(request: Request):
         f.write(single_html)
 
     ensure_teacher_html_files(username)
-    rel_path = os.path.relpath(target_path, str(_BASE_DIR)).replace("\\", "/")
+    rel_path = os.path.relpath(target_path, str(_STORAGE_DIR)).replace("\\", "/")
 
     return {
         "message": f"✅ HTML 资源已保存为 {filename}",
@@ -2185,7 +2185,7 @@ async def ai_generate_async(request: Request):
                 }
             else:
                 # 单文件
-                from backend.config import BASE_DIR as _BASE_DIR
+                from backend.config import STORAGE_DIR as _STORAGE_DIR
                 filename = f"{_sanitize_filename(dir_name)}.html"
                 target_path = os.path.join(html_dir, filename)
                 if os.path.exists(target_path):
@@ -2196,7 +2196,7 @@ async def ai_generate_async(request: Request):
                 with open(target_path, "w", encoding="utf-8") as f:
                     f.write(html_cleaned)
                 ensure_teacher_html_files(username)
-                rel_path = os.path.relpath(target_path, str(_BASE_DIR)).replace("\\", "/")
+                rel_path = os.path.relpath(target_path, str(_STORAGE_DIR)).replace("\\", "/")
                 saved_info = {
                     "is_subdir": False,
                     "file_name": filename,

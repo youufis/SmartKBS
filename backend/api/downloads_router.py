@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from starlette.datastructures import UploadFile
 
-from backend.config import BASE_DIR
+from backend.config import STORAGE_DIR
 from backend.utils import get_user_base_dir
 from backend.logger import logger
 from backend.database import execute_query
@@ -29,7 +29,7 @@ EXCLUDE = {"index.html"}
 def _get_user_downloads_dir(username: str) -> str:
     """获取用户个人的 downloads 目录路径"""
     base = get_user_base_dir(username)
-    return os.path.join(str(BASE_DIR), base, "downloads")
+    return os.path.join(str(STORAGE_DIR), base, "downloads")
 
 
 def _get_user_quota(username: str) -> int:
@@ -338,7 +338,7 @@ async def api_shared_list(request: Request, owner: str = "", dir_path: str = "")
     # 构建实际目录路径
     from backend.utils import get_user_base_dir
     base = get_user_base_dir(owner)
-    full_dir = os.path.join(str(BASE_DIR), base, "downloads", clean_dir)
+    full_dir = os.path.join(str(STORAGE_DIR), base, "downloads", clean_dir)
 
     if not os.path.isdir(full_dir):
         return {"files": [], "error": "目录不存在"}

@@ -41,6 +41,7 @@ from backend.ai_task_manager import report_progress
 from backend.api.config_router import get_config_value
 from backend.model_catalog import (DEFAULT_IMAGE_MODEL, describe_size_rule, image_endpoint_of,
                                    options_for, preset_values_for, size_ok)
+from backend.config import STORAGE_DIR
 from backend.logger import logger
 
 # ── 全局并发控制 ──
@@ -1025,7 +1026,7 @@ async def _generate_image_item(
 
     file_name = Path(local_path).name
     try:
-        rel_path = Path(local_path).relative_to(BASE_DIR).as_posix()
+        rel_path = Path(local_path).relative_to(STORAGE_DIR).as_posix()
     except (ValueError, NameError):
         rel_path = f"question_media/_html/{file_name}"
     return {

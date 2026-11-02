@@ -27,7 +27,7 @@ from backend.config import (
     SUMMARY_DIR_NAME,
     TEACHERS_SUMMARY_DIR,
     ADMIN_SUMMARY_DIR,
-    BASE_DIR,
+    STORAGE_DIR,
     ai_api_base,
 )
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir, path_within
@@ -90,7 +90,7 @@ def _summary_paths_for(creator: str, fname: str, admin_fname: str) -> list[str]:
         os.path.join(get_account_chat_history_dir(creator), SUMMARY_DIR_NAME, fname),
         os.path.join(admin_chat_dir, SUMMARY_DIR_NAME, ADMIN_SUMMARY_DIR, admin_fname),
     ]
-    root = os.path.realpath(str(BASE_DIR))
+    root = os.path.realpath(str(STORAGE_DIR))
     return [p for p in candidates if path_within(root, os.path.realpath(p))]
 
 
