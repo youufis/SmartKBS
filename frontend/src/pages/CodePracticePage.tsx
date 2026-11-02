@@ -210,10 +210,25 @@ const CodePracticePage: React.FC = () => {
 
   // ── 创建题目 ──
   const handleCreateProblem = async () => {
-    if (!createForm.title.trim()) { message.warning(t('inputTitle')); return }
+    try {
+      await doCreateProblem()
+    } catch (e: any) {
+      // 兜底：这里以前一旦抛异常就整段静默，表现成"点保存没反应"
+      message.error(e?.message || t('createFailed'))
+    }
+  }
+
+  const doCreateProblem = async () => {
+    if (!String(createForm.title || '').trim()) { message.warning(t('inputTitle')); return }
     if (createForm.test_cases.length === 0) { message.warning(t('addAtLeastOneTestCase')); return }
-    if (createForm.test_cases.some((c) => !c.input.trim() && !c.expected.trim() && !c.description.trim())) {
-      message.warning(t('emptyTestCaseWarning'))
+    // 用 String() 兜底：字段缺失时 c.input.trim() 会抛 TypeError，异常在事件里被吞掉，
+    // 用户只会看到「点了没反应」，很难排查
+    const emptyIdx = createForm.test_cases.findIndex((c) =>
+      !String(c.input ?? '').trim()
+      && !String(c.expected ?? '').trim()
+      && !String(c.description ?? '').trim())
+    if (emptyIdx >= 0) {
+      message.warning(`第 ${emptyIdx + 1} 个测试用例是空的，请填写输入、期望输出或说明`)
       return
     }
     setCreateLoading(true)
