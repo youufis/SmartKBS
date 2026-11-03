@@ -49,10 +49,17 @@ _DB_FILES = ("smartkb.db", "questions.db")
 
 #: 老版本按「代码所在目录」存放的用户内容目录，桌面版覆盖安装会连着安装目录一起删。
 #: 迁移时逐个并入用户数据根（只补缺失文件、绝不覆盖）。Web/源码部署两者同路径 -> 自动跳过。
-_CONTENT_TOPS = ("root", "stu", "question_media", "temp_uploads", "ChatHistory", "db_backups")
+#: 只列**用户内容**目录。`db_backups/` 不在这里：它既不是内容、也不是备份入口，
+#: 只是 backend/database.py 数据自愈清理脏行时的整行留底（需要时自己 mkdir），
+#: 历史上还堆过一批一次性手工 .db 副本 —— 2026-11-03 已确认为无用文件并清理，
+#: 再把它算进"内容目录"会让页面看起来像重要数据、还会误导整站备份口径。
+_CONTENT_TOPS = ("root", "stu", "question_media", "temp_uploads", "ChatHistory")
 
 #: 历史顶层目录里、新版本已经并到 question_media 下面的一批
 _CONTENT_INTO_MEDIA = ("whiteboard_assets",)
+
+#: 自愈留底目录：不参与迁移（程序需要时自建），只在页面里当"可清理的运行副产物"提示
+_SELFHEAL_DIR = "db_backups"
 
 #: 升级运行期产物：以前写死在安装目录，覆盖安装即被删（等于"备份被下一次升级干掉"）
 _RUNTIME_DIRS = (".upgrade_backups",)
@@ -569,6 +576,7 @@ def storage_overview() -> dict:
         "legacy_config": {str(p): _size(p) for p in _legacy_config_candidates()},
         # 内容目录概况：页面要显示"数据在哪、多大"，并据此判断要不要做整站备份
         "content": {name: _dir_brief(Path(STORAGE_DIR) / name) for name in _CONTENT_TOPS},
+        "selfheal": _dir_brief(Path(STORAGE_DIR) / _SELFHEAL_DIR),
         "media_root": _dir_brief(Path(MEDIA_ROOT)),
         "upgrade_backups": _dir_brief(Path(STORAGE_DIR) / ".upgrade_backups"),
         "legacy_upgrade_backups": _dir_brief(Path(BASE_DIR) / ".upgrade_backups"),

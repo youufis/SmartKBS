@@ -1,28 +1,24 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Alert, Button, Card, Checkbox, Descriptions, message, Popconfirm, Space, Table, Tag, Typography,
+  Alert, Button, Card, Checkbox, Descriptions, message, Popconfirm, Segmented, Space, Table, Tag, Typography,
 } from 'antd'
 import {
   DatabaseOutlined, DeleteOutlined, ReloadOutlined, RollbackOutlined, SaveOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
-import ConfigRestorePanel from './ConfigRestorePanel'
 
 const { Text } = Typography
 
 /**
- * 备份与恢复（一个 Tab 里放三件事）
+ * 备份与恢复（一个 Tab、一张表）
  *
- * ① 「数据存放位置」：数据到底在哪个目录、多大、磁盘还剩多少，以及配置当前健康状态。
- *    「升级后像丢了数据」的第一现场几乎都是路径（换目录、换 Windows 账号、
- *    安装目录里还残留一份旧库），先把位置摊开，比让人翻日志快得多。
- * ② 「数据备份」：默认只备两个数据库 + 系统配置（快、小、够用）；
- *    勾「整站备份」再附带内容目录（root/stu/上传媒体等），恢复时按"只补缺失"并回，
- *    绝不覆盖现有文件。桌面版与源码包部署没有 git 链路，也能正常备份（源码快照自动跳过）。
- * ③ 「配置备份与恢复」：只回滚 system_config.json，用于"配置被打回出厂默认值"这种局部故障。
+ * 为什么合并成一张表：原来「数据备份」和「配置备份与恢复」上下两节，标题、说明、分页各来一遍，
+ * 使用者要先搞清楚"哪一节才是要点的"。两种恢复的差别只是**范围**（整机回退 / 只回退配置），
+ * 不是两个功能 —— 所以合并成一张表，用类型筛选切换，行上的操作按范围自适应。
  *
- * 三者放一起：触发场景往往是同一次升级，用户不该在两个页面之间找。
+ * 顶部「数据存放位置」卡：数据到底在哪个目录、多大、磁盘还剩多少、配置当前健康状态。
+ * 「升级后像丢了数据」的第一现场几乎都是路径（换目录、换 Windows 账号、安装目录里还有一份旧库）。
  */
 
 interface BackupItem {
@@ -42,28 +38,40 @@ interface BackupItem {
   path: string
 }
 
+interface ConfigSource {
+  id: string
+  kind: string
+  label: string
+  path: string
+  exists: boolean
+  is_current: boolean
+  size: number
+  mtime: string
+  keys: number
+  subjects: number
+  score: number
+  factory_default: boolean
+}
+
+interface DirBrief { path: string; exists: boolean; files: number; bytes: number }
+
 interface StorageInfo {
   storage_dir: string
   db_dir: string
   media_root: string
   config_file: string
   config_history_count: number
-  upgrade_backups: { path: string; exists: boolean; files: number; bytes: number }
-  content: Record<string, { path: string; exists: boolean; files: number; bytes: number }>
   db: Record<string, number>
   legacy_db: Record<string, number>
   desktop_layout: boolean
   legacy_data_at_risk: boolean
+  upgrade_backups: DirBrief
+  selfheal: DirBrief
+  content: Record<string, DirBrief>
   disk: { total_gb: number; free_gb: number }
   config_health: {
-    status: string
-    detail: string
-    score: number
-    subjects: number
-    factory_default: boolean
-    exists: boolean
-    backup_exists: boolean
-    history_count: number
+    status: string; detail: string; score: number; subjects: number; factory_default: boolean
+    exists: boolean; backup_exists: boolean; history_count: number
   }
 }
 
@@ -79,7 +87,7 @@ const StorageCard: React.FC = () => {
       const { data } = await apiClient.get('/api/config/storage')
       setInfo(data)
     } catch {
-      setInfo(null)   // 老后端没有这个接口：整卡不显示即可，不影响备份列表
+      setInfo(null)   // 老后端没有这个接口：整卡不显示，不影响下面的备份表
     }
   }, [])
 
@@ -110,13 +118,9 @@ const StorageCard: React.FC = () => {
       extra={<Button size="small" icon={<ReloadOutlined />} onClick={recheck} loading={checking}>{t('storageRecheck')}</Button>}
     >
       {bad && (
-        <Alert
-          type={h.status === 'factory_default' ? 'error' : 'warning'}
-          showIcon
-          style={{ marginBottom: 12 }}
+        <Alert type={h.status === 'factory_default' ? 'error' : 'warning'} showIcon style={{ marginBottom: 12 }}
           title={h.status === 'factory_default' ? t('storageHealthFactory') : t('storageHealthBad')}
-          description={h.detail || t('storageHealthHint')}
-        />
+          description={h.detail || t('storageHealthHint')} />
       )}
       {info.legacy_data_at_risk && (
         <Alert type="error" showIcon style={{ marginBottom: 12 }}
@@ -155,36 +159,62 @@ const StorageCard: React.FC = () => {
         <Descriptions.Item label={t('storageBackups')}>
           <Text type="secondary" style={{ fontSize: 12 }}>
             {info.upgrade_backups?.path} · {info.upgrade_backups?.files ?? 0} {t('storageFiles')} · {mb(info.upgrade_backups?.bytes ?? 0)}
-            {' · '}{t('storageDiskFree', { gb: info.disk?.free_gb ?? 0 })}
+            {' · '}{info.disk?.free_gb >= 0 ? t('storageDiskFree', { free: info.disk?.free_gb ?? 0 }) : t('storageDiskUnknown')}
           </Text>
         </Descriptions.Item>
+        {info.selfheal?.exists && (
+          <Descriptions.Item label={t('storageSelfheal')}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {info.selfheal.path} · {info.selfheal.files} {t('storageFiles')} · {mb(info.selfheal.bytes)}
+              {' · '}{t('storageSelfhealHint')}
+            </Text>
+          </Descriptions.Item>
+        )}
       </Descriptions>
     </Card>
   )
 }
 
+type Scope = 'all' | 'backup' | 'config'
 
-const DataBackupCard: React.FC = () => {
+interface MergedRow {
+  key: string
+  scope: 'backup' | 'config'
+  name: string
+  path: string
+  created: string
+  sizeText: string
+  tags: React.ReactNode
+  status: React.ReactNode
+  restorable: boolean
+  deletable: boolean
+  warning?: string
+  backup?: BackupItem
+  source?: ConfigSource
+}
+
+const BackupTableCard: React.FC = () => {
   const { t } = useTranslation('system')
-  const [items, setItems] = useState<BackupItem[]>([])
+  const [backups, setBackups] = useState<BackupItem[]>([])
+  const [sources, setSources] = useState<ConfigSource[]>([])
   const [loading, setLoading] = useState(false)
-  const [creating, setCreating] = useState(false)
   const [acting, setActing] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(5)
-  const [total, setTotal] = useState(0)
+  const [creating, setCreating] = useState(false)
   const [fullBackup, setFullBackup] = useState(false)
-  const [summary, setSummary] = useState({ total_size_mb: 0, disk_free_mb: -1 })
+  const [scope, setScope] = useState<Scope>('all')
+  const [meta, setMeta] = useState({ total_size_mb: 0, disk_free_mb: -1, dir: '' })
 
-  const load = useCallback(async (p: number, ps: number) => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
-      const { data } = await apiClient.get('/api/system/upgrade/backups', {
-        params: { page: p, page_size: ps },
-      })
-      setItems(data?.backups || [])
-      setTotal(data?.total ?? data?.count ?? 0)
-      setSummary({ total_size_mb: data?.total_size_mb ?? 0, disk_free_mb: data?.disk_free_mb ?? -1 })
+      const [b, s] = await Promise.all([
+        apiClient.get('/api/system/upgrade/backups', { params: { page: 1, page_size: 100 } }),
+        apiClient.get('/api/config/sources'),
+      ])
+      setBackups(b.data?.backups || [])
+      setMeta({ total_size_mb: b.data?.total_size_mb ?? 0, disk_free_mb: b.data?.disk_free_mb ?? -1, dir: b.data?.dir ?? '' })
+      // 「使用中」那份不进表（顶部数据位置卡已经写了它的路径与健康分），不存在的副本也不占行
+      setSources((s.data?.sources || []).filter((x: ConfigSource) => x.exists && x.kind !== 'current'))
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('backupLoadingFailed'))
     } finally {
@@ -192,9 +222,7 @@ const DataBackupCard: React.FC = () => {
     }
   }, [t])
 
-  useEffect(() => {
-    load(page, pageSize)
-  }, [load, page, pageSize])
+  useEffect(() => { load() }, [load])
 
   const create = async () => {
     setCreating(true)
@@ -207,10 +235,8 @@ const DataBackupCard: React.FC = () => {
       if (data?.content_dirs?.length) parts.push(`${t('backupContentTag')}(${data.content_dirs.length})`)
       if (data?.source_tar) parts.push(t('backupSourceTar'))
       message.success(t('backupCreated', { items: parts.join('、') || '-' }))
-      const warns: string[] = data?.warnings || []
-      warns.slice(0, 2).forEach((w) => message.warning(w))
-      setPage(1)
-      await load(1, pageSize)
+      ;(data?.warnings || []).slice(0, 2).forEach((w: string) => message.warning(w))
+      await load()
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('backupFailed'))
     } finally {
@@ -218,19 +244,19 @@ const DataBackupCard: React.FC = () => {
     }
   }
 
-  const restore = async (r: BackupItem) => {
-    setActing(`${r.name}:restore`)
+  const restoreBackup = async (r: BackupItem) => {
+    setActing(`b:${r.name}`)
     try {
       const { data } = await apiClient.post(
         `/api/system/upgrade/backups/${encodeURIComponent(r.name)}/restore`)
       const parts: string[] = [...(data?.databases || [])]
       if (data?.config_restored) parts.push(t('backupConfigShort'))
-      const contentN = Object.values(data?.content_restored || {})
+      const n = Object.values(data?.content_restored || {})
         .reduce((a: number, b: any) => a + Number(b || 0), 0)
-      if (contentN) parts.push(`${t('backupContentTag')}+${contentN}`)
+      if (n) parts.push(`${t('backupContentTag')}+${n}`)
       message.success(t('backupRestoreOk', { items: parts.join('、') || '-' }))
-      ;(data?.notes || []).slice(0, 3).forEach((n: string) => message.warning(n))
-      await load(page, pageSize)
+      ;(data?.notes || []).slice(0, 3).forEach((x: string) => message.warning(x))
+      await load()
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('backupRestoreFailed'))
     } finally {
@@ -238,16 +264,34 @@ const DataBackupCard: React.FC = () => {
     }
   }
 
-  const remove = async (r: BackupItem) => {
-    setActing(`${r.name}:delete`)
+  const restoreConfig = async (r: ConfigSource) => {
+    setActing(`c:${r.id}`)
     try {
-      const { data } = await apiClient.delete(
-        `/api/system/upgrade/backups/${encodeURIComponent(r.name)}`)
-      message.success(t('backupDeleted', { mb: data?.freed_mb ?? 0 }))
-      if (data?.warning) message.warning(data.warning)
-      const nextPage = items.length === 1 && page > 1 ? page - 1 : page
-      setPage(nextPage)
-      await load(nextPage, pageSize)
+      const { data } = await apiClient.post('/api/config/restore', { source: r.id })
+      message.success(t('configRestoreOk', { n: data?.changed_count ?? 0 }))
+      const keys: string[] = data?.changed_keys || []
+      if (keys.length) message.info(t('configRestoreChanged', { keys: keys.slice(0, 8).join('、') }))
+      setTimeout(() => window.location.reload(), 1500)   // 配置整页重载最稳（各 Tab 都要拿新值）
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('configRestoreFailed'))
+    } finally {
+      setActing('')
+    }
+  }
+
+  const removeRow = async (row: MergedRow) => {
+    setActing(`d:${row.key}`)
+    try {
+      if (row.scope === 'backup' && row.backup) {
+        const { data } = await apiClient.delete(
+          `/api/system/upgrade/backups/${encodeURIComponent(row.backup.name)}`)
+        message.success(t('backupDeleted', { mb: data?.freed_mb ?? 0 }))
+        if (data?.warning) message.warning(data.warning)
+      } else if (row.source) {
+        await apiClient.post('/api/config/sources/delete', { source: row.source.id })
+        message.success(t('configRestoreDeleted'))
+      }
+      await load()
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('backupDeleteFailed'))
     } finally {
@@ -255,81 +299,116 @@ const DataBackupCard: React.FC = () => {
     }
   }
 
-  const contentCell = (r: BackupItem) => (
-    <Space size={[4, 4]} wrap>
-      {r.databases.map((f) => <Tag key={f} color="blue">{f}</Tag>)}
-      {r.has_config && <Tag color="purple">{t('backupConfigShort')}</Tag>}
-      {r.has_content && <Tag color="cyan">{t('backupContentTag')} {r.content_files}</Tag>}
-      {r.has_source_tar && <Tag color="green">{t('backupSourceTar')}</Tag>}
-      {!r.databases.length && !r.has_config && !r.has_content && !r.has_source_tar
-        && r.files.map((f) => <Tag key={f}>{f}</Tag>)}
-      {!r.databases.length && !r.has_config && !r.has_content && !r.has_source_tar && !r.files.length
-        && <Text type="secondary">-</Text>}
-    </Space>
-  )
+  const rows: MergedRow[] = useMemo(() => {
+    const out: MergedRow[] = []
+    if (scope !== 'config') {
+      backups.forEach((b) => out.push({
+        key: `b:${b.name}`,
+        scope: 'backup',
+        name: b.name,
+        path: b.path,
+        created: b.created_at,
+        sizeText: `${b.size_mb} MB`,
+        tags: (
+          <Space size={[4, 4]} wrap>
+            {b.databases.map((f) => <Tag key={f} color="blue">{f}</Tag>)}
+            {b.has_config && <Tag color="purple">{t('backupConfigShort')}</Tag>}
+            {b.has_content && <Tag color="cyan">{t('backupContentTag')} {b.content_files}</Tag>}
+            {b.has_source_tar && <Tag color="green">{t('backupSourceTar')}</Tag>}
+            {!b.databases.length && !b.has_config && !b.has_content && !b.has_source_tar
+              && (b.files.length ? b.files.map((f) => <Tag key={f}>{f}</Tag>) : <Text type="secondary">-</Text>)}
+          </Space>
+        ),
+        status: b.kind === 'restore_point'
+          ? <Tag color="orange">{t('backupKindRestorePoint')}</Tag>
+          : (b.databases.length
+            ? <Tag color="green">{t('statusFull')}</Tag>
+            : <Tag color="gold">{t('backupKindConfigGuard')}</Tag>),
+        restorable: !!b.restorable,
+        deletable: true,
+        warning: (b.warnings || [])[0],
+        backup: b,
+      }))
+    }
+    if (scope !== 'backup') {
+      sources.forEach((c) => out.push({
+        key: `c:${c.id}`,
+        scope: 'config',
+        name: c.label,
+        path: c.path,
+        created: c.mtime,
+        sizeText: `${(c.size / 1024).toFixed(1)} KB`,
+        tags: (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t('configRestoreContentLine', { subjects: c.subjects, keys: c.keys, kb: (c.size / 1024).toFixed(1) })}
+            {' · '}{t('storageHealthScore', { score: c.score, subjects: c.subjects })}
+          </Text>
+        ),
+        status: c.factory_default
+          ? <Tag color="red">{t('configRestoreDefault')}</Tag>
+          : <Tag color="green">{t('configRestoreUsable')}</Tag>,
+        restorable: c.exists,
+        // 真实配置（当前使用中/旧位置）与 .bak（主配置缺失时唯一可用）由后端拒绝删除
+        deletable: c.kind !== 'legacy_backend',
+        source: c,
+      }))
+    }
+    return out
+  }, [backups, sources, scope, t])
 
   const columns: any[] = [
     {
-      title: t('backupColName'),
+      title: t('colItem'),
       dataIndex: 'name',
-      width: 250,
-      render: (_: any, r: BackupItem) => (
+      width: 280,
+      render: (_: any, r: MergedRow) => (
         <Space direction="vertical" size={0} style={{ lineHeight: 1.4 }}>
           <Space size={4} wrap>
+            <Tag color={r.scope === 'backup' ? 'geekblue' : 'purple'}>
+              {r.scope === 'backup' ? t('tagScopeBackup') : t('tagScopeConfig')}
+            </Tag>
             <Text strong>{r.name}</Text>
-            {r.kind === 'restore_point' && <Tag color="orange">{t('backupKindRestorePoint')}</Tag>}
-            {r.kind === 'config_guard' && <Tag color="gold">{t('backupKindConfigGuard')}</Tag>}
-            {!!r.version && <Tag>{r.version}</Tag>}
           </Space>
           <Text type="secondary" style={{ fontSize: 11 }}>{r.path}</Text>
-          {(r.warnings || []).slice(0, 1).map((w) => (
-            <Text key={w} type="warning" style={{ fontSize: 11 }}>{w}</Text>
-          ))}
+          {r.warning && <Text type="warning" style={{ fontSize: 11 }}>{r.warning}</Text>}
         </Space>
       ),
     },
-    { title: t('backupColTime'), dataIndex: 'created_at', width: 165 },
-    {
-      title: t('backupColSize'), dataIndex: 'size_mb', width: 95,
-      render: (v: number) => <Text>{v} MB</Text>,
-    },
-    { title: t('backupColContent'), render: (_: any, r: BackupItem) => contentCell(r) },
+    { title: t('backupColTime'), dataIndex: 'created', width: 160, render: (v: string) => v || '-' },
+    { title: t('backupColSize'), dataIndex: 'sizeText', width: 92 },
+    { title: t('backupColContent'), dataIndex: 'tags' },
+    { title: t('configRestoreColStatus'), dataIndex: 'status', width: 132 },
     {
       title: t('backupColAction'),
-      width: 178,
-      render: (_: any, r: BackupItem) => (
+      width: 190,
+      render: (_: any, r: MergedRow) => (
         <Space size={4}>
           <Popconfirm
-            title={t('backupRestoreConfirmTitle')}
-            description={r.has_content ? t('backupRestoreConfirmDesc') : t('backupRestoreConfirmNoContent')}
+            title={r.scope === 'backup' ? t('backupRestoreConfirmTitle') : t('configRestoreConfirmTitle')}
+            description={r.scope === 'backup'
+              ? (r.backup?.has_content ? t('backupRestoreConfirmDesc') : t('backupRestoreConfirmNoContent'))
+              : t('configRestoreConfirmDesc')}
             okText={t('backupRestoreConfirmOk')}
             cancelText={t('cancel')}
-            onConfirm={() => restore(r)}
+            disabled={!r.restorable}
+            onConfirm={() => (r.scope === 'backup' && r.backup
+              ? restoreBackup(r.backup) : (r.source ? restoreConfig(r.source) : undefined))}
           >
-            <Button
-              size="small"
-              icon={<RollbackOutlined />}
-              disabled={!r.restorable || (!!acting && acting !== `${r.name}:restore`)}
-              loading={acting === `${r.name}:restore`}
-            >
-              {t('backupRestore')}
+            <Button size="small" icon={<RollbackOutlined />} disabled={!r.restorable}
+              loading={acting === `b:${r.backup?.name}` || acting === `c:${r.source?.id}`}>
+              {r.scope === 'backup' ? t('restoreFull') : t('restoreConfigOnly')}
             </Button>
           </Popconfirm>
           <Popconfirm
             title={t('backupDeleteConfirm')}
-            description={total <= 1 ? t('backupDeleteLastHint') : undefined}
+            description={rows.length <= 1 ? t('backupDeleteLastHint') : undefined}
             okText={t('backupDeleteOk')}
             cancelText={t('cancel')}
-            onConfirm={() => remove(r)}
+            disabled={!r.deletable}
+            onConfirm={() => removeRow(r)}
           >
-            <Button
-              size="small"
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              loading={acting === `${r.name}:delete`}
-              disabled={!!acting && acting !== `${r.name}:delete`}
-            />
+            <Button size="small" type="text" danger icon={<DeleteOutlined />}
+              disabled={!r.deletable} loading={acting === `d:${r.key}`} />
           </Popconfirm>
         </Space>
       ),
@@ -339,47 +418,45 @@ const DataBackupCard: React.FC = () => {
   return (
     <Card
       title={<span><DatabaseOutlined /> {t('backupDataTitle')}</span>}
-      style={{ marginBottom: 16 }}
       extra={
-        <Space>
+        <Space wrap>
+          <Segmented
+            size="small"
+            value={scope}
+            onChange={(v) => setScope(v as Scope)}
+            options={[
+              { label: t('scopeAll'), value: 'all' },
+              { label: t('scopeBackups'), value: 'backup' },
+              { label: t('scopeConfigs'), value: 'config' },
+            ]}
+          />
           <Checkbox checked={fullBackup} onChange={(e) => setFullBackup(e.target.checked)}>
             {t('backupScopeFull')}
           </Checkbox>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => load(page, pageSize)} loading={loading}>
-            {t('refresh')}
-          </Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading}>{t('refresh')}</Button>
           <Button size="small" type="primary" icon={<SaveOutlined />} onClick={create} loading={creating}>
             {creating ? t('backupCreating') : t('backupNow')}
           </Button>
         </Space>
       }
     >
-      <Alert type="info" showIcon style={{ marginBottom: 4 }}
-        title={t('backupDataAlertTitle')}
-        description={fullBackup ? t('backupDataDescFull') : t('backupDataDesc')} />
+      <Alert type="info" showIcon style={{ marginBottom: 8 }}
+        title={t('mergedAlertTitle')} description={t('mergedAlertDesc')} />
       <Text type="secondary" style={{ fontSize: 12 }}>
-        {t('backupSummary', { n: total, mb: summary.total_size_mb, free: summary.disk_free_mb })}
+        {t('backupSummary', { n: backups.length, mb: meta.total_size_mb,
+          free: meta.disk_free_mb >= 0 ? meta.disk_free_mb : '-' })}
+        {' · '}{meta.dir}
       </Text>
-      <Table
-        rowKey="name"
+      <Table<MergedRow>
+        rowKey="key"
         size="small"
         style={{ marginTop: 8 }}
         loading={loading}
-        dataSource={items}
+        dataSource={rows}
         columns={columns}
         locale={{ emptyText: t('backupEmpty') }}
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
-          pageSizeOptions: [5, 10, 20],
-          showTotal: (n) => t('backupTotal', { n }),
-          onChange: (p, ps) => {
-            setPage(p)
-            setPageSize(ps)
-          },
-        }}
+        pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50],
+          showTotal: (n) => t('backupTotal', { n }) }}
       />
     </Card>
   )
@@ -388,8 +465,7 @@ const DataBackupCard: React.FC = () => {
 const BackupPanel: React.FC = () => (
   <>
     <StorageCard />
-    <DataBackupCard />
-    <ConfigRestorePanel />
+    <BackupTableCard />
   </>
 )
 
