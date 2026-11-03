@@ -212,6 +212,20 @@ def _same_path(a: Path, b: Path) -> bool:
         return str(a) == str(b)
 
 
+def _dst_has_files(dst: Path) -> bool:
+    """目标目录是否已经有自己的数据（有则不再从旧位置补文件）"""
+    try:
+        if not dst.is_dir():
+            return False
+        for _root, _dirs, files in os.walk(dst):
+            if files:
+                return True
+        return False
+    except OSError:
+        # 判不准时按"已有数据"处理：宁可少补，也不要复活用户删掉的东西
+        return True
+
+
 def _migrate_content_dirs(records: list) -> None:
     """把老版本落在代码目录里的**用户内容目录**并进 STORAGE_DIR。
 
@@ -236,6 +250,12 @@ def _migrate_content_dirs(records: list) -> None:
             continue
         seen.add(key)
         if not src.is_dir() or _same_path(src, dst):
+            continue
+        # 整类缺失才补，不逐文件补：安装目录里的旧副本会永久留着（迁移不删源），
+        # 逐文件补意味着"用户在应用里删掉的教师页面/学生画像，下次启动或覆盖安装又被复活"。
+        # 实测踩过：删掉 stu/s001/me.png 后二次覆盖安装，旧副本被补回来了。
+        if _dst_has_files(dst):
+            logger.debug("[迁移] 目标 %s 已有数据，跳过（避免复活用户已删除的文件）", dst)
             continue
         try:
             _copy_tree_merge(src, dst, records)
