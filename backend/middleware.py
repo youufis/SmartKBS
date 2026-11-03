@@ -64,6 +64,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/auth/reset-password-by-security",
             "/api/resources/nav",
             "/api/downloads/",
+    # 桌面壳自检用：只返回版本/构建标识/部署形态，用于判断 :8086 上是不是自己拉起的后端
+    "/api/system/info",
             "/static/",
             # S1: 原 "/docs" 与 "/openapi.json" 两条已删 —— 接口文档现在默认不注册路由
             # （backend/main.py 里 SMARTKB_DOCS_ENABLED=1 才打开）。开发机打开时这两个路径

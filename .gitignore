@@ -3,6 +3,12 @@
 /system_config.json
 /system_config.json.bak
 /system_config.json.tmp
+# 配置滚动历史（里面有 API Key，绝不能入库）
+/config_history/
+/.config_alert_state.json
+# 节点身份：被跟踪时每次 git 升级都会覆盖本机那份（多台机器会共用一个 node_id）
+/backend/.node_id
+**/.node_id
 # 历史位置（v9.0.0 及更早），保留以防旧分支/老部署被误提交
 backend/system_config.json
 backend/system_config.json.bak

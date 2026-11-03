@@ -61,9 +61,14 @@ REMOTE_VERSION_MIRRORS: list[str] = [
 MIRROR_SOURCE_MARK = "（CDN 缓存可能滞后）"
 VERSION_FETCH_TIMEOUT = 6  # 单个候选的超时：页面要等得起，连不上就快点换下一个
 VERSION_CACHE_TTL = 60  # 秒：页面轮询 + 后台自动检查都会调，缓存住别反复打网络
-BACKUP_DIR = BASE_DIR / ".upgrade_backups"
-STATE_FILE = BASE_DIR / ".upgrade_state.json"
-LOCK_FILE = BASE_DIR / ".upgrade_lock"  # 文件锁，防止多 IIS worker 并发升级
+# ── 升级运行期目录：一律派生自 STORAGE_DIR ──
+# 为什么不用 BASE_DIR：桌面版 BASE_DIR 就是安装目录（resources\backend\_internal），
+# 备份写在那里等于"下一次覆盖安装把救命的备份一起删掉"，装到 Program Files 时标准用户
+# 甚至写不进去。Web/源码部署 STORAGE_DIR == BASE_DIR，路径与历史完全一致。
+# （.git 相关路径仍按 BASE_DIR：仓库确实跟着代码目录走）
+BACKUP_DIR = STORAGE_DIR / ".upgrade_backups"
+STATE_FILE = STORAGE_DIR / ".upgrade_state.json"
+LOCK_FILE = STORAGE_DIR / ".upgrade_lock"  # 文件锁，防止多 IIS worker 并发升级
 MIGRATIONS_DIR = BASE_DIR / "backend" / "migrations"
 GIT_DOWNLOAD_URL = "https://git-scm.com/downloads/win"
 REMOTE_REPO_URL = "https://github.com/youufis/SmartKBS.git"
@@ -337,8 +342,15 @@ def _cleanup_pack_residue(*, dry_run: bool = False, gc_after: bool = False) -> d
     return result
 
 
-# 所有运行时数据（数据库、配置、上传文件等）已在 .gitignore 中，
-# git reset --hard 不会影响它们，无需额外保护
+# ── 「数据类路径永不允许被 git 跟踪」的判据 ──
+# git reset --hard 只替换**已跟踪**文件，未跟踪的用户数据不受影响；一旦哪天误把
+# 配置/库/节点 ID 提交进仓库，每台部署机下一次升级都会被仓库里那份覆盖掉
+# （system_config.json 搬回项目根时差点又踩一次），所以升级流水线在 reset 前先查一遍。
+_CRITICAL_TRACKED_NAMES = {"system_config.json", "system_config.json.bak", ".node_id"}
+_CRITICAL_TRACKED_SUFFIXES = (".db", ".db-wal", ".db-shm", ".db-journal")
+_CRITICAL_TRACKED_TOPS = {"root", "stu", "question_media", "temp_uploads",
+                          "whiteboard_assets", "db_backups", "ChatHistory",
+                          ".upgrade_backups", "LogFiles"}
 
 # ── 运行时状态 ──
 _state: dict[str, Any] = {
@@ -1287,11 +1299,29 @@ def _get_client_ip(request: Request) -> str:
     return ""
 
 
+def _git_home_dir() -> Path:
+    """给 git 当 HOME/USERPROFILE 的可写目录。
+
+    Web/源码部署仍是 <项目根>/Temp（与历史一致）；桌面版 BASE_DIR 在安装目录里
+    （Program Files 下标准用户不可写，覆盖安装还会被清掉），拿不到可写位就退回系统临时目录。
+    """
+    for cand in (Path(STORAGE_DIR) / "Temp", Path(tempfile.gettempdir()) / "smartkbs-git"):
+        try:
+            cand.mkdir(parents=True, exist_ok=True)
+            probe = cand / ".skb-write-test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return cand
+        except OSError:
+            continue
+    return Path(tempfile.gettempdir())
+
+
 def _make_git_env() -> dict[str, str]:
     """构建统一的 Git 环境变量"""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
-    temp_dir = str(BASE_DIR / "Temp")
+    temp_dir = str(_git_home_dir())
     env.setdefault("HOME", temp_dir)
     env.setdefault("USERPROFILE", temp_dir)
     env["GIT_DIR"] = str(BASE_DIR / ".git")
@@ -1634,18 +1664,23 @@ def _restore_config_after_sync(snapshot: dict[str, Any]) -> None:
     """reset 之后校验配置目标位；缺失或被重置成默认值就回填（回填前留现场）"""
     if not snapshot:
         return
-    from backend.data_migration import score_config
+    from backend.data_migration import looks_like_factory_default, score_config
     target = Path(STORAGE_DIR) / "system_config.json"
     snap = Path(snapshot["snap"])
     if not snap.is_file():
         return
     cur_score = -1
+    cur_is_factory = True
     if target.is_file():
         try:
-            cur_score = score_config(json.loads(target.read_text(encoding="utf-8")))
+            cur_cfg = json.loads(target.read_text(encoding="utf-8"))
+            cur_score = score_config(cur_cfg)
+            cur_is_factory = looks_like_factory_default(cur_cfg)
         except Exception:
             cur_score = -1
-    if cur_score >= max(int(snapshot["score"]) - 1, 3):
+    # 目标位健康（分数够、且不像出厂默认值）才保持不动；
+    # "文件存在但内容已经是默认值"是最阴的一种 —— 看 exists 一切正常，业务却全线异常。
+    if not cur_is_factory and cur_score >= max(int(snapshot["score"]) - 1, 3):
         logger.info(f"[upgrade] 配置守护: 目标位配置健康（分 {cur_score}），保持不动")
         return
     try:
@@ -1662,8 +1697,263 @@ def _restore_config_after_sync(snapshot: dict[str, Any]) -> None:
         logger.error(f"[upgrade] 配置守护: 恢复失败，请手工把 {snap} 覆盖到 {target}: {exc}")
 
 
+def _sqlite_backup_of(live_db: Path, dst: Path) -> str:
+    """给正在使用的库拍一份一致性快照，返回方式标记（sqlite / file）
+
+    优先走 SQLite 在线备份（拿写锁、按页复制，WAL 下也一致）；
+    万一库被打不开或损坏，退回"主库 + -wal + -shm 整组拷贝"，
+    宁可留下一份可能旧的备份，也不要什么都没有。
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _sqlite_restore(live_db, dst)      # 同一个 API：src -> dst
+        return "sqlite"
+    except Exception as exc:
+        logger.warning("[备份] %s 在线快照失败，改用文件拷贝：%s", live_db.name, exc)
+    try:
+        if dst.exists():
+            dst.unlink()
+    except OSError:
+        pass
+    shutil.copy2(live_db, dst)
+    for suffix in ("-wal", "-shm"):
+        side = Path(str(live_db) + suffix)
+        if side.exists():
+            try:
+                shutil.copy2(side, Path(str(dst) + suffix))
+            except OSError:
+                pass
+    return "file"
+
+
+def _write_backup_manifest(backup_dir: Path, payload: dict[str, Any]) -> None:
+    """给备份目录留一份清单：里面到底有什么、当时是什么版本、有没有降级警告"""
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        (backup_dir / "manifest.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("[备份] 清单写入失败（不影响备份本身）：%s", exc)
+
+
+def _read_backup_manifest(backup_dir: Path) -> dict[str, Any]:
+    try:
+        data = json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _content_backup_pairs() -> list[tuple[Path, str]]:
+    """整站备份要附带的内容目录（相对 STORAGE_DIR 的名字）"""
+    names = ("root", "stu", "question_media", "temp_uploads", "ChatHistory")
+    out: list[tuple[Path, str]] = []
+    for name in names:
+        d = Path(STORAGE_DIR) / name
+        if d.is_dir():
+            out.append((d, name))
+    return out
+
+
+def _backup_content_snapshot(backup_dir: Path, records: list[dict[str, Any]]) -> dict[str, Any]:
+    """把内容目录整份拷进备份（同一目录名放在 backup/content/ 下）"""
+    root = backup_dir / "content"
+    summary: dict[str, Any] = {}
+    for src, name in _content_backup_pairs():
+        dst = root / name
+        local: list[dict[str, Any]] = []
+        try:
+            n = _copy_tree_into(src, dst)
+        except Exception as exc:
+            logger.warning("[备份] 内容目录 %s 拷贝失败：%s", src, exc)
+            summary[name] = {"files": 0, "error": str(exc)}
+            continue
+        summary[name] = {"files": n}
+        records.extend(local)
+    if summary:
+        total = sum(int(v.get("files") or 0) for v in summary.values())
+        logger.info("[备份] 内容目录已附带 %d 个文件", total)
+    return summary
+
+
+def _copy_tree_into(src: Path, dst: Path, limit: int = 200000) -> int:
+    """目录整份复制（备份方向：目标是新目录，同名文件以源为准），返回文件数"""
+    if not src.is_dir():
+        return 0
+    copied = 0
+    for root, _dirs, files in os.walk(src):
+        rel = Path(root).relative_to(src)
+        (dst / rel).mkdir(parents=True, exist_ok=True)
+        for name in files:
+            if copied >= limit:
+                logger.warning("[备份] %s 文件数超过上限 %d，剩余未拷", src, limit)
+                return copied
+            try:
+                shutil.copy2(Path(root) / name, dst / rel / name)
+                copied += 1
+            except Exception as exc:
+                logger.warning("[备份] 拷贝 %s 失败：%s", Path(root) / name, exc)
+    return copied
+
+
+def _restore_content_missing(backup_dir: Path) -> dict[str, int]:
+    """把备份里的内容目录**只补缺失**地并回来（绝不覆盖现有文件）
+
+    数据库回退到升级前、文件却停在升级后，表现就是"记录在、点开 404"。
+    只补不覆：即便备份比现在旧，也不会盖掉升级后新产生的文件。
+    """
+    root = backup_dir / "content"
+    out: dict[str, int] = {}
+    if not root.is_dir():
+        return out
+    for sub in sorted(p for p in root.iterdir() if p.is_dir()):
+        dst = Path(STORAGE_DIR) / sub.name
+        copied = 0
+        for base, _dirs, files in os.walk(sub):
+            rel = Path(base).relative_to(sub)
+            (dst / rel).mkdir(parents=True, exist_ok=True)
+            for name in files:
+                target = dst / rel / name
+                if target.exists():
+                    continue
+                try:
+                    shutil.copy2(Path(base) / name, target)
+                    copied += 1
+                except Exception as exc:
+                    logger.warning("[备份恢复] 补文件 %s 失败：%s", target, exc)
+        if copied:
+            out[sub.name] = copied
+    return out
+
+
+#: 只有主库有这个表；题库/schema 不同，不能拿同一把尺子量
+_DB_MARKER_TABLES = {"smartkb.db": "users", "questions.db": "question_bank"}
+
+
+def _db_integrity(db: Path) -> str:
+    """恢复后做一次只读体检：把"备份本身是坏的"这件事当场说出来
+
+    判据分三层：SQLite 自身完整性 → 有表 → 主库/题库各自的关键表在不在。
+    只查 users 会把正常的 questions.db 误报成"不是本平台数据库"。
+    """
+    try:
+        con = sqlite3.connect(f"file:{str(db).replace(chr(92), '/')}?mode=ro", uri=True, timeout=15)
+        try:
+            row = con.execute("PRAGMA integrity_check").fetchone()
+            verdict = str(row[0]) if row else "unknown"
+            if verdict != "ok":
+                return f"integrity={verdict}"
+            n_tables = con.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()
+            if not (n_tables and n_tables[0]):
+                return "库里没有任何表（多半不是本平台数据库）"
+            marker = _DB_MARKER_TABLES.get(db.name)
+            if marker:
+                has = con.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (marker,)).fetchone()
+                if not has:
+                    return f"缺少关键表 {marker}（可能不是本平台的 {db.name}）"
+            return "ok"
+        finally:
+            con.close()
+    except Exception as exc:
+        return f"检查失败: {exc}"
+
+
+async def _local_changes_patch(guard_dir: Path) -> dict[str, Any]:
+    """reset 之前把"本机对被跟踪文件的改动"存成补丁
+
+    学校如果改过模板/提示词/构建产物，git reset --hard 会静默丢弃，而且失败回滚也回不来。
+    这里不阻断升级（管理员已经明确点了几次确认），但一定留一份可手工 apply 的补丁。
+    """
+    try:
+        status = await _run_git(["status", "--porcelain"], timeout=30)
+    except Exception as exc:
+        return {"error": str(exc)}
+    lines = [ln for ln in (status or "").splitlines() if ln.strip()]
+    if not lines:
+        return {"modified": 0}
+    try:
+        guard_dir.mkdir(parents=True, exist_ok=True)
+        diff = await _run_git(["diff", "HEAD", "--binary"], timeout=120)
+        (guard_dir / "local-changes.patch").write_text(diff or "", encoding="utf-8")
+        (guard_dir / "local-changes.txt").write_text("\n".join(lines), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("[upgrade] 本地改动补丁保存失败：%s", exc)
+    logger.warning("[upgrade] 检测到 %d 处本地改动，已留补丁 local-changes.patch", len(lines))
+    return {"modified": len(lines), "sample": lines[:20]}
+
+
+async def _check_tracked_user_data() -> list[str]:
+    """列出「被 git 跟踪、但属于运行期数据」的路径；命中即应中止升级"""
+    try:
+        out = await _run_git(["ls-files"], timeout=60)
+    except Exception as exc:
+        logger.warning("[upgrade] 读取 git 跟踪清单失败（跳过检查）: %s", exc)
+        return []
+    hits: list[str] = []
+    for line in (out or "").splitlines():
+        rel = line.strip().replace("\\", "/")
+        if not rel:
+            continue
+        parts = rel.split("/")
+        name = parts[-1]
+        if name in _CRITICAL_TRACKED_NAMES or name.endswith(_CRITICAL_TRACKED_SUFFIXES) \
+                or parts[0] in _CRITICAL_TRACKED_TOPS:
+            hits.append(rel)
+    return hits
+
+
+#: 备份保留策略：每类各留最近 N 份，超出的自动清理（磁盘不会被备份吃满）
+BACKUP_KEEP_EACH = 10
+
+
+def _prune_backups(keep: int = BACKUP_KEEP_EACH) -> list[str]:
+    """按前缀分组保留最近 `keep` 份，删掉更早的（连同同名 .tar）。
+
+    为什么需要：一次整站备份可能几百 MB～几 GB，以前只增不减，跑几次就把系统盘吃满，
+    反而让"升级前留底"在最需要的时候写不进去。`pre_upgrade_*`（升级/手动备份）与
+    `pre_restore_*`（恢复前自动留底）分别计量，避免一次误操作回退把升级留底全挤掉。
+    升级进行中的那份永不动。
+    """
+    removed: list[str] = []
+    if not BACKUP_DIR.is_dir():
+        return removed
+    groups: dict[str, list[Path]] = {}
+    for d in BACKUP_DIR.iterdir():
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        head = d.name.split("_")
+        prefix = "_".join(head[:2]) if len(head) > 2 else d.name   # pre_upgrade / pre_restore 分组
+        groups.setdefault(prefix, []).append(d)
+    current = ""
+    try:
+        current = Path(str(_load_state().get("current_backup", {}).get("path") or "")).name
+    except Exception:
+        current = ""
+    for prefix, dirs in groups.items():
+        # 按修改时间排（历史 hex 命名的留底目录名排序不可比，用 mtime 才不会把最新的时间戳份当旧的清掉）
+        dirs.sort(key=lambda x: (x.stat().st_mtime, x.name), reverse=True)
+        for old_dir in dirs[keep:]:
+            if _state["running"] or old_dir.name == current:
+                continue
+            try:
+                tar = old_dir.with_suffix(".tar")
+                shutil.rmtree(old_dir)
+                if tar.is_file():
+                    tar.unlink()
+                removed.append(old_dir.name)
+            except OSError as exc:
+                logger.warning("[备份] 清理 %s 失败：%s", old_dir.name, exc)
+    if removed:
+        logger.warning(f"[备份] 按保留策略清理 {len(removed)} 份旧备份：{', '.join(removed[:6])}")
+    return removed
+
+
 #: 只认这两种目录名，删除/恢复时用它挡掉路径穿越
-_BACKUP_NAME_RE = re.compile(r"^(pre_upgrade|pre_restore)_[0-9]{8}_[0-9]{6}$")
+#: 时间戳格式是现行规则；[0-9a-f]{12} 兼容 2026-11-03 之前升级流水线留下的
+#: `pre_upgrade_<task_id>` 目录 —— 那些目录当时在页面上看得见却点不动（一律 400 非法名称）。
+_BACKUP_NAME_RE = re.compile(r"^(pre_upgrade|pre_restore)_([0-9]{8}_[0-9]{6}|[0-9a-f]{12})$")
 
 
 def _resolve_backup_dir(name: str) -> Path:
@@ -1711,6 +2001,7 @@ async def list_backups(request: Request,
     require_admin(user)
 
     items: list[dict[str, Any]] = []
+    total_bytes = 0
     if BACKUP_DIR.is_dir():
         dirs = [d for d in BACKUP_DIR.iterdir() if d.is_dir() and not d.name.startswith(".")]
         try:
@@ -1729,6 +2020,17 @@ async def list_backups(request: Request,
                         except OSError:
                             continue
                         files.append(f.name)
+            # 内容目录快照（整站备份才有）
+            content_dir = d / "content"
+            content_files = 0
+            if content_dir.is_dir():
+                for f in content_dir.rglob("*"):
+                    if f.is_file():
+                        content_files += 1
+                        try:
+                            total += f.stat().st_size
+                        except OSError:
+                            pass
             tar_path = d.with_suffix(".tar")
             has_tar = tar_path.is_file()
             if has_tar:
@@ -1736,28 +2038,53 @@ async def list_backups(request: Request,
                     total += tar_path.stat().st_size
                 except OSError:
                     pass
+            total_bytes += total
+            manifest = _read_backup_manifest(d)
             try:
                 created = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(d.stat().st_mtime))
             except OSError:
                 created = ""
+            dbs = [f for f in files if f.endswith(".db")]
+            has_cfg = "system_config.json" in files
+            if d.name.startswith("pre_restore"):
+                kind = "restore_point"
+            elif manifest.get("deploy_mode") or dbs:
+                kind = "upgrade"
+            else:
+                kind = "config_guard"          # 只有配置的留底（旧版流水线产物）
             items.append({
                 "name": d.name,
-                "kind": "restore_point" if d.name.startswith("pre_restore") else "upgrade",
+                "kind": kind,
                 "created_at": created,
                 "size_mb": round(total / 1024 / 1024, 2),
                 "files": files,
+                "databases": dbs,
+                "has_config": has_cfg,
+                "has_content": bool(content_files),
+                "content_files": content_files,
                 "has_source_tar": has_tar,
-                "path": str(d).replace(str(BASE_DIR) + os.sep, ""),
+                "version": str(manifest.get("version") or ""),
+                "warnings": manifest.get("warnings") or [],
+                "restorable": bool(dbs or has_cfg),
+                "path": str(d).replace(str(STORAGE_DIR) + os.sep, "").replace(str(BASE_DIR) + os.sep, ""),
             })
     total_count = len(items)
-    start = (page - 1) * page_size
+    start_idx = (page - 1) * page_size
+    try:
+        disk_free_mb = round(shutil.disk_usage(str(BACKUP_DIR)).free / 1024 / 1024, 1)
+    except OSError:
+        disk_free_mb = -1
     return {
-        "backups": items[start:start + page_size],
+        "backups": items[start_idx:start_idx + page_size],
         "count": total_count,
         "total": total_count,
         "page": page,
         "page_size": page_size,
         "dir": str(BACKUP_DIR),
+        "total_size_mb": round(total_bytes / 1024 / 1024, 2),
+        "disk_free_mb": disk_free_mb,
+        "storage_dir": str(STORAGE_DIR),
+        "deploy_mode": _deploy_mode(),
     }
 
 
@@ -1790,16 +2117,25 @@ async def delete_backup(name: str, request: Request):
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"删除失败：{exc}")
     freed_mb = round(freed / 1024 / 1024, 2)
-    logger.warning(f"管理员 {user['username']} 删除数据备份 {name}（释放 {freed_mb} MB）")
-    return {"status": "ok", "name": name, "freed_mb": freed_mb}
+    remaining = len([d for d in BACKUP_DIR.iterdir() if d.is_dir()]) if BACKUP_DIR.is_dir() else 0
+    logger.warning(f"管理员 {user['username']} 删除数据备份 {name}（释放 {freed_mb} MB，剩余 {remaining} 份）")
+    hint = "" if remaining else "这已经是最后一份备份，删除后本机没有任何可回退的副本，建议立即再备份一次"
+    return {"status": "ok", "name": name, "freed_mb": freed_mb,
+            "remaining": remaining, "warning": hint}
 
 
 @router.post("/backups/{name}/restore", summary="从数据备份恢复数据库与配置（管理员）")
-async def restore_backup(name: str, request: Request):
+async def restore_backup(name: str, request: Request,
+                         restore_content: bool = Query(
+                             True, description="顺带把备份里的内容目录缺失文件补回来（绝不覆盖现有文件）")):
     """整站回退：数据库用 SQLite 在线备份覆盖，配置走 config_router.save_config。
 
-    恢复前会先把当前数据库与配置另存一份 pre_restore_<时间>，误操作还能再退回来。
-    注意：这份备份之后产生的数据会丢失，前端必须做二次确认。
+    - 恢复前先把当前库与配置另存一份 `pre_restore_<时间>`，误操作还能再退回来；
+      留底同样走在线快照 —— 以前用 `copy2` 拷正在写的库会漏掉 -wal 里的近期事务，
+      等于"救命的那一份本身可能是残缺的"。
+    - 恢复后立刻 `PRAGMA integrity_check`，备份本身是坏的当场说清楚，而不是让用户
+      在之后的使用中慢慢撞上。
+    - 只回库和配置、不回文件，会出现"记录在、点开 404"，所以内容目录按"只补缺失"并回。
     """
     user = get_current_user(request)
     require_admin(user)
@@ -1810,6 +2146,10 @@ async def restore_backup(name: str, request: Request):
     protected = target / "protected"
     dbs = sorted(protected.glob("*.db")) if protected.is_dir() else []
     cfg_file = protected / "system_config.json"
+    if not cfg_file.is_file():
+        legacy_cfg = next(iter(sorted(protected.glob("system_config*.json"))), None)
+        if legacy_cfg is not None:
+            cfg_file = legacy_cfg
     if not dbs and not cfg_file.is_file():
         raise HTTPException(status_code=400, detail="该备份里没有可恢复的数据库或配置")
 
@@ -1818,18 +2158,26 @@ async def restore_backup(name: str, request: Request):
     (safety / "protected").mkdir(parents=True, exist_ok=True)
 
     restored: list[str] = []
+    integrity: dict[str, str] = {}
+    notes: list[str] = []
     for src_db in dbs:
         cur_db = Path(DB_DIR) / src_db.name
         if cur_db.is_file():
             try:
-                shutil.copy2(cur_db, safety / "protected" / cur_db.name)
-            except OSError as exc:
+                await asyncio.to_thread(_sqlite_backup_of, cur_db, safety / "protected" / cur_db.name)
+            except Exception as exc:
                 logger.warning(f"[备份恢复] 回退点留底失败（继续恢复）{cur_db.name}: {exc}")
+                notes.append(f"{src_db.name} 回退点留底失败")
         try:
-            _sqlite_restore(src_db, cur_db)
+            await asyncio.to_thread(_sqlite_restore, src_db, cur_db)
             restored.append(src_db.name)
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"恢复 {src_db.name} 失败：{exc}")
+            raise HTTPException(status_code=500,
+                                detail=f"恢复 {src_db.name} 失败：{exc}（回退点={safety.name}）")
+        verdict = await asyncio.to_thread(_db_integrity, cur_db)
+        integrity[src_db.name] = verdict
+        if verdict != "ok":
+            notes.append(f"{src_db.name} 体检结果：{verdict}")
 
     cfg_restored = False
     if cfg_file.is_file():
@@ -1839,27 +2187,62 @@ async def restore_backup(name: str, request: Request):
             if isinstance(data, dict) and data:
                 merged = dict(DEFAULT_CONFIG)
                 merged.update(data)
-                save_config(merged)
+                await asyncio.to_thread(save_config, merged)
                 cfg_restored = True
         except Exception as exc:
             logger.error(f"[备份恢复] 配置恢复失败：{exc}")
+            notes.append(f"配置恢复失败：{exc}")
 
+    content_restored: dict[str, int] = {}
+    if restore_content:
+        try:
+            content_restored = await asyncio.to_thread(_restore_content_missing, target)
+        except Exception as exc:
+            logger.warning("[备份恢复] 内容目录补档失败：%s", exc)
+            notes.append("内容目录补档失败")
+
+    _write_backup_manifest(safety, {
+        "created_at": stamp, "version": APP_VERSION, "deploy_mode": _deploy_mode(),
+        "admin": user["username"], "client_ip": _get_client_ip(request),
+        "databases": [{"name": n, "bytes": (safety / "protected" / n).stat().st_size}
+                      for n in restored if (safety / "protected" / n).is_file()],
+        "config": ["system_config.json"] if cfg_restored else [],
+        "source_tar": False,
+        "warnings": ["由备份恢复前自动生成"],
+    })
+
+    total_files = sum(content_restored.values())
+    try:
+        _prune_backups()
+    except Exception as prune_exc:
+        logger.debug(f"[备份恢复] 保留策略清理跳过：{prune_exc}")
     logger.warning(
         f"管理员 {user['username']} 从数据备份 {name} 恢复：数据库={restored or '无'}，"
-        f"配置={'已恢复' if cfg_restored else '未恢复'}；回退点={safety.name}")
+        f"配置={'已恢复' if cfg_restored else '未恢复'}，内容补档 {total_files} 个文件；回退点={safety.name}")
     return {
         "status": "ok",
         "name": name,
         "databases": restored,
+        "integrity": integrity,
         "config_restored": cfg_restored,
+        "content_restored": content_restored,
         "safety_backup": safety.name,
-        "restart_hint": "数据库已在线恢复，刷新页面即可看到；如有页面仍显示旧数据，请重新登录",
+        "notes": notes,
+        "restart_hint": ("数据库已在线恢复，刷新页面即可看到；如有页面仍显示旧数据，请重新登录"
+                         + ("；体检未通过，请按提示复核" if notes else "")),
     }
 
 
-@router.post("/backup")
-async def create_backup(request: Request):
-    """② 升级前备份源码和关键数据"""
+@router.post("/backup", summary="创建数据备份（管理员）")
+async def create_backup(request: Request,
+                        include_content: bool = Query(
+                            False, description="整站备份：附带内容目录（root/stu/上传媒体等），体积会明显变大")):
+    """数据备份：两个数据库 + 系统配置（默认），可附带内容目录，Git 部署再附源码快照。
+
+    顺序很重要：**先落数据，再尽力附源码 tar**。桌面版与源码包部署没有可用的 git 链路，
+    以前第一步就执行 `git archive`，于是这两类部署点「立即备份」必然 500 ——
+    而恰恰是这两类用户没有 git 回滚能力，最需要可用的备份。
+    """
     user = get_current_user(request)
     require_admin(user)
     client_ip = _get_client_ip(request)
@@ -1870,50 +2253,112 @@ async def create_backup(request: Request):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = BACKUP_DIR / f"pre_upgrade_{timestamp}"
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    warnings: list[str] = []
 
     try:
-        # 用 git archive 备份跟踪的文件（轻量、快速，输出到文件无需捕获）
-        tar_path = backup_path.with_suffix(".tar")
-        await _run_git(["archive", "-o", str(tar_path), "HEAD"], timeout=30, capture_output=False)
-
         prot_dir = backup_path / "protected"
         prot_dir.mkdir(parents=True, exist_ok=True)
-        # 额外备份数据库和配置（虽在 .gitignore 中，但很重要）
-        # 路径必须按实际落盘位置推：数据库在 DB_DIR，配置在 STORAGE_DIR 根
-        # （Web 版=项目根，桌面版=%APPDATA%）；backend/system_config.json 只是 v9.0.0 及更早的
-        # 历史位置，留作兼容兜底，否则升级前备份会漏掉整份配置。
-        cands = [
-            Path(DB_DIR) / "smartkb.db",
-            Path(DB_DIR) / "questions.db",
-            Path(STORAGE_DIR) / "system_config.json",
-            BASE_DIR / "backend" / "system_config.json",
-            Path(DB_DIR) / ".node_id",
-            BASE_DIR / "backend" / ".node_id",
-        ]
-        for src in dict.fromkeys(cands):      # 去重且保序
-            if src.exists():
-                try:
-                    shutil.copy2(src, prot_dir / src.name)
-                except Exception as copy_err:
-                    msg = f"备份 {src} 跳过: {copy_err}"
-                    logger.warning(msg)
-                    _state["message"] = msg
+
+        # ① 数据库：在线一致性快照（正在用也能拍）
+        dbs: list[dict[str, Any]] = []
+        for name in ("smartkb.db", "questions.db"):
+            src = Path(DB_DIR) / name
+            if not src.exists():
+                warnings.append(f"未找到 {name}（{src}）")
+                continue
+            how = await asyncio.to_thread(_sqlite_backup_of, src, prot_dir / name)
+            dbs.append({"name": name, "bytes": src.stat().st_size, "via": how})
+            if how == "file":
+                warnings.append(f"{name} 走了文件拷贝（在线快照失败），恢复后请留意完整性")
+
+        # ② 配置：当前生效的一份 + 旧位置（v9.0.0 及更早）如果还在也带上
+        #    注意两份文件的 name 相同，不能按文件名去重（那样旧位置那份永远备不到）
+        cfg_names: list[str] = []
+        cur_cfg = Path(STORAGE_DIR) / "system_config.json"
+        legacy_cfg = BASE_DIR / "backend" / "system_config.json"
+        if cur_cfg.is_file():
+            shutil.copy2(cur_cfg, prot_dir / "system_config.json")
+            cfg_names.append("system_config.json")
+        if legacy_cfg.is_file():
+            try:
+                dup = legacy_cfg.resolve() == cur_cfg.resolve()
+            except OSError:
+                dup = False
+            if not dup:
+                shutil.copy2(legacy_cfg, prot_dir / "system_config.legacy.json")
+                cfg_names.append("system_config.legacy.json")
+        if not cfg_names:
+            warnings.append("未找到 system_config.json，本次备份不含配置")
+        node = Path(DB_DIR) / ".node_id"
+        if node.is_file():
+            shutil.copy2(node, prot_dir / node.name)
+
+        # ③ 内容目录（可选）：root / stu / question_media / temp_uploads / ChatHistory
+        content: dict[str, Any] = {}
+        if include_content:
+            content = await asyncio.to_thread(_backup_content_snapshot, backup_path, [])
+            total_files = sum(int(v.get("files") or 0) for v in content.values())
+            logger.info(f"管理员 {user['username']} 整站备份：内容目录 {total_files} 个文件")
+
+        # ④ 源码快照：只有真的是 git 仓库且有提交时才做，失败不影响数据备份
+        has_tar = False
+        if _has_git_history():
+            try:
+                tar_path = backup_path.with_suffix(".tar")
+                await _run_git(["archive", "-o", str(tar_path), "HEAD"],
+                               timeout=120, capture_output=False)
+                has_tar = tar_path.is_file()
+            except Exception as tar_err:
+                has_tar = False
+                warnings.append(f"源码快照未生成：{str(tar_err)[:160]}")
+        else:
+            warnings.append("本机不是 Git 部署（桌面版/源码包），已跳过源码快照；数据库与配置照常备份")
+
+        manifest = {
+            "created_at": timestamp,
+            "version": APP_VERSION,
+            "desktop_build": str(_read_local_version_payload().get("desktop_build") or ""),
+            "deploy_mode": _deploy_mode(),
+            "admin": user["username"],
+            "client_ip": client_ip,
+            "databases": dbs,
+            "config": cfg_names,
+            "content": content,
+            "source_tar": has_tar,
+            "warnings": warnings,
+        }
+        _write_backup_manifest(backup_path, manifest)
 
         def _m_backup(st: dict[str, Any]) -> None:
             st["current_backup"] = {
                 "path": str(backup_path),
-                "tar": str(tar_path),
+                "tar": str(backup_path.with_suffix(".tar")) if has_tar else "",
                 "version": APP_VERSION,
                 "created_at": timestamp,
                 "admin": user["username"],
                 "client_ip": client_ip,
+                "includes_content": bool(content),
             }
         _mutate_state(_m_backup)
 
-        logger.info(f"升级备份完成: {backup_path}")
-        return {"status": "ok", "backup_path": str(backup_path), "version": APP_VERSION}
+        logger.info(f"升级备份完成: {backup_path}（数据{len(dbs)}库/配置{len(cfg_names)}/内容{bool(content)}）")
+        pruned = _prune_backups()
+        result = {"status": "ok", "backup_path": str(backup_path), "version": APP_VERSION,
+                  "databases": [d["name"] for d in dbs], "config": cfg_names,
+                  "content_dirs": list(content.keys()), "source_tar": has_tar,
+                  "warnings": warnings}
+        if pruned:
+            result["pruned"] = pruned
+            warnings.append(f"按保留策略（每类 {BACKUP_KEEP_EACH} 份）清理了 {len(pruned)} 份旧备份")
+            _write_backup_manifest(backup_path, {**manifest, "warnings": warnings})
+        return result
 
     except Exception as e:
+        try:
+            if backup_path.is_dir() and not any((backup_path / "protected").glob("*.db")):
+                shutil.rmtree(backup_path, ignore_errors=True)
+        except OSError:
+            pass
         raise HTTPException(status_code=500, detail=f"备份失败: {str(e)}")
 
 
@@ -1989,6 +2434,11 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
     """
     to_version = remote.get("latest_version", "unknown")
     reset_done = False        # 是否已经真的动过工作区(Step 2)，决定失败时要不要回滚
+    # Step 1d/1e 的产物先在函数头声明：失败分支在 Step 1 之前就退出时也要能安全引用，
+    # 否则 except 里那句"可用留底"会变成 NameError，把真正的报错盖掉。
+    guard_stamp = ""
+    guard_name = ""
+    local_changes: dict[str, Any] = {}
     try:
         # ── Step 1: git fetch 增量拉取（如果已预缓存则跳过网络传输）──
         with _STATE_LOCK:
@@ -2048,17 +2498,80 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         })
         logger.info(f"[upgrade] Step 1c: 已写入进行中占位记录 task={task_id}")
 
-        # ── Step 1d: 配置守护快照（必须在 reset 之前） ──
-        # 升级后进程未必立刻重启，启动迁移也就未必跑得到；先把当前真正生效的配置留底，
-        # reset 之后再校验回填，避免"代码升上去了、配置变成出厂默认值"。
+        # ── Step 1d: 升级前留底（配置 + 两个数据库），目录名与手动备份同一套规则 ──
+        # 为什么必须在这里做：① 升级后进程未必立刻重启，启动期迁移也就未必跑得到，
+        # 先把当前真正生效的配置留底，reset 之后立刻校验回填，避免"代码升上去了、配置变回出厂默认值"；
+        # ② Step 3 的数据库迁移是直接改库的，而失败回滚只 `git reset --hard` 退代码 ——
+        # 没有库级备份的话，失败后就停在"旧代码 + 迁移了一半的库"，只能人工救。
+        # ③ 目录名以前用 task_id（12 位 hex），不匹配备份白名单，页面上看得见却点不动。
+        guard_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        guard_name = f"pre_upgrade_{guard_stamp}"
+        guard_root = BACKUP_DIR / guard_name
+        guard_dir = guard_root / "protected"
         cfg_snapshot: dict[str, Any] = {}
+        db_snapshot: list[dict[str, Any]] = []
+        local_changes: dict[str, Any] = {}
         try:
-            guard_dir = BACKUP_DIR / f"pre_upgrade_{task_id}" / "protected"
+            guard_dir.mkdir(parents=True, exist_ok=True)
             cfg_snapshot = _snapshot_config(guard_dir)
             if not cfg_snapshot:
                 logger.warning("[upgrade] Step 1d: 未找到可留底的配置文件（新装机器或路径异常）")
+            for db_name in ("smartkb.db", "questions.db"):
+                live = Path(DB_DIR) / db_name
+                if live.is_file():
+                    how = _sqlite_backup_of(live, guard_dir / db_name)
+                    db_snapshot.append({"name": db_name, "bytes": live.stat().st_size, "via": how})
+            node_file = Path(DB_DIR) / ".node_id"
+            if node_file.is_file():
+                shutil.copy2(node_file, guard_dir / node_file.name)
+            _write_backup_manifest(guard_root, {
+                "created_at": guard_stamp, "version": APP_VERSION,
+                "desktop_build": str(_read_local_version_payload().get("desktop_build") or ""),
+                "deploy_mode": _deploy_mode(), "admin": admin, "client_ip": client_ip,
+                "databases": db_snapshot,
+                "config": ["system_config.json"] if cfg_snapshot else [],
+                "content": {}, "source_tar": False,
+                "warnings": ["升级流水线自动留底（含配置与数据库，不含内容目录）"],
+            })
+
+            def _m_guard_backup(st: dict[str, Any]) -> None:
+                st["current_backup"] = {
+                    "path": str(guard_root), "tar": "", "version": APP_VERSION,
+                    "created_at": guard_stamp, "admin": admin, "client_ip": client_ip,
+                    "includes_content": False,
+                }
+            _mutate_state(_m_guard_backup)
+            _set_progress("backup", f"升级前已留底（配置 + {len(db_snapshot)} 个数据库）", 18)
         except Exception as snap_e:
-            logger.warning(f"[upgrade] Step 1d: 配置留底异常（不影响升级）: {snap_e}")
+            logger.warning(f"[upgrade] Step 1d: 留底异常（不影响升级）: {snap_e}")
+
+        # ── Step 1e: 动工作区之前的两道闸 ──
+        # 闸一：本机对被跟踪文件的改动。git reset --hard 会静默丢弃它们，回滚也回不来
+        #       （回滚是退回 HEAD@{1}，不是退回"你改过的样子"），所以先存一份可 apply 的补丁。
+        # 闸二：仓库里是否混进了运行期数据文件。reset 会用仓库那份覆盖本机数据 ——
+        #       backend/.node_id 就真被跟踪过（每台部署机的节点身份都被覆盖成同一份），
+        #       system_config.json 搬回项目根时也差点再来一次。命中就中止，不拿全站数据赌。
+        try:
+            local_changes = await _local_changes_patch(guard_dir)
+            if local_changes.get("modified"):
+                logger.warning(f"[upgrade] Step 1e: 本机有 {local_changes['modified']} 处被跟踪文件的改动，"
+                               f"已存 local-changes.patch（升级后如需保留请手工 apply）")
+        except Exception as lc_e:
+            logger.warning(f"[upgrade] Step 1e: 本地改动补丁异常（不影响升级）: {lc_e}")
+
+        try:
+            bad_tracked = await _check_tracked_user_data()
+        except Exception as bt_e:
+            logger.warning(f"[upgrade] Step 1e: 跟踪清单检查异常（跳过）: {bt_e}")
+            bad_tracked = []
+        if bad_tracked:
+            raise RuntimeError(
+                "仓库中存在被 git 跟踪的运行期数据文件，继续升级会用仓库里那份覆盖本机数据，已中止。\n"
+                "请在本机执行后重试（或在仓库侧删除并提交）：\n  "
+                + "\n  ".join(f"git rm --cached {f}" for f in bad_tracked[:10])
+                + (" ..." if len(bad_tracked) > 10 else "")
+                + f"\n（升级前留底目录：{guard_name}）"
+            )
 
         # ── Step 2: git reset 快速同步 ──
         _set_progress("sync", f"正在同步 {behind} 个提交的变更到本地...", 30)
@@ -2142,6 +2655,8 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             "changed_files": changed_files,
             "migrations": applied,
             "changelog": remote.get("changelog", []),
+            "pre_upgrade_backup": guard_name,      # 升级前留底（配置 + 两个库）
+            "local_changes": local_changes.get("modified", 0),
         }
         try:
             _finalize_history(task_id, success_entry)
@@ -2164,6 +2679,8 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
                     "admin": admin,
                     "client_ip": client_ip,
                     "completed_at": datetime.now().isoformat(),
+                    "pre_upgrade_backup": guard_name,
+                    "local_changes": local_changes.get("modified", 0),
                 }
             _mutate_state(_m_success)
             logger.info("[upgrade] Step 6b/7: 完成状态已持久化")
@@ -2190,7 +2707,9 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         logger.error(f"升级失败: {e}")
         _state["error"] = str(e)
         _state["running"] = False
-        _set_progress("failed", f"❌ 升级失败: {e}", -1)
+        _set_progress("failed", f"❌ 升级失败: {e}"
+                      + (f"｜升级前留底：{guard_name}（可在「系统配置 → 备份与恢复」一键退回）"
+                         if guard_name else ""), -1)
 
         # 自动回滚：只有 Step 2 真的动过工作区才需要，也才安全。
         # 早退失败(fetch/迁移之前)时 HEAD 没动过，此时 reset --hard HEAD@{1} 会把
@@ -2220,6 +2739,10 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             "status": "failed",
             "error": str(e),
             "rolled_back": rolled_back,
+            # 升级失败最常见的是"代码退回了、库却被迁移到一半"：把可用留底直接写进记录，
+            # 管理员在页面上就能定位到「备份与恢复」里的这一份并一键退回。
+            "pre_upgrade_backup": guard_name,
+            "local_changes": local_changes.get("modified", 0),
         }
         _finalize_history(task_id, fail_entry)
 

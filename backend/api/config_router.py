@@ -13,6 +13,7 @@ import re
 import shutil
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -398,6 +399,53 @@ def save_config(config: dict[str, Any]):
     with _cache_lock:
         _cfg_cache = None
         _cfg_cache_key = None
+    _rotate_config_history()
+
+
+def _config_history_dir() -> Path:
+    """配置滚动历史目录（跟着 CONFIG_FILE 走：Web 版=项目根，桌面版=%APPDATA%）"""
+    return CONFIG_FILE.parent / "config_history"
+
+
+def _rotate_config_history(keep: int = 30, recent_days: int = 7) -> None:
+    """每次成功保存留一份带时间戳的副本。
+
+    为什么需要：以前只有 `.bak` 一代。管理员先存对了、又存错一次，`.bak` 就被错误那份顶掉，
+    "从历史备份恢复"于是再也找不到可用的一版。滚动历史保留最近 `keep` 份，
+    外加 `recent_days` 天内的全部（避免高频保存把有用的那一版挤掉）。内容没变不重复落盘。
+    """
+    try:
+        dst_dir = _config_history_dir()
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        current = CONFIG_FILE.read_bytes()
+        # 带毫秒：管理员在一次课里连点两次保存落在同一秒时，纯秒级时间戳会让后一份把前一份
+        # 直接盖掉（实测下来"历史"里永远只有一条，回滚点等于没有）
+        _now = datetime.now()
+        stamp = _now.strftime("%Y%m%d_%H%M%S") + f".{_now.microsecond // 1000:03d}"
+        dst = dst_dir / f"{CONFIG_FILE.name}.{stamp}.json"
+        newest = sorted(dst_dir.glob(f"{CONFIG_FILE.name}.*.json"), reverse=True)
+        if newest and newest[0].read_bytes() == current:
+            return                      # 与上一份完全相同，不留重复
+        dst.write_bytes(current)
+        newest.insert(0, dst)
+
+        cutoff = time.time() - recent_days * 86400
+        victims = [f for i, f in enumerate(newest)
+                   if i >= keep and (not f.stat().st_mtime or f.stat().st_mtime < cutoff)]
+        for f in victims:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+    except Exception as exc:      # 历史留底失败绝不影响本次保存
+        logger.warning(f"[配置] 滚动历史写入失败（不影响本次保存）：{exc}")
+
+
+def list_config_history() -> list[Path]:
+    try:
+        return sorted(_config_history_dir().glob(f"{CONFIG_FILE.name}.*.json"), reverse=True)
+    except OSError:
+        return []
 
 
 def get_config_value(key: str, default: Any = None) -> Any:
@@ -407,19 +455,64 @@ def get_config_value(key: str, default: Any = None) -> Any:
 
 
 def config_health() -> dict[str, Any]:
-    """C1: 配置健康状态(供 /config/health 与启动自检使用)"""
-    load_config()
+    """C1: 配置健康状态(供 /config/health 与启动自检使用)
+
+    除了"文件在不在、解析成不成"，还要能回答"这份配置是不是其实已经退回出厂默认值"——
+    配置被重置时文件存在、JSON 合法，光看 exists 完全正常（课程只剩「人工智能」
+    就是这样被放过好几轮的），所以额外给出健康分与出厂默认判定。
+    """
+    cfg = load_config()
     with _cache_lock:
         info = dict(_cfg_corrupt)
+    from backend.data_migration import looks_like_factory_default, score_config
+    score = score_config(cfg)
+    factory = looks_like_factory_default(cfg)
+    status = ("corrupt_recovered_from_backup" if info.get("recovered_from_backup")
+              else ("corrupt" if info.get("corrupt")
+                    else ("factory_default" if factory else "ok")))
+    subjects = cfg.get("SUBJECTS")
     return {
-        "status": ("corrupt_recovered_from_backup" if info.get("recovered_from_backup")
-                   else ("corrupt" if info.get("corrupt") else "ok")),
+        "status": status,
         "ok": not info.get("corrupt", False),
         "detail": info.get("detail", ""),
         "file": str(CONFIG_FILE),
         "exists": CONFIG_FILE.exists(),
         "backup_exists": _backup_file().exists(),
+        "history_count": len(list_config_history()),
+        "score": score,
+        "factory_default": factory,
+        "subjects": len(subjects) if isinstance(subjects, list) else 0,
+        "appid_set": bool(str(cfg.get("APPID") or "").strip()),
     }
+
+
+def storage_info() -> dict[str, Any]:
+    """数据落盘概览（备份与恢复页要显示"数据到底在哪、有多大、有没有第二份在危险位置"）"""
+    from backend.data_migration import storage_overview
+    from backend.config import DATA_DIR, DB_DIR, MEDIA_ROOT, TEMP_UPLOAD_ROOT
+    out = storage_overview()
+    try:
+        usage = shutil.disk_usage(str(STORAGE_DIR))
+        out["disk"] = {"total_gb": round(usage.total / 1024 ** 3, 2),
+                       "free_gb": round(usage.free / 1024 ** 3, 2)}
+    except OSError:
+        out["disk"] = {"total_gb": 0, "free_gb": -1}
+    out["storage_dir"] = str(STORAGE_DIR)
+    out["config_file"] = str(CONFIG_FILE)
+    out["config_backup"] = str(_backup_file())
+    out["config_history_dir"] = str(_config_history_dir())
+    out["config_history_count"] = len(list_config_history())
+    out["db_dir"] = str(DB_DIR)
+    out["media_root"] = str(MEDIA_ROOT)
+    out["temp_uploads"] = str(TEMP_UPLOAD_ROOT)
+    out["data_dir"] = str(DATA_DIR)
+    out["base_dir"] = str(BASE_DIR)
+    # 危险信号：安装目录（代码目录）里还躺着一份库 —— 桌面版覆盖安装会把它连目录一起删
+    legacy = out.get("legacy_db") or {}
+    out["legacy_data_at_risk"] = bool(out.get("desktop_layout")
+                                      and any((v or 0) > 0 for v in legacy.values()))
+    out["config_health"] = config_health()
+    return out
 
 
 def _mask_secret(value: Any) -> Any:
@@ -785,6 +878,7 @@ _CONFIG_SOURCE_LABELS: dict[str, str] = {
     "migration_backup": "迁移前的留底",
     "db_backup": "备份目录 db_backups",
     "upgrade_backup": "在线升级前自动留底",
+    "config_history": "每次保存的滚动历史",
 }
 
 
@@ -807,9 +901,26 @@ def _config_source_specs() -> list[dict[str, Any]]:
     _add_glob("restore_backup", str(CONFIG_FILE) + ".before-restore.*")
     _add_glob("restore_backup", str(CONFIG_FILE) + ".before-upgrade-restore.*")
     _add_glob("migration_backup", str(CONFIG_FILE) + ".replaced-by-migration.*")
-    _add_glob("db_backup", str(base / "db_backups" / "system_config*.json"))
-    _add_glob("upgrade_backup", str(base / ".upgrade_backups" / "*" / "protected" / "system_config.json"))
-    return specs
+    _add_glob("config_history", str(_config_history_dir() / (CONFIG_FILE.name + ".*.json")))
+    # db_backups / .upgrade_backups 的现行位置是 STORAGE_DIR（桌面版=%APPDATA%），
+    # BASE_DIR 是历史位置（v9.0.0 及更早；Web/源码部署两者本来就同路径）—— 两边都扫再去重，
+    # 否则桌面版的升级留底在页面上永远列不出来。
+    for root in (STORAGE_DIR, base):
+        _add_glob("db_backup", str(Path(root) / "db_backups" / "system_config*.json"))
+        _add_glob("upgrade_backup",
+                  str(Path(root) / ".upgrade_backups" / "*" / "protected" / "system_config*.json"))
+    seen: set = set()
+    uniq: list[dict[str, Any]] = []
+    for spec in specs:
+        try:
+            key = str(Path(spec["path"]).resolve())
+        except OSError:
+            key = str(spec["path"])
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(spec)
+    return uniq
 
 
 def _describe_config_source(spec: dict[str, Any]) -> dict[str, Any]:
@@ -935,6 +1046,10 @@ async def delete_config_source(req: ConfigRestoreRequest, request: Request):
         raise HTTPException(
             status_code=400,
             detail="当前使用中/旧位置的真实配置不能在这里删除，请先确认已在别处留好备份")
+    if spec["kind"] == "current_bak" and not CONFIG_FILE.is_file():
+        # 主配置已经没了，.bak 就是唯一还在用的那份（load_config 正按它运行），删掉 = 整站配置归零
+        raise HTTPException(status_code=400,
+                            detail="主配置文件当前不存在，这份 .bak 是唯一可用的配置，不能删除")
     path: Path = spec["path"]
     if not path.is_file():
         raise HTTPException(status_code=404, detail="该备份文件已不存在")
@@ -945,6 +1060,79 @@ async def delete_config_source(req: ConfigRestoreRequest, request: Request):
         raise HTTPException(status_code=500, detail=f"删除失败：{exc}")
     logger.warning(f"管理员 {user['username']} 删除配置备份 {spec['id']}（{size} 字节）")
     return {"status": "ok", "id": spec["id"], "freed_kb": round(size / 1024, 1)}
+
+
+def _alert_state_file() -> Path:
+    return CONFIG_FILE.parent / ".config_alert_state.json"
+
+
+def notify_admins_config_risk() -> dict[str, Any]:
+    """配置处于"损坏/靠 .bak 运行/已退回出厂默认值"时，给管理员发一条站内通知。
+
+    补的是"出事没人知道"：以前只有 logger.error 一行，管理员要到学生说"课程怎么少了两门"
+    才发现。同一状态只提醒一次（用状态指纹去重），修好后状态变了会重新计时。
+    """
+    health = config_health()
+    status = health.get("status")
+    if status == "ok":
+        return {"notified": False, "status": status}
+    fingerprint = f"{status}:{health.get('score')}:{health.get('subjects')}:{health.get('file')}"
+    state_file = _alert_state_file()
+    try:
+        if state_file.is_file():
+            last = json.loads(state_file.read_text(encoding="utf-8"))
+            if last.get("fingerprint") == fingerprint:
+                return {"notified": False, "status": status, "reason": "同一状态已提醒过"}
+    except Exception:
+        pass
+    try:
+        from backend.database import execute_query as _eq
+        rows = _eq("SELECT username FROM users WHERE role=0")
+        admins = [r[0] for r in rows] if rows else []
+        if not admins:
+            return {"notified": False, "status": status, "reason": "没有管理员账号"}
+        from backend.api.notification_router import notify_users
+        title = ("⚠️ 系统配置异常：" +
+                 ("已按 .bak 备份运行" if status == "corrupt_recovered_from_backup" else
+                  ("疑似退回出厂默认值" if status == "factory_default" else "配置文件损坏")))
+        notify_users(
+            usernames=admins, type_="system", title=title,
+            content=f"{health.get('detail') or ''}\n"
+                    f"配置文件：{health.get('file')}\n"
+                    f"课程数：{health.get('subjects')}，健康分：{health.get('score')}"
+                    f"（0~2 分基本就是出厂默认值）\n"
+                    "请到「系统配置 → 备份与恢复」查看数据位置并从历史副本恢复，"
+                    "不要在被重置的状态上继续点保存。",
+            related_link="/admin/system-config",
+        )
+        state_file.write_text(json.dumps({"fingerprint": fingerprint,
+                                          "at": time.strftime("%Y-%m-%d %H:%M:%S")},
+                                         ensure_ascii=False), encoding="utf-8")
+        logger.warning(f"[配置告警] 已通知 {len(admins)} 位管理员：{title}")
+        return {"notified": True, "status": status, "admins": len(admins)}
+    except Exception as exc:
+        logger.debug(f"[配置告警] 通知发送失败：{exc}")
+        return {"notified": False, "status": status, "reason": str(exc)}
+
+
+@router.post("/alert", summary="立即复检并推送配置异常告警（管理员）")
+async def trigger_config_alert(request: Request):
+    """给"备份与恢复"页一个手动重发/复检入口（改了状态指纹就能再提醒一次）"""
+    user = get_current_user(request)
+    require_admin(user)
+    return notify_admins_config_risk()
+
+
+@router.get("/storage", summary="数据落盘位置与体积概览（管理员）")
+async def get_storage_info(request: Request):
+    """数据根/库/媒体/备份位置 + 磁盘余量 + 配置健康分。
+
+    「升级后数据像没了」的第一现场几乎都是路径：换目录、换账号、安装目录里还有一份旧库。
+    把这些直接摊到页面上，比让人去翻日志快。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+    return storage_info()
 
 
 @router.get("/health", summary="配置文件健康状态（管理员）")

@@ -47,6 +47,17 @@ BACKUP_DIR_NAME = "_pre_migration_backup"
 
 _DB_FILES = ("smartkb.db", "questions.db")
 
+#: 老版本按「代码所在目录」存放的用户内容目录，桌面版覆盖安装会连着安装目录一起删。
+#: 迁移时逐个并入用户数据根（只补缺失文件、绝不覆盖）。Web/源码部署两者同路径 -> 自动跳过。
+_CONTENT_TOPS = ("root", "stu", "question_media", "temp_uploads", "ChatHistory", "db_backups")
+
+#: 历史顶层目录里、新版本已经并到 question_media 下面的一批
+_CONTENT_INTO_MEDIA = ("whiteboard_assets",)
+
+#: 升级运行期产物：以前写死在安装目录，覆盖安装即被删（等于"备份被下一次升级干掉"）
+_RUNTIME_DIRS = (".upgrade_backups",)
+_RUNTIME_FILES = (".upgrade_state.json", ".upgrade_lock")
+
 
 def _is_desktop_layout() -> bool:
     """只有「数据目录 != 代码目录」时才需要迁移（Web/源码部署两者相同，跳过）"""
@@ -103,6 +114,9 @@ def score_config(cfg: dict | None) -> int:
     scene_map = cfg.get("skill_scene_map")
     if isinstance(scene_map, dict) and len(scene_map) > 2:
         s += 2
+    subjects = cfg.get("SUBJECTS")
+    if isinstance(subjects, list) and len(subjects) > 1:
+        s += 3        # 课程被收回只剩「人工智能」正是配置被重置的第一个表象
     for key in ("TTS_ENABLED", "ENABLE_MULTIMODAL", "AGENT_ENABLED", "ENABLE_REQUEST_LIMIT"):
         if cfg.get(key) is True:
             s += 1
@@ -110,8 +124,31 @@ def score_config(cfg: dict | None) -> int:
 
 
 def looks_like_factory_default(cfg: dict | None) -> bool:
-    """是不是"被重置过"的配置（默认值就是这个特征）"""
-    return score_config(cfg) <= 2
+    """是不是"从没被管理员配过 / 被重置回出厂值"的配置。
+
+    不用 `score_config(cfg) <= 2` 那种阈值判：布尔开关和 skill_scene_map 的默认值本身
+    就会加分，"APPID/知识库/版本号都空、只留着默认开关"的半成品反而越过阈值。
+    这里改判据为「身份类字段全空 + 课程仍是单门默认」两个硬特征同时成立：
+
+      · APPID 空 + 知识库(KB_AGENT_ID)空 + 版本号为空/通用版  —— 管理员配过的配置不可能三项全空；
+      · SUBJECTS 只剩一门（默认就是「人工智能」）—— 排除"只是还没填 APPID 的新机器、
+        但课程已经配好好几百门"的情况（API Key 也可能只放在环境变量里）。
+
+    `score_config` 仍用于在几份候选文件里排序挑一份，不再用来定性。
+    """
+    if not isinstance(cfg, dict) or not cfg:
+        return False
+    identity_empty = (
+        not str(cfg.get("APPID") or "").strip()
+        and not str(cfg.get("KB_AGENT_ID") or "").strip()
+        and str(cfg.get("AGENT_EDITION") or "").strip() in ("", FACTORY_EDITION_MARK)
+    )
+    if not identity_empty:
+        return False
+    subjects = cfg.get("SUBJECTS")
+    if isinstance(subjects, list) and len(subjects) > 1:
+        return False
+    return True
 
 
 def _migrate_config_file(records: list) -> Path | None:
@@ -166,6 +203,103 @@ def _migrate_config_file(records: list) -> Path | None:
     records.append(item)
     logger.warning("[迁移] 旧位置配置 %s 已复制到 %s（原文件保留）", src, dst)
     return src
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return str(a) == str(b)
+
+
+def _migrate_content_dirs(records: list) -> None:
+    """把老版本落在代码目录里的**用户内容目录**并进 STORAGE_DIR。
+
+    为什么必须做：v9.0.0 及更早，`root/`（教师 HTML 页面 + ChatHistory + downloads）、
+    `stu/`（学生画像 / 作业附件 / downloads）都按 DATA_DIR == 代码目录算，桌面版就等于躺在
+    安装目录里。第一版迁移只搬了库、配置和 question_media，于是覆盖安装之后
+    「名单成绩都在，页面和附件全打不开」。
+
+    规则与库搬迁一致：只复制、不移动、不删除，目标已有的文件一律不覆盖，
+    单个目录失败不影响其它目录。
+    """
+    tops = [(Path(BASE_DIR) / name, Path(STORAGE_DIR) / name) for name in _CONTENT_TOPS]
+    tops.append((Path(BASE_DIR) / "question_media", Path(MEDIA_ROOT)))
+    tops.append((Path(BASE_DIR) / "temp_uploads", Path(TEMP_UPLOAD_ROOT)))
+    for name in _CONTENT_INTO_MEDIA:
+        tops.append((Path(BASE_DIR) / name, Path(MEDIA_ROOT) / name))
+
+    seen: set = set()
+    for src, dst in tops:
+        key = (str(src).lower(), str(dst).lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        if not src.is_dir() or _same_path(src, dst):
+            continue
+        try:
+            _copy_tree_merge(src, dst, records)
+        except Exception as exc:  # 单个目录失败不阻断其它搬迁
+            logger.warning("[迁移] 内容目录 %s -> %s 失败（不影响启动）：%s", src, dst, exc)
+
+
+def _relocate_runtime_state(records: list) -> None:
+    """把以前写进安装目录的升级备份/状态并入用户数据根。
+
+    `.upgrade_backups`（含同名 .tar 源码快照）、`.upgrade_state.json`、`.upgrade_lock`
+    过去按 BASE_DIR 算，桌面版就在安装目录里：下一次覆盖安装会把救命的备份一起删掉，
+    装到 Program Files 时标准用户甚至写不进去。代码侧改派生自 STORAGE_DIR 之后，
+    这里把已经存在的老备份接回来（只补缺失、不覆盖）。
+    """
+    for name in _RUNTIME_DIRS:
+        src = Path(BASE_DIR) / name
+        dst = Path(STORAGE_DIR) / name
+        if not src.is_dir() or _same_path(src, dst):
+            continue
+        try:
+            _copy_tree_merge(src, dst, records)
+        except Exception as exc:
+            logger.warning("[迁移] 升级备份目录 %s -> %s 失败（不影响启动）：%s", src, dst, exc)
+
+    for name in _RUNTIME_FILES:
+        src = Path(BASE_DIR) / name
+        dst = Path(STORAGE_DIR) / name
+        if not src.is_file() or dst.exists() or _same_path(src, dst):
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            records.append({"type": "file", "from": str(src), "to": str(dst),
+                            "size": src.stat().st_size})
+            logger.info("[迁移] 已复制 %s -> %s", src, dst)
+        except Exception as exc:
+            logger.warning("[迁移] %s 搬迁失败（不影响启动）：%s", src, exc)
+
+
+def _dir_brief(path: Path, cap: int = 20000) -> dict:
+    """目录概况（给页面显示"数据到底在哪、有多大"用）；打不开就返回 exists=False"""
+    info = {"path": str(path), "exists": False, "files": 0, "bytes": 0, "truncated": False}
+    try:
+        if not path.exists():
+            return info
+        info["exists"] = True
+        if path.is_file():
+            info["files"] = 1
+            info["bytes"] = path.stat().st_size
+            return info
+        for root, _dirs, files in os.walk(path):
+            for name in files:
+                if info["files"] >= cap:
+                    info["truncated"] = True
+                    return info
+                info["files"] += 1
+                try:
+                    info["bytes"] += (Path(root) / name).stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return info
 
 
 def _marker_path() -> Path:
@@ -368,9 +502,12 @@ def migrate_legacy_data() -> dict:
                         "[迁移] 旧库 %s 看起来是空库（users 表无记录），仍将复制以免丢失其它数据", src)
                 _copy_file(src, dst, records)
 
-        # ② 媒体与临时上传目录（目录合并，不覆盖已有文件）
-        _copy_tree_merge(Path(BASE_DIR) / "question_media", Path(MEDIA_ROOT), records)
-        _copy_tree_merge(Path(BASE_DIR) / "temp_uploads", Path(TEMP_UPLOAD_ROOT), records)
+        # ② 内容目录：question_media / temp_uploads / root / stu / ChatHistory / db_backups
+        #    （目录合并，不覆盖已有文件；早期顶层 whiteboard_assets 并进 question_media 下）
+        _migrate_content_dirs(records)
+
+        # ②b 升级备份与状态文件：以前写在安装目录，下一次覆盖安装会被一起删掉
+        _relocate_runtime_state(records)
 
         # ③ 库内绝对路径归一（画像等历史写法，搬目录后会失效）
         _normalize_absolute_paths(records)
@@ -410,6 +547,11 @@ def storage_overview() -> dict:
         "legacy_db": {name: _size(_legacy_db_dir() / name) for name in _DB_FILES},
         "config": _size(Path(STORAGE_DIR) / "system_config.json"),
         "legacy_config": {str(p): _size(p) for p in _legacy_config_candidates()},
+        # 内容目录概况：页面要显示"数据在哪、多大"，并据此判断要不要做整站备份
+        "content": {name: _dir_brief(Path(STORAGE_DIR) / name) for name in _CONTENT_TOPS},
+        "media_root": _dir_brief(Path(MEDIA_ROOT)),
+        "upgrade_backups": _dir_brief(Path(STORAGE_DIR) / ".upgrade_backups"),
+        "legacy_upgrade_backups": _dir_brief(Path(BASE_DIR) / ".upgrade_backups"),
         "migrated_at": _read_marker().get("history", [{}])[-1].get("at") if _read_marker() else None,
     }
 

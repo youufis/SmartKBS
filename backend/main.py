@@ -182,6 +182,12 @@ async def lifespan(app: FastAPI):
                 "[配置健康] system_config.json 状态异常: "
                 f"{_cfg_health}；请尽快在系统配置页面复核并重新保存"
             )
+            # 只写日志等于没人看见 —— 同步给管理员发一条站内通知（同一状态只提醒一次）
+            try:
+                from backend.api.config_router import notify_admins_config_risk
+                notify_admins_config_risk()
+            except Exception as alert_err:
+                logger.debug(f"[配置健康] 告警通知未发出: {alert_err}")
     except Exception as e:
         print(f"[main] 配置文件健康检查失败: {e}", file=sys.stderr)
     try:

@@ -12,12 +12,45 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.auth import ROLE_ADMIN
-from backend.config import ROOT_DIR
+from backend.config import APP_VERSION, ROOT_DIR  # APP_VERSION: /api/system/info 要回身份位
 from backend.security_guard import snapshot as guard_snapshot, unban as guard_unban
 from backend.utils import get_account_html_dir
 from backend.logger import logger
 
 router = APIRouter()
+
+#: 本次进程启动的随机身份位（同机多个后端可据此区分）
+_BOOT_ID = ""
+
+
+@router.get("/info", summary="实例身份标识（免鉴权，供桌面壳校验连的是不是自己拉起的后端）")
+async def system_info(verify: str = ""):
+    """只回答"我是谁、什么版本、哪种部署"，不含路径、密钥与任何用户数据。
+
+    为什么需要：桌面版 Electron 的"等后端就绪"是轮询 :8086 通不通。上一次没退干净的
+    `smartkb-backend.exe`、或同机 IIS 上的 Web 版，都可能在占着这个端口 —— 于是桌面版
+    装完打开的是**旧进程**，表现成"升级没生效/数据不对"。有了身份位就能判定并提示。
+    """
+    import os as _os
+    import uuid as _uuid
+    from backend.api.upgrade_router import _deploy_mode, _read_local_version_payload
+    global _BOOT_ID
+    if not _BOOT_ID:
+        _BOOT_ID = _uuid.uuid4().hex[:12]
+    payload = _read_local_version_payload()
+    out = {
+        "app_version": APP_VERSION,
+        "desktop_build": str(payload.get("desktop_build") or ""),
+        "deploy_mode": _deploy_mode(),
+        "boot_id": _BOOT_ID,
+    }
+    # 桌面壳会随机生成一个只有它和它拉起的子进程知道的暗号：
+    # 带上正确暗号才回 owned=true，于是"8086 上是不是我自己那个后端"有确定答案，
+    # 不再靠"端口通了就算就绪"（同机残留的旧后端、或 IIS 上的 Web 版都能冒充）。
+    token = (_os.environ.get("SMARTKB_DESKTOP_TOKEN") or "").strip()
+    if token and verify == token:
+        out["owned"] = True
+    return out
 
 
 @router.get("/examples/files")
