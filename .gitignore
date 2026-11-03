@@ -68,6 +68,8 @@ pytest.ini
 # ── 开发工具脚本（不部署） ──
 scripts/
 tools/
+# 运维一次性工具同样不入库（2d6f69c 移除过 ops/，别再提回去；本地放 scripts/）
+ops/
 build-desktop.bat
 
 # ── 覆盖率报告 ──
