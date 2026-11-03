@@ -38,64 +38,53 @@
 > 📌 **Highlights of V9.0.0**
 >
 > **Data safety (this build)**
-> - 🛡️ **Upgrades no longer reset the config**: once the config moved to the project root, the old copy was silently ignored and the platform fell back to factory defaults (subject list reduced to "Artificial Intelligence", APPID and knowledge base empty). It now migrates on startup, falls back to `.bak` and logs an error when the file is missing, keeps a copy before and after upgrades, and auto-corrects a config that was reset to defaults
-> - 💾 **New "Backup & restore" tab**: full-site backup / restore / delete / paging; config copies are ranked by a health score (APPID, edition, knowledge base — a factory default is also 111 keys and ~5 KB, so only these fingerprints tell them apart) and restored with one click, keeping a rollback copy
-> - 🔒 **Restores are bounded**: only ids from the server-side list are accepted, backup names are whitelisted against path traversal, and every restore / delete is audit-logged
+> - 🛡️ **Install-over upgrades no longer lose content**: teacher pages, student portraits and homework attachments are migrated and rescued by the installer, so "the roster is there but everything 404s" no longer happens
+> - 🛡️ **Backups work on all three deployments**: the database now uses an online consistent snapshot and source snapshots are skipped where they don't apply; the backup folder moved to the user data directory so the next install can't delete it
+> - 🛡️ **A safety copy before every upgrade**: config and both databases are kept first, with the usable copy recorded in the upgrade log for one-click rollback; the config is auto-migrated, a missing file falls back to its backup and logs an error instead of silently resetting to defaults
+> - 💾 **New "Backup & restore" tab**: full-site backup / restore / delete / paging, config copies ranked by health score and restored in one click with a rollback copy; only listed backups are accepted, names are whitelisted against path traversal, every action is audit-logged and the active config can't be deleted
 >
 > **Dashboard charts**
-> - 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin the one you prefer
-> - 🩹 **Three chart defects fixed**: points and chats shared one axis so the chat bars always sat on the floor (now split into separate tracks); exam-status percentages added up to 101% (now largest-remainder rounding); card content floated in the middle leaving large empty bands (now top-aligned)
+> - 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin one
+> - 🩹 **Chart and to-do display fixes**: mixed axes, share totals, card padding and duplicated to-do counts are all corrected, and teacher shortcuts no longer land on the wrong page
 >
 > **Code practice and course management**
-> - 🧑‍🏫 **Unified AI generate / create / edit**: one five-tab form (basics, template, test cases, reference solution, scope); AI output fills it directly and the reference can be validated against the current unsaved cases
-> - ⚙️ **Judging engine rebuilt**: async execution no longer blocks the class, per-problem time limits, concurrent cases, per-case details in their own table; syntax errors, timeouts and runtime errors are reported separately
-> - 🛡️ **Teacher tools filled in**: submission details, missing-student roster, per-case pass rates, CSV export and regrade; students get draft autosave, sample runs with diffs, and load-back of past code
-> - 📚 **Course tree**: one expand/collapse-all toggle in the header and per-chapter expand; editing a course, chapter or knowledge point updates only that node and keeps the tree's expanded state
-> - 🩹 **Fixes**: admin and student problem counts no longer disagree on legacy data; the notification type "Task" is now "Homework"; placeholders in system settings no longer render literally
+> - 🧑‍🏫 **One form for AI generate / create / edit**, with AI output filled in directly and the reference solution testable against the current cases
+> - ⚙️ **Judging engine rebuilt**: async execution, per-problem time limits, concurrent cases and per-case details, with errors reported by type
+> - 🛡️ **Teaching stats completed**: submission details, missing-student roster, pass rates, CSV export and regrade; students get drafts, sample runs with diffs and load-back of past code
+> - 📚 **Course tree**: one expand/collapse-all toggle, and editing a course, chapter or knowledge point refreshes only that node
 >
 > **AI lesson cast (new)**
-> - 🎬 **A knowledge point becomes a micro-lesson that talks**: paginated slides with one voice clip per sentence — each clip ends, the page turns, the subtitle follows. No video file, so fixing one line re-records one line
-> - 🎙️ **One narrator or two**: two-host dialogue by default for self-study (a conversation holds attention), single narrator for classroom projection (the teacher adds their own commentary, a second host would talk over them). Both versions can coexist for the same topic
-> - 🖥️ **A second screen for presenting**: the projected screen shows only the slide; the teacher's screen shows the next slide, the script and the clock. Space pauses, arrows turn pages, digits jump
-> - ✏️ **Editing one line costs one line**: rewrite lines, switch speaker, reorder or delete pages; a single page can be re-synthesised on its own
-> - 🎨 **Four slide themes**: clean white / warm sand / ink / pale green — Ink is for dim classrooms
-> - ⚙️ **Four knobs in system settings**: duration options, default duration, hard length cap and page cap, sharing the TTS master switch with the podcast
+> - 🎬 **A knowledge point becomes a micro-lesson that talks**: paginated slides with one voice clip per sentence, auto page turns and per-sentence subtitles; fixing one line re-records one line
+> - 🎙️ **One narrator or two**: two hosts by default for self-study, a single narrator for classroom projection, both kept for the same topic
+> - 🖥️ **A second screen for presenting**: only the slide is projected, while the teacher's screen shows the next page and the script, controlled from the keyboard
+> - ✏️ **Editable outline, single-page re-record**: rewrite lines, switch speaker, reorder or delete pages, with four slide themes
+> - ⚙️ **Four knobs in system settings**, sharing the TTS master switch with the podcast
 >
 > **Mistake book and auto consolidation**
-> - 📕 **The mistake book is now card-based**: one question reads top to bottom — stem, your answer against the correct one, explanation, knowledge points — with the figure beside the stem and dropping below it on narrow screens
-> - 🧠 **Mistakes finally carry explanations**: existing bank explanations show in a collapsible block; missing ones can be AI-generated straight into the bank — **empty slots only, never overwriting a teacher's text**
-> - 🔎 **Filter, group, batch, export**: pending / mastered / all with real counts, group by exam, topic or question type, keyword search, topic chips as filters, batch mark-as-mastered, and a Word export with explanations
-> - 🔁 **Auto consolidation practice works again**: an unanswered set no longer blocks forever, pushes notify with a direct link, cooldown and a daily cap were added, selection prefers frequently-missed and long-neglected questions while avoiding recent sets, all four knobs live in system settings, and teachers can push a set on demand
-> - 🧭 **Admins decide what feeds the mistake book**: tick which activities' mistakes are collected in system settings (exams are always included), and the page shows its current scope; students who only ever did practice or class questioning can now be reached too
-> - 🧭 **Teacher-targeted practice is visible again**: sets pushed to named students and auto-consolidation sets used to vanish from the student home page and the to-do list; they are listed now, consolidation sets ranked first, one click straight into the answers
+> - 📕 **Card-based mistake book**: stem, your answer, explanation, knowledge points in reading order, with icons, text and colour coding for correctness
+> - 🧠 **Explanations can be filled in**: missing ones are AI-generated into the bank — **empty slots only, never overwriting a teacher's text**
+> - 🔎 **Filter, group, batch, export**: real counts per state, grouping by exam, topic or type, search and Word export
+> - 🔁 **Auto consolidation works again**: stale sets close out, pushes link straight to practice, cooldown and a daily cap apply, and selection prefers frequently-missed questions; teachers can push a set on demand
 >
-> **Resource centre and content types**
-> - 🏷️ **Web resources now have a content-type system**: 11 types — courseware, animation, course practice, chapter practice, interactive quiz, lab simulation, podcast, custom page, activity, handout, unclassified
-> - ✍️ **The type can be set by hand**: an explicit mark beats filename guessing, artifacts are classified when written, **follow renames and are cleared on delete**; click the tag in any of four places to reclassify, and filter by type at the top
-> - 🗃️ **One-click grouping for ungrouped resources**: by content type, chapter or section, with a preview before anything is written; only ungrouped files are touched and same-named groups are reused
-> - ✂️ **Two kinds of practice separated**: AI course practice records student scores, generated chapter exercises record nothing — they used to share one label
->
-> **Sharing and binding**
-> - 🗂️ **Three share tabs, consistent semantics**: a new "My shares" tab (only what you actually shared out, admins included), "Shared with me" renamed "Shared by colleagues", and admin management now addresses shares by record instead of guessing from the path
-> - 🔁 **Re-sharing really works and merges**: one physical file shared by several people is one card, with a note about who else shared it
-> - 🧩 **Resource binding rebuilt**: one registry replaces six hard-coded lists, synchronous practice is on the shelf, and the picker gained a facet sidebar, card layout and honest totals
+> **Resource centre and sharing**
+> - 🏷️ **Web resources have 11 content types**: an explicit mark beats filename guessing, follows renames and clears on delete, and can be changed in four places or filtered at the top
+> - 🗃️ **One-click grouping for ungrouped resources**: preview first, then write, by type, chapter or section
+> - 🗂️ **Three share tabs**: "My shares" added, "Shared by colleagues" renamed, and one file shared by several people becomes one card
+> - 🧩 **Resource binding rebuilt**: one registry replaces scattered hard-coded lists, with course practice scoring and chapter practice not scoring
 >
 > **Security, analytics and polish**
-> - 🔒 **Path traversal in static file serving fixed** (server files were reachable without logging in); the API listing page is no longer exposed by default in production
-> - 📊 **Bank analytics no longer truncate**: full per-creator type and subject breakdowns, click a chip to filter
-> - 📥 **Bulk import reports the reason per row**; question management is faster; editing a knowledge point's chapter now shows the chapter name and actually saves
-> - 📱 **Detail tables became cards on phones**; portrait and avatar images no longer break with 401
+> - 🔒 **Path traversal in static file serving fixed**, and the API listing page is no longer exposed by default in production
+> - 📊 **Bank analytics no longer truncate**, bulk import reports the reason per row and question management is faster
+> - 📱 **Detail tables became cards on phones**, and images that need a login no longer break
 >
 > **System settings rebuild**
-> - ⚙️ **105 settings regrouped by scenario**: five technical groups became four (School & Branding / Teaching & Incentives / AI Capabilities / Storage & Security), with a new "Answer Quality" section
-> - 🧭 **Master-detail layout**: a left tree switches sections, the right pane lists one section at a time; 46 everyday settings are shown, 59 advanced ones fold away
-> - 🎛️ **No more typing enum values**: rank visibility, skill injection position and ladder skin became dropdowns; quest question source and portrait period became radio groups; the question-type list became a dialog editor
-> - 📝 **Copy corrected**: "5 sections" was really 24, "no restart needed" contradicted the field notes, and stray Markdown asterisks and hard line breaks are gone
-> - 🔒 **No more lost edits**: switching sections or searching no longer clears other sections on save, and leaving with unsaved changes is blocked
+> - ⚙️ **Regrouped by scenario**: four scenario groups and 24 sections in a master-detail layout, everyday settings shown and advanced ones folded
+> - 🎛️ **Control types corrected**: fields that should be dropdowns or radios are no longer free text, and the question-type list became a dialog editor
+> - 📝 **Copy and save fixes**: contradictory counts corrected, and saving after switching sections or searching no longer clears other sections
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes, including the new content-type mark table and the code-practice per-case detail table, are applied automatically at startup.
+> 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes are applied automatically at startup.
 
 ---
 
@@ -1211,89 +1200,78 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 
 **Data safety (this build)**
 
-- 🛡️ **Upgrades no longer reset the config**: once the config moved to the project root, the old copy was silently ignored and the platform fell back to factory defaults (subject list reduced to "Artificial Intelligence", APPID and knowledge base empty). It now migrates on startup, falls back to `.bak` and logs an error when the file is missing, keeps a copy before and after upgrades, and auto-corrects a config that was reset to defaults
-- 💾 **New "Backup & restore" tab**: full-site backup / restore / delete / paging; config copies are ranked by a health score (APPID, edition, knowledge base) and restored with one click, keeping a rollback copy
-- 🔒 **Restores are bounded**: only ids from the server-side list are accepted, backup names are whitelisted against path traversal, and every restore / delete is audit-logged
+- 🛡️ **Upgrades no longer reset the config**: once the config moved, the old copy was ignored and the platform fell back to factory defaults (subjects, APPID and knowledge base empty). It now migrates on startup, falls back to the backup and logs an error when a file is missing, keeps a copy before and after upgrades, and auto-corrects a config that was reset
+- 💾 **New "Backup & restore" tab**: full-site backup / restore / delete / paging, config copies ranked by health score (APPID, edition, knowledge base) and restored in one click with a rollback copy
+- 🔒 **Restores are bounded**: only listed backups are accepted, names are whitelisted against path traversal, every action is audit-logged and the active config can't be deleted
 
 **Dashboard charts**
 
-- 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin the one you prefer
-- 🩹 **Three chart defects fixed**: points and chats shared one axis so the chat bars always sat on the floor (now split into separate tracks); exam-status percentages added up to 101% (now largest-remainder rounding); card content floated in the middle leaving large empty bands (now top-aligned)
+- 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin one
+- 🩹 **Chart and to-do display fixes**: mixed axes, share totals, card padding and duplicated to-do counts are all corrected, and teacher shortcuts land on the right page
 
 **Code practice and course management**
 
-- 🧑‍🏫 **Unified AI generate / create / edit**: one five-tab form (basics, template, test cases, reference solution, scope); AI output fills it directly and the reference can be validated against the current unsaved cases
-- ⚙️ **Judging engine rebuilt**: async execution no longer blocks the class, per-problem time limits, concurrent cases, per-case details in their own table; UTF-8, compile errors, timeouts and runtime errors are separated
-- 🛡️ **Permissions and teaching stats**: student visibility/length/rate checks, teachers manage only their own problems; submission details, missing-student roster, per-case pass rates, CSV export and regrade
-- ✍️ **Student experience**: draft autosave, one-click sample runs with diffs, load-back of past code, locked language, offline Monaco and dark theme
-- 📚 **Course tree**: one expand/collapse-all toggle in the header and per-chapter expand; editing a course, chapter or knowledge point updates only that node and keeps the expanded state
-- 🩹 **Fixes**: admin and student problem counts no longer disagree on legacy data; the notification type "Task" is now "Homework"; placeholders in system settings no longer render literally
+- 🧑‍🏫 **One form for AI generate / create / edit**, with AI output filled in directly and the reference solution testable against the current cases
+- ⚙️ **Judging engine rebuilt**: async execution, per-problem time limits, concurrent cases and per-case details, with errors separated by type
+- 🛡️ **Permissions and teaching stats**: student visibility / length / rate checks, teachers manage only their own problems; submission details, missing-student roster, pass rates, CSV export and regrade
+- ✍️ **Student experience**: draft autosave, sample runs with diffs, load-back of past code, locked language and dark theme
+- 📚 **Course tree**: one expand/collapse-all toggle, and editing a course, chapter or knowledge point refreshes only that node
+- 🩹 **Fixes**: problem counts disagreeing between admin and student views; the notification type "Task" is now "Homework"; placeholders no longer render literally
 
 **AI lesson cast**
 
-- 🎬 **One click turns a knowledge point into a talking micro-lesson**: paginated slides plus one voice clip per sentence; each clip ends, the page turns, the subtitle follows. Not a video file, so fixing one line re-records one line
-- 🎙️ **Two narration styles**: two-host dialogue (self-study, holds attention) or single narrator (classroom projection, does not talk over the teacher); both can exist for the same topic and are picked by context
-- 🖥️ **Classroom presentation**: full-screen mode with space / arrows / digit keys; the presenter view puts the next slide and the script on the teacher's own screen
+- 🎬 **One click turns a knowledge point into a talking micro-lesson**: paginated slides with one voice clip per sentence, auto page turns and per-sentence subtitles; fixing one line re-records one line
+- 🎙️ **Two narration styles**: two-host dialogue (self-study) or single narrator (classroom projection), both kept for the same topic
+- 🖥️ **Classroom presentation**: full-screen mode with keyboard control, and a presenter view showing the next slide and the script on the teacher's screen
 - ✏️ **Editable outline, single-page re-record**: rewrite lines, switch speaker, reorder or delete pages; changing one page re-synthesises only that page
-- 🎨 **Four slide themes**: clean white / warm sand / ink / pale green; Ink is for dim classrooms, and a theme only affects the slide
-- ▶ **Play and edit are separate entries**: play straight from the knowledge-point row; "AI edit" lives in the AI tools menu
-- ⚙️ **Parameters in system settings**: duration options, default duration, hard cap and page cap, sharing the TTS master switch with the podcast
+- 🎨 **Four slide themes**: clean white / warm sand / ink / pale green, affecting the slide only
+- ▶ **Play and edit are separate entries**: play from the knowledge-point row, edit from the AI tools menu
+- ⚙️ **Parameters in system settings**: duration and page caps, sharing the TTS master switch with the podcast
 
-**Security**
+**Security and polish**
 
-- 🔒 **Path traversal in static file serving fixed**: files could be pulled off the server without logging in; only paths inside the site directory are served now, and the API listing page is off by default in production
-- 🩹 **Views of shared files never attached to a resource**: the query passed one parameter too many, so the view count stayed empty
+- 🔒 **Path traversal in static file serving fixed**: only paths inside the site directory are served, and the API listing page is off by default in production
+- 🩹 **Views of shared files never attached to a resource**, so the view count stayed empty — fixed
+- 📱 **Detail tables became cards on phones**; protected image URLs now carry the token, so avatars no longer break
 
 **Mistake book and auto consolidation**
 
-- 📕 **The mistake book is now card-based**: one question reads top to bottom — stem, your answer against the correct one, explanation, knowledge points; the figure sits beside the stem and drops below it on narrow screens instead of breaking out of the card
-- 🧠 **Mistakes carry explanations**: explanations already in the bank show in a collapsible block, and missing ones can be AI-generated straight into the bank — **empty slots only, never overwriting a teacher's text**
-- 🎨 **Right and wrong no longer rely on colour alone**: icon + text label + tint, theme colours throughout so dark mode works; status is a tag and actions are buttons, so “mastered” no longer reads like a state
-- 🔎 **Filter, group, batch, export**: real counts on pending / mastered / all, grouping by exam, topic or question type, keyword and topic filtering, batch mark-as-mastered, and a Word export grouped by source with answer comparison and explanations
-- 🔁 **Auto consolidation practice revived**: an unanswered set no longer blocks future ones (stale sets are closed after the interval); pushes send a notification that opens the set directly; a cooldown and a daily cap keep it from swinging to the opposite extreme; selection prefers frequently-missed and long-neglected questions and avoids recent sets; teachers see the policy and each student's state, and can push a set on demand
-- 🧭 **Admins choose the sources**: tick which activities feed the mistake book in system settings — exams are always included — and the page states its current scope. Only activities whose questions can be traced back to the bank are offered
-- 🧭 **Teacher-targeted practice is visible again**: sets pushed to named students and auto-consolidation sets used to vanish from the student home page and to-do list; they are listed now, with consolidation sets ranked first and one click straight into the answers
-- 🩹 **Students who only did practice or class questioning can now be reached**: the grade, class and student pickers used to list only students with exam submissions
-- 🧷 **Quick-quiz mistakes can be traced again**: quiz questions never recorded which bank question they came from, so nothing could reach the mistake book
-- 🧷 **A mistake keeps its origin**: getting it wrong again inside a consolidation set only raises the counter, it no longer rewrites which exam the mistake came from; existing rows were re-attributed to the earliest exam where the student missed them
-- 🩹 The student-side “consolidate mistakes” button now actually works (draw a set or resume the unfinished one) instead of only showing a note; retired questions are labelled as such
+- 📕 **The mistake book is now card-based**: stem, your answer, explanation and knowledge points in reading order
+- 🎨 **Right and wrong no longer rely on colour alone**: icon + text + tint, status as tags and actions as buttons
+- 🧠 **Explanations can be filled in**: existing ones show in a collapsible block, missing ones are AI-generated into the bank — **empty slots only, never overwriting a teacher's text**
+- 🔎 **Filter, group, batch, export**: real counts per state, grouping by exam, topic or type, keyword and topic filtering, batch marking and a Word export
+- 🔁 **Auto consolidation revived**: stale sets close out, pushes open the set directly, cooldown and a daily cap apply, and selection prefers frequently-missed questions; teachers see the policy and can push a set on demand
+- 🧭 **Origin stays put, practice stays visible**: a wrong answer inside a consolidation set only raises the counter; teacher-targeted and auto-consolidation sets are listed again on the home page and to-do list
 
-**Resource centre and content types**
+**Resource centre and sharing**
 
-- 🗂️ **Three share tabs with consistent semantics**: a new "My shares" tab lists only what you actually shared out (admins included; private registrations to yourself are not listed), "Shared with me" became "Shared by colleagues", and admin management addresses shares by record instead of guessing from the path
-- 🔁 **Re-sharing really works and merges**: one physical file shared by several people is now a single card that honestly notes who else shared it
-- 🧩 **Resource binding rebuilt**: one registry replaces six hard-coded type lists (fixing "change one, miss five"), synchronous practice is on the shelf, and the candidate list gained a facet sidebar, a card picker, real totals and an explicit truncated flag
-- 🏷️ **Web resources now have a content-type system**: 11 types (courseware, animation, course practice, chapter practice, interactive quiz, lab simulation, podcast, custom page, activity, handout, unclassified); an explicit mark wins over filename guessing, artifacts are classified when written, **follow renames and are cleared on delete**
-- ✍️ **Types can be set by hand**: click the tag in My resources, on a share card, in the binding picker or in resource management (tree and grid) to reclassify, with a content-type filter on top; a gold tag with a dot is a human mark and can be cleared back to filename inference
-- 🗃️ **One-click grouping for ungrouped resources**: by content type, chapter (Chapter N) or section (N.M), previewing which groups are created or reused and how many items each takes before anything is written; already grouped files are never touched
-- ✂️ **Two kinds of practice separated**: `{point_id}_{title}_{timestamp}_练习.html` is **course practice** (answers recorded with a score) while a name ending in 练习题 is a **chapter exercise** (a generated page that records nothing). Both used to share one value shown as chapter practice; the tag now explains the difference on hover
-- 🩹 **The “My shares” sort box leaked an internal value**: both share tabs read one local preference, so a sort option from one leaked into the other; preferences are now stored per tab and validated, and view and page size no longer overwrite each other
+- 🗂️ **Three share tabs**: a new "My shares" tab, "Shared with me" renamed "Shared by colleagues", and admin management addressing shares by record
+- 🔁 **One file shared by several people is one card**, noting who else shared it
+- 🧩 **Resource binding rebuilt**: one registry replaces scattered hard-coded lists, synchronous practice is on the shelf, and the picker gained a facet sidebar and card layout
+- 🏷️ **Web resources have a content-type system**: 11 types, an explicit mark wins over filename guessing, **follows renames and clears on delete**
+- ✍️ **Types can be set by hand** in four places and cleared back to inference, with a content-type filter on top
+- 🗃️ **One-click grouping for ungrouped resources**: preview first, then write, by type, chapter or section
+- ✂️ **Two kinds of practice separated**: course practice records scores, generated chapter exercises record nothing
 
 **Question bank, courses and import**
 
-- 📊 **Creator breakdowns in bank analytics no longer truncate**: types were capped at the top 5 and subjects at the top 3, so the smallest subject — typically a newly added one — vanished while its questions still counted in the total. Both now list everything and act as filters
-- 📥 **Bulk import explains every failed row** instead of "row 3 failed", naming the column and what is missing
-- ⚡ **Question management is faster**: production build, duplicate requests removed, cells re-render only when they change
-- 🗂️ **Knowledge point chapter fixed**: the editor shows the chapter name instead of a bare id, and switching chapters really saves
-
-**Phones and images**
-
-- 📱 **Detail tables became cards**, fixing six places that could not be read on a narrow screen
-- 🖼️ **Avatars and portrait images broke with 401 on every client**; protected image URLs now carry the token
+- 📊 **Bank analytics no longer truncate**: types and subjects are listed in full and act as filters
+- 📥 **Bulk import names the column and what is missing** per failed row; question management is faster
+- 🗂️ **Knowledge point chapter fixed**: the editor shows the chapter name and switching chapters really saves
 
 **System administration**
 
-- ⚙️ **System settings rebuilt**: 105 settings regrouped by scenario into 4 groups and 24 sections (a new "Answer Quality" section), with a left tree switching sections and a single-column right pane; 46 everyday settings are visible, 59 advanced ones (memory budgets, grading cadence, audit thresholds) fold into "Advanced"
-- 🎛️ **Control types fixed**: rank visibility, skill injection position and default ladder skin became dropdowns instead of free text; quest question source and portrait period became radio groups instead of switches; the question-type list became a dialog editor with separate key and label fields and duplicate detection
-- 🧩 **Login gate merged into one card**: student, teacher and external logins share a single explanation; the latter two previously had none
-- 📝 **Copy fixed and terminology unified**: the panel counter reported the number of groups as sections ("5 sections" where there are 24); AI concurrency is now marked "takes effect after restart" and no longer contradicts the "no restart needed" footer; the outdated "restart required" note on subjects is gone; Markdown asterisks and hard line breaks were removed; terminology unified to login token, AI endpoint and edition name
-- 🔒 **Edits are no longer lost**: saving after switching sections or searching no longer clears other sections, leaving with unsaved changes is intercepted, "reload from server" asks for confirmation, and the unsaved counter opens a change list
-- 🧪 **New consistency check**: `scripts/check_system_config.py` verifies field counts, section membership, zh/en coverage, Markdown leftovers and enum options — a field added without a section or a translation fails loudly
+- ⚙️ **System settings rebuilt**: 105 settings regrouped into 4 groups and 24 sections in a master-detail layout, everyday settings visible and advanced ones folded
+- 🎛️ **Control types fixed**: fields that should be dropdowns or radios are no longer free text, and the question-type list became a dialog editor
+- 🧩 **Login gate merged into one card**: student, teacher and external logins share a single explanation
+- 📝 **Copy and terminology fixed**: the counter reports real section counts, the restart contradiction is gone, and Markdown leftovers were removed
+- 🔒 **Edits are no longer lost**: saving after switching sections or searching no longer clears other sections, and leaving with unsaved changes is intercepted
+- 🧪 **New consistency check**: field counts, section membership, zh/en coverage and enum options fail loudly when wrong
 
 **Fixes**
 
 - 🩹 The class ladder failed to load completion, with roster matching and the reset owner column fixed along the way
-- 🩹 AI teaching suggestions were missing a prompt import deleted during the 8.8.0 refactor; three same-root risks were fixed in the same pass
+- 🩹 AI teaching suggestions were missing a prompt import deleted during the 8.8.0 refactor; related risks were fixed in the same pass
 
 ### v7.x – v8.9.0 (outline)
 
