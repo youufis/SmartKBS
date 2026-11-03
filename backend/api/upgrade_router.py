@@ -1583,6 +1583,83 @@ async def clean_repo_hygiene(request: Request, deep: bool = False) -> dict[str, 
     return result
 
 
+# ── 配置守护（升级期） ──
+# reset --hard 只动已跟踪文件，配置正常不会被删；但下面两种情况升级后照样"读不到配置"：
+#   1) 配置还躺在 backend/ 下，而新代码读 STORAGE_DIR 根，且进程在 Step 2 之后没有重启
+#      （IIS 应用池不回收时就是这样），启动期的 data_migration 根本没机会执行；
+#   2) 根目录留着上一轮"被重置后又被页面保存"的默认值配置，启动迁移按"目标已存在"跳过。
+# 所以在动代码之前先把当前真正生效的那份配置留底，reset 之后校验并回填。
+
+def _config_guard_candidates() -> list[Path]:
+    return [
+        Path(STORAGE_DIR) / "system_config.json",
+        Path(STORAGE_DIR) / "system_config.json.bak",
+        BASE_DIR / "backend" / "system_config.json",
+        BASE_DIR / "backend" / "system_config.json.bak",
+    ]
+
+
+def _snapshot_config(guard_dir: Path) -> dict[str, Any]:
+    """reset 之前留一份"当前生效配置"的底，返回 {src, snap, score}"""
+    from backend.data_migration import score_config
+    best: tuple[int, Path] | None = None
+    for p in _config_guard_candidates():
+        if not p.is_file():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict) or not data:
+            continue
+        s = score_config(data)
+        if best is None or s > best[0]:
+            best = (s, p)
+    if best is None:
+        return {}
+    try:
+        guard_dir.mkdir(parents=True, exist_ok=True)
+        snap = guard_dir / "system_config.json"
+        shutil.copy2(best[1], snap)
+    except Exception as exc:
+        logger.warning(f"[upgrade] 配置守护: 留底失败（不影响升级）: {exc}")
+        return {}
+    logger.info(f"[upgrade] 配置守护: 已留底 {best[1]}（健康分 {best[0]}）→ {snap}")
+    return {"src": str(best[1]), "snap": str(snap), "score": best[0]}
+
+
+def _restore_config_after_sync(snapshot: dict[str, Any]) -> None:
+    """reset 之后校验配置目标位；缺失或被重置成默认值就回填（回填前留现场）"""
+    if not snapshot:
+        return
+    from backend.data_migration import score_config
+    target = Path(STORAGE_DIR) / "system_config.json"
+    snap = Path(snapshot["snap"])
+    if not snap.is_file():
+        return
+    cur_score = -1
+    if target.is_file():
+        try:
+            cur_score = score_config(json.loads(target.read_text(encoding="utf-8")))
+        except Exception:
+            cur_score = -1
+    if cur_score >= max(int(snapshot["score"]) - 1, 3):
+        logger.info(f"[upgrade] 配置守护: 目标位配置健康（分 {cur_score}），保持不动")
+        return
+    try:
+        if target.exists():
+            keep = target.with_name(
+                f"{target.name}.before-upgrade-restore.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            shutil.copy2(target, keep)
+            logger.warning(f"[upgrade] 配置守护: 现场健康分 {cur_score}，已备份为 {keep.name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(snap, target)
+        os.utime(target, None)          # 让运行中的进程立刻重读（mtime 缓存失效）
+        logger.warning(f"[upgrade] 配置守护: 已用升级前留底恢复配置 → {target}（分 {snapshot['score']}）")
+    except Exception as exc:
+        logger.error(f"[upgrade] 配置守护: 恢复失败，请手工把 {snap} 覆盖到 {target}: {exc}")
+
+
 @router.post("/backup")
 async def create_backup(request: Request):
     """② 升级前备份源码和关键数据"""
@@ -1774,6 +1851,18 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         })
         logger.info(f"[upgrade] Step 1c: 已写入进行中占位记录 task={task_id}")
 
+        # ── Step 1d: 配置守护快照（必须在 reset 之前） ──
+        # 升级后进程未必立刻重启，启动迁移也就未必跑得到；先把当前真正生效的配置留底，
+        # reset 之后再校验回填，避免"代码升上去了、配置变成出厂默认值"。
+        cfg_snapshot: dict[str, Any] = {}
+        try:
+            guard_dir = BACKUP_DIR / f"pre_upgrade_{task_id}" / "protected"
+            cfg_snapshot = _snapshot_config(guard_dir)
+            if not cfg_snapshot:
+                logger.warning("[upgrade] Step 1d: 未找到可留底的配置文件（新装机器或路径异常）")
+        except Exception as snap_e:
+            logger.warning(f"[upgrade] Step 1d: 配置留底异常（不影响升级）: {snap_e}")
+
         # ── Step 2: git reset 快速同步 ──
         _set_progress("sync", f"正在同步 {behind} 个提交的变更到本地...", 30)
         logger.info("[upgrade] Step 2/7: git reset --hard origin/master")
@@ -1782,6 +1871,12 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         # 代码已落地 —— 这正是"升级被打断时代码到不到位"的分界点，之后才轮到迁移
         _mark_stage(task_id, "synced")
         logger.info("[upgrade] Step 2/7: reset 完成")
+
+        # ── Step 2b: 配置守护回填（reset 后立刻校验，不等进程重启） ──
+        try:
+            _restore_config_after_sync(cfg_snapshot)
+        except Exception as cfg_e:
+            logger.error(f"[upgrade] 配置守护回填异常（不阻断升级，请人工核对配置）: {cfg_e}")
 
         # Step 2b: 获取变更文件列表
         changed_files = []

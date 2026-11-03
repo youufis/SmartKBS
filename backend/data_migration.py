@@ -73,18 +73,65 @@ def _legacy_config_candidates() -> list[Path]:
             Path(BASE_DIR) / "system_config.json"]
 
 
-def _migrate_config_file(records: list) -> Path | None:
-    """把旧位置的 system_config.json 搬到 STORAGE_DIR 根（只复制，绝不覆盖）。
+#: 出厂默认值的版本号标记：命中说明这份配置没被管理员配置过
+FACTORY_EDITION_MARK = "通用版"
 
-    返回实际使用的源文件，未搬迁返回 None。
+
+def _read_config_file(p: Path) -> dict | None:
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def score_config(cfg: dict | None) -> int:
+    """配置"像不像真实配置"的粗打分（0 分≈出厂默认值），用于在几份文件里挑一份。
+
+    只看文件大小/键数会误判：被重置后的默认值同样是 111 个键、4999 字节。
+    真正的特征是 APPID 空、AGENT_EDITION 退回通用版、知识库没配。
+    """
+    if not isinstance(cfg, dict) or not cfg:
+        return -1
+    s = 0
+    if str(cfg.get("APPID") or "").strip():
+        s += 5
+    if str(cfg.get("AGENT_EDITION") or "").strip() not in ("", FACTORY_EDITION_MARK):
+        s += 3
+    if str(cfg.get("KB_AGENT_ID") or "").strip():
+        s += 3
+    scene_map = cfg.get("skill_scene_map")
+    if isinstance(scene_map, dict) and len(scene_map) > 2:
+        s += 2
+    for key in ("TTS_ENABLED", "ENABLE_MULTIMODAL", "AGENT_ENABLED", "ENABLE_REQUEST_LIMIT"):
+        if cfg.get(key) is True:
+            s += 1
+    return s
+
+
+def looks_like_factory_default(cfg: dict | None) -> bool:
+    """是不是"被重置过"的配置（默认值就是这个特征）"""
+    return score_config(cfg) <= 2
+
+
+def _migrate_config_file(records: list) -> Path | None:
+    """把旧位置的 system_config.json 搬到 STORAGE_DIR 根。
+
+    规则（依次）：
+      1. 新位置已有**真实**配置 → 不动（绝不覆盖管理员正在用的配置）
+      2. 新位置是**出厂默认值**（曾经丢过、管理员又在页面上点过保存，落下一份默认值），
+         而旧位置存在更完整的配置 → 先备份现场，再用旧位置覆盖
+      3. 新位置不存在 → 直接复制
 
     为什么 Web 版也必须走这一步：新代码读 STORAGE_DIR/system_config.json，而历史配置躺在
     `<代码目录>/backend/` 下，新位置没有文件时 load_config 会回落到出厂默认值
     （SUBJECTS 只剩「人工智能」、API Key/知识库/版本号全空），表现成"系统配置被人改过"。
     """
     dst = Path(STORAGE_DIR) / "system_config.json"
-    if dst.exists():
+    dst_cfg = _read_config_file(dst) if dst.exists() else None
+    if dst.exists() and not looks_like_factory_default(dst_cfg):
         return None
+
     srcs = []
     for p in _legacy_config_candidates():
         try:
@@ -94,8 +141,29 @@ def _migrate_config_file(records: list) -> Path | None:
             continue
     if not srcs:
         return None
-    src = max(srcs, key=lambda p: p.stat().st_mtime)   # 两处都有时取较新的那份
-    _copy_file(src, dst, records)
+    src = max(srcs, key=lambda p: (score_config(_read_config_file(p)), p.stat().st_mtime))
+    src_cfg = _read_config_file(src)
+
+    replaced_backup = None
+    if dst.exists():
+        # 目标是默认值：只有源明显更完整才动手，且先把现场留一份
+        if score_config(src_cfg) <= score_config(dst_cfg):
+            return None
+        replaced_backup = dst.with_name(
+            f"{dst.name}.replaced-by-migration.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        try:
+            shutil.copy2(dst, replaced_backup)
+        except Exception as exc:
+            logger.warning("[迁移] 备份被重置的配置失败（仍继续覆盖）：%s", exc)
+            replaced_backup = None
+        logger.warning("[迁移] 新位置配置是出厂默认值，改用旧位置 %s 覆盖（原文件已留底）", src)
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    item = {"type": "file", "from": str(src), "to": str(dst), "size": src.stat().st_size}
+    if replaced_backup is not None:
+        item["replaced"] = str(replaced_backup)
+    records.append(item)
     logger.warning("[迁移] 旧位置配置 %s 已复制到 %s（原文件保留）", src, dst)
     return src
 
