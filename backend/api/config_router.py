@@ -7,6 +7,7 @@
 （v9.0.0 及更早存在 <项目根>/backend/system_config.json，升级时由 data_migration 搬过去）
 """
 import json
+import glob
 import os
 import re
 import shutil
@@ -19,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
-from backend.config import STORAGE_DIR
+from backend.config import BASE_DIR, STORAGE_DIR
 from backend.logger import logger
 # 模型默认值只认 model_catalog 一份。以前这四行是手写字面量（注释还写着"由 model_catalog 维护"），
 # 改清单默认模型时这里不会跟着变，升级后配置缺键就补出旧模型名 —— 正是 404 的来源。
@@ -768,6 +769,158 @@ async def get_config(request: Request):
     user = get_current_user(request)
     require_admin(user)
     return _mask_config(load_config())
+
+
+# ── 配置备份与恢复（管理员在页面上操作，不必登服务器） ──
+# 场景：升级或误操作把整份配置打回出厂默认值（课程只剩「人工智能」、APPID/知识库为空）。
+# 历史副本散落在根目录 / backend/ / 各种备份目录里，页面按"健康分"排序列出来，选一份覆盖即可。
+# 关键：出厂默认值同样是 111 个键、约 5KB，光看大小和键数分不出好坏，
+# 所以用 score_config 的指纹（APPID / 版本号 / 知识库）判断哪份"像真实配置"。
+_CONFIG_SOURCE_LABELS: dict[str, str] = {
+    "current": "当前使用中",
+    "current_bak": "当前配置的上次保存(.bak)",
+    "legacy_backend": "旧位置 backend/",
+    "legacy_backend_bak": "旧位置 backend/ 的上次保存",
+    "restore_backup": "恢复前自动备份",
+    "migration_backup": "迁移前的留底",
+    "db_backup": "备份目录 db_backups",
+    "upgrade_backup": "在线升级前自动留底",
+}
+
+
+def _config_source_specs() -> list[dict[str, Any]]:
+    """候选来源清单。id 由本函数生成，restore 只认这里的 id（前端不能传任意路径）"""
+    base = Path(BASE_DIR)
+    specs: list[dict[str, Any]] = [
+        {"id": "current", "kind": "current", "path": CONFIG_FILE},
+        {"id": "current_bak", "kind": "current_bak", "path": _backup_file()},
+        {"id": "legacy_backend", "kind": "legacy_backend",
+         "path": base / "backend" / "system_config.json"},
+        {"id": "legacy_backend_bak", "kind": "legacy_backend_bak",
+         "path": base / "backend" / "system_config.json.bak"},
+    ]
+
+    def _add_glob(kind: str, pattern: str) -> None:
+        for hit in sorted(glob.glob(pattern), reverse=True)[:20]:
+            specs.append({"id": f"{kind}:{hit}", "kind": kind, "path": Path(hit)})
+
+    _add_glob("restore_backup", str(CONFIG_FILE) + ".before-restore.*")
+    _add_glob("restore_backup", str(CONFIG_FILE) + ".before-upgrade-restore.*")
+    _add_glob("migration_backup", str(CONFIG_FILE) + ".replaced-by-migration.*")
+    _add_glob("db_backup", str(base / "db_backups" / "system_config*.json"))
+    _add_glob("upgrade_backup", str(base / ".upgrade_backups" / "*" / "protected" / "system_config.json"))
+    return specs
+
+
+def _describe_config_source(spec: dict[str, Any]) -> dict[str, Any]:
+    """把一份候选文件描述成页面能直接渲染的行（含健康分与"是否像出厂默认值"）"""
+    from backend.data_migration import looks_like_factory_default, score_config
+
+    p: Path = spec["path"]
+    display = str(p)
+    try:
+        display = str(p.relative_to(Path(BASE_DIR)))          # 项目内的显示相对路径
+    except ValueError:
+        pass
+    item: dict[str, Any] = {
+        "id": spec["id"],
+        "kind": spec["kind"],
+        "label": _CONFIG_SOURCE_LABELS.get(spec["kind"], spec["kind"]),
+        "path": display,
+        "exists": p.is_file(),
+        "is_current": False,
+        "size": 0,
+        "mtime": "",
+        "keys": 0,
+        "subjects": 0,
+        "score": -1,
+        "factory_default": True,
+    }
+    try:
+        item["is_current"] = p.resolve() == CONFIG_FILE.resolve()
+    except OSError:
+        pass
+    if not item["exists"]:
+        return item
+    try:
+        st = p.stat()
+        item["size"] = st.st_size
+        item["mtime"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))
+    except OSError:
+        pass
+    data = _read_json_config(p)
+    if isinstance(data, dict):
+        item["keys"] = len(data)
+        subjects = data.get("SUBJECTS")
+        item["subjects"] = len(subjects) if isinstance(subjects, list) else 0
+        item["score"] = score_config(data)
+        item["factory_default"] = looks_like_factory_default(data)
+    return item
+
+
+@router.get("/sources", summary="可恢复的配置来源清单（管理员）")
+async def list_config_sources(request: Request):
+    """列出所有历史副本并按健康分排序，供页面选择恢复"""
+    user = get_current_user(request)
+    require_admin(user)
+    items = [_describe_config_source(spec) for spec in _config_source_specs()]
+    items.sort(key=lambda x: x["mtime"] or "", reverse=True)
+    items.sort(key=lambda x: (not x["exists"], -x["score"]))   # 稳定排序：先存在、再高分
+    return {"sources": items, "count": len(items)}
+
+
+class ConfigRestoreRequest(BaseModel):
+    source: str
+
+
+@router.post("/restore", summary="从历史备份恢复系统配置（管理员）")
+async def restore_config_from_source(req: ConfigRestoreRequest, request: Request):
+    """用选定的历史副本覆盖当前配置；覆盖前自动把当前文件另存为 .before-restore.<时间>"""
+    user = get_current_user(request)
+    require_admin(user)
+
+    spec = next((s for s in _config_source_specs() if s["id"] == req.source), None)
+    if spec is None:
+        raise HTTPException(status_code=400, detail="无效的配置来源，请刷新列表后重试")
+    src: Path = spec["path"]
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="该备份文件已不存在，可能已被清理")
+    data = _read_json_config(src)
+    if not isinstance(data, dict) or not data:
+        raise HTTPException(status_code=400, detail="该文件不是有效配置（JSON 解析失败）")
+    if not isinstance(data.get("SUBJECTS"), list) or not data["SUBJECTS"]:
+        raise HTTPException(status_code=400, detail="该文件缺少课程列表（SUBJECTS），可能不是系统配置")
+
+    before = load_config()
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    backup_path: Path | None = CONFIG_FILE.with_name(f"{CONFIG_FILE.name}.before-restore.{stamp}")
+    try:
+        if CONFIG_FILE.exists():
+            shutil.copy2(CONFIG_FILE, backup_path)
+        else:
+            backup_path = None
+    except OSError as exc:
+        logger.warning(f"[配置] 恢复前备份失败（仍继续恢复）：{exc}")
+        backup_path = None
+
+    merged = dict(DEFAULT_CONFIG)
+    merged.update(data)
+    save_config(merged)
+
+    after = load_config()
+    changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    label = _CONFIG_SOURCE_LABELS.get(spec["kind"], spec["kind"])
+    logger.warning(
+        f"管理员 {user['username']} 从「{label}」恢复系统配置：{len(changed)} 项变化；"
+        f"恢复前备份={backup_path}")
+    return {
+        "status": "ok",
+        "source": _describe_config_source(spec)["path"],
+        "backup": str(backup_path) if backup_path else "",
+        "changed_count": len(changed),
+        "changed_keys": changed[:50],
+        "subjects": after.get("SUBJECTS", []),
+    }
 
 
 @router.get("/health", summary="配置文件健康状态（管理员）")

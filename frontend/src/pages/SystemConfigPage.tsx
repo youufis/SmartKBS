@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
+import ConfigRestorePanel from '../components/ConfigRestorePanel'
 import { useAuthStore } from '../stores/authStore'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
@@ -3063,7 +3064,11 @@ const SystemConfigPage: React.FC = () => {
             key: 'upgrade',
             label: <span><CloudUploadOutlined /> {t('tabVersion')}</span>,
             children: (
-            <UpgradePanel />
+            <>
+              <UpgradePanel />
+              {/* 升级的另一半：万一配置被重置，就在同一个页面里捞回来，不用登服务器敲命令 */}
+              <ConfigRestorePanel />
+            </>
             ),
           },
           ]}
