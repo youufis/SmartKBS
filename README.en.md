@@ -37,7 +37,12 @@
 
 > 📌 **Highlights of V9.0.0**
 >
-> **Dashboard charts (this build)**
+> **Data safety (this build)**
+> - 🛡️ **Upgrades no longer reset the config**: once the config moved to the project root, the old copy was silently ignored and the platform fell back to factory defaults (subject list reduced to "Artificial Intelligence", APPID and knowledge base empty). It now migrates on startup, falls back to `.bak` and logs an error when the file is missing, keeps a copy before and after upgrades, and auto-corrects a config that was reset to defaults
+> - 💾 **New "Backup & restore" tab**: full-site backup / restore / delete / paging; config copies are ranked by a health score (APPID, edition, knowledge base — a factory default is also 111 keys and ~5 KB, so only these fingerprints tell them apart) and restored with one click, keeping a rollback copy
+> - 🔒 **Restores are bounded**: only ids from the server-side list are accepted, backup names are whitelisted against path traversal, and every restore / delete is audit-logged
+>
+> **Dashboard charts**
 > - 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin the one you prefer
 > - 🩹 **Three chart defects fixed**: points and chats shared one axis so the chat bars always sat on the floor (now split into separate tracks); exam-status percentages added up to 101% (now largest-remainder rounding); card content floated in the middle leaving large empty bands (now top-aligned)
 >
@@ -1204,7 +1209,13 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.0.0
 
-**Dashboard charts (this build)**
+**Data safety (this build)**
+
+- 🛡️ **Upgrades no longer reset the config**: once the config moved to the project root, the old copy was silently ignored and the platform fell back to factory defaults (subject list reduced to "Artificial Intelligence", APPID and knowledge base empty). It now migrates on startup, falls back to `.bak` and logs an error when the file is missing, keeps a copy before and after upgrades, and auto-corrects a config that was reset to defaults
+- 💾 **New "Backup & restore" tab**: full-site backup / restore / delete / paging; config copies are ranked by a health score (APPID, edition, knowledge base) and restored with one click, keeping a rollback copy
+- 🔒 **Restores are bounded**: only ids from the server-side list are accepted, backup names are whitelisted against path traversal, and every restore / delete is audit-logged
+
+**Dashboard charts**
 
 - 📊 **Five cards, several ways to read them**: learning trend, ability profile, recent scores, exam status and stars of the week each offer two to three forms; they rotate by date and you can pin the one you prefer
 - 🩹 **Three chart defects fixed**: points and chats shared one axis so the chat bars always sat on the floor (now split into separate tracks); exam-status percentages added up to 101% (now largest-remainder rounding); card content floated in the middle leaving large empty bands (now top-aligned)
