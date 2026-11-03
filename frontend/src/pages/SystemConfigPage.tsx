@@ -12,11 +12,11 @@ import {
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
   CheckCircleOutlined, CloseCircleOutlined, EditOutlined, DownOutlined, BarChartOutlined,
   DesktopOutlined, AppstoreOutlined, CloudUploadOutlined, ControlOutlined, InfoCircleOutlined,
-  PlusOutlined,
+  PlusOutlined, HistoryOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
-import ConfigRestorePanel from '../components/ConfigRestorePanel'
+import BackupPanel from '../components/BackupPanel'
 import { useAuthStore } from '../stores/authStore'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
@@ -3064,11 +3064,15 @@ const SystemConfigPage: React.FC = () => {
             key: 'upgrade',
             label: <span><CloudUploadOutlined /> {t('tabVersion')}</span>,
             children: (
-            <>
-              <UpgradePanel />
-              {/* 升级的另一半：万一配置被重置，就在同一个页面里捞回来，不用登服务器敲命令 */}
-              <ConfigRestorePanel />
-            </>
+            <UpgradePanel />
+            ),
+          },
+          {
+            // 单独一个 tab：整站数据备份 + 配置恢复放在一起，升级前后都从这里进
+            key: 'backup',
+            label: <span><HistoryOutlined /> {t('backupTab')}</span>,
+            children: (
+            <BackupPanel />
             ),
           },
           ]}

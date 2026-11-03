@@ -6,7 +6,9 @@ import asyncio
 import json
 import os
 import platform
+import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -18,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
@@ -1658,6 +1660,201 @@ def _restore_config_after_sync(snapshot: dict[str, Any]) -> None:
         logger.warning(f"[upgrade] 配置守护: 已用升级前留底恢复配置 → {target}（分 {snapshot['score']}）")
     except Exception as exc:
         logger.error(f"[upgrade] 配置守护: 恢复失败，请手工把 {snap} 覆盖到 {target}: {exc}")
+
+
+#: 只认这两种目录名，删除/恢复时用它挡掉路径穿越
+_BACKUP_NAME_RE = re.compile(r"^(pre_upgrade|pre_restore)_[0-9]{8}_[0-9]{6}$")
+
+
+def _resolve_backup_dir(name: str) -> Path:
+    """把备份名解析成目录，并确保没有跑出 .upgrade_backups"""
+    if not _BACKUP_NAME_RE.fullmatch(name or ""):
+        raise HTTPException(status_code=400, detail="非法的备份名称")
+    root = BACKUP_DIR.resolve()
+    target = (BACKUP_DIR / name).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法的备份路径")
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="备份不存在或已被删除")
+    return target
+
+
+def _sqlite_restore(src: Path, dst: Path) -> None:
+    """用 SQLite 在线备份 API 覆盖目标库
+
+    比直接 copy 文件稳：直接覆盖正在被读写的 .db 会读到半截页面；
+    backup() 走 SQLite 自己的页复制，会拿写锁，WAL 下也能保持一致。
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    src_conn = sqlite3.connect(str(src), timeout=30)
+    try:
+        dst_conn = sqlite3.connect(str(dst), timeout=30)
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+    finally:
+        src_conn.close()
+
+
+@router.get("/backups", summary="列出数据备份（管理员）")
+async def list_backups(request: Request,
+                       page: int = Query(1, ge=1, description="页码，从 1 开始"),
+                       page_size: int = Query(5, ge=1, le=100, description="每页条数")):
+    """列出 .upgrade_backups 下的备份：每个备份含数据库、系统配置与上传文件。
+
+    与"配置恢复"放在同一个页面用：先看有没有可用的整机备份，再决定是回退数据还是只恢复配置。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+
+    items: list[dict[str, Any]] = []
+    if BACKUP_DIR.is_dir():
+        dirs = [d for d in BACKUP_DIR.iterdir() if d.is_dir() and not d.name.startswith(".")]
+        try:
+            dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            pass
+        for d in dirs:
+            total = 0
+            files: list[str] = []
+            protected = d / "protected"
+            if protected.is_dir():
+                for f in protected.iterdir():
+                    if f.is_file():
+                        try:
+                            total += f.stat().st_size
+                        except OSError:
+                            continue
+                        files.append(f.name)
+            tar_path = d.with_suffix(".tar")
+            has_tar = tar_path.is_file()
+            if has_tar:
+                try:
+                    total += tar_path.stat().st_size
+                except OSError:
+                    pass
+            try:
+                created = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(d.stat().st_mtime))
+            except OSError:
+                created = ""
+            items.append({
+                "name": d.name,
+                "kind": "restore_point" if d.name.startswith("pre_restore") else "upgrade",
+                "created_at": created,
+                "size_mb": round(total / 1024 / 1024, 2),
+                "files": files,
+                "has_source_tar": has_tar,
+                "path": str(d).replace(str(BASE_DIR) + os.sep, ""),
+            })
+    total_count = len(items)
+    start = (page - 1) * page_size
+    return {
+        "backups": items[start:start + page_size],
+        "count": total_count,
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "dir": str(BACKUP_DIR),
+    }
+
+
+@router.delete("/backups/{name}", summary="删除数据备份（管理员）")
+async def delete_backup(name: str, request: Request):
+    """删除一份备份（目录 + 同名源码快照），释放磁盘"""
+    user = get_current_user(request)
+    require_admin(user)
+    if _state["running"]:
+        raise HTTPException(status_code=409, detail="升级进行中，暂不能删除备份")
+
+    target = _resolve_backup_dir(name)
+    tar_path = target.with_suffix(".tar")
+    freed = 0
+    for f in target.rglob("*"):
+        if f.is_file():
+            try:
+                freed += f.stat().st_size
+            except OSError:
+                pass
+    if tar_path.is_file():
+        try:
+            freed += tar_path.stat().st_size
+        except OSError:
+            pass
+    try:
+        shutil.rmtree(target)
+        if tar_path.is_file():
+            tar_path.unlink()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"删除失败：{exc}")
+    freed_mb = round(freed / 1024 / 1024, 2)
+    logger.warning(f"管理员 {user['username']} 删除数据备份 {name}（释放 {freed_mb} MB）")
+    return {"status": "ok", "name": name, "freed_mb": freed_mb}
+
+
+@router.post("/backups/{name}/restore", summary="从数据备份恢复数据库与配置（管理员）")
+async def restore_backup(name: str, request: Request):
+    """整站回退：数据库用 SQLite 在线备份覆盖，配置走 config_router.save_config。
+
+    恢复前会先把当前数据库与配置另存一份 pre_restore_<时间>，误操作还能再退回来。
+    注意：这份备份之后产生的数据会丢失，前端必须做二次确认。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+    if _state["running"]:
+        raise HTTPException(status_code=409, detail="升级进行中，暂不能恢复备份")
+
+    target = _resolve_backup_dir(name)
+    protected = target / "protected"
+    dbs = sorted(protected.glob("*.db")) if protected.is_dir() else []
+    cfg_file = protected / "system_config.json"
+    if not dbs and not cfg_file.is_file():
+        raise HTTPException(status_code=400, detail="该备份里没有可恢复的数据库或配置")
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safety = BACKUP_DIR / f"pre_restore_{stamp}"
+    (safety / "protected").mkdir(parents=True, exist_ok=True)
+
+    restored: list[str] = []
+    for src_db in dbs:
+        cur_db = Path(DB_DIR) / src_db.name
+        if cur_db.is_file():
+            try:
+                shutil.copy2(cur_db, safety / "protected" / cur_db.name)
+            except OSError as exc:
+                logger.warning(f"[备份恢复] 回退点留底失败（继续恢复）{cur_db.name}: {exc}")
+        try:
+            _sqlite_restore(src_db, cur_db)
+            restored.append(src_db.name)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"恢复 {src_db.name} 失败：{exc}")
+
+    cfg_restored = False
+    if cfg_file.is_file():
+        try:
+            from backend.api.config_router import DEFAULT_CONFIG, save_config
+            data = json.loads(cfg_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data:
+                merged = dict(DEFAULT_CONFIG)
+                merged.update(data)
+                save_config(merged)
+                cfg_restored = True
+        except Exception as exc:
+            logger.error(f"[备份恢复] 配置恢复失败：{exc}")
+
+    logger.warning(
+        f"管理员 {user['username']} 从数据备份 {name} 恢复：数据库={restored or '无'}，"
+        f"配置={'已恢复' if cfg_restored else '未恢复'}；回退点={safety.name}")
+    return {
+        "status": "ok",
+        "name": name,
+        "databases": restored,
+        "config_restored": cfg_restored,
+        "safety_backup": safety.name,
+        "restart_hint": "数据库已在线恢复，刷新页面即可看到；如有页面仍显示旧数据，请重新登录",
+    }
 
 
 @router.post("/backup")

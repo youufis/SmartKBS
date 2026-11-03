@@ -923,6 +923,30 @@ async def restore_config_from_source(req: ConfigRestoreRequest, request: Request
     }
 
 
+@router.post("/sources/delete", summary="删除某个配置备份（管理员）")
+async def delete_config_source(req: ConfigRestoreRequest, request: Request):
+    """删掉一份不再需要的配置副本（磁盘上的历史备份文件）"""
+    user = get_current_user(request)
+    require_admin(user)
+    spec = next((s for s in _config_source_specs() if s["id"] == req.source), None)
+    if spec is None:
+        raise HTTPException(status_code=400, detail="无效的配置来源，请刷新列表后重试")
+    if spec["kind"] in ("current", "legacy_backend"):
+        raise HTTPException(
+            status_code=400,
+            detail="当前使用中/旧位置的真实配置不能在这里删除，请先确认已在别处留好备份")
+    path: Path = spec["path"]
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="该备份文件已不存在")
+    try:
+        size = path.stat().st_size
+        path.unlink()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"删除失败：{exc}")
+    logger.warning(f"管理员 {user['username']} 删除配置备份 {spec['id']}（{size} 字节）")
+    return {"status": "ok", "id": spec["id"], "freed_kb": round(size / 1024, 1)}
+
+
 @router.get("/health", summary="配置文件健康状态（管理员）")
 async def get_config_health(request: Request):
     """C1: 配置文件损坏/回退状态可见, 不再静默用默认值覆盖真实配置"""

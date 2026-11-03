@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Alert, Button, Card, message, Popconfirm, Space, Table, Tag, Typography } from 'antd'
-import { HistoryOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
+import { DeleteOutlined, HistoryOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
 
 const { Text } = Typography
@@ -32,10 +32,12 @@ interface ConfigSource {
 }
 
 const ConfigRestorePanel: React.FC = () => {
-  const { t } = useTranslation()
+  // 与系统配置页其余面板保持一致：文案都在 system 命名空间里（默认命名空间读不到会直接显示 key）
+  const { t } = useTranslation('system')
   const [items, setItems] = useState<ConfigSource[]>([])
   const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState('')
+  const [removing, setRemoving] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -68,6 +70,23 @@ const ConfigRestorePanel: React.FC = () => {
       message.error(e?.response?.data?.detail || t('configRestoreFailed'))
     } finally {
       setPending('')
+    }
+  }
+
+  // 只允许删"备份类"副本：当前使用中与旧位置的真实配置留着，避免误删唯一可用的一份
+  const deletable = (r: ConfigSource) => r.exists && !r.is_current
+    && r.kind !== 'current' && r.kind !== 'legacy_backend'
+
+  const remove = async (row: ConfigSource) => {
+    setRemoving(row.id)
+    try {
+      await apiClient.post('/api/config/sources/delete', { source: row.id })
+      message.success(t('configRestoreDeleted'))
+      await load()
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('configRestoreDeleteFailed'))
+    } finally {
+      setRemoving('')
     }
   }
 
@@ -109,26 +128,44 @@ const ConfigRestorePanel: React.FC = () => {
     },
     {
       title: t('configRestoreColAction'),
-      width: 110,
+      width: 180,
       render: (_: any, r: ConfigSource) => (
-        <Popconfirm
-          title={t('configRestoreConfirmTitle')}
-          description={t('configRestoreConfirmDesc')}
-          okText={t('configRestoreConfirmOk')}
-          cancelText={t('cancel')}
-          disabled={!r.exists || r.is_current}
-          onConfirm={() => restore(r)}
-        >
-          <Button
-            size="small"
-            icon={<RollbackOutlined />}
-            danger={r.factory_default}
+        <Space size={4}>
+          <Popconfirm
+            title={t('configRestoreConfirmTitle')}
+            description={t('configRestoreConfirmDesc')}
+            okText={t('configRestoreConfirmOk')}
+            cancelText={t('cancel')}
             disabled={!r.exists || r.is_current}
-            loading={pending === r.id}
+            onConfirm={() => restore(r)}
           >
-            {t('configRestoreAction')}
-          </Button>
-        </Popconfirm>
+            <Button
+              size="small"
+              icon={<RollbackOutlined />}
+              danger={r.factory_default}
+              disabled={!r.exists || r.is_current}
+              loading={pending === r.id}
+            >
+              {t('configRestoreAction')}
+            </Button>
+          </Popconfirm>
+          <Popconfirm
+            title={t('configRestoreDeleteConfirm')}
+            okText={t('configRestoreDeleteOk')}
+            cancelText={t('cancel')}
+            disabled={!deletable(r)}
+            onConfirm={() => remove(r)}
+          >
+            <Button
+              size="small"
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              disabled={!deletable(r)}
+              loading={removing === r.id}
+            />
+          </Popconfirm>
+        </Space>
       ),
     },
   ]
@@ -152,7 +189,7 @@ const ConfigRestorePanel: React.FC = () => {
         loading={loading}
         dataSource={items}
         columns={columns}
-        pagination={false}
+        pagination={{ pageSize: 5, showSizeChanger: true, pageSizeOptions: [5, 10, 20], showTotal: (n) => t('configRestoreTotal', { n }) }}
         locale={{ emptyText: t('configRestoreEmpty') }}
       />
     </Card>
