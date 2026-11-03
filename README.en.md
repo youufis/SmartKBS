@@ -1335,7 +1335,7 @@ Don't want to install Python or Node.js? Use the desktop installer — double-cl
 | Item | Notes |
 | --- | --- |
 | Runtime dependencies | None — no Python / Node.js needed (Electron shell + PyInstaller backend + Vite frontend) |
-| Data location | `%APPDATA%\SmartKBS\` (database, uploads, logs) — **survives uninstall and reinstall** |
+| Data location | `%APPDATA%\smartkbs-desktop\` (both databases, `system_config.json`, `root/`, `stu/`, `question_media/`, `LogFiles/`) — **survives uninstall and reinstall** |
 | Upgrading | Use 「System Config → Version Management → Check Update」; when a newer build is found, install the new package over the old one (data is kept). The Git-style online incremental upgrade does not apply to the desktop edition. |
 | Port | Fixed `8086`. If the web edition already runs on this machine under IIS, stop it first or the desktop app won't start |
 | Platforms | Only a Windows x64 installer is published today; macOS / Linux packaging is configured but not released |
@@ -1510,7 +1510,7 @@ SmartKBS/
 | `LogFiles/`, `backend/logs/` | logs |
 | `db_backups/`, `.upgrade_backups/` | database backups and upgrade rollback snapshots |
 
-> 🖥️ The desktop edition (Electron + PyInstaller) is a local build and its project folder is not distributed with the source; installers are published through GitHub Releases and keep data in `%APPDATA%\SmartKBS\`.
+> 🖥️ The desktop edition (Electron + PyInstaller) is a local build and its project folder is not distributed with the source; installers are published through GitHub Releases and keep data in `%APPDATA%\smartkbs-desktop\`.
 
 ---
 
@@ -1533,7 +1533,7 @@ SmartKBS/
 
 ---
 
-> 💾 **Backup checklist** — to migrate or restore, keep `backend/smartkb.db`, `backend/questions.db`, `backend/system_config.json` and the `root/`, `stu/`, `question_media/` directories; for the desktop edition, back up the whole `%APPDATA%\SmartKBS\` folder.
+> 💾 **Backup checklist** — to migrate or restore, keep `backend/smartkb.db`, `backend/questions.db`, `backend/system_config.json` and the `root/`, `stu/`, `question_media/` directories; for the desktop edition, back up the whole `%APPDATA%\smartkbs-desktop\` folder.
 
 ---
 
@@ -1658,7 +1658,7 @@ Copyright © 2026 youufis (UNET)
 - **How do I upgrade?**
   1. Git deployment: as admin open System Configuration → Version Management, then Check for Updates and Incremental upgrade; failures roll back automatically.
   2. Source package: unzip the new release over the old directory, keeping `backend/system_config.json` and the two `.db` files, then restart.
-  3. Desktop edition: run the new installer over the old one; data in `%APPDATA%\SmartKBS\` is preserved.
+  3. Desktop edition: run the new installer **over** the old one; data in `%APPDATA%\smartkbs-desktop\` is preserved. Do **not** uninstall first on versions ≤9.0.0 — their data still lives in the app folder and would be deleted with it.
 - **A fresh machine refuses to start.** Confirm Python is 3.11+, reinstall dependencies with `pip install -r requirements.txt`, and if a module is reported missing check whether it is listed there.
 
 ---
