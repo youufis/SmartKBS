@@ -7,6 +7,7 @@
 - resource_view_logs 365 天
 - notifications     90 天(仅已读, 未读永不清理)
 """
+import re as _re
 import threading
 import time as _time
 from datetime import datetime, timedelta
@@ -279,6 +280,90 @@ def _maintain_question_media() -> None:
         logger.warning(f"题库配图治理失败: {e}")
 
 
+# 白板素材（question_media/whiteboard_assets）孤儿回收:
+# 这些图**不是**用完即弃的临时文件 —— 快照里只存 URL，历史板书回看/导出/学生端
+# 全靠它们，所以绝不能像 temp_uploads 那样「超 24h 就删」。
+# 只回收「任何白板快照都不再引用」且已晾够 _WB_ASSET_IDLE_DAYS 天的文件。
+_WB_ASSET_IDLE_DAYS = 30
+_WB_ASSET_NAME_RE = _re.compile(r"^[a-f0-9]{64}\.(?:png|jpg)$")
+_WB_ASSET_REF_RE = _re.compile(r"[a-f0-9]{64}\.(?:png|jpg)")
+
+
+def _wb_referenced_assets() -> set[str] | None:
+    """收集所有白板快照里出现过的素材文件名；读库失败返回 None（调用方放弃清理）"""
+    try:
+        rows = []
+        with get_connection() as conn:
+            for sql in (
+                "SELECT snapshot_data FROM whiteboard_pages WHERE snapshot_data LIKE '%whiteboard_assets%'",
+                "SELECT self_snapshot FROM whiteboard_room_members "
+                "WHERE self_snapshot LIKE '%whiteboard_assets%'",
+            ):
+                try:
+                    rows.extend(conn.execute(sql).fetchall())
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.warning(f"[log_retention] 读取白板快照失败，跳过素材回收: {e}")
+        return None
+    refs: set[str] = set()
+    for row in rows:
+        try:
+            refs.update(_WB_ASSET_REF_RE.findall(row[0] or ""))
+        except Exception:
+            continue
+    return refs
+
+
+def _maintain_whiteboard_assets() -> None:
+    """白板素材孤儿回收：只删「无快照引用 + 超过 30 天」的文件
+
+    上传接口按内容哈希命名、同图只存一份，所以被引用过的文件永远会被上面那批快照保住；
+    真正能删的只有「传了但白板后来没保留」的残留。30 天与题库配图的孤儿口径一致，
+    也给「快照尚在内存、还没落库」的极端情况留足余量。
+    """
+    import os
+    import time
+
+    try:
+        from backend.api.whiteboard_router import WB_ASSET_DIR
+    except Exception as e:
+        logger.warning(f"[log_retention] 白板素材目录不可用，跳过回收: {e}")
+        return
+
+    if not WB_ASSET_DIR.is_dir():
+        return
+
+    refs = _wb_referenced_assets()
+    if refs is None:
+        return
+
+    cutoff = time.time() - _WB_ASSET_IDLE_DAYS * 86400
+    removed = 0
+    freed = 0
+    for path in WB_ASSET_DIR.iterdir():
+        try:
+            if not path.is_file() or not _WB_ASSET_NAME_RE.match(path.name):
+                continue
+            if path.name in refs:
+                continue
+            st = path.stat()
+            if st.st_mtime >= cutoff:
+                continue
+            path.unlink()
+            removed += 1
+            freed += st.st_size
+        except OSError:
+            # Windows 上刚被读过的文件可能删不掉，下一轮再试
+            continue
+
+    if removed:
+        logger.info(
+            f"[log_retention] 白板素材孤儿回收 {removed} 张，释放 {freed / 1048576:.1f}MB"
+            f"（保留被 {len(refs)} 张快照引用的素材）"
+        )
+
+
 def _as_list_json(raw):
     """media_files 字段的 JSON 兼容层（字符串/列表 → 字典列表）"""
     import json as _json
@@ -466,6 +551,7 @@ def purge_once() -> None:
     _repair_view_logs_provenance()
     _maintain_exam_attempts()
     _maintain_question_media()
+    _maintain_whiteboard_assets()
     _check_question_references()
     _reconcile_points_and_badges()
     _prune_log_files()

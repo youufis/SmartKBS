@@ -37,6 +37,12 @@
 
 > 📌 **Highlights of V9.0.0**
 >
+> **Whiteboard AI assistant (this build)**
+> - 🖼️ **Question images and handwriting are readable again**: after board images moved to external URLs the vision path silently lost them, so the model only saw stray numbers; fixed, and questions are now sent as a full-page screenshot
+> - 🧠 **Teaching advice reads the board**: when there is little content it says so and suggests what to add instead of guessing at isolated digits
+> - 💬 **Follow-ups and reuse**: multi-turn context, and every answer can be copied, inserted onto the board or regenerated
+> - 🎯 **Generated content is brought into view**: mind maps, board drafts, bilingual boards and quizzes are selected and zoomed to right after insertion
+>
 > **Data safety (this build)**
 > - 🛡️ **Install-over upgrades no longer lose content**: teacher pages, student portraits and homework attachments are migrated and rescued by the installer, so "the roster is there but everything 404s" no longer happens
 > - 🛡️ **Backups work on all three deployments**: the database now uses an online consistent snapshot and source snapshots are skipped where they don't apply; the backup folder moved to the user data directory so the next install can't delete it
@@ -1197,6 +1203,14 @@ Git-based online incremental upgrade system:
 Current version **9.0.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.9.0 is merged into one outline section below.
 
 ### v9.0.0
+
+**Whiteboard AI assistant (build 20261105.2012)**
+
+- 🖼️ **Vision path fixed**: images became external URLs and the vision path silently returned none, so the model only saw stray numbers and shapes; board assets are now read through their references, and a full-page screenshot is sent with the question
+- 🧠 **Advice reads the page**: when a screenshot is attached it takes precedence; a thin board gets guidance instead of a guess
+- 💬 **Follow-ups and reuse**: the chat keeps the last few turns, and answers can be copied, inserted onto the board or regenerated
+- 🎯 **Generated content is brought into view**: mind maps, board drafts, bilingual boards and quizzes are selected and zoomed to after insertion
+- 🧹 **Housekeeping**: unreferenced board assets are reclaimed after 30 days and per-call temp images are deleted immediately
 
 **Data safety (this build)**
 

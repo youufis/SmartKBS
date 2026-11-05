@@ -737,18 +737,22 @@ def _meta_max_tokens(meta_reason: Optional[str]) -> Optional[int]:
 def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = "",
                         use_agent: bool = True, history: Optional[list] = None,
                         enable_thinking: Optional[bool] = None,
-                        system: Optional[str] = None, max_tokens: Optional[int] = None):
+                        system: Optional[str] = None, max_tokens: Optional[int] = None,
+                        use_kb: bool = True):
     """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式（history 仅直连生效）
 
     system: V8.6.1 身份/规则段，直连模式走独立 system 角色；智能体模式由
     ai_service 内联到问题前（百炼 Application 的 messages 不收 system）。
+    use_kb: 白板/板书这类「以眼前材料为准」的问答传 False，别让知识库拿
+    系统提示词全文去检索（实测会捞回一堆无关片段，还拖慢首字）。
     """
     from backend.api.ai_service import call_ai_stream
 
     try:
         for chunk in call_ai_stream(prompt, api_key, session_id, use_agent=use_agent, history=history,
                                     enable_thinking=enable_thinking,
-                                    system=system, max_tokens=max_tokens):
+                                    system=system, max_tokens=max_tokens,
+                                    use_kb=use_kb):
             yield chunk
     except Exception as e:
         logger.error(f"AI chat error: {e}")
