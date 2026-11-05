@@ -19,6 +19,7 @@ import {
   RiseOutlined, ReloadOutlined, PlusSquareOutlined,
 } from '@ant-design/icons'
 import VoiceInput from '../VoiceInput'
+import KnowledgePointSelect from '../KnowledgePointSelect'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -261,6 +262,37 @@ function focusNewShapes(editor: Editor, ids: (string | undefined)[]) {
       animation: { duration: 220 },
     })
   } catch { /* 视口缩放失败也不该让「已插入」变成报错 */ }
+}
+
+/**
+ * 弹窗里的「知识点」输入框：下拉选课程知识点，也可直接打字。
+ * 复用全站统一的 KnowledgePointSelect（下拉 + 手输 + 逗号/顿号分词 + 按学科过滤），
+ * 以前这两个弹窗是纯 TextArea，老师只能凭记忆手打，容易和课程树口径对不上。
+ */
+const KpPromptInput: React.FC<{
+  subject?: string
+  hint?: string
+  onChange: (v: string) => void
+}> = ({ subject, hint, onChange }) => {
+  const [value, setValue] = useState('')
+  return (
+    <div>
+      <KnowledgePointSelect
+        multiple={false}
+        subject={subject}
+        value={value}
+        onChange={(v) => {
+          const next = String(v || '')
+          setValue(next)
+          onChange(next)
+        }}
+        style={{ width: '100%' }}
+      />
+      {hint && (
+        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-tertiary)' }}>{hint}</div>
+      )}
+    </div>
+  )
 }
 
 interface Message {
@@ -534,23 +566,21 @@ export const AIPanel: React.FC<Props> = ({
       message.warning(t('aiBoardNotReady'))
       return
     }
-    // 弹出输入框让用户描述图示
+    // 弹窗让老师选/填图示主题（可下拉选课程知识点，也可直接输入）
+    let picked = ''
     const desc = await new Promise<string>((resolve) => {
       Modal.confirm({
         title: t('aiFigModalTitle'),
         content: (
-          <TextArea
-            id="ai-diagram-desc"
-            placeholder={t('aiFigPh')}
-            rows={3}
+          <KpPromptInput
+            subject={subject}
+            hint={t('aiFigPh')}
+            onChange={(v) => { picked = v }}
           />
         ),
         okText: t('aiGen'),
         cancelText: t('aiCancel'),
-        onOk: () => {
-          const el = document.getElementById('ai-diagram-desc') as HTMLTextAreaElement
-          resolve(el?.value || '')
-        },
+        onOk: () => resolve(picked),
         onCancel: () => resolve(''),
       })
     })
@@ -663,25 +693,23 @@ export const AIPanel: React.FC<Props> = ({
       return
     }
 
-    // 如果没有知识点名称，弹窗让教师输入
+    // 如果没有知识点名称，弹窗让教师选/填（下拉课程知识点，也可直接输入）
     let topic = kpName
     if (!topic) {
+      let pickedTopic = ''
       topic = await new Promise<string>((resolve) => {
         Modal.confirm({
           title: t('aiBoardModalTitle'),
           content: (
-            <TextArea
-              id="ai-board-topic"
-              placeholder={t('aiBoardPh')}
-              rows={2}
+            <KpPromptInput
+              subject={subject}
+              hint={t('aiBoardPh')}
+              onChange={(v) => { pickedTopic = v }}
             />
           ),
           okText: t('aiGen'),
           cancelText: t('aiCancel'),
-          onOk: () => {
-            const el = document.getElementById('ai-board-topic') as HTMLTextAreaElement
-            resolve(el?.value || '')
-          },
+          onOk: () => resolve(pickedTopic),
           onCancel: () => resolve(''),
         })
       })

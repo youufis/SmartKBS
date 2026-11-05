@@ -2505,9 +2505,14 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         # 没有库级备份的话，失败后就停在"旧代码 + 迁移了一半的库"，只能人工救。
         # ③ 目录名以前用 task_id（12 位 hex），不匹配备份白名单，页面上看得见却点不动。
         guard_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        guard_name = f"pre_upgrade_{guard_stamp}"
+        auto_backup = _upgrade_auto_backup_enabled()
+        # 配置守护快照与「备份」是两件事：
+        #   · 守护快照是升级正确性的一环（reset 后校验回填，防配置被打回默认值），任何情况下都要做；
+        #   · pre_upgrade_* 备份目录（含两个数据库）按开关决定，默认关，避免每次升级都堆一份全库副本。
+        # 因此开关关闭时把守护快照放到 upgrade_guard/，不进备份列表，历史里也不写备份名。
+        guard_name = f"pre_upgrade_{guard_stamp}" if auto_backup else ""
         guard_root = BACKUP_DIR / guard_name
-        guard_dir = guard_root / "protected"
+        guard_dir = (guard_root / "protected") if auto_backup else (STORAGE_DIR / "upgrade_guard")
         cfg_snapshot: dict[str, Any] = {}
         db_snapshot: list[dict[str, Any]] = []
         local_changes: dict[str, Any] = {}
@@ -2516,32 +2521,37 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             cfg_snapshot = _snapshot_config(guard_dir)
             if not cfg_snapshot:
                 logger.warning("[upgrade] Step 1d: 未找到可留底的配置文件（新装机器或路径异常）")
-            for db_name in ("smartkb.db", "questions.db"):
-                live = Path(DB_DIR) / db_name
-                if live.is_file():
-                    how = _sqlite_backup_of(live, guard_dir / db_name)
-                    db_snapshot.append({"name": db_name, "bytes": live.stat().st_size, "via": how})
-            node_file = Path(DB_DIR) / ".node_id"
-            if node_file.is_file():
-                shutil.copy2(node_file, guard_dir / node_file.name)
-            _write_backup_manifest(guard_root, {
-                "created_at": guard_stamp, "version": APP_VERSION,
-                "desktop_build": str(_read_local_version_payload().get("desktop_build") or ""),
-                "deploy_mode": _deploy_mode(), "admin": admin, "client_ip": client_ip,
-                "databases": db_snapshot,
-                "config": ["system_config.json"] if cfg_snapshot else [],
-                "content": {}, "source_tar": False,
-                "warnings": ["升级流水线自动留底（含配置与数据库，不含内容目录）"],
-            })
+            if auto_backup:
+                for db_name in ("smartkb.db", "questions.db"):
+                    live = Path(DB_DIR) / db_name
+                    if live.is_file():
+                        how = _sqlite_backup_of(live, guard_dir / db_name)
+                        db_snapshot.append({"name": db_name, "bytes": live.stat().st_size, "via": how})
+                node_file = Path(DB_DIR) / ".node_id"
+                if node_file.is_file():
+                    shutil.copy2(node_file, guard_dir / node_file.name)
+                _write_backup_manifest(guard_root, {
+                    "created_at": guard_stamp, "version": APP_VERSION,
+                    "desktop_build": str(_read_local_version_payload().get("desktop_build") or ""),
+                    "deploy_mode": _deploy_mode(), "admin": admin, "client_ip": client_ip,
+                    "databases": db_snapshot,
+                    "config": ["system_config.json"] if cfg_snapshot else [],
+                    "content": {}, "source_tar": False,
+                    "warnings": ["升级流水线自动留底（含配置与数据库，不含内容目录）"],
+                })
 
-            def _m_guard_backup(st: dict[str, Any]) -> None:
-                st["current_backup"] = {
-                    "path": str(guard_root), "tar": "", "version": APP_VERSION,
-                    "created_at": guard_stamp, "admin": admin, "client_ip": client_ip,
-                    "includes_content": False,
-                }
-            _mutate_state(_m_guard_backup)
-            _set_progress("backup", f"升级前已留底（配置 + {len(db_snapshot)} 个数据库）", 18)
+                def _m_guard_backup(st: dict[str, Any]) -> None:
+                    st["current_backup"] = {
+                        "path": str(guard_root), "tar": "", "version": APP_VERSION,
+                        "created_at": guard_stamp, "admin": admin, "client_ip": client_ip,
+                        "includes_content": False,
+                    }
+                _mutate_state(_m_guard_backup)
+                _set_progress("backup", f"升级前已留底（配置 + {len(db_snapshot)} 个数据库）", 18)
+            else:
+                logger.info("[upgrade] Step 1d: 升级前自动备份已关闭（系统配置 → 存储与安全 → 升级 → "
+                            "升级前自动备份），仅保留配置守护快照")
+                _set_progress("backup", "已跳过升级前自动备份（可在系统配置中开启）", 18)
         except Exception as snap_e:
             logger.warning(f"[upgrade] Step 1d: 留底异常（不影响升级）: {snap_e}")
 
@@ -2570,7 +2580,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
                 "请在本机执行后重试（或在仓库侧删除并提交）：\n  "
                 + "\n  ".join(f"git rm --cached {f}" for f in bad_tracked[:10])
                 + (" ..." if len(bad_tracked) > 10 else "")
-                + f"\n（升级前留底目录：{guard_name}）"
+                + (f"\n（升级前留底目录：{guard_name}）" if guard_name else "")
             )
 
         # ── Step 2: git reset 快速同步 ──
@@ -3081,6 +3091,20 @@ def _auto_pull_enabled() -> bool:
         return bool(get_config_value("auto_pull_enabled", True))
     except Exception:
         return True
+
+
+def _upgrade_auto_backup_enabled() -> bool:
+    """升级前自动留底开关(system_config.json 的 UPGRADE_AUTO_BACKUP, 默认关闭)
+
+    关掉只影响「是否产出 pre_upgrade_* 备份目录」，不影响配置守护：
+    升级前仍会取一份当前生效配置的快照，reset 之后照旧校验回填，
+    避免代码升上去、配置却被仓库那份打成出厂默认值。
+    """
+    try:
+        from backend.api.config_router import get_config_value
+        return bool(get_config_value("UPGRADE_AUTO_BACKUP", False))
+    except Exception:
+        return False
 
 
 async def _try_auto_ff_sync(current: str = "", latest: str = "",
