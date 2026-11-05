@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.auth import ROLE_ADMIN
-from backend.config import APP_VERSION, ROOT_DIR  # APP_VERSION: /api/system/info 要回身份位
+from backend.config import APP_VERSION, ROOT_DIR, STORAGE_DIR  # APP_VERSION: /api/system/info 要回身份位
 from backend.security_guard import snapshot as guard_snapshot, unban as guard_unban
 from backend.utils import get_account_html_dir
 from backend.logger import logger
@@ -56,7 +56,9 @@ async def system_info(verify: str = ""):
 @router.get("/examples/files")
 async def get_random_files(request: Request):
     """获取随机文件示例"""
-    imgs_dir = os.path.join(ROOT_DIR, "imgs")
+    # 必须挂到数据根：ROOT_DIR 只是目录名（"root"），直接 join 会按进程当前目录解析，
+    # 桌面版的后端 cwd 是安装目录（resources\backend），结果永远读不到 <userData>\root\imgs
+    imgs_dir = os.path.join(str(STORAGE_DIR), ROOT_DIR, "imgs")
     if not os.path.exists(imgs_dir):
         return {"files": []}
 
