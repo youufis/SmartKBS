@@ -127,6 +127,10 @@ export async function aiChatStream(
     useVision?: boolean
     /** 浏览器里的实时白板快照（服务端那份是异步落库的副本，可能过期/为空） */
     snapshot?: string
+    /** 最近几轮对话，让追问「第二题呢」这类话能接上上文 */
+    history?: { role: 'user' | 'assistant'; content: string }[]
+    /** 整页截图（data URL）：手写/图片/文本框只有看图才认得出来 */
+    pageImage?: string
   },
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token')
@@ -144,6 +148,8 @@ export async function aiChatStream(
         subject: options?.subject || '',
         use_vision: options?.useVision ?? false,
         snapshot: options?.snapshot || '',
+        history: options?.history || [],
+        page_image: options?.pageImage || '',
       }),
       signal: options?.signal,
     })
@@ -468,13 +474,14 @@ export async function aiGenerateBilingual(
 export async function aiSuggest(
   content: string,
   kpName?: string,
-  options?: { snapshot?: string; roomId?: number },
+  options?: { snapshot?: string; roomId?: number; pageImage?: string },
 ): Promise<{
   suggestion: string
 }> {
   const res = await apiClient.post(
     '/api/whiteboard/ai/suggest',
-    { content, kp_name: kpName, snapshot: options?.snapshot || '', room_id: options?.roomId },
+    { content, kp_name: kpName, snapshot: options?.snapshot || '', room_id: options?.roomId,
+      page_image: options?.pageImage || '' },
     { timeout: 320000 },
   )
   return res.data

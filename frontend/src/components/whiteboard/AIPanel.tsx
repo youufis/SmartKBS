@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import i18n from '../../i18n'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  Input, Button, Typography, Space, Spin, Tag, Tooltip,
+  Input, Button, Typography, Space, Spin, Tag, Tooltip, Divider,
   message, Modal, Select,
 } from 'antd'
 import {
@@ -16,7 +16,7 @@ import {
   FullscreenOutlined, FullscreenExitOutlined,
   CopyOutlined, BulbOutlined, HighlightOutlined,
   EditOutlined, ApartmentOutlined, TranslationOutlined,
-  RiseOutlined,
+  RiseOutlined, ReloadOutlined, PlusSquareOutlined,
 } from '@ant-design/icons'
 import VoiceInput from '../VoiceInput'
 import ReactMarkdown from 'react-markdown'
@@ -28,6 +28,7 @@ import * as whiteboardApi from '../../api/whiteboard'
 import { useProgressModal } from './ProgressModal'
 import useSubjectOptions from '../../hooks/useSubjectOptions'
 import type { Editor } from 'tldraw'
+import { Box } from 'tldraw'
 
 // ── 统一错误转换：把各种错误转为友好、可操作的提示 ──
 function friendlyError(err: any, defaultMsg: string = ''): string {
@@ -199,6 +200,69 @@ function fixTextShapeProps(type: string, props: Record<string, any>): Record<str
   return result
 }
 
+/**
+ * 把白板当前页导出成 JPEG data URL，交给视觉模型「看图」。
+ *
+ * 为什么不是发坐标清单：手写题干、题目截图、文本框，只有渲染成一页画面
+ * 才是 VL 模型真正认得的东西；坐标清单再详细也读不出手写笔迹。
+ * 导出后统一压到最长边 1600 / 质量 0.82，避免几十 MB 的板书撑爆请求。
+ */
+async function exportPageImage(editor: Editor, maxEdge = 1600): Promise<string> {
+  const shapes = editor.getCurrentPageShapes()
+  if (!shapes.length) return ''
+  const { blob } = await editor.toImage(shapes, {
+    format: 'jpeg',
+    quality: 0.9,
+    background: true,
+    padding: 16,
+  })
+  const bitmap = await createImageBitmap(blob)
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+  const w = Math.max(1, Math.round(bitmap.width * scale))
+  const h = Math.max(1, Math.round(bitmap.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    bitmap.close?.()
+    return ''
+  }
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, w, h)
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  bitmap.close?.()
+  return canvas.toDataURL('image/jpeg', 0.82)
+}
+
+/**
+ * 新插入的 AI 内容一律落在「已有板书最右侧」。板子上攒了几屏内容之后，
+ * 这个位置离视口几千像素，创建完不把镜头移过去，老师看到的就是一片空白
+ * ——「已生成思维导图（10 个节点）」但画布上什么都没有，就是这么来的。
+ * 这里统一做两件事：选中新内容 + 缩放到合适大小。
+ */
+function focusNewShapes(editor: Editor, ids: (string | undefined)[]) {
+  const clean = ids.filter(Boolean) as string[]
+  if (!clean.length) return
+  try {
+    editor.setSelectedShapes(clean as any)
+  } catch { /* 选中失败不影响已创建的内容 */ }
+  try {
+    const boxes = clean
+      .map((id) => editor.getShapePageBounds(id as any))
+      .filter((b) => !!b) as { x: number; y: number; w: number; h: number }[]
+    if (!boxes.length) return
+    const minX = Math.min(...boxes.map((b) => b.x))
+    const minY = Math.min(...boxes.map((b) => b.y))
+    const maxX = Math.max(...boxes.map((b) => b.x + b.w))
+    const maxY = Math.max(...boxes.map((b) => b.y + b.h))
+    editor.zoomToBounds(new Box(minX, minY, maxX - minX, maxY - minY), {
+      inset: 64,
+      animation: { duration: 220 },
+    })
+  } catch { /* 视口缩放失败也不该让「已插入」变成报错 */ }
+}
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
@@ -237,6 +301,9 @@ export const AIPanel: React.FC<Props> = ({
   const abortRef = useRef<AbortController | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false)  // 防止并发发送
+  // 供「重新生成」等回调读取最新消息，避免闭包拿到旧列表
+  const messagesRef = useRef<Message[]>([])
+  useEffect(() => { messagesRef.current = messages }, [messages])
   const progressModal = useProgressModal()
 
   // 学科口径：默认「自动判断」，由后端按教师任教学科/白板内容收敛；老师也能临时切换某一科。
@@ -311,24 +378,50 @@ export const AIPanel: React.FC<Props> = ({
     setStreamingText('')
   }, [])
 
-  // 发送对话消息
-  const handleSend = useCallback(async () => {
-    const text = input.trim()
-    if (!text || loading || sendingRef.current) return
+  /** 把消息列表压成「最近几轮」上下文，太长的单条截断，避免请求体膨胀 */
+  const toHistory = useCallback((rows: Message[], limit = 6) => {
+    return rows
+      .filter((m) => m.content.trim())
+      .slice(-limit)
+      .map((m) => ({ role: m.role, content: m.content.slice(0, 1500) }))
+  }, [])
 
+  /**
+   * 统一的白板问答执行器：直接提问与「重新生成」共用一条链路。
+   * userText 传 null 表示不追加用户气泡（重新生成时原问题还在列表里）。
+   */
+  const runChat = useCallback(async (
+    modelPrompt: string,
+    userText: string | null,
+    history: { role: 'user' | 'assistant'; content: string }[],
+    withPageImage = false,
+  ) => {
+    if (sendingRef.current) return
     sendingRef.current = true
-    setInput('')
-    setMessages((prev) => [...prev, { role: 'user', content: text }])
     setLoading(true)
     setStreamingText('')
+    if (userText) setMessages((prev) => [...prev, { role: 'user', content: userText }])
 
     const abortController = new AbortController()
     abortRef.current = abortController
 
+    // 「🧠 结合画面」开着时，普通提问也把整页截图带上
+    let pageImage = ''
+    if (withPageImage) {
+      const ed = editorRef.current
+      if (ed) {
+        try {
+          pageImage = await exportPageImage(ed)
+        } catch {
+          pageImage = ''
+        }
+      }
+    }
+
     let fullContent = ''
     try {
       await whiteboardApi.aiChatStream(
-        text,
+        modelPrompt,
         roomId,
         (delta) => {
           // 后端返回的是累计文本，直接替换
@@ -364,13 +457,75 @@ export const AIPanel: React.FC<Props> = ({
           signal: abortController.signal,
           useVision,
           snapshot: boardSnapshot(),
+          history,
+          pageImage,
         },
       )
     } finally {
       sendingRef.current = false
       setLoading(false)
     }
-  }, [input, loading, roomId, kpName, subject, useVision])
+  }, [roomId, kpName, subject, useVision, editorRef, boardSnapshot, t])
+
+  // 发送对话消息
+  const handleSend = useCallback(async () => {
+    const text = input.trim()
+    if (!text || loading || sendingRef.current) return
+    const history = toHistory(messages)
+    setInput('')
+    await runChat(text, text, history, useVision)
+  }, [input, loading, messages, runChat, toHistory, useVision])
+
+  // 重新生成：丢掉这条回答及其后内容，用同一个问题再问一次
+  const handleRegenerate = useCallback(async (index: number) => {
+    const rows = messagesRef.current
+    let userIdx = -1
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (rows[i].role === 'user') { userIdx = i; break }
+    }
+    if (userIdx < 0) return
+    const prompt = rows[userIdx].content
+    setMessages(rows.slice(0, index))
+    await runChat(prompt, null, toHistory(rows.slice(0, userIdx)), useVision)
+  }, [runChat, toHistory, useVision])
+
+  // 把 AI 的回答直接贴成白板上的一个卡片：讲完就留在板书上，不用手抄
+  const handleInsertToBoard = useCallback((text: string) => {
+    const editor = editorRef.current
+    if (!editor) {
+      message.warning(t('aiBoardNotReady'))
+      return
+    }
+    const plain = text
+      .replace(/```[\s\S]*?```/g, '（代码块见对话）')
+      .replace(/\*\*|__|`|^#{1,6}\s*/gm, '')
+      .trim()
+      .slice(0, 600)
+    if (!plain) return
+    const pos = getRightSidePosition(editor)
+    const lineCount = plain.split('\n').filter((x) => x.trim()).length
+    const answerId = `shape:ai-answer-${Date.now()}`
+    editor.createShapes([{
+      id: answerId,
+      type: 'geo',
+      x: pos.x,
+      y: pos.y,
+      props: {
+        geo: 'rectangle',
+        w: 380,
+        h: Math.min(560, Math.max(90, 36 + lineCount * 22)),
+        color: 'black',
+        fill: 'none',
+        size: 's',
+        richText: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: plain }] }],
+        },
+      },
+    }] as any)
+    focusNewShapes(editor, [answerId])
+    message.success(t('aiInserted'))
+  }, [editorRef, getRightSidePosition, t])
 
   // 一键生成图示（流式进度版，防止 IIS 超时）
   const handleGenerateDiagram = useCallback(async () => {
@@ -570,6 +725,7 @@ export const AIPanel: React.FC<Props> = ({
           } as Record<string, any>
         })
         editor.createShapes(shapes as any)
+        focusNewShapes(editor, shapes.map((s: any) => s.id))
         progressModal.updateStep('insert', 'done')
         progressModal.markSuccess()
         setMessages((prev) => [
@@ -791,6 +947,7 @@ export const AIPanel: React.FC<Props> = ({
 
       // 写入白板
       editor.createShapes(shapes)
+      focusNewShapes(editor, shapes.map((s: any) => s.id))
       progressModal.updateStep('insert', 'done')
       progressModal.markSuccess()
 
@@ -805,18 +962,29 @@ export const AIPanel: React.FC<Props> = ({
     }
   }, [editorRef, roomId, subject, kpName, progressModal, getRightSidePosition])
 
-  // 解答题目：识别白板图片中的题目并用视觉模型解析
+  // 解答题目：把整页画面 + 板上的图片一起交给视觉模型解析
   const handleSolveQuestion = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
       message.warning(t('aiBoardNotReady'))
       return
     }
+    if (loading || sendingRef.current) return
+    sendingRef.current = true
 
-    const prompt = '请认真查看白板上的题目（包括图片和文字），逐步解答这道题，给出详细的解析过程和最终答案。如果白板上有图片，请结合图片内容一起分析。'
+    const prompt = '请认真查看白板上的题目（包括图片、手写和文字），逐步解答这道题，给出详细的解析过程和最终答案。'
+    const history = toHistory(messagesRef.current)
     setMessages((prev) => [...prev, { role: 'user', content: '📝 ' + t('aiCmdSolve') }])
     setLoading(true)
     setStreamingText('')
+
+    // 整页截图是这里的关键输入：手写题干、题目图片只有渲染后才认得出
+    let pageImage = ''
+    try {
+      pageImage = await exportPageImage(editor)
+    } catch {
+      // 导出失败就退回纯文字描述，不要让整个「解答题目」挂掉
+    }
 
     const abortController = new AbortController()
     abortRef.current = abortController
@@ -856,13 +1024,15 @@ export const AIPanel: React.FC<Props> = ({
           subject,
           signal: abortController.signal,
           snapshot: boardSnapshot(),
+          history,
+          pageImage,
         },
       )
     } finally {
       sendingRef.current = false
       setLoading(false)
     }
-  }, [editorRef, roomId, kpName, subject])
+  }, [editorRef, roomId, kpName, subject, loading, boardSnapshot, toHistory])
 
   // 智能批注：分析选中内容并添加标注（带进度模态框）
   const handleSmartAnnotation = useCallback(async () => {
@@ -989,6 +1159,7 @@ export const AIPanel: React.FC<Props> = ({
           } as Record<string, any>
         })
         editor.createShapes(shapes as any)
+        focusNewShapes(editor, shapes.map((s: any) => s.id))
         progressModal.updateStep('insert', 'done')
         progressModal.markSuccess()
         setMessages((prev) => [
@@ -1051,6 +1222,7 @@ export const AIPanel: React.FC<Props> = ({
           } as Record<string, any>
         })
         editor.createShapes(shapes as any)
+        focusNewShapes(editor, shapes.map((s: any) => s.id))
         progressModal.updateStep('insert', 'done')
         progressModal.markSuccess()
         setMessages((prev) => [
@@ -1099,7 +1271,16 @@ export const AIPanel: React.FC<Props> = ({
     })
 
     try {
-      const result = await whiteboardApi.aiSuggest(content, kpName, { snapshot: boardSnapshot(), roomId })
+      // 带上整页截图：手写板书、图片题干只有看图才认得出来，纯文字清单读不出内容
+      let pageImage = ''
+      try {
+        pageImage = await exportPageImage(editor)
+      } catch {
+        pageImage = ''
+      }
+      const result = await whiteboardApi.aiSuggest(content, kpName, {
+        snapshot: boardSnapshot(), roomId, pageImage,
+      })
       progressModal.updateStep('analyze', 'done')
       progressModal.updateStep('generate', 'done')
 
@@ -1180,6 +1361,7 @@ export const AIPanel: React.FC<Props> = ({
       {/* ── 快捷操作 ── */}
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #f5f5f5' }}>
         <Space wrap size={4}>
+          {/* ① 生成内容：图示 / 一键板书 / 思维导图 / 双语 */}
           {isTeacher && (
             <Tooltip title={t('aiTipFig')}>
               <Button size="small" icon={<PictureOutlined />} onClick={handleGenerateDiagram} />
@@ -1188,16 +1370,6 @@ export const AIPanel: React.FC<Props> = ({
           {isTeacher && (
             <Tooltip title={t('aiTipBoard')}>
               <Button size="small" icon={<FileTextOutlined />} onClick={handleGenerateBoard} />
-            </Tooltip>
-          )}
-          {isTeacher && (
-            <Tooltip title={t('aiTipBeautify')}>
-              <Button size="small" icon={<HighlightOutlined />} onClick={handleBeautify} />
-            </Tooltip>
-          )}
-          {isTeacher && (
-            <Tooltip title={t('aiTipAnno')}>
-              <Button size="small" icon={<EditOutlined />} onClick={handleSmartAnnotation} />
             </Tooltip>
           )}
           {isTeacher && (
@@ -1210,6 +1382,20 @@ export const AIPanel: React.FC<Props> = ({
               <Button size="small" icon={<TranslationOutlined />} onClick={handleGenerateBilingual} />
             </Tooltip>
           )}
+          {isTeacher && <Divider type="vertical" style={{ margin: '0 2px' }} />}
+          {/* ② 改板书：美化排版 / 智能批注 */}
+          {isTeacher && (
+            <Tooltip title={t('aiTipBeautify')}>
+              <Button size="small" icon={<HighlightOutlined />} onClick={handleBeautify} />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title={t('aiTipAnno')}>
+              <Button size="small" icon={<EditOutlined />} onClick={handleSmartAnnotation} />
+            </Tooltip>
+          )}
+          {isTeacher && <Divider type="vertical" style={{ margin: '0 2px' }} />}
+          {/* ③ 课堂分析：教学建议 / 随堂提问 / 解答题目 */}
           {isTeacher && (
             <Tooltip title={t('aiTipAdvice')}>
               <Button size="small" icon={<RiseOutlined />} onClick={handleSuggest} />
@@ -1344,6 +1530,40 @@ export const AIPanel: React.FC<Props> = ({
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
               {msg.role === 'user' ? t('aiYou') : isTeacher ? t('aiAssist') : t('aiMate')}
             </div>
+            {msg.role === 'assistant' && !msg.isStreaming && msg.content.trim() && (
+              <Space size={0} style={{ marginTop: 2 }}>
+                <Tooltip title={t('aiMsgCopy')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(msg.content)
+                      message.success(t('aiCopied'))
+                    }}
+                  />
+                </Tooltip>
+                {isTeacher && (
+                  <Tooltip title={t('aiMsgInsert')}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<PlusSquareOutlined />}
+                      onClick={() => handleInsertToBoard(msg.content)}
+                    />
+                  </Tooltip>
+                )}
+                <Tooltip title={t('aiMsgRetry')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    disabled={loading}
+                    onClick={() => handleRegenerate(i)}
+                  />
+                </Tooltip>
+              </Space>
+            )}
           </div>
         ))}
 

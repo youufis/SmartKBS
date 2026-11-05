@@ -3,6 +3,7 @@
 房间管理、页面管理、WebSocket 通信、AI 辅助
 """
 import json
+import asyncio
 import hashlib
 import io
 import os
@@ -1218,7 +1219,6 @@ def _get_snapshot_text(room_id, live_snapshot: str = "") -> str:
             logger.info(f"[白板AI] room={room_id} 快照里没有 shape 记录（记录数={len(store)}）")
             return "白板当前为空"
 
-        type_names = {"geo": "几何形状", "arrow": "箭头", "text": "文本", "draw": "手绘", "image": "图片", "line": "线条"}
         geo_names = {"rectangle": "矩形", "ellipse": "椭圆", "diamond": "菱形", "triangle": "三角形",
                      "cloud": "云形", "pentagon": "五边形", "hexagon": "六边形", "trapezoid": "梯形",
                      "rhombus": "菱形", "star": "星形", "arrow-up": "上箭头", "arrow-down": "下箭头",
@@ -1226,17 +1226,24 @@ def _get_snapshot_text(room_id, live_snapshot: str = "") -> str:
 
         lines = []
         texts = []
+        seen_texts = set()
         arrows = []
+        text_budget = 4000  # 全体文字预算：板书再长也不把提示词撑爆
         for sid, shape in shapes.items():
             props = shape.get("props", {}) or {}
             stype = shape.get("type", "unknown")
-            sname = type_names.get(stype, stype)
             text = _extract_text(props)
             x = int(shape.get("x", 0))
             y = int(shape.get("y", 0))
 
             if text:
-                texts.append(text)
+                norm = " ".join(text.split())
+                # 同一段文字可能同时出现在多个形状里（复制/合并/富文本嵌套），只留一份
+                if norm and norm not in seen_texts and text_budget > 0:
+                    seen_texts.add(norm)
+                    clipped = text if len(text) <= 300 else text[:300] + "…（后略）"
+                    texts.append(clipped)
+                    text_budget -= len(clipped)
 
             if stype == "geo":
                 geo = props.get("geo", "rectangle")
@@ -1250,8 +1257,9 @@ def _get_snapshot_text(room_id, live_snapshot: str = "") -> str:
                     desc += f"，{color}色边框"
                 if fill and fill not in ("none", "null"):
                     desc += f"，{fill}色填充"
+                # 文字已在上面「文字内容」里完整列出，这里只标记，避免同一段话被读成两处
                 if text:
-                    desc += f"，文字「{text[:30]}」"
+                    desc += "，含文字"
                 lines.append(desc)
 
             elif stype == "arrow":
@@ -1264,22 +1272,19 @@ def _get_snapshot_text(room_id, live_snapshot: str = "") -> str:
                 arrows.append(f"从({sx},{sy})指向({ex},{ey})的箭头")
 
             elif stype == "image":
-                src = props.get("src", "")
-                desc = f"位于({x},{y})的图片"
-                if src and isinstance(src, str):
-                    desc += f"，来源: {src[:80]}"
-                lines.append(desc)
+                # 不写内部素材 URL：模型用不上，还容易被当成内容来源去猜
+                lines.append(f"位于({x},{y})的图片")
 
             elif stype == "draw":
                 lines.append(f"位于({x},{y})的手绘笔迹")
 
             elif text:
-                lines.append(f"位于({x},{y})的文字「{text[:30]}」")
+                lines.append(f"位于({x},{y})的文字块")
 
         # 构建结构化描述
         parts = []
         if texts:
-            parts.append(f"## 白板中的文字内容\n{' | '.join(texts)}")
+            parts.append("## 白板中的文字内容\n" + "\n".join(f"- {t}" for t in texts))
         if lines:
             parts.append(f"## 白板中的图形\n{chr(10).join('- ' + l for l in lines)}")
         if arrows:
@@ -1295,9 +1300,31 @@ def _get_snapshot_text(room_id, live_snapshot: str = "") -> str:
         return "白板当前有内容"
 
 
+def _local_asset_file(src: str) -> str:
+    """把白板素材的同源外链解析成本地文件路径；不是本站素材就返回空串。
+
+    2026-10 起剪贴板图片改成「先上传、快照只留 URL」，asset.props.src 是
+    /api/files/question_media/whiteboard_assets/<sha>.jpg 这种相对路径，
+    既不是 data: 也不是 http 开头，原来的提取逻辑会把它整张丢掉，
+    表现为「板上有题目图片，AI 说只看到一个数字」。
+    """
+    if not isinstance(src, str) or not src.strip():
+        return ""
+    path = src.split("?")[0].split("#")[0].strip()
+    m = re.search(r"/question_media/whiteboard_assets/([A-Za-z0-9._-]+)$", path)
+    if not m:
+        return ""
+    name = m.group(1)
+    # 只允许上传接口产出的「内容哈希.扩展名」，天然挡掉路径穿越
+    if not _WB_ASSET_NAME_RE.match(name):
+        return ""
+    fp = WB_ASSET_DIR / name
+    return str(fp) if fp.is_file() else ""
+
+
 def _get_snapshot_images(room_id, live_snapshot: str = "") -> list[str]:
     """从白板快照中提取图片，保存为临时文件，返回文件路径列表"""
-    import base64, tempfile, os, re
+    import base64, tempfile, os, shutil
 
     snap = _resolve_snapshot(room_id, live_snapshot)
     if not snap or snap == "{}":
@@ -1320,24 +1347,43 @@ def _get_snapshot_images(room_id, live_snapshot: str = "") -> list[str]:
             if isinstance(v, dict) and v.get("typeName") == "shape" and v.get("type") == "image":
                 image_shapes.append(v)
 
-        if not image_shapes or not assets:
+        if not image_shapes:
             return []
 
         saved_paths = []
         for shape in image_shapes:
+            props = shape.get("props") or {}
             # TLDraw v3 image shape 用 assetId 引用 asset，不是 src
-            src_ref = (shape.get("props") or {}).get("assetId", "")
-            if not src_ref or not isinstance(src_ref, str):
-                continue
+            src_ref = props.get("assetId", "")
+            if not isinstance(src_ref, str):
+                src_ref = ""
 
-            # assetId 已经是 asset:xxx 格式
             asset_src = ""
             if src_ref.startswith("asset:") and src_ref in assets:
                 asset_src = (assets[src_ref].get("props") or {}).get("src", "")
-            elif src_ref.startswith("data:") or src_ref.startswith("http"):
+            elif src_ref.startswith("data:") or src_ref.startswith("http") or src_ref.startswith("/"):
                 asset_src = src_ref
+            if not asset_src:
+                # 兜底：部分版本把 src 直接挂在 shape.props 上，没有 asset 记录
+                inline = props.get("src", "")
+                if isinstance(inline, str):
+                    asset_src = inline
 
             if not asset_src:
+                continue
+
+            # 本站素材（相对外链 / 本站绝对 URL）：直接读磁盘副本，免鉴权、免网络往返
+            local = _local_asset_file(asset_src)
+            if local:
+                try:
+                    suffix = os.path.splitext(local)[1] or ".png"
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                    tmp.close()
+                    # 必须拷贝：两个调用方都会 unlink 返回值，直接返回素材路径会删掉白板原图
+                    shutil.copyfile(local, tmp.name)
+                    saved_paths.append(tmp.name)
+                except Exception as e:
+                    logger.warning(f"[白板AI] 读取白板素材失败 {local}: {e}")
                 continue
 
             # 处理 data URL
@@ -1375,10 +1421,99 @@ def _get_snapshot_images(room_id, live_snapshot: str = "") -> list[str]:
                 except Exception:
                     continue
 
+        if not saved_paths:
+            # 板上有图片却一张都没取到：记下首个来源，别再让「AI 看不见图」变成无日志悬案
+            sample = ""
+            for shape in image_shapes:
+                sp = shape.get("props") or {}
+                sample = str(sp.get("assetId") or sp.get("src") or "")
+                if sample:
+                    break
+            logger.warning(
+                f"[白板AI] room={room_id} 检出 {len(image_shapes)} 张图片但未取到可用文件源"
+                f"（assets={len(assets)}，样例来源={sample[:120]}）"
+            )
         return saved_paths
     except Exception as e:
         logger.warning(f"[白板AI] 提取图片失败: {e}")
         return []
+
+
+_WB_PAGE_IMAGE_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _page_image_file(raw) -> str:
+    """把前端导出的「整页截图」（data URL）落成临时文件；格式/体积不对返回空串。
+
+    手写题干、上传图片、文本框，只有渲染成一页画面才是 VL 模型真正看得懂的东西；
+    坐标清单再详细也读不出手写内容。这是「解答题目」最稳的输入。
+    """
+    if not isinstance(raw, str) or not raw.startswith("data:image/"):
+        return ""
+    import base64
+    import tempfile
+
+    m = re.match(r"data:image/(png|jpeg|jpg|webp);base64,(.+)", raw, re.S)
+    if not m:
+        return ""
+    ext = "jpg" if m.group(1) in ("jpeg", "jpg") else m.group(1)
+    b64 = m.group(2).strip()
+    try:
+        data = base64.b64decode(b64, validate=False)
+    except Exception:
+        return ""
+    if not data:
+        return ""
+    if len(data) > _WB_PAGE_IMAGE_MAX_BYTES:
+        logger.warning(f"[白板AI] 页截图 {len(data)}B 超过上限，已忽略（前端应压缩后再传）")
+        return ""
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+    tmp.write(data)
+    tmp.close()
+    return tmp.name
+
+
+def _chat_history(body: dict, limit: int = 8) -> list:
+    """取前端带来的最近若干轮对话；形状不对就当没有，绝不让脏数据进提示词"""
+    raw = (body or {}).get("history")
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for turn in raw[-limit:]:
+        if not isinstance(turn, dict):
+            continue
+        role = turn.get("role")
+        content = turn.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            out.append({"role": role, "content": content.strip()[:2000]})
+    return out
+
+
+def _mark_images_attached(snapshot_text: str, count: int) -> str:
+    """把版式清单里的「图片」改成「见附图」，让文字描述和附图口径一致。
+
+    白板描述只有「位于(113,1216)的图片」这种位置信息，视觉模型读到后会反过来
+    断言「白板上没有题目 / 消息里没有附图片」，哪怕附图 OCR 得一清二楚。
+    实测这样改之后模型就直接读附图作答，也不再复述内部素材 URL。
+    """
+    if not snapshot_text or count <= 0:
+        return snapshot_text
+    out = []
+    for line in snapshot_text.split("\n"):
+        if "的图片" in line:
+            head = line.partition("的图片")[0]
+            out.append(f"{head}的图片（内容已随消息作为附图提供，请直接阅读附图）")
+        else:
+            out.append(line)
+    # 关键：这份文字清单是快照解析出来的，天生看不见手写和图片内容。
+    # 不声明「以附图为准」的话，模型会拿清单当事实，反过来说「白板内容不足」。
+    out.append(
+        "\n## 解析口径\n"
+        "以上文字清单由白板快照自动解析，**可能不完整**（手写笔迹、图片里的题干无法转成文字）。\n"
+        "本次已把白板整页画面作为附图提供：**只要附图里能看清题目或板书内容，就以附图为准正常作答**，"
+        "不得因为上面的文字清单很少而回答「白板内容不足」。"
+    )
+    return "\n".join(out)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1590,11 +1725,12 @@ def _snapshot_to_base64_svg(snapshot_json: str) -> str:
 async def _understand_whiteboard_with_vision(
     room_id, api_key: str, snapshot_text: str, live_snapshot: str = ""
 ) -> str:
-    """
-    增强白板理解：
-    1. 从快照提取精确的布局描述（形状位置、颜色、文字、箭头关系）
-    2. 将白板上的真实图片发送给视觉模型识别
-    3. 融合文本解析 + 图片视觉理解，返回增强描述
+    """【已停用，保留备查】两段式视觉增强：先让 VL 描述图片，再交给文本模型作答。
+
+    现在 /ai/chat-stream 有图时直接走 `_whiteboard_ai_vision_stream`
+    （前端会带整页截图，图片原样进模型）：少一次模型往返、题干不经二次转述，
+    质量与延迟都优于这条老路，故不再调用。留着是因为它包含「快照→布局文字」
+    的融合逻辑，日后若要给非多模态模型做降级，可以直接复用。
     """
     # 获取快照（与文字解析同源：前端实时快照 > 内存 > 数据库）
     snap = _resolve_snapshot(room_id, live_snapshot)
@@ -1660,6 +1796,12 @@ async def _understand_whiteboard_with_vision(
                         f"## 白板图片视觉识别\n{vision_text}"
                     )
                     logger.info(f"[白板AI-视觉增强] room={room_id} 文本+图片融合完成")
+                    # 成功分支也要清理临时图片，否则每次 AI 调用都在 temp 里留一份
+                    for fp in image_paths:
+                        try:
+                            os.unlink(fp)
+                        except Exception:
+                            pass
                     return enhanced
             except Exception as e:
                 logger.warning(f"[白板AI-视觉增强] 图片视觉分析异常: {e}")
@@ -1835,19 +1977,25 @@ async def ai_chat_stream(request: Request):
     mode = whiteboard_manager.get_mode(room_id) if room_id else "demo"
     kp_name = _resolve_kp_name(body.get("kp_name"), room_id)
     subject = _resolve_subject(body.get("subject"), room_id, user["username"])
-    use_vision = body.get("use_vision", False)  # 前端可控制是否使用视觉理解
+    # 是否识图现在由前端按「这次提问带不带整页截图」决定，后端不再分支；
+    # 这里只用于日志与排查（有图一律走视觉链路）。
+    use_vision = body.get("use_vision", False)
 
-    # ── 获取白板理解文本（视觉增强版） ──
+    # ── 获取白板理解文本 ──
     live_snapshot = _live_snapshot(body) if room_id else ""
     snapshot_text = _get_snapshot_text(room_id, live_snapshot) if room_id else "无白板内容"
-    if room_id and use_vision and dashscope_api_key:
-        try:
-            enhanced = await _understand_whiteboard_with_vision(room_id, dashscope_api_key, snapshot_text, live_snapshot)
-            if enhanced != snapshot_text:
-                snapshot_text = enhanced
-                logger.info(f"[白板AI] room={room_id} 使用视觉增强理解")
-        except Exception as e:
-            logger.warning(f"[白板AI] 视觉增强失败，降级到文本解析: {e}")
+    history = _chat_history(body)
+
+    # 白板上的图片 + 前端导出的整页截图，一起交给视觉模型
+    image_paths = _get_snapshot_images(room_id, live_snapshot) if room_id else []
+    # 整页截图放最前：手写/图片/文本框一次全给模型，比坐标清单准得多
+    page_image = _page_image_file(body.get("page_image"))
+    if page_image:
+        image_paths.insert(0, page_image)
+    if image_paths:
+        # 图形清单里的「图片」只有位置、没有内容，模型读到会反过来断言「板子上没有题目」，
+        # 哪怕附图里 OCR 得一清二楚；先把描述口径改一致再拼提示词。
+        snapshot_text = _mark_images_attached(snapshot_text, len(image_paths))
 
     # 构建系统提示词
     from backend.prompts.whiteboard_ai import WHITEBOARD_TEACHER_ASSISTANT
@@ -1859,27 +2007,107 @@ async def ai_chat_stream(request: Request):
     )
     enhanced_prompt = f"{system_prompt}\n\n---\n\n用户提问：{prompt}"
 
-    # 检测白板中是否有图片，有则走视觉流式（传统逻辑）
-    image_paths = _get_snapshot_images(room_id, live_snapshot) if room_id else []
-    if image_paths and not use_vision:
+    # 有图（页截图或白板图片）就走单次视觉调用：图片原样进模型，
+    # 比「先让 VL 描述再让文本模型作答」的两段式又快又准。
+    if image_paths:
+        logger.info(
+            f"[白板AI] room={room_id} 走视觉链路：附图 {len(image_paths)} 张"
+            f"（页截图={'有' if page_image else '无'}），历史 {len(history)} 轮，"
+            f"use_vision={bool(use_vision)}"
+        )
         return StreamingResponse(
-            _whiteboard_ai_vision_stream(system_prompt, prompt, image_paths, username, dashscope_api_key),
+            _whiteboard_ai_vision_stream(system_prompt, prompt, image_paths, username,
+                                         dashscope_api_key, history=history),
             media_type="text/event-stream",
         )
 
     from backend.api.chat_router import _chat_event_generator as _cg
     return StreamingResponse(
-        _whiteboard_ai_stream(enhanced_prompt, username, dashscope_api_key),
+        _whiteboard_ai_stream(enhanced_prompt, username, dashscope_api_key, history=history),
         media_type="text/event-stream",
     )
 
 
-def _whiteboard_ai_stream(prompt: str, username: str, api_key: str):
+def _board_text_is_thin(current_content: str) -> bool:
+    """白板文字是否少到撑不起教学建议（只数真实文字，不数坐标/版式行）
+
+    「只有一个 222 + 几个几何形状」这种情形，模型只会硬凑一句无依据的猜测，
+    不如直接给老师一句可操作的引导。阈值取 8 个字：一个词/一个公式都还算有内容。
+    """
+    if not current_content:
+        return True
+    chars = []
+    for line in current_content.split("\n"):
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("- 位于("):
+            continue
+        if s.startswith("- "):
+            s = s[2:]
+        chars.append(s)
+    return len(re.sub(r"\s", "", "".join(chars))) < 8
+
+
+_THIN_BOARD_ADVICE = (
+    "白板上的有效内容还比较少，暂时给不出有针对性的建议。"
+    "建议先在白板上写出本节课的题干、要点或关键概念（也可以上传题目图片），"
+    "我再结合这些内容给下一步怎么追问、怎么练、怎么小结。"
+)
+
+
+def _vl_read_page(image_path: str, prompt: str, api_key: str) -> str:
+    """让视觉模型读「整页截图」再作答（阻塞调用，调用方丢线程池，别卡事件循环）"""
+    import requests as sync_requests
+    from backend.api.chat_router import get_config_value as get_cfg
+    from backend.utils import encode_image_to_base64, get_image_mime_type
+
+    b64 = encode_image_to_base64(image_path)
+    mime = get_image_mime_type(image_path)
+    payload = {
+        "model": resolve_vl_model(get_cfg("MODEL_VL_NAME", "")),
+        "messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+            {"type": "text", "text": "【先看附图】附图是白板当前整页画面（可能有手写、图片、文本框），"
+                                     "请结合画面内容作答。\n\n" + prompt},
+        ]}],
+        "stream": False,
+    }
+    resp = sync_requests.post(
+        f"{ai_api_base()}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=90,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"视觉模型调用失败: HTTP {resp.status_code}")
+    return resp.json()["choices"][0]["message"]["content"]
+
+
+def _wb_history_text(history, limit: int = 6, per_msg: int = 400) -> str:
+    """把最近几轮对话压成一段纯文本上下文（视觉流里图片没法回放历史，只能这样带）"""
+    if not history:
+        return ""
+    rows = []
+    for turn in history[-limit:]:
+        if not isinstance(turn, dict):
+            continue
+        role = turn.get("role")
+        content = turn.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str) or not content.strip():
+            continue
+        who = "教师" if role == "user" else "你（AI）"
+        rows.append(f"{who}：{content.strip()[:per_msg]}")
+    if not rows:
+        return ""
+    return "## 前几轮对话（仅供理解上下文，不必重复）\n" + "\n".join(rows) + "\n\n"
+
+
+def _whiteboard_ai_stream(prompt: str, username: str, api_key: str, history=None):
     """白板 AI 流式生成器（上游每帧已是全文快照，原样透传，前端只替换不追加）"""
-    import asyncio
     from backend.api.chat_router import _agent_chat_stream
     try:
-        for chunk in _agent_chat_stream(prompt, None, api_key, username):
+        # use_kb=False：白板问答以板书为准，知识库检索只会拿系统提示词当 query 捞回无关片段
+        for chunk in _agent_chat_stream(prompt, None, api_key, username,
+                                        use_kb=False, history=history):
             # 注意：call_ai_stream/_call_agent_stream 产出的 text 是「累计全文」而非增量，
             # 这里绝不能再 +=，否则前端替换后会得到逐帧前缀叠加的重复文本。
             full = chunk["text"]
@@ -1894,7 +2122,7 @@ def _whiteboard_ai_stream(prompt: str, username: str, api_key: str):
 
 
 def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_paths: list[str],
-                                 username: str, api_key: str):
+                                 username: str, api_key: str, history=None):
     """白板 AI 视觉流式生成：将白板图片+文字一起送入视觉模型"""
     import requests as sync_requests
     from backend.api.chat_router import get_config_value as get_cfg
@@ -1916,8 +2144,14 @@ def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_pat
             })
         except Exception as e:
             logger.warning(f"[白板AI] 图片编码失败 {fp}: {e}")
-    # 再加用户提问
-    content.append({"type": "text", "text": f"{system_prompt}\n\n用户提问：{user_prompt}"})
+    # 再加文字：提示放最前面，别让模型先读完一长串版式清单再去找图
+    content.append({"type": "text", "text": (
+        f"【先看附图】本次随消息附上 {len(image_paths)} 张图片，就是白板上的原始画面。"
+        "请先逐字识别附图里的题干、选项、图表或公式，再回答问题；"
+        "下文「白板中的图形」只是版式清单。\n\n"
+        f"{_wb_history_text(history)}"
+        f"{system_prompt}\n\n用户提问：{user_prompt}"
+    )})
 
     payload = {
         "model": model_name,
@@ -1958,19 +2192,18 @@ def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_pat
                     continue
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        # 清理临时图片文件
-        for fp in image_paths:
-            try:
-                import os
-                os.unlink(fp)
-            except Exception:
-                pass
-
     except Exception as e:
         logger.error(f"[白板AI] 视觉流式生成失败: {e}")
         yield f"data: {json.dumps({'type': 'error', 'content': f'AI 响应失败：{str(e)}'})}\n\n"
     except GeneratorExit:
         logger.info("[白板AI] 视觉流式客户端断开")
+    finally:
+        # 成功、出错、客户端断流都要删掉临时图，否则 temp 里会一直攒拷贝
+        for fp in image_paths:
+            try:
+                os.unlink(fp)
+            except Exception:
+                pass
 
 
 def _error_stream(msg: str):
@@ -2307,6 +2540,40 @@ async def ai_generate_mindmap(request: Request):
         raise HTTPException(status_code=500, detail=f"AI 思维导图生成失败: {str(e)}")
 
 
+def _advice_prompt(current_content: str, kp_name: str, has_image: bool) -> str:
+    """教学建议提示词。有整页截图时把文字提取降级为「定位线索」，避免模型按残缺文字瞎编。"""
+    if has_image:
+        # 有整页截图时干脆不塞文字提取：截图里题干、手写、公式全都有，
+        # 塞一份残缺的文字清单只会让模型拿「只有 222」去编建议。
+        return f"""你是课堂观察助手。附图是白板当前整页画面（可能有题干、选项、手写板书、图表），
+请以附图里真实可见的内容为准，给教师下一步教学建议。
+
+## 知识点
+{kp_name or "未指定"}
+
+## 输出要求
+- 2~3 条，总字数 150 字以内，直接给可执行动作（追问什么、举什么例子、练哪道题、怎么小结）
+- 必须扣住附图里真实可见的内容，不要泛泛而谈「注意引导学生思考」
+- 若画面里确实没有可用的教学内容，直接说明缺什么、建议补什么，禁止猜测孤立数字/符号的含义
+- 直接回复文字，不要 JSON 格式
+"""
+    return f"""你是课堂观察助手。请根据白板当前内容，给教师下一步教学建议。
+
+## 白板当前内容
+{current_content}
+
+## 知识点
+{kp_name or "未指定"}
+
+## 输出要求
+- 2~3 条，总字数 150 字以内，直接给可执行动作（追问什么、举什么例子、练哪道题、怎么小结）
+- 必须扣住白板上真实出现的文字、图形或公式，不要泛泛而谈「注意引导学生思考」
+- 看不出学科、或内容不足以支撑建议时，直接说明缺什么、建议补什么；
+  禁止猜测孤立数字/符号的含义（例如「某个数字可能是代码」这类无依据推测）
+- 直接回复文字，不要 JSON 格式
+"""
+
+
 @router.post("/ai/suggest", summary="AI 根据当前内容推荐下一步")
 async def ai_suggest(request: Request):
     # S8: 该接口消耗调用者 API Key 并返回教学建议, 前端仅在教师工具区暴露
@@ -2326,19 +2593,30 @@ async def ai_suggest(request: Request):
     if not dashscope_api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    prompt = f"""你是一位教学助手。课堂上白板当前内容如下，请给出简短的下一步教学建议（50字以内）。
+    # 老师点了「教学建议」，但板子上只有一个孤零零的数字/符号：给引导，不调模型也不猜
+    page_image = _page_image_file(body.get("page_image"))
+    if not page_image and _board_text_is_thin(current_content):
+        logger.info(f"[白板AI] 教学建议：白板文字过少，返回引导语（room={body.get('room_id')}）")
+        return {"suggestion": _THIN_BOARD_ADVICE, "thin": True}
 
-{current_content}
-知识点：{kp_name}
-
-直接回复文字，不要JSON格式。"""
+    if page_image:
+        # 有整页截图时，文字提取只能当定位线索：手写和图片内容它压根没转成文字，
+        # 如果还按「以文字为准」写，模型会拿一句「只有 222」去编建议。
+        prompt = _advice_prompt(current_content, kp_name, True)
+    else:
+        prompt = _advice_prompt(current_content, kp_name, False)
     prompt = apply_skills(prompt, "whiteboard")
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        # 这是「回一段文字」的端点，必须 json_mode=False：
-        # 开了 JSON 模式，模型在 response_format 约束下只挤得出 `[ ]`，教学建议就变成空壳
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=False, use_kb=False)
+        if page_image:
+            # 有整页截图就走视觉模型：手写板书、图片题干只有看图才认得出来
+            result = await asyncio.to_thread(_vl_read_page, page_image, prompt, dashscope_api_key)
+        else:
+            # 这是「回一段文字」的端点，必须 json_mode=False：
+            # 开了 JSON 模式，模型在 response_format 约束下只挤得出 `[ ]`，教学建议就变成空壳
+            result = await call_ai_sync_with_timeout(
+                prompt, dashscope_api_key, timeout=timeout, json_mode=False, use_kb=False)
         suggestion = _plain_ai_text(result)
         if not suggestion:
             logger.warning(f"[白板AI] 教学建议返回空壳回答，已拦截: {str(result)[:80]!r}")
@@ -2352,6 +2630,12 @@ async def ai_suggest(request: Request):
     except Exception as e:
         logger.error(f"AI 教学建议失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 建议失败: {str(e)}")
+    finally:
+        if page_image:
+            try:
+                os.unlink(page_image)
+            except Exception:
+                pass
 
 
 @router.get("/ai/export-summary/{room_id}", summary="导出板书总结（Word）")
