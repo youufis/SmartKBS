@@ -1010,6 +1010,9 @@ const WrongBookPage: React.FC = () => {
                       title: pubTitle.trim(), knowledge_points: genKp,
                       question_ids: generatedQuestions.map((q: any) => q.id),
                       target_students: [selectedStudent],
+                      // 错题本一键布置要归到「同步练习 → 错题巩固」页签，并直接对学生开放
+                      source: 'wrong_book',
+                      publish: true,
                     })
                     message.success(t('practicePushed'))
                     setPracticeModal(false)

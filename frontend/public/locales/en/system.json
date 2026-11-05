@@ -1589,5 +1589,7 @@
   "mergedAlertDesc": "Full = databases + system config (plus content dirs for full-site backups); it rolls back answers, points and homework created after that backup. Config = overwrites system_config.json only, for lost subjects/keys without touching databases. Either way current data is saved first.",
   "storageSelfheal": "Self-heal dumps",
   "storageSelfhealHint": "row dumps kept before dirty-data cleanup, safe to purge manually (not a backup entry)",
-  "storageDiskUnknown": "free space unknown"
+  "storageDiskUnknown": "free space unknown",
+  "clearFilter": "Clear filters",
+  "listSearchPh": "Search task name / requirement"
 }

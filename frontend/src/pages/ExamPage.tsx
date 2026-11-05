@@ -107,6 +107,8 @@ const ExamPage: React.FC = () => {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [statusFilter, setStatusFilter] = useState<string | undefined>()
+  // 学科筛选（后端一直支持 subject 参数，页面此前没给入口）
+  const [subjectFilter, setSubjectFilter] = useState<string | undefined>()
   // 首页「待处理批阅」卡片带 ?grading=pending 进来时，列表只留仍有待批改答卷的考试，
   // 否则会出现「卡片 13（份答卷）/ 列表 9（场考试）」这种看着像丢数据的错位
   const [searchParams, setSearchParams] = useSearchParams()
@@ -238,6 +240,7 @@ const ExamPage: React.FC = () => {
       const scope = isStudent ? 'all' : 'all'
       const res = await examsApi.listExams({
         status: statusFilter,
+        subject: subjectFilter,
         keyword: keyword.trim() || undefined,
         // 学生端按「我参没参加」筛（服务端在分页前过滤）；教师端不传
         my_status: isStudent && myStatus !== 'all' ? myStatus : undefined,
@@ -254,7 +257,7 @@ const ExamPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, keyword, myStatus, page, pageSize, isStudent, t, pendingOnly])
+  }, [statusFilter, subjectFilter, keyword, myStatus, page, pageSize, isStudent, t, pendingOnly])
 
   useEffect(() => { const fn = async () => { loadExams() }; fn() }, [loadExams])
 
@@ -1188,16 +1191,31 @@ const ExamPage: React.FC = () => {
           <Col>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('status')}：</Typography.Text>
           </Col>
+          <Col>
+            {/* 状态改成并排的分类按钮：比下拉少一次点击，也一眼看得出有几类 */}
+            <Segmented value={statusFilter || 'all'}
+              onChange={(v) => { setStatusFilter(v === 'all' ? undefined : String(v)); setPage(1) }}
+              options={[
+                { value: 'all', label: t('all') },
+                ...(isStudent ? [] : [{ value: 'draft', label: t('draft') }]),
+                { value: 'published', label: t('published') },
+                { value: 'ended', label: t('ended') },
+              ]} />
+          </Col>
           <Col xs={12} sm={6} md={3}>
-            <Select allowClear placeholder={t('all')} style={{ width: '100%' }}
-              value={statusFilter}
-              onChange={(val) => { setStatusFilter(val); setPage(1) }}>
-              {/* 学生只看得到已发布/已结束的考试，给「草稿」等于给一个永远空的筛选 */}
-              {!isStudent && <Option value="draft">{t('draft')}</Option>}
-              <Option value="published">{t('published')}</Option>
-              <Option value="ended">{t('ended')}</Option>
+            <Select allowClear placeholder={t('subject')} style={{ width: '100%' }}
+              value={subjectFilter}
+              onChange={(val) => { setSubjectFilter(val); setPage(1) }}>
+              {subjects.map(s => <Option key={s} value={s}>{s}</Option>)}
             </Select>
           </Col>
+          {(statusFilter || subjectFilter || keyword) && (
+            <Col>
+              <Button size="small" onClick={() => {
+                setStatusFilter(undefined); setSubjectFilter(undefined); setKeyword(''); setPage(1)
+              }}>{t('clearFilter')}</Button>
+            </Col>
+          )}
           {isStudent && (
             <Col>
               {/* 学生真正关心的是"我考没考"，而不是考试本身的草稿/发布状态 */}

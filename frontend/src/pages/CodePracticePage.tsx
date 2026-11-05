@@ -812,16 +812,20 @@ const CodePracticePage: React.FC = () => {
       </div>
 
       <Spin spinning={loading}>
+        {/* 展开行里放的是代码工作区（左右分栏）。原先 scroll.x = 'max-content' 会让表格
+            宽度由内容 max-content 撑开，而工作区左栏又按"表格宽度的 35%"取宽，两者互为
+            依据 —— 结果表格被撑到几千像素、右栏编辑器被挤出屏幕。给个具体宽度，表格宽
+            度才有上限，展开行才能拿到确定的可用宽度。 */}
         <Table
           dataSource={problemList}
           rowKey="problem_id"
           pagination={false}
           size={narrow ? 'small' : 'middle'}
           showHeader={!narrow}
-          scroll={{ x: 'max-content' }}
+          scroll={{ x: narrow ? 760 : 980 }}
           expandable={{
             expandedRowRender: (record: any) => (
-              <div style={{ padding: '8px 0' }}>
+              <div style={{ padding: '8px 0', minWidth: 0, maxWidth: '100%' }}>
                 <CodeWorkspace problemId={record.problem_id} onSubmitted={loadProblems} />
               </div>
             ),

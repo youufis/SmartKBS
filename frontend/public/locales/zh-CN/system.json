@@ -1589,5 +1589,7 @@
   "mergedAlertDesc": "「整机」= 数据库 + 系统配置（整站备份还含内容目录），会把这份备份之后产生的答题、积分、作业等一并回退；「配置」= 只覆盖 system_config.json，用于课程变少、密钥或知识库被重置这类局部问题，不动数据库。无论恢复哪一份，系统都会先留一份当前数据（pre_restore_ / before-restore），误操作还能退回来。",
   "storageSelfheal": "自愈留底",
   "storageSelfhealHint": "清理脏数据前的整行 JSON，可按需人工清理（不是备份入口）",
-  "storageDiskUnknown": "磁盘余量未知"
+  "storageDiskUnknown": "磁盘余量未知",
+  "clearFilter": "清除筛选",
+  "listSearchPh": "搜索作业名称 / 要求"
 }

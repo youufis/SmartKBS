@@ -576,5 +576,6 @@
   "exDuration": "Duration",
   "exMySubmitted": "Submitted",
   "readonlyPreview": "Read-only preview",
-  "correctAnswerLbl": "Answer"
+  "correctAnswerLbl": "Answer",
+  "clearFilter": "Clear filters"
 }

@@ -1,5 +1,5 @@
 import { studentLabel } from '../utils/studentLabel'
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Card, Table, Tabs, Button, Space, Typography, Tag, Modal,
   Form, Input, Select, InputNumber, message, Empty, Spin,
@@ -16,6 +16,7 @@ import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import ListFilterBar from '../components/ListFilterBar'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import ScopeTag from '../components/ScopeTag'
@@ -67,6 +68,9 @@ const DiscussionPage: React.FC = () => {
   const MOBILE_CARD_PAGE = 8            // 窄屏卡片列表每页条数
   const [mPage, setMPage] = useState(1)
   const [activeTab, setActiveTab] = useState('all')
+  // 列表查找：关键词（主题/说明）+ 学科
+  const [discKw, setDiscKw] = useState('')
+  const [discSubject, setDiscSubject] = useState('')
   const [createForm] = Form.useForm()
   const [editForm] = Form.useForm()
   const [aiForm] = Form.useForm()
@@ -324,10 +328,30 @@ const DiscussionPage: React.FC = () => {
     navigate(`/discussion-room/${groupId}?discussion_id=${discussionId}`)
   }
 
-  // 过滤列表
+  // 过滤列表：状态页签 + 关键词 + 学科（数据本地全量，切换即时生效）
+  const discSubjects = useMemo(
+    () => Array.from(new Set(discussions.map((d: any) => String(d.subject || '').trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+      .map((s) => ({ value: s, label: s })),
+    [discussions],
+  )
+  /** 关键词 + 学科命中（不含状态），状态页签的条数基于它统计 */
+  const discMatched = useMemo(() => {
+    const k = discKw.trim().toLowerCase()
+    return discussions.filter((d: any) => {
+      if (discSubject && String(d.subject || '').trim() !== discSubject) return false
+      if (!k) return true
+      return `${d.title || ''} ${d.description || ''}`.toLowerCase().includes(k)
+    })
+  }, [discussions, discKw, discSubject])
+  const discStatusCount = useMemo(() => {
+    const c: Record<string, number> = { pending: 0, active: 0, ended: 0 }
+    discMatched.forEach((d: any) => { if (c[d.status] !== undefined) c[d.status] += 1 })
+    return c
+  }, [discMatched])
   const filtered = activeTab === 'all'
-    ? discussions
-    : discussions.filter(d => d.status === activeTab)
+    ? discMatched
+    : discMatched.filter((d: any) => d.status === activeTab)
 
   // ── 创建讨论表单 ──
   const renderCreateForm = () => (
@@ -510,21 +534,39 @@ const DiscussionPage: React.FC = () => {
           </Space>
         )}
 
+        <ListFilterBar
+          keyword={discKw}
+          onKeyword={(v) => { setDiscKw(v); setMPage(1) }}
+          searchPlaceholder={t('listSearchPh')}
+          subject={discSubject}
+          onSubject={(v) => { setDiscSubject(v); setMPage(1) }}
+          subjectOptions={discSubjects}
+          dirty={!!discKw || !!discSubject}
+          onReset={() => { setDiscKw(''); setDiscSubject(''); setMPage(1) }}
+          resetLabel={t('clearFilter')}
+        />
+
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
           tabBarStyle={{ marginBottom: 16 }}
           items={[
-            { key: 'all', label: t('allDiscussions') },
-            { key: 'pending', label: t('pendingDiscussions') },
-            { key: 'active', label: t('activeDiscussions') },
-            { key: 'ended', label: t('endedDiscussions') },
+            { key: 'all', label: `${t('allDiscussions')} (${discMatched.length})` },
+            { key: 'pending', label: `${t('pendingDiscussions')} (${discStatusCount.pending})` },
+            { key: 'active', label: `${t('activeDiscussions')} (${discStatusCount.active})` },
+            { key: 'ended', label: `${t('endedDiscussions')} (${discStatusCount.ended})` },
           ]}
         />
 
         <Spin spinning={loading}>
           {filtered.length === 0 ? (
-            <Empty description={t('noDiscussions')} />
+            <Empty description={discussions.length > 0 ? t('listNoMatch') : t('noDiscussions')}>
+              {discussions.length > 0 && (
+                <Button size="small" onClick={() => { setDiscKw(''); setDiscSubject(''); setActiveTab('all') }}>
+                  {t('clearFilter')}
+                </Button>
+              )}
+            </Empty>
           ) : isMobile ? (
               /* 窄屏：讨论列表改卡片，主题完整可读、进入按钮不必横滚才点得到 */
               <MobileCardTable

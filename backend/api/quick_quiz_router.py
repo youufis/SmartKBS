@@ -921,8 +921,10 @@ async def update_room(room_id: int, request: Request):
         raise HTTPException(status_code=404, detail="房间不存在")
     if room["creator_username"] != username and role != 0:
         raise HTTPException(status_code=403, detail="无权修改")
-    if room["status"] != "waiting":
-        raise HTTPException(status_code=400, detail="活动已开始，无法修改")
+    # 已结束的活动也允许改配置（改的是「下一场」用的模板，不影响已产生的成绩与排名快照）；
+    # 只有进行中的场次不能改，否则会与已推送的题目/倒计时对不上
+    if room["status"] == "playing":
+        raise HTTPException(status_code=400, detail="活动进行中，请先结束本场再修改配置")
 
     body = await request.json()
     upd_fields = []
@@ -977,6 +979,83 @@ async def delete_room(room_id: int, request: Request):
     game_manager.remove_room(room_id)
 
     return {"message": "已删除"}
+
+
+@router.post("/quick-quiz/room/{room_id}/restart", summary="重新开始（开新一场，保留本场成绩）")
+async def restart_quiz(room_id: int, request: Request):
+    """把已结束（或待开始）的活动再开一场。
+
+    做法是**复制配置建新房间**，而不是把本场状态回滚成 waiting：
+    本场的排名快照、作答明细、积分流水全部保留，教师还能回看复盘；
+    同时也不会和「重置」按钮撞车——重置是不可撤销的数据清理，这里一条不删。
+    题目默认沿用本场（同一套题再比一次），也可选择按当前配置重新出题。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
+    if not room:
+        raise HTTPException(status_code=404, detail="房间不存在")
+    if room["creator_username"] != username and role != 0:
+        raise HTTPException(status_code=403, detail="仅创建者可重新开始")
+    if room["status"] == "playing":
+        raise HTTPException(status_code=400, detail="活动进行中，请先结束本场再重新开始")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    reuse_questions = body.get("reuse_questions", True)
+    reuse_questions = reuse_questions not in (False, 0, "0", "false", "False")
+
+    room_code = _generate_room_code()
+    now = _now()
+    new_id = execute_insert_update(
+        """INSERT INTO quick_quiz_rooms
+           (room_code, title, creator_username, status, question_source, question_count,
+            time_limit, scoring_mode, min_players, max_players,
+            target_scope, target_grade, target_class, target_users,
+            subject, knowledge_points, difficulty,
+            created_at)
+           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (room_code, room["title"], username, room["question_source"], room["question_count"],
+         room["time_limit"], room["scoring_mode"], room["min_players"], room["max_players"],
+         room["target_scope"], room["target_grade"], room["target_class"], room["target_users"],
+         room["subject"], room["knowledge_points"], room["difficulty"],
+         now),
+    )
+    if new_id is None:
+        raise HTTPException(status_code=500, detail="创建新一场失败")
+
+    copied = 0
+    if reuse_questions:
+        rows = execute_query_dict(
+            """SELECT * FROM quick_quiz_questions WHERE room_id=? ORDER BY sort_order""",
+            (room_id,),
+        )
+        for r in rows:
+            execute_insert_update(
+                """INSERT INTO quick_quiz_questions
+                   (room_id, sort_order, question_text, options, correct_answer, explanation, source,
+                    source_question_id, svg_content, has_svg, media_files, media_placeholders)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (new_id, r["sort_order"], r["question_text"], r["options"], r["correct_answer"],
+                 r.get("explanation", ""), r.get("source") or "bank", r.get("source_question_id") or 0,
+                 r.get("svg_content") or "", r.get("has_svg") or 0,
+                 r.get("media_files") or "", r.get("media_placeholders") or ""),
+            )
+            copied += 1
+
+    # 新房间只建内存态，等教师点「开始」再出题/推送（与新建房间一致）
+    game_manager.create_room_state(new_id, int(room["time_limit"] or DEFAULT_TIME_LIMIT))
+
+    return {
+        "room_id": new_id,
+        "room_code": room_code,
+        "copied_questions": copied,
+        "message": "已开启新一场",
+    }
 
 
 @router.post("/quick-quiz/join", summary="加入抢答房间")

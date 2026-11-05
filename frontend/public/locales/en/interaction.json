@@ -268,6 +268,14 @@
   "deleteActivityHint": "Deleted data cannot be recovered",
   "delete": "Delete",
   "details": "Details",
+  "restartActivity": "Restart",
+  "restartConfirm": "Start new round",
+  "restartTarget": "Run \"{{title}}\" again with the same settings",
+  "restartKeepHint": "Results, rankings and answers of this round are kept for review. A new room code is generated for the new round.",
+  "restartReuseQuestions": "Reuse this round's questions ({{count}} in total); uncheck to generate new ones from the current settings",
+  "restartCreated": "New round created, room code {{code}}",
+  "restartFailed": "Failed to restart",
+  "editEndedHint": "This round has ended. Settings changes won't affect existing results and only apply to the next restart.",
   "joinRoom": "Join Room",
   "participateQuiz": "Play",
   "createQuizActivity": "Create Quiz",
@@ -702,5 +710,11 @@
   "pickRoundNeedClass": "Pick a grade and class first",
   "pickRoundDone": "Started round {{round}}",
   "pickRoundFailed": "Failed to start a new round",
-  "readonlyPreview": "Read-only preview"
+  "readonlyPreview": "Read-only preview",
+  "all": "All",
+  "clearFilter": "Clear filters",
+  "listSearchPh": "Search title / keyword",
+  "listNoMatch": "No records match the current filters",
+  "pollTodo": "Not voted",
+  "pollDone": "Voted"
 }

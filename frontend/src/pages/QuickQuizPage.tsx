@@ -3,16 +3,17 @@
  * 教师：创建房间、管理历史
  * 学生：查看可加入的房间、参与历史
  */
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   Card, Button, Typography, Space, Tag, message, Spin, Empty, Pagination,
   Modal, Form, Input, InputNumber, Select, Row, Col, Popconfirm, Tooltip,
+  Checkbox, Alert,
 } from 'antd'
 import {
   ThunderboltOutlined, PlusOutlined, PlayCircleOutlined,
   HistoryOutlined, TeamOutlined, ClockCircleOutlined,
   TrophyOutlined, SettingOutlined, QuestionCircleOutlined,
-  UserOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
+  UserOutlined, EditOutlined, DeleteOutlined, EyeOutlined, RedoOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -25,6 +26,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import ScopeTag from '../components/ScopeTag'
 import ResetActivityButton from '../components/ResetActivityButton'
+import ListFilterBar from '../components/ListFilterBar'
 import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
@@ -42,6 +44,10 @@ const QuickQuizPage: React.FC = () => {
 
   const [rooms, setRooms] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  // 列表查找/分类：标题或房间码关键词 + 状态 + 学科（数据已全量在本地，无需再打接口）
+  const [roomKw, setRoomKw] = useState('')
+  const [roomStatus, setRoomStatus] = useState('all')
+  const [roomSubject, setRoomSubject] = useState('')
   const [createModal, setCreateModal] = useState(false)
   const [joinModal, setJoinModal] = useState(false)
   const { subjects: subjectOptions } = useSubjectOptions()
@@ -177,6 +183,25 @@ const QuickQuizPage: React.FC = () => {
     }
   }
 
+  /** 重新开始：复制本场配置开新一场（本场成绩/排名原样保留），成功后直接进等待页 */
+  const [restartRoom, setRestartRoom] = useState<any>(null)
+  const [restartReuse, setRestartReuse] = useState(true)
+  const [restarting, setRestarting] = useState(false)
+  const handleRestart = async () => {
+    if (!restartRoom) return
+    setRestarting(true)
+    try {
+      const { data } = await apiClient.post(
+        `/api/quick-quiz/room/${restartRoom.id}/restart`, { reuse_questions: restartReuse })
+      setRestartRoom(null)
+      message.success(t('restartCreated', { code: data.room_code }))
+      await loadRooms()
+      navigate(`/quick-quiz/lobby/${data.room_id}`)
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || t('restartFailed'))
+    } finally { setRestarting(false) }
+  }
+
   const getStatusTag = (status: string) => {
     const map: Record<string, { color: string; text: string }> = {
       waiting: { color: 'processing', text: t('waiting') },
@@ -263,7 +288,15 @@ const QuickQuizPage: React.FC = () => {
                       onClick={() => navigate(`/quick-quiz/result/${record.id}`)} />
                   </Tooltip>
                 )}
-                {record.status === 'waiting' && (
+                {/* 重新开始：已结束的场次一键「再比一场」，复制配置开新房，本场成绩保留 */}
+                {record.status === 'ended' && (
+                  <Tooltip title={t('restartActivity')}>
+                    <Button size="small" icon={<RedoOutlined />}
+                      onClick={() => { setRestartReuse(true); setRestartRoom(record) }} />
+                  </Tooltip>
+                )}
+                {/* 编辑：待开始 + 已结束都能改配置（已结束改的是下一场模板，不动已有成绩） */}
+                {record.status !== 'playing' && (
                   <Tooltip title={t('edit')}>
                     <Button size="small" icon={<EditOutlined />} onClick={() => openEditRoom(record)} />
                   </Tooltip>
@@ -282,10 +315,14 @@ const QuickQuizPage: React.FC = () => {
                     </Tooltip>
                   </Popconfirm>
                 )}
-                <Tooltip title={t('details')}>
-                  <Button size="small" icon={<EyeOutlined />}
-                    onClick={() => navigate(`/quick-quiz/lobby/${record.id}`)} />
-                </Tooltip>
+                {/* 详情只在「待开始」有意义：进行中会跳控制台、已结束会跳结果页，
+                    与旁边的按钮完全重复，所以这两种状态不再显示 */}
+                {record.status === 'waiting' && (
+                  <Tooltip title={t('details')}>
+                    <Button size="small" icon={<EyeOutlined />}
+                      onClick={() => navigate(`/quick-quiz/lobby/${record.id}`)} />
+                  </Tooltip>
+                )}
               </>
             ) : (
               <>
@@ -324,6 +361,28 @@ const QuickQuizPage: React.FC = () => {
       </div>
     </Card>
   )
+
+  // ── 房间列表的查找/分类（本地全量数据，切筛选即时生效） ──
+  const roomStatusCount = useMemo(() => ({
+    waiting: rooms.filter((r: any) => r.status === 'waiting').length,
+    playing: rooms.filter((r: any) => r.status === 'playing').length,
+    ended: rooms.filter((r: any) => r.status === 'ended').length,
+  }), [rooms])
+  const roomSubjects = useMemo(
+    () => Array.from(new Set(rooms.map((r: any) => String(r.subject || '').trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+      .map((s) => ({ value: s, label: s })),
+    [rooms],
+  )
+  const visibleRooms = useMemo(() => {
+    const k = roomKw.trim().toLowerCase()
+    return rooms.filter((r: any) => {
+      if (roomStatus !== 'all' && r.status !== roomStatus) return false
+      if (roomSubject && String(r.subject || '').trim() !== roomSubject) return false
+      if (!k) return true
+      return `${r.title || ''} ${r.room_code || ''} ${r.creator_username || ''}`.toLowerCase().includes(k)
+    })
+  }, [rooms, roomKw, roomStatus, roomSubject])
 
   // 学生的“我的抢答记录”
   const renderHistoryCard = (r: any) => (
@@ -386,24 +445,49 @@ const QuickQuizPage: React.FC = () => {
       </Card>
 
       {/* 房间列表 */}
-      <Card title={t('activityList', { count: rooms.length })} style={{ borderRadius: 12 }}>
+      <Card title={t('activityList', { count: visibleRooms.length })} style={{ borderRadius: 12 }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
         ) : rooms.length === 0 ? (
           <Empty description={isTeacherOrAdmin ? t('noActivitiesTeacher') : t('noActivitiesStudent')} />
         ) : (
           <>
-            <RowList items={rooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize)}
-              split={false} renderItem={renderRoomCard} />
-            <div style={{ marginTop: 12, textAlign: 'center' }}>
-              <Pagination
-                current={roomPage} pageSize={roomPageSize} total={rooms.length}
-                showSizeChanger showTotal={(total) => t('totalCount', { count: total })}
-                pageSizeOptions={['10', '20', '50']}
-                onChange={(p, ps) => { setRoomPage(p); setRoomPageSize(ps) }}
-                size="small"
-              />
-            </div>
+            <ListFilterBar
+              keyword={roomKw}
+              onKeyword={(v) => { setRoomKw(v); setRoomPage(1) }}
+              searchPlaceholder={t('listSearchPh')}
+              status={roomStatus}
+              onStatus={(v) => { setRoomStatus(v); setRoomPage(1) }}
+              statusOptions={[
+                { value: 'all', label: `${t('all')} (${rooms.length})` },
+                { value: 'waiting', label: `${t('waiting')} (${roomStatusCount.waiting})` },
+                { value: 'playing', label: `${t('playing')} (${roomStatusCount.playing})` },
+                { value: 'ended', label: `${t('ended')} (${roomStatusCount.ended})` },
+              ]}
+              subject={roomSubject}
+              onSubject={(v) => { setRoomSubject(v); setRoomPage(1) }}
+              subjectOptions={roomSubjects}
+              dirty={!!roomKw || roomStatus !== 'all' || !!roomSubject}
+              onReset={() => { setRoomKw(''); setRoomStatus('all'); setRoomSubject(''); setRoomPage(1) }}
+              resetLabel={t('clearFilter')}
+            />
+            {visibleRooms.length === 0 ? (
+              <Empty description={t('listNoMatch')} />
+            ) : (
+              <>
+                <RowList items={visibleRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize)}
+                  split={false} renderItem={renderRoomCard} />
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                  <Pagination
+                    current={roomPage} pageSize={roomPageSize} total={visibleRooms.length}
+                    showSizeChanger showTotal={(total) => t('totalCount', { count: total })}
+                    pageSizeOptions={['10', '20', '50']}
+                    onChange={(p, ps) => { setRoomPage(p); setRoomPageSize(ps) }}
+                    size="small"
+                  />
+                </div>
+              </>
+            )}
           </>
         )}
       </Card>
@@ -577,6 +661,10 @@ const QuickQuizPage: React.FC = () => {
         width={600}
       >
         <Form form={editForm} layout="vertical" onFinish={handleEdit}>
+          {editRoom?.status === 'ended' && (
+            <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+              title={t('editEndedHint')} />
+          )}
           <Form.Item name="title" label={t('activityTitle')} rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -652,6 +740,28 @@ const QuickQuizPage: React.FC = () => {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* ── 重新开始弹窗：复制配置开新一场，本场数据不动 ── */}
+      <Modal maskClosable={false}
+        title={<Space><RedoOutlined />{t('restartActivity')}</Space>}
+        open={!!restartRoom}
+        onCancel={() => setRestartRoom(null)}
+        onOk={handleRestart}
+        confirmLoading={restarting}
+        okText={t('restartConfirm')}
+        width={520}
+      >
+        {restartRoom && (
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+            <Alert type="info" showIcon
+              title={t('restartTarget', { title: restartRoom.title })}
+              description={t('restartKeepHint')} />
+            <Checkbox checked={restartReuse} onChange={(e) => setRestartReuse(e.target.checked)}>
+              {t('restartReuseQuestions', { count: restartRoom.question_count ?? 0 })}
+            </Checkbox>
+          </Space>
+        )}
       </Modal>
     </Card>
   )

@@ -272,6 +272,14 @@
   "deleteActivityHint": "删除后数据不可恢复",
   "delete": "删除",
   "details": "详情",
+  "restartActivity": "重新开始",
+  "restartConfirm": "开启新一场",
+  "restartTarget": "按「{{title}}」的配置再开一场",
+  "restartKeepHint": "本场成绩、排名与作答记录全部保留，可随时回看；新一场会生成新的房间码，学生用新房间码加入。",
+  "restartReuseQuestions": "沿用本场题目（共 {{count}} 题），不勾选则按当前配置重新出题",
+  "restartCreated": "已开启新一场，房间码 {{code}}",
+  "restartFailed": "重新开始失败",
+  "editEndedHint": "本场已结束，修改配置不会影响已产生的成绩与排名，只在「重新开始」时生效。",
   "joinRoom": "加入房间",
   "participateQuiz": "参与抢答",
   "createQuizActivity": "创建抢答活动",
@@ -702,5 +710,11 @@
   "pickRoundNeedClass": "请先选年级和班级",
   "pickRoundDone": "已开新一轮（第 {{round}} 轮）",
   "pickRoundFailed": "重置本轮失败",
-  "readonlyPreview": "只读预览"
+  "readonlyPreview": "只读预览",
+  "all": "全部",
+  "clearFilter": "清除筛选",
+  "listSearchPh": "搜索标题 / 关键词",
+  "listNoMatch": "没有符合筛选条件的记录",
+  "pollTodo": "未投票",
+  "pollDone": "已投票"
 }

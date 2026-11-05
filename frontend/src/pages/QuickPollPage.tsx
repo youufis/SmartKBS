@@ -2,7 +2,7 @@
  * QuickPollPage — 快速投票（独立页）
  * 从 InteractionPage 提取，独立的投票功能页面
  */
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import {
   Card, Button, Space, Typography, Tag, Modal,
@@ -23,6 +23,7 @@ import { reportLoadError } from '../utils/loadError'
 import { RowList } from '../components/RowList'
 import ScopeTag from '../components/ScopeTag'
 import useSubjectOptions from '../hooks/useSubjectOptions'
+import ListFilterBar from '../components/ListFilterBar'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -59,6 +60,10 @@ const QuickPollPage: React.FC = () => {
   })
 
   // 列表分页
+  // 列表查找/分类
+  const [pollKw, setPollKw] = useState('')
+  const [pollFilter, setPollFilter] = useState('all')
+  const [pollSubject, setPollSubject] = useState('')
   const [pollPage, setPollPage] = useState(1)
   const [pollPageSize, setPollPageSize] = useState(10)
 
@@ -208,6 +213,27 @@ const QuickPollPage: React.FC = () => {
     } catch { message.error(t('updateFailed')) }
   }
 
+  // ── 列表查找/分类（数据本地全量，切筛选即时生效） ──
+  const pollHasVoted = (p: any) => Boolean(p.voted ?? votedPolls[p.id])
+  const pollSubjects = useMemo(
+    () => Array.from(new Set(polls.map((p: any) => String(p.subject || '').trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+      .map((s) => ({ value: s, label: s })),
+    [polls],
+  )
+  const visiblePolls = useMemo(() => {
+    const k = pollKw.trim().toLowerCase()
+    return polls.filter((p: any) => {
+      if (pollFilter === 'single' && p.poll_type === 'multiple') return false
+      if (pollFilter === 'multiple' && p.poll_type !== 'multiple') return false
+      if (pollFilter === 'todo' && pollHasVoted(p)) return false
+      if (pollFilter === 'done' && !pollHasVoted(p)) return false
+      if (pollSubject && String(p.subject || '').trim() !== pollSubject) return false
+      if (!k) return true
+      return `${p.question || ''} ${p.creator_name || p.creator_username || ''}`.toLowerCase().includes(k)
+    })
+  }, [polls, pollKw, pollFilter, pollSubject, votedPolls])
+
   return (
     <Card style={{ borderRadius: 8 }}>
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
@@ -236,8 +262,35 @@ const QuickPollPage: React.FC = () => {
         <Spin spinning={pollLoading}>
           {polls.length === 0 ? <Empty description={t('noPolls')} /> : (
             <>
+            {/* 查找 + 分类：教师按题型分，学生按「投没投」分；再叠加学科 */}
+            <ListFilterBar
+              keyword={pollKw}
+              onKeyword={(v) => { setPollKw(v); setPollPage(1) }}
+              searchPlaceholder={t('listSearchPh')}
+              status={pollFilter}
+              onStatus={(v) => { setPollFilter(v); setPollPage(1) }}
+              statusOptions={isTeacherOrAdmin
+                ? [
+                    { value: 'all', label: `${t('all')} (${polls.length})` },
+                    { value: 'single', label: `${t('single')} (${polls.filter((p: any) => p.poll_type !== 'multiple').length})` },
+                    { value: 'multiple', label: `${t('multiple')} (${polls.filter((p: any) => p.poll_type === 'multiple').length})` },
+                  ]
+                : [
+                    { value: 'all', label: `${t('all')} (${polls.length})` },
+                    { value: 'todo', label: `${t('pollTodo')} (${polls.filter((p: any) => !(p.voted ?? votedPolls[p.id])).length})` },
+                    { value: 'done', label: `${t('pollDone')} (${polls.filter((p: any) => (p.voted ?? votedPolls[p.id])).length})` },
+                  ]}
+              subject={pollSubject}
+              onSubject={(v) => { setPollSubject(v); setPollPage(1) }}
+              subjectOptions={pollSubjects}
+              dirty={!!pollKw || pollFilter !== 'all' || !!pollSubject}
+              onReset={() => { setPollKw(''); setPollFilter('all'); setPollSubject(''); setPollPage(1) }}
+              resetLabel={t('clearFilter')}
+            />
+            {visiblePolls.length === 0 ? <Empty description={t('listNoMatch')} /> : (
+            <>
             <RowList
-              items={polls.slice((pollPage - 1) * pollPageSize, pollPage * pollPageSize)}
+              items={visiblePolls.slice((pollPage - 1) * pollPageSize, pollPage * pollPageSize)}
               split={false}
               renderItem={(poll: any) => {
                 const isMultiple = poll.poll_type === 'multiple'
@@ -311,13 +364,15 @@ const QuickPollPage: React.FC = () => {
             />
             <div style={{ marginTop: 12, textAlign: 'center' }}>
               <Pagination
-                current={pollPage} pageSize={pollPageSize} total={polls.length}
+                current={pollPage} pageSize={pollPageSize} total={visiblePolls.length}
                 showSizeChanger showTotal={(total) => t('totalPolls', { count: total })}
                 pageSizeOptions={['5', '10', '20', '50']}
                 onChange={(p, ps) => { setPollPage(p); setPollPageSize(ps) }}
                 size="small"
               />
             </div>
+            </>
+            )}
             </>
           )}
         </Spin>

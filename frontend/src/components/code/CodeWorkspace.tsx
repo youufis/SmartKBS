@@ -808,18 +808,24 @@ const CodeWorkspace: React.FC<CodeWorkspaceProps> = ({
   const leftPanel = (
     <div
       style={{
-        width: narrow ? '100%' : isFull ? '38%' : '35%',
-        minWidth: narrow ? 0 : 260,
-        flexShrink: 0,
+        // 用 flex-basis 而不是 width+flexShrink:0：外层宽度由容器决定时，百分比
+        // width 在"宽度待定"的父级里会退化成内容宽度，长知识点能把面板顶到几屏宽。
+        // 折叠后必须收成窄条：留给它的 35% 宽度会变成一大块空白，编辑器只能挤在右边。
+        flex: narrow ? '1 1 100%' : descCollapsed ? '0 0 44px' : `0 0 ${isFull ? 38 : 35}%`,
+        width: narrow ? '100%' : undefined,
+        minWidth: narrow || descCollapsed ? 0 : 260,
+        maxWidth: narrow ? '100%' : undefined,
+        boxSizing: 'border-box',
         height: isFull && !narrow ? '100%' : 'auto',
         maxHeight: isFull && !narrow ? '100%' : (narrow ? 320 : 520),
         overflow: 'auto',
+        overflowWrap: 'anywhere',
         background: 'var(--bg-layout)',
         borderRadius: 8,
         padding: descCollapsed ? '8px 6px' : 12,
         border: '1px solid var(--border-color)',
         cursor: descCollapsed ? 'pointer' : 'default',
-        transition: 'width .2s, min-width .2s, padding .2s',
+        transition: 'flex-basis .2s, padding .2s',
       }}
       onClick={() => { if (descCollapsed) setDescCollapsed(false) }}
     >
@@ -852,7 +858,7 @@ const CodeWorkspace: React.FC<CodeWorkspaceProps> = ({
           </div>
 
           {(problem.subject || problem.knowledge_points) && (
-            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-tertiary)' }}>
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>
               {problem.subject ? `${t('subject')}: ${problem.subject}` : ''}
               {problem.subject && problem.knowledge_points ? ' · ' : ''}
               {problem.knowledge_points ? `${t('knowledgePoints')}: ${problem.knowledge_points}` : ''}
@@ -882,7 +888,7 @@ const CodeWorkspace: React.FC<CodeWorkspaceProps> = ({
   )
 
   const rightPanel = (
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, height: isFull && !narrow ? '100%' : 'auto', overflow: isFull && !narrow ? 'auto' : 'visible', paddingRight: isFull && !narrow ? 4 : 0 }}>
+    <div style={{ flex: 1, minWidth: 0, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 8, height: isFull && !narrow ? '100%' : 'auto', overflow: isFull && !narrow ? 'auto' : 'visible', paddingRight: isFull && !narrow ? 4 : 0 }}>
       <CodeEditor
         language={problem.language || 'python'}
         value={code}
@@ -949,6 +955,10 @@ const CodeWorkspace: React.FC<CodeWorkspaceProps> = ({
       flexDirection: narrow ? 'column' : 'row',
       gap: 12,
       alignItems: 'stretch',
+      width: '100%',
+      maxWidth: '100%',
+      minWidth: 0,
+      boxSizing: 'border-box',
       height: isFull && !narrow ? '100%' : 'auto',
     }}>
       {leftPanel}

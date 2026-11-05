@@ -61,6 +61,9 @@ const InteractionPage: React.FC = () => {
   // 列表工具条：测验多了以后靠翻页找太累（筛选/排序只在已加载的这页数据里做，不动接口）
   const [quizKeyword, setQuizKeyword] = useState('')
   const [quizFilter, setQuizFilter] = useState<'all' | 'todo' | 'done'>('all')
+  // 教师端分类：全部 / 进行中 / 已结束；外加按学科筛
+  const [quizStatus, setQuizStatus] = useState<'all' | 'active' | 'ended'>('all')
+  const [quizSubject, setQuizSubject] = useState('')
   const [quizSort, setQuizSort] = useState<'newest' | 'oldest' | 'title'>('newest')
   const [quizSubmitting, setQuizSubmitting] = useState(false)
   const [quizResult, setQuizResult] = useState<any>(null)
@@ -451,10 +454,16 @@ const InteractionPage: React.FC = () => {
   const quizStateOf = (q: any): 'todo' | 'done' => (q?.answered ? 'done' : 'todo')
   const quizTodoCount = quizzes.filter(q => quizStateOf(q) === 'todo').length
   const quizDoneCount = quizzes.length - quizTodoCount
+  // 教师端的分类：进行中 / 已结束（closed 与 ended 同义，后端两种状态值并存）
+  const quizLiveOf = (q: any) => (q?.status === 'active' ? 'active' : 'ended')
+  const quizLiveCount = quizzes.filter(q => quizLiveOf(q) === 'active').length
+  const quizEndedCount = quizzes.length - quizLiveCount
   const qkw = quizKeyword.trim().toLowerCase()
   const visibleQuizzes = [...quizzes]
     .filter(q => {
       if (quizFilter !== 'all' && quizStateOf(q) !== quizFilter) return false
+      if (quizStatus !== 'all' && quizLiveOf(q) !== quizStatus) return false
+      if (quizSubject && String(q.subject || '').trim() !== quizSubject) return false
       if (!qkw) return true
       return `${q.title || ''} ${q.description || ''}`.toLowerCase().includes(qkw)
     })
@@ -493,20 +502,35 @@ const InteractionPage: React.FC = () => {
             onSave={handleCreateQuiz}
           />
           <Spin spinning={quizLoading}>
-            {/* 工具条：学生看「待作答 / 已完成」，教师也一样能用（长的行自动换行） */}
+            {/* 工具条：关键词 + 分类（学生看待作答/已完成，教师看进行中/已结束）+ 学科 + 排序 */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
               <Input allowClear prefix={<SearchOutlined />} placeholder={t('ipSearchPh')}
-                value={quizKeyword} style={{ width: 240 }}
+                value={quizKeyword} style={{ width: 220 }}
                 onChange={e => { setQuizKeyword(e.target.value); setQuizPage(1) }} />
-              {isStudent && (
+              {isStudent ? (
                 <Segmented value={quizFilter}
                   onChange={(v) => { setQuizFilter(v as 'all' | 'todo' | 'done'); setQuizPage(1) }}
                   options={[
                     { value: 'all', label: t('ipFilterAll') },
-                    { value: 'todo', label: t('ipFilterTodo') },
-                    { value: 'done', label: t('ipFilterDone') },
+                    { value: 'todo', label: `${t('ipFilterTodo')} (${quizTodoCount})` },
+                    { value: 'done', label: `${t('ipFilterDone')} (${quizDoneCount})` },
+                  ]} />
+              ) : (
+                <Segmented value={quizStatus}
+                  onChange={(v) => { setQuizStatus(v as 'all' | 'active' | 'ended'); setQuizPage(1) }}
+                  options={[
+                    { value: 'all', label: `${t('ipFilterAll')} (${quizzes.length})` },
+                    { value: 'active', label: `${t('playing')} (${quizLiveCount})` },
+                    { value: 'ended', label: `${t('ended')} (${quizEndedCount})` },
                   ]} />
               )}
+              {/* 学科：只列本页数据里真实出现过的，避免选到空结果 */}
+              <Select allowClear value={quizSubject || undefined} style={{ width: 130 }}
+                placeholder={t('subject')}
+                onChange={(v) => { setQuizSubject(v || ''); setQuizPage(1) }}
+                options={Array.from(new Set(quizzes.map((q: any) => String(q.subject || '').trim()).filter(Boolean)))
+                  .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+                  .map((s) => ({ value: s, label: s }))} />
               <Select value={quizSort} style={{ width: 140 }}
                 onChange={(v) => { setQuizSort(v); setQuizPage(1) }}
                 options={[
@@ -514,6 +538,11 @@ const InteractionPage: React.FC = () => {
                   { value: 'oldest', label: t('ipSortOldest') },
                   { value: 'title', label: t('ipSortTitle') },
                 ]} />
+              {(quizKeyword || quizSubject || quizFilter !== 'all' || quizStatus !== 'all') && (
+                <Button size="small" onClick={() => {
+                  setQuizKeyword(''); setQuizFilter('all'); setQuizStatus('all'); setQuizSubject(''); setQuizPage(1)
+                }}>{t('ipClearFilter')}</Button>
+              )}
             </div>
             {quizzes.length === 0
               ? <Empty description={isStudent ? t('ipNoListTitle') : t('noPolls')}>
@@ -521,7 +550,9 @@ const InteractionPage: React.FC = () => {
                 </Empty>
               : visibleQuizzes.length === 0
               ? <Empty description={t('ipNoMatch')}>
-                  <Button size="small" onClick={() => { setQuizKeyword(''); setQuizFilter('all'); setQuizPage(1) }}>
+                  <Button size="small" onClick={() => {
+                    setQuizKeyword(''); setQuizFilter('all'); setQuizStatus('all'); setQuizSubject(''); setQuizPage(1)
+                  }}>
                     {t('ipClearFilter')}
                   </Button>
                 </Empty>

@@ -80,6 +80,9 @@ class PracticeCreateSession(BaseModel):
     # 立即发布：默认 False=存为草稿（与考试「新建即草稿」一致），
     # 老师在列表里点「发布」才对学生开放；显式传 true 才会创建即进行中
     publish: bool = False
+    # 来源：teacher(教师自建, 默认) / wrong_book(错题本一键布置)
+    # 同步练习页按它把「错题巩固」单独分页签，不需要靠标题猜
+    source: str = ""
 
 
 class PracticeUpdate(BaseModel):
@@ -158,6 +161,43 @@ def _parse_target_students(raw: Any) -> list[str]:
     except (json.JSONDecodeError, TypeError):
         return []
     return [str(x) for x in data] if isinstance(data, list) else []
+
+
+def _teacher_scope_students(username: str) -> set[str]:
+    """教师任教范围内的学生用户名集合。
+
+    错题巩固练习由系统按学生逐份推送（creator='system'），列表按创建者过滤的话
+    教师永远看不到自己学生的那几份，所以这里要拿"任教范围"做可见性判断。
+    """
+    from backend.permission_service import get_students_in_scope
+    try:
+        return {s["username"] for s in (get_students_in_scope(username) or [])}
+    except Exception as e:                      # 任教数据异常不该让列表整体 500
+        logger.warning(f"[练习列表] 取任教学生名单失败 {username}: {e}")
+        return set()
+
+
+def _is_wrong_book_session(sess: dict) -> bool:
+    return (sess.get("source") or "") == "wrong_book"
+
+
+def _session_targets_in_teacher_scope(sess: dict, username: str) -> bool:
+    """系统按人推送的错题巩固：目标学生里有任教学生，教师就该看得到"""
+    if not _is_wrong_book_session(sess):
+        return False
+    targets = _parse_target_students(sess.get("target_students"))
+    if not targets:
+        return False
+    return bool(set(targets) & _teacher_scope_students(username))
+
+
+def _can_manage_session(sess: dict, username: str, role: int) -> bool:
+    """能否管理这场练习：管理员全放行；创建者放行；任教学生的错题巩固放行"""
+    if role == 0:
+        return True
+    if sess.get("creator_username") == username:
+        return True
+    return _session_targets_in_teacher_scope(sess, username)
 
 
 def _student_scope(username: str) -> tuple[str, str]:
@@ -560,15 +600,19 @@ async def create_session(req: PracticeCreateSession, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # 状态：draft=草稿(学生看不到) / active=进行中 / ended=已结束
     status = "active" if req.publish else "draft"
+    # 来源只认白名单两值，避免前端传脏值把列表分类搞乱
+    source = (req.source or "").strip().lower()
+    if source not in ("teacher", "wrong_book"):
+        source = "teacher"
     session_id = execute_insert(
         """INSERT INTO practice_sessions
            (title, knowledge_points, creator_username, subject, question_count,
-            total_score, target_grade, target_class, target_students, status, created_at, updated_at,
+            total_score, target_grade, target_class, target_students, source, status, created_at, updated_at,
             target_scope, target_users)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (req.title.strip(), req.knowledge_points, username, req.subject,
          len(req.question_ids), total, req.target_grade, req.target_class,
-         target_students_str, status, now, now,
+         target_students_str, source, status, now, now,
          (req.target_scope or "").strip(), (req.target_users or "").strip()),
     )
 
@@ -593,10 +637,19 @@ async def list_teacher_sessions(request: Request):
     if role == 0:
         rows = execute_query('SELECT * FROM practice_sessions ORDER BY created_at DESC')
     else:
+        # 自己创建的 + 系统推给自己任教学生的错题巩固（后者 creator='system'，按创建者查会漏）
         rows = execute_query(
-            'SELECT * FROM practice_sessions WHERE creator_username=? ORDER BY created_at DESC',
+            "SELECT * FROM practice_sessions "
+            "WHERE creator_username=? OR source='wrong_book' ORDER BY created_at DESC",
             (username,),
         )
+        scope_students = _teacher_scope_students(username)
+        rows = [
+            r for r in rows
+            if r.get("creator_username") == username
+            or (scope_students and _is_wrong_book_session(r)
+                and bool(set(_parse_target_students(r.get("target_students"))) & scope_students))
+        ]
     if not rows:
         return {"sessions": []}
 
@@ -611,6 +664,10 @@ async def list_teacher_sessions(request: Request):
         )
     }
     creator_map = _user_info_map({r["creator_username"] for r in rows if r.get("creator_username")})
+    # 定向学生姓名：错题巩固是"按人推送"，列表要能直接看出推给了谁（前端按学生筛选/分组）
+    stu_name_map = _user_info_map({
+        u for r in rows for u in _parse_target_students(r.get("target_students"))
+    })
 
     by_gc: dict[tuple[str, str], int] = {}
     by_grade: dict[str, int] = {}
@@ -643,6 +700,9 @@ async def list_teacher_sessions(request: Request):
             "target_grade": r["target_grade"], "target_class": r["target_class"],
             "target_scope": (r.get("target_scope") or "").strip(),
             "target_students": target_students,
+            "target_student_names": {
+                u: (stu_name_map.get(u) or {}).get("name") or u for u in target_students
+            },
             "status": r["status"],
             "source": r.get("source") or "teacher",
             "creator_username": r.get("creator_username", "") or "",
@@ -672,7 +732,8 @@ async def get_session_detail(session_id: int, request: Request):
 
     # 「绑定即授权」：非创建者教师若该练习已绑定到课程知识点，放行只读预览
     # （题目内容可见；学生作答与成绩属创建教师的教学数据，下方剥离）。
-    is_owner = role == 0 or sess["creator_username"] == username
+    # 错题巩固是按人推送的，任教该学生的教师视同创建者（要看答卷与成绩）。
+    is_owner = _can_manage_session(sess, username, role)
     if not is_owner:
         from backend.permission_service import can_view_bound_resource
         if not can_view_bound_resource("practice", session_id, role):
@@ -946,7 +1007,7 @@ async def delete_session(session_id: int, request: Request):
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
+    if not _can_manage_session(sess, username, role):
         raise HTTPException(status_code=403, detail="只能删除自己的练习")
 
     left = execute_query_one("SELECT COUNT(*) c FROM practice_attempts WHERE session_id=?", (session_id,))
@@ -977,7 +1038,7 @@ async def update_session(session_id: int, req: PracticeUpdate, request: Request)
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
+    if not _can_manage_session(sess, username, role):
         raise HTTPException(status_code=403, detail="只能修改自己的练习")
 
     updates: list[str] = []
@@ -1013,7 +1074,7 @@ async def end_session(session_id: int, request: Request):
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
+    if not _can_manage_session(sess, username, role):
         raise HTTPException(status_code=403, detail="只能结束自己的练习")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1042,7 +1103,7 @@ async def publish_session(session_id: int, request: Request):
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
+    if not _can_manage_session(sess, username, role):
         raise HTTPException(status_code=403, detail="只能发布自己的练习")
 
     status = (sess.get("status") or "").strip()
@@ -1073,7 +1134,7 @@ async def reopen_session(session_id: int, request: Request):
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
+    if not _can_manage_session(sess, username, role):
         raise HTTPException(status_code=403, detail="只能开启自己的练习")
 
     status = (sess.get("status") or "").strip()
@@ -1102,7 +1163,7 @@ async def grade_practice_now(session_id: int, request: Request):
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
+    if not _can_manage_session(sess, username, role):
         raise HTTPException(status_code=403, detail="只能批改自己布置的练习")
 
     pend = execute_query(
@@ -1147,7 +1208,7 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
     sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (attempt["session_id"],))
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if role != 0 and sess["creator_username"] != username:
+    if not _can_manage_session(sess, username, role):
         raise HTTPException(status_code=403, detail="只能复核自己布置的练习")
 
     answers = attempt.get("answers")

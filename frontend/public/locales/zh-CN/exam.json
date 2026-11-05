@@ -576,5 +576,6 @@
   "exDuration": "时长",
   "exMySubmitted": "已交卷",
   "readonlyPreview": "只读预览",
-  "correctAnswerLbl": "答案"
+  "correctAnswerLbl": "答案",
+  "clearFilter": "清除筛选"
 }

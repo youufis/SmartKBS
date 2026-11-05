@@ -1,7 +1,7 @@
 /**
  * 协作白板主页面 — 教师创建/管理房间
  */
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Card, Button, Space, Typography, Tag, Modal, Input, Select, Pagination,
   message, Popconfirm, Tooltip, Radio, Empty, Spin,
@@ -17,6 +17,7 @@ import { useAuthStore } from '../stores/authStore'
 import * as whiteboardApi from '../api/whiteboard'
 import type { WhiteboardRoom, WhiteboardMode } from '../types'
 import ScopeTag from '../components/ScopeTag'
+import ListFilterBar from '../components/ListFilterBar'
 import { RowList } from '../components/RowList'
 import ActivityScopeSelector, { type ActivityScopeValue } from '../components/ActivityScopeSelector'
 
@@ -33,6 +34,9 @@ const WhiteboardPage: React.FC = () => {
   const [rooms, setRooms] = useState<WhiteboardRoom[]>([])
   const [loading, setLoading] = useState(false)
   // 卡片列表自己管分页（原来是 Table 内置分页）
+  // 列表查找/分类：标题或房间码 + 进行中/已结束
+  const [wbKw, setWbKw] = useState('')
+  const [wbStatus, setWbStatus] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [createOpen, setCreateOpen] = useState(false)
@@ -273,6 +277,17 @@ const WhiteboardPage: React.FC = () => {
     )
   }
 
+  const wbActiveCount = rooms.filter((r: any) => r.status === 'active').length
+  const visibleRooms = useMemo(() => {
+    const k = wbKw.trim().toLowerCase()
+    return rooms.filter((r: any) => {
+      if (wbStatus === 'active' && r.status !== 'active') return false
+      if (wbStatus === 'ended' && r.status === 'active') return false
+      if (!k) return true
+      return `${r.title || ''} ${r.room_code || ''} ${r.creator_username || ''}`.toLowerCase().includes(k)
+    })
+  }, [rooms, wbKw, wbStatus])
+
   return (
     <Card style={{ borderRadius: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -300,17 +315,36 @@ const WhiteboardPage: React.FC = () => {
         <Empty description={isStudent ? t('noWhiteboardsStudent') : t('noWhiteboards')} />
       ) : (
         <>
-          <RowList items={rooms.slice((page - 1) * pageSize, page * pageSize)}
+          <ListFilterBar
+            keyword={wbKw}
+            onKeyword={(v) => { setWbKw(v); setPage(1) }}
+            searchPlaceholder={t('wbSearchPh')}
+            status={wbStatus}
+            onStatus={(v) => { setWbStatus(v); setPage(1) }}
+            statusOptions={[
+              { value: 'all', label: `${t('all')} (${rooms.length})` },
+              { value: 'active', label: `${t('active')} (${wbActiveCount})` },
+              { value: 'ended', label: `${t('ended')} (${rooms.length - wbActiveCount})` },
+            ]}
+            dirty={!!wbKw || wbStatus !== 'all'}
+            onReset={() => { setWbKw(''); setWbStatus('all'); setPage(1) }}
+            resetLabel={t('clearFilter')}
+          />
+          {visibleRooms.length === 0 ? <Empty description={t('wbNoMatch')} /> : (
+          <>
+          <RowList items={visibleRooms.slice((page - 1) * pageSize, page * pageSize)}
             split={false} renderItem={renderRoomCard} />
           <div style={{ marginTop: 12, textAlign: 'center' }}>
             <Pagination
-              current={page} pageSize={pageSize} total={rooms.length}
+              current={page} pageSize={pageSize} total={visibleRooms.length}
               showSizeChanger showTotal={(total) => t('wbTotalRooms', { total })}
               pageSizeOptions={['10', '20', '50']}
               onChange={(p, ps) => { setPage(p); setPageSize(ps) }}
               size="small"
             />
           </div>
+          </>
+          )}
         </>
       )}
 

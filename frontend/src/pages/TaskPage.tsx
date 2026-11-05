@@ -1,5 +1,5 @@
 import { studentLabel } from '../utils/studentLabel'
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox, Alert, Radio,
   Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select, Empty,
@@ -11,6 +11,7 @@ import {
   EditOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
+import ListFilterBar from '../components/ListFilterBar'
 import { useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -99,7 +100,29 @@ const TaskPage: React.FC = () => {
     else next.delete('grading')
     setSearchParams(next, { replace: true })
   }
-  const visibleTasks = pendingOnly && !isStudent ? tasks.filter((x) => (x.pending_grade_count ?? 0) > 0) : tasks
+  // 列表查找/分类：关键词（名称/要求）+ 状态（进行中/已结束）+ 科目
+  const [taskKw, setTaskKw] = useState('')
+  const [taskFilter, setTaskFilter] = useState('all')
+  const [taskSubjectFilter, setTaskSubjectFilter] = useState('')
+  const taskStatusOf = (t: any) => (t?.status === 'active' ? 'active' : 'ended')
+  const taskMatched = useMemo(() => {
+    const base = pendingOnly && !isStudent
+      ? tasks.filter((x) => (x.pending_grade_count ?? 0) > 0)
+      : tasks
+    const k = taskKw.trim().toLowerCase()
+    return base.filter((x) => {
+      if (taskSubjectFilter && String(x.subject || '').trim() !== taskSubjectFilter) return false
+      if (!k) return true
+      return `${x.name || ''} ${x.description || ''} ${x.creator || ''}`.toLowerCase().includes(k)
+    })
+  }, [tasks, pendingOnly, isStudent, taskKw, taskSubjectFilter])
+  const taskStatusCount = useMemo(() => ({
+    active: taskMatched.filter((x) => taskStatusOf(x) === 'active').length,
+    ended: taskMatched.filter((x) => taskStatusOf(x) === 'ended').length,
+  }), [taskMatched])
+  const visibleTasks = taskFilter === 'all'
+    ? taskMatched
+    : taskMatched.filter((x) => taskStatusOf(x) === taskFilter)
   const [loading, setLoading] = useState(false)
   const MOBILE_CARD_PAGE = 8            // 窄屏卡片列表每页条数
   const [mPage, setMPage] = useState(1)
@@ -716,6 +739,25 @@ const TaskPage: React.FC = () => {
             </Checkbox>
           )}
         </Space>
+
+        <ListFilterBar
+          keyword={taskKw}
+          onKeyword={(v) => { setTaskKw(v); setMPage(1) }}
+          searchPlaceholder={t('listSearchPh')}
+          status={taskFilter}
+          onStatus={(v) => { setTaskFilter(v); setMPage(1) }}
+          statusOptions={[
+            { value: 'all', label: `${t('all')} (${taskMatched.length})` },
+            { value: 'active', label: `${t('inProgress')} (${taskStatusCount.active})` },
+            { value: 'ended', label: `${t('ended')} (${taskStatusCount.ended})` },
+          ]}
+          subject={taskSubjectFilter}
+          onSubject={(v) => { setTaskSubjectFilter(v); setMPage(1) }}
+          subjectOptions={subjectOptions.map((s) => ({ value: s, label: s }))}
+          dirty={!!taskKw || taskFilter !== 'all' || !!taskSubjectFilter}
+          onReset={() => { setTaskKw(''); setTaskFilter('all'); setTaskSubjectFilter(''); setMPage(1) }}
+          resetLabel={t('clearFilter')}
+        />
 
         <Spin spinning={loading}>
           {isMobile ? (

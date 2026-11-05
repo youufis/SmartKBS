@@ -691,7 +691,9 @@ const TeacherView: React.FC = () => {
   const { t } = useTranslation('practice')
   const [searchParams, setSearchParams] = useSearchParams()
   const openedRef = useRef(false)
-  const [tab, setTab] = useState<'generate' | 'sessions'>('generate')
+  // 默认落在「已发布练习」：教师进页面多是看/管已有练习，AI 生成是想建新练习时才点
+  // wrongbook = 错题巩固（系统按人推送，source='wrong_book'），单独一页，不和普通练习混排
+  const [tab, setTab] = useState<'generate' | 'sessions' | 'wrongbook'>('sessions')
   const [kpInput, setKpInput] = useState('')
   const [subject, setSubject] = useState('')
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
@@ -710,6 +712,8 @@ const TeacherView: React.FC = () => {
   const [publishing, setPublishing] = useState(false)
   const [sessions, setSessions] = useState<any[]>([])
   const [sessionPage, setSessionPage] = useState(1)
+  /** 错题巩固独立分页，和普通练习互不影响 */
+  const [wrongBookPage, setWrongBookPage] = useState(1)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const user = useAuthStore(s => s.user)
   const isAdmin = user?.role === 'admin'
@@ -786,6 +790,7 @@ const TeacherView: React.FC = () => {
       message.success(data.message)
       setQuestions([])
       setTab('sessions')
+      setSessionPage(1)
       loadSessions()
     } catch (e: any) { message.error(e.response?.data?.detail || t('publishFailed')) }
     finally { setPublishing(false) }
@@ -1018,12 +1023,204 @@ const TeacherView: React.FC = () => {
     } catch (e: any) { message.error(e.response?.data?.detail || t('deleteFailed')) }
   }
 
+  // ── 错题巩固（source='wrong_book'，系统按人推送）与普通练习分开列，各自分页 ──
+  const isWrongBook = (r: any) => r?.source === 'wrong_book'
+  const wrongBookAll = useMemo(() => sessions.filter(isWrongBook), [sessions])
+  const classSessions = useMemo(() => sessions.filter((r: any) => !isWrongBook(r)), [sessions])
+
+  // 已发布练习的查找：标题关键词 + 状态 + 学科（列表本来是全量下发，本地筛即可）
+  const [pKw, setPKw] = useState('')
+  const [pStatus, setPStatus] = useState<'all' | 'draft' | 'active' | 'ended'>('all')
+  const [pSubject, setPSubject] = useState('')
+
+  const pSubjects = useMemo(
+    () => Array.from(new Set(classSessions.map((s: any) => String(s.subject || '').trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+      .map((s) => ({ value: s, label: s })),
+    [classSessions],
+  )
+
+  /** 关键词 + 学科命中（不算状态），状态页签的条数基于它统计 */
+  const pMatched = useMemo(() => {
+    const k = pKw.trim().toLowerCase()
+    return classSessions.filter((s: any) => {
+      if (pSubject && String(s.subject || '').trim() !== pSubject) return false
+      if (!k) return true
+      return `${s.title || ''} ${s.knowledge_points || ''} ${s.creator_username || ''}`
+        .toLowerCase().includes(k)
+    })
+  }, [classSessions, pKw, pSubject])
+
+  const pStatusCount = useMemo(() => ({
+    draft: pMatched.filter((s: any) => s.status === 'draft').length,
+    active: pMatched.filter((s: any) => s.status === 'active').length,
+    ended: pMatched.filter((s: any) => s.status === 'ended').length,
+  }), [pMatched])
+
+  const classFiltered = useMemo(
+    () => (pStatus === 'all' ? pMatched : pMatched.filter((s: any) => s.status === pStatus)),
+    [pMatched, pStatus],
+  )
+
+  // 错题巩固的细分：按天筛 + 按学生筛 + 分组展示（练习一多，混在一起根本找不到）
+  const [wbDays, setWbDays] = useState<'all' | '7' | '30'>('all')
+  const [wbStudent, setWbStudent] = useState('')
+  const [wbGroup, setWbGroup] = useState<'date' | 'student' | 'none'>('date')
+
+  /** 错题巩固里出现过的学生（用户名 → 姓名），用于"按学生"筛选/分组 */
+  const wbStudents = useMemo(() => {
+    const m = new Map<string, string>()
+    wrongBookAll.forEach((s: any) => {
+      ;(s.target_students || []).forEach((u: string) => {
+        m.set(u, s.target_student_names?.[u] || m.get(u) || u)
+      })
+    })
+    return Array.from(m, ([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'))
+  }, [wrongBookAll])
+
+  const wrongBookSessions = useMemo(() => {
+    const days = wbDays === 'all' ? 0 : Number(wbDays)
+    const limit = days ? days * 86400000 : 0
+    const now = Date.now()
+    return wrongBookAll.filter((s: any) => {
+      if (wbStudent && !(s.target_students || []).includes(wbStudent)) return false
+      if (limit) {
+        // created_at 形如 "2026-10-30 18:55"（无时区），补 T 才能被 Date.parse 认
+        const t = Date.parse(String(s.created_at || '').replace(' ', 'T'))
+        if (!Number.isFinite(t) || now - t > limit) return false
+      }
+      return true
+    })
+  }, [wrongBookAll, wbDays, wbStudent])
+
+  const PAGE_SIZE = 10
+  const listSessions = tab === 'wrongbook' ? wrongBookSessions : classFiltered
+  const listPage = tab === 'wrongbook' ? wrongBookPage : sessionPage
+  const setListPage = tab === 'wrongbook' ? setWrongBookPage : setSessionPage
+  // 删除/筛选后当前页可能越界，渲染前夹一下，避免翻到空白页
+  const maxPage = Math.max(1, Math.ceil(listSessions.length / PAGE_SIZE))
+  const safePage = Math.min(listPage, maxPage)
+
+  /** 当前页按「日期 / 学生」分组，分组头 + 卡片；不分组时返回单个匿名组 */
+  const pageGroups = useMemo(() => {
+    const items = listSessions.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+    if (tab !== 'wrongbook' || wbGroup === 'none') return [{ key: '', label: '', items }]
+    const gmap = new Map<string, any[]>()
+    items.forEach((r: any) => {
+      const key = wbGroup === 'date'
+        ? (String(r.created_at || '').slice(0, 10) || '-')
+        : (r.target_student_names?.[r.target_students?.[0]] || r.target_students?.[0] || t('unknownStudent'))
+      if (!gmap.has(key)) gmap.set(key, [])
+      gmap.get(key)!.push(r)
+    })
+    return Array.from(gmap, ([key, items]) => ({ key, label: key, items }))
+  }, [listSessions, safePage, tab, wbGroup, t])
+
+  const renderSessionCard = (r: any) => {
+    const students: string[] = r.target_students || []
+    const scope = students.length
+      ? 'individual'
+      : (r.target_scope || (String(r.target_grade || '').trim() ? 'grade' : 'teacher_classes'))
+    return (
+      <Card size="small" hoverable style={{ marginBottom: 8, cursor: 'pointer' }}
+        onClick={() => viewSessionDetail(r.id)}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text strong>{r.title}</Text>
+            <div style={{ marginTop: 4 }}>
+              {r.status === 'draft'
+                ? <Tag>{t('draft')}</Tag>
+                : r.status === 'active'
+                ? <Tag color="green">{t('inProgress')}</Tag>
+                : <Tag color="red">{t('endedSuccess')}</Tag>}
+              <Tag color="blue">
+                {r.creator_username === 'system' ? t('systemGenerated') : r.creator_username}
+              </Tag>
+              <Tag>{t('subject')}：{r.subject || '-'}</Tag>
+              <ScopeTag scope={scope} grade={r.target_grade} classes={r.target_class}
+                users={students.join(',')} />
+              {r.source === 'wrong_book' && students.length > 0 && (
+                <Tag color="green">
+                  {students.map((u: string) => r.target_student_names?.[u] || u).join('、')}
+                </Tag>
+              )}
+              {r.source === 'wrong_book' && <Tag color="purple">{t('sourceWrongBook')}</Tag>}
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('questionCountTitle')} {r.question_count} · {t('totalScoreTitle')} {r.total_score}
+                {' · '}{t('submitted')} {r.submitted_count}/{r.student_count}
+                {/* 创建时间：与抢答/白板/测验的卡片同口径，方便按时间找最近布置的那份 */}
+                {' · '}{t('createdAt')} {String(r.created_at || '').slice(0, 16) || '-'}
+              </Text>
+            </div>
+          </div>
+          <span onClick={(e) => e.stopPropagation()}>
+            <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+              {/* 发布 / 结束 / 重开：与考试中心同一套（绿=发布、红=结束、灰=重开），图标 + tooltip */}
+              {r.status === 'draft' && (
+                <Tooltip title={t('publishAction')}>
+                  <Button size="small" icon={<PlayCircleOutlined />}
+                    style={{ color: '#52c41a' }} loading={statusBusy === r.id}
+                    onClick={() => publishOrReopen(r)} />
+                </Tooltip>
+              )}
+              {r.status === 'active' && (
+                <Tooltip title={t('endAction')}>
+                  <Button size="small" icon={<PauseCircleOutlined />}
+                    style={{ color: '#ff4d4f' }}
+                    onClick={() => Modal.confirm({
+                      title: t('endConfirm'), okText: t('endAction'), cancelText: t('cancel'),
+                      okButtonProps: { danger: true },
+                      onOk: () => endSession(r.id),
+                    })} />
+                </Tooltip>
+              )}
+              {r.status === 'ended' && (
+                <Tooltip title={t('reopenAction')}>
+                  <Button size="small" icon={<RedoOutlined />}
+                    loading={statusBusy === r.id} onClick={() => publishOrReopen(r)} />
+                </Tooltip>
+              )}
+              <Tooltip title={t('detail')}>
+                <Button size="small" icon={<EyeOutlined />} onClick={() => viewSessionDetail(r.id)} />
+              </Tooltip>
+              {/* 改名称：任何状态都能改（学生看到的标题同步更新） */}
+              <Tooltip title={t('renameTitle')}>
+                <Button size="small" icon={<EditOutlined />}
+                  onClick={() => { setRenameTarget(r); setRenameValue(r.title || '') }} />
+              </Tooltip>
+              <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
+              {/* 导出 / 删除 直接摊成图标显示（不再藏进"更多"菜单），都配 tooltip */}
+              <Tooltip title={t('exportResult')}>
+                <Button size="small" icon={<DownloadOutlined />}
+                  onClick={() => window.open(`/api/export/practice/${r.id}`, '_blank')} />
+              </Tooltip>
+              <Tooltip title={t('delete')}>
+                <Button size="small" danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({
+                  title: t('deleteConfirm'), okText: t('delete'), okButtonProps: { danger: true },
+                  cancelText: t('cancel'), onOk: () => deleteSession(r.id),
+                })} />
+              </Tooltip>
+            </Space>
+          </span>
+        </div>
+      </Card>
+    )
+  }
+
   return (
     <div>
       <Title level={4}>{t('syncPractice')}</Title>
       <Space style={{ marginBottom: 16 }}>
+        {/* 已发布练习在前：它是默认落地页，AI 生成是想新建练习时才点 */}
+        <Button type={tab === 'sessions' ? 'primary' : 'default'} onClick={() => setTab('sessions')}>
+          {t('publishedPractices')}{classSessions.length > 0 ? ` (${classSessions.length})` : ''}
+        </Button>
+        {/* 错题巩固（系统按人推送）单独一页，不和普通练习混排 */}
+        <Button type={tab === 'wrongbook' ? 'primary' : 'default'} onClick={() => setTab('wrongbook')}>
+          {t('wrongBookPractices')}{wrongBookSessions.length > 0 ? ` (${wrongBookSessions.length})` : ''}
+        </Button>
         <Button type={tab === 'generate' ? 'primary' : 'default'} onClick={() => setTab('generate')}>{t('aiGenerate')}</Button>
-        <Button type={tab === 'sessions' ? 'primary' : 'default'} onClick={() => setTab('sessions')}>{t('publishedPractices')}</Button>
       </Space>
 
       {tab === 'generate' && (
@@ -1104,104 +1301,93 @@ const TeacherView: React.FC = () => {
         </>
       )}
 
+      {/* 已发布练习的查找：关键词 / 状态 / 学科 */}
       {tab === 'sessions' && (
+        <Space wrap style={{ marginBottom: 12 }} size={8}>
+          <Input allowClear prefix={<SearchOutlined />} placeholder={t('pSearchPh')}
+            style={{ width: 220 }} value={pKw}
+            onChange={(e) => { setPKw(e.target.value); setSessionPage(1) }} />
+          <Segmented size="small" value={pStatus}
+            onChange={(v) => { setPStatus(v as 'all' | 'draft' | 'active' | 'ended'); setSessionPage(1) }}
+            options={[
+              { value: 'all', label: `${t('all')} (${pMatched.length})` },
+              { value: 'draft', label: `${t('draft')} (${pStatusCount.draft})` },
+              { value: 'active', label: `${t('inProgress')} (${pStatusCount.active})` },
+              { value: 'ended', label: `${t('endedSuccess')} (${pStatusCount.ended})` },
+            ]} />
+          <Select size="small" style={{ width: 130 }} allowClear
+            placeholder={t('subject')} value={pSubject || undefined}
+            onChange={(v) => { setPSubject(v || ''); setSessionPage(1) }}
+            options={pSubjects} />
+          {(pKw || pStatus !== 'all' || pSubject) && (
+            <Button size="small"
+              onClick={() => { setPKw(''); setPStatus('all'); setPSubject(''); setSessionPage(1) }}>
+              {t('clearFilter')}
+            </Button>
+          )}
+        </Space>
+      )}
+
+      {/* 错题巩固细分：时间范围（最近 N 天）/ 指定学生 / 分组方式 */}
+      {tab === 'wrongbook' && (
+        <Space wrap style={{ marginBottom: 12 }} size={8}>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('wbTimeRange')}</Text>
+          <Segmented size="small" value={wbDays}
+            onChange={(v) => { setWbDays(v as 'all' | '7' | '30'); setWrongBookPage(1) }}
+            options={[
+              { value: 'all', label: t('wbAllTime') },
+              { value: '7', label: t('wbLast7') },
+              { value: '30', label: t('wbLast30') },
+            ]} />
+          <Select size="small" style={{ width: 150 }} allowClear
+            placeholder={t('wbAllStudents')}
+            value={wbStudent || undefined}
+            onChange={(v) => { setWbStudent(v || ''); setWrongBookPage(1) }}
+            options={wbStudents} />
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('wbGroupBy')}</Text>
+          <Segmented size="small" value={wbGroup}
+            onChange={(v) => setWbGroup(v as 'date' | 'student' | 'none')}
+            options={[
+              { value: 'date', label: t('wbGroupDate') },
+              { value: 'student', label: t('wbGroupStudent') },
+              { value: 'none', label: t('wbGroupNone') },
+            ]} />
+          {(wbDays !== 'all' || wbStudent) && (
+            <Button size="small" onClick={() => { setWbDays('all'); setWbStudent(''); setWrongBookPage(1) }}>
+              {t('clearFilter')}
+            </Button>
+          )}
+        </Space>
+      )}
+
+      {(tab === 'sessions' || tab === 'wrongbook') && (
         loadingSessions ? <Spin style={{ display: 'block', margin: '40px auto' }} />
-        : sessions.length === 0 ? <Result icon={<FileTextOutlined />} title={t('publishedRecords')} />
-        // 卡片列表（与随堂测验/快速投票同款）：列宽不用斤斤计较，操作图标也一定在同一行
-        : <>
-          <RowList
-            items={sessions.slice((sessionPage - 1) * 10, sessionPage * 10)}
-            split={false}
-            renderItem={(r: any) => {
-              const students: string[] = r.target_students || []
-              const scope = students.length
-                ? 'individual'
-                : (r.target_scope || (String(r.target_grade || '').trim() ? 'grade' : 'teacher_classes'))
-              return (
-                <Card size="small" hoverable style={{ marginBottom: 8, cursor: 'pointer' }}
-                  onClick={() => viewSessionDetail(r.id)}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Text strong>{r.title}</Text>
-                      <div style={{ marginTop: 4 }}>
-                        {r.status === 'draft'
-                          ? <Tag>{t('draft')}</Tag>
-                          : r.status === 'active'
-                          ? <Tag color="green">{t('inProgress')}</Tag>
-                          : <Tag color="red">{t('endedSuccess')}</Tag>}
-                        <Tag color="blue">{r.creator_username}</Tag>
-                        <Tag>{t('subject')}：{r.subject || '-'}</Tag>
-                        <ScopeTag scope={scope} grade={r.target_grade} classes={r.target_class}
-                          users={students.join(',')} />
-                        {r.source === 'wrong_book' && <Tag color="purple">{t('sourceWrongBook')}</Tag>}
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {t('questionCountTitle')} {r.question_count} · {t('totalScoreTitle')} {r.total_score}
-                          {' · '}{t('submitted')} {r.submitted_count}/{r.student_count}
-                          {/* 创建时间：与抢答/白板/测验的卡片同口径，方便按时间找最近布置的那份 */}
-                          {' · '}{t('createdAt')} {String(r.created_at || '').slice(0, 16) || '-'}
-                        </Text>
-                      </div>
-                    </div>
-                    <span onClick={(e) => e.stopPropagation()}>
-                      <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
-                        {/* 发布 / 结束 / 重开：与考试中心同一套（绿=发布、红=结束、灰=重开），图标 + tooltip */}
-                        {r.status === 'draft' && (
-                          <Tooltip title={t('publishAction')}>
-                            <Button size="small" icon={<PlayCircleOutlined />}
-                              style={{ color: '#52c41a' }} loading={statusBusy === r.id}
-                              onClick={() => publishOrReopen(r)} />
-                          </Tooltip>
-                        )}
-                        {r.status === 'active' && (
-                          <Tooltip title={t('endAction')}>
-                            <Button size="small" icon={<PauseCircleOutlined />}
-                              style={{ color: '#ff4d4f' }}
-                              onClick={() => Modal.confirm({
-                                title: t('endConfirm'), okText: t('endAction'), cancelText: t('cancel'),
-                                okButtonProps: { danger: true },
-                                onOk: () => endSession(r.id),
-                              })} />
-                          </Tooltip>
-                        )}
-                        {r.status === 'ended' && (
-                          <Tooltip title={t('reopenAction')}>
-                            <Button size="small" icon={<RedoOutlined />}
-                              loading={statusBusy === r.id} onClick={() => publishOrReopen(r)} />
-                          </Tooltip>
-                        )}
-                        <Tooltip title={t('detail')}>
-                          <Button size="small" icon={<EyeOutlined />} onClick={() => viewSessionDetail(r.id)} />
-                        </Tooltip>
-                        {/* 改名称：任何状态都能改（学生看到的标题同步更新） */}
-                        <Tooltip title={t('renameTitle')}>
-                          <Button size="small" icon={<EditOutlined />}
-                            onClick={() => { setRenameTarget(r); setRenameValue(r.title || '') }} />
-                        </Tooltip>
-                        <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
-                        {/* 导出 / 删除 直接摊成图标显示（不再藏进"更多"菜单），都配 tooltip */}
-                        <Tooltip title={t('exportResult')}>
-                          <Button size="small" icon={<DownloadOutlined />}
-                            onClick={() => window.open(`/api/export/practice/${r.id}`, '_blank')} />
-                        </Tooltip>
-                        <Tooltip title={t('delete')}>
-                          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({
-                            title: t('deleteConfirm'), okText: t('delete'), okButtonProps: { danger: true },
-                            cancelText: t('cancel'), onOk: () => deleteSession(r.id),
-                          })} />
-                        </Tooltip>
-                      </Space>
-                    </span>
+        : listSessions.length === 0
+          ? <Result icon={<FileTextOutlined />}
+              title={tab === 'wrongbook' ? t('noWrongBookPractices') : t('publishedRecords')}
+              subTitle={tab === 'wrongbook'
+                ? (wrongBookAll.length > 0 ? t('wbNoMatch') : undefined)
+                : (classSessions.length > 0 ? t('noMatchFilter') : undefined)} />
+          // 卡片列表（与随堂测验/快速投票同款）：列宽不用斤斤计较，操作图标也一定在同一行
+          : <>
+            {pageGroups.map((g) => (
+              <div key={g.key || 'all'}>
+                {/* 分组头：日期（2026-10-30）或学生姓名，右挂条数 */}
+                {g.key && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0 8px' }}>
+                    <Text strong style={{ fontSize: 13 }}>{g.label}</Text>
+                    <Tag style={{ marginInlineEnd: 0 }}>{g.items.length}</Tag>
                   </div>
-                </Card>
-              )
-            }}
-          />
-          <div style={{ marginTop: 12, textAlign: 'center' }}>
-            <Pagination current={sessionPage} pageSize={10} total={sessions.length}
-              onChange={(p) => setSessionPage(p)}
-              showTotal={(total: number) => t('totalItems', { count: total })} />
-          </div>
-        </>
+                )}
+                <RowList items={g.items} split={false} renderItem={renderSessionCard} />
+              </div>
+            ))}
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <Pagination current={safePage} pageSize={PAGE_SIZE} total={listSessions.length}
+                onChange={(p) => setListPage(p)}
+                showTotal={(total: number) => t('totalItems', { count: total })} />
+            </div>
+          </>
       )}
       {/* ── 修改名称（草稿/进行中/已结束都可改，学生看到的标题同步更新） ── */}
       <Modal maskClosable={false}

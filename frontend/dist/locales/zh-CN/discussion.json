@@ -441,5 +441,11 @@
   "wbDisconnected": "未连接",
   "wbSpectator": "你是旁观教师，仅可查看",
   "aiSubjectTip": "本次 AI 提问使用的学科；默认按教师任教学科与白板内容判断，也可临时指定",
-  "readonlyPreview": "只读预览"
+  "readonlyPreview": "只读预览",
+  "listSearchPh": "搜索讨论主题 / 说明",
+  "clearFilter": "清除筛选",
+  "listNoMatch": "没有符合筛选条件的讨论",
+  "all": "全部",
+  "wbSearchPh": "搜索白板标题 / 房间码",
+  "wbNoMatch": "没有符合筛选条件的白板"
 }

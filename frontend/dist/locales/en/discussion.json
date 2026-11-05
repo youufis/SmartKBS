@@ -441,5 +441,11 @@
   "wbDisconnected": "Not connected",
   "wbSpectator": "You are spectating; view only",
   "aiSubjectTip": "Subject used for AI requests. By default it follows the teacher's assigned subjects and the board content; you can pin one temporarily.",
-  "readonlyPreview": "Read-only preview"
+  "readonlyPreview": "Read-only preview",
+  "listSearchPh": "Search topic / description",
+  "clearFilter": "Clear filters",
+  "listNoMatch": "No discussions match the filters",
+  "all": "All",
+  "wbSearchPh": "Search title / room code",
+  "wbNoMatch": "No whiteboards match the filters"
 }
