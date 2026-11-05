@@ -421,6 +421,8 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'LOGIN_BLOCK_EXTERNAL', labelKey: 'field_LOGIN_BLOCK_EXTERNAL', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
   // 版本与自动同步（升级/回滚操作在「版本与升级」标签页）
   { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade', level: 'basic', danger: true },
+  // 升级前自动留底（backend/api/upgrade_router.py Step 1d）：默认关，关掉只保留配置守护快照
+  { key: 'UPGRADE_AUTO_BACKUP', labelKey: 'field_UPGRADE_AUTO_BACKUP', descKey: 'field_UPGRADE_AUTO_BACKUP_desc', longDescKey: 'field_UPGRADE_AUTO_BACKUP_tip', type: 'boolean', group: 'upgrade', level: 'basic', required: false },
 ]
 
 // tags 类字段的键：保存时统一把逗号分隔字符串转回数组（留空 -> []，允许清空）

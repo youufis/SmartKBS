@@ -225,6 +225,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 版本管理：后台检测到新提交时，是否自动快进同步运行代码。
     # 涉及数据库迁移或 requirements.txt 变更时不会自动同步，仍走人工升级。
     "auto_pull_enabled": True,
+    # 升级前自动留底（配置 + 两个数据库）。默认关：每次升级都会复制一份完整的库，
+    # 备份目录会长期堆积；关掉后升级仍会保留「配置守护快照」（防配置被 reset 打回默认值），
+    # 只是不再产出 pre_upgrade_* 备份目录。需要留底的管理员可自行开启或手动点「立即备份」。
+    "UPGRADE_AUTO_BACKUP": False,
     # AI 请求超时设置（秒）— 白板 AI 生成图示/板书等操作的超时时间
     "AI_REQUEST_TIMEOUT": 300,
     # ── AI 输出形态与解析（backend/api/curriculum_router.py / question_router.py）──
@@ -614,6 +618,7 @@ _BOOL_KEYS = {
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
+    "UPGRADE_AUTO_BACKUP",
     "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED", "CLASS_LADDER_AI_ENABLED", "CLASS_LADDER_SOUND_ENABLED",
     "PORTRAIT_ENABLED", "PORTRAIT_PERIOD_MONTHLY", "PORTRAIT_AUTO_PUSH",
     "SHOWCASE_AUTO_ENABLED",

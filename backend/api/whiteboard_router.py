@@ -2005,7 +2005,11 @@ async def ai_chat_stream(request: Request):
         subject=subject,
         snapshot_text=snapshot_text,
     )
-    enhanced_prompt = f"{system_prompt}\n\n---\n\n用户提问：{prompt}"
+    # 多轮上下文直接并进提示词：知识库接管/智能体两条路都不吃 history 参数，
+    # 并进正文才在三种调用模式下都生效（视觉流那边也是同样的处理）。
+    enhanced_prompt = (
+        f"{system_prompt}\n\n---\n\n{_wb_history_text(history)}用户提问：{prompt}"
+    )
 
     # 有图（页截图或白板图片）就走单次视觉调用：图片原样进模型，
     # 比「先让 VL 描述再让文本模型作答」的两段式又快又准。
@@ -2023,7 +2027,7 @@ async def ai_chat_stream(request: Request):
 
     from backend.api.chat_router import _chat_event_generator as _cg
     return StreamingResponse(
-        _whiteboard_ai_stream(enhanced_prompt, username, dashscope_api_key, history=history),
+        _whiteboard_ai_stream(enhanced_prompt, username, dashscope_api_key, kb_query=prompt),
         media_type="text/event-stream",
     )
 
@@ -2101,13 +2105,14 @@ def _wb_history_text(history, limit: int = 6, per_msg: int = 400) -> str:
     return "## 前几轮对话（仅供理解上下文，不必重复）\n" + "\n".join(rows) + "\n\n"
 
 
-def _whiteboard_ai_stream(prompt: str, username: str, api_key: str, history=None):
+def _whiteboard_ai_stream(prompt: str, username: str, api_key: str, kb_query: str = ""):
     """白板 AI 流式生成器（上游每帧已是全文快照，原样透传，前端只替换不追加）"""
     from backend.api.chat_router import _agent_chat_stream
     try:
-        # use_kb=False：白板问答以板书为准，知识库检索只会拿系统提示词当 query 捞回无关片段
+        # 保留知识库，但只用教师这句话去检索：以前不传 kb_query，检索拿的是整段
+        # 系统提示词（「按白板与提问自行判定学科作答…」），命中一堆无关片段还拖慢首字。
         for chunk in _agent_chat_stream(prompt, None, api_key, username,
-                                        use_kb=False, history=history):
+                                        use_kb=True, kb_query=kb_query):
             # 注意：call_ai_stream/_call_agent_stream 产出的 text 是「累计全文」而非增量，
             # 这里绝不能再 +=，否则前端替换后会得到逐帧前缀叠加的重复文本。
             full = chunk["text"]
