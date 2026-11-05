@@ -575,8 +575,10 @@ async def share_resource(request: Request, body: ShareRequest):
             def _send_notifications_sync():
                 """同步执行通知发送，在后台线程中运行"""
                 try:
-                    # 检查分享通知类型是否启用
-                    enabled = set(get_config_value("enabled_notification_types", ["exam"]))
+                    # 检查分享通知类型是否启用（配置被写成逗号串时也要能正确解包）
+                    from backend.config_lists import as_str_list
+
+                    enabled = set(as_str_list(get_config_value("enabled_notification_types", ["exam"]), ["exam"]))
                     if "share" not in enabled:
                         return
                     resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
@@ -867,7 +869,9 @@ def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
                           target_grade_csv: str, target_class_csv: str):
     """同步发送取消共享通知，在后台线程中运行"""
     try:
-        enabled = set(get_config_value("enabled_notification_types", ["exam"]))
+        from backend.config_lists import as_str_list
+
+        enabled = set(as_str_list(get_config_value("enabled_notification_types", ["exam"]), ["exam"]))
         if "share" not in enabled:
             return
         resource_label = "HTML 资源" if resource_type == "html" else "下载文件"

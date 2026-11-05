@@ -3,7 +3,7 @@ import { Badge, Popover, Button, Space, Typography, Empty, Spin, Tag, Tooltip, t
 import {
   BellOutlined, CheckOutlined, DeleteOutlined,
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
-  AuditOutlined, InfoCircleOutlined, RightOutlined,
+  AuditOutlined, InfoCircleOutlined, RightOutlined, LikeOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -23,6 +23,8 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   exam: { color: '#1677ff', icon: <FileAddOutlined /> },
   score: { color: '#52c41a', icon: <TrophyOutlined /> },
   task: { color: '#faad14', icon: <CheckCircleOutlined /> },
+  // 教师「认可/加分」：单独一类，别和信息流混在一起（reward_router 发的就是 success）
+  success: { color: '#eb2f96', icon: <LikeOutlined /> },
   rollcall: { color: '#722ed1', icon: <AuditOutlined /> },
   share: { color: '#13c2c2', icon: <InfoCircleOutlined /> },
   info: { color: 'var(--text-tertiary)', icon: <InfoCircleOutlined /> },

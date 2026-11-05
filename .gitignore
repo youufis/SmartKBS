@@ -3,6 +3,10 @@
 /system_config.json
 /system_config.json.bak
 /system_config.json.tmp
+# 配置一次性迁移标记（运行时状态，各机器不一样）
+/.notif_types_migrated
+# 本地备份目录（含旧构建产物快照，不入库）
+/backups/
 # 配置滚动历史（里面有 API Key，绝不能入库）
 /config_history/
 /.config_alert_state.json

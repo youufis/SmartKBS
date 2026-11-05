@@ -7,8 +7,7 @@ import {
 import {
   CheckOutlined, DeleteOutlined, ReloadOutlined,
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
-  AuditOutlined, InfoCircleOutlined,
-  CustomerServiceOutlined,
+  AuditOutlined, InfoCircleOutlined, CustomerServiceOutlined, LikeOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -31,6 +30,8 @@ const NotificationsPage: React.FC = () => {
     exam: { color: '#1677ff', icon: <FileAddOutlined />, label: t('notifExam') },
     score: { color: '#52c41a', icon: <TrophyOutlined />, label: t('notifScore') },
     task: { color: '#faad14', icon: <CheckCircleOutlined />, label: t('notifTask') },
+    // 教师「认可/加分」，与普通消息区分开（此前缺这一项，会兜底成 info 的灰点样式）
+    success: { color: '#eb2f96', icon: <LikeOutlined />, label: t('notifSuccess') },
     rollcall: { color: '#722ed1', icon: <AuditOutlined />, label: t('notifRollcall') },
     share: { color: '#13c2c2', icon: <InfoCircleOutlined />, label: t('notifShare') },
     info: { color: 'var(--text-tertiary)', icon: <InfoCircleOutlined />, label: t('notifInfo') },

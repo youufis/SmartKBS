@@ -180,14 +180,25 @@ def like_escape(v: str) -> str:
 
 def is_image_file(file_path: str) -> bool:
     from backend.api.config_router import get_config_value
+    from backend.config_lists import as_str_list
     _, ext = os.path.splitext(file_path.lower())
-    return ext in get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'])
+    return ext in as_str_list(
+        get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']),
+        ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'],
+    )
 
 
 def is_document_file(file_path: str) -> bool:
     from backend.api.config_router import get_config_value
+    from backend.config_lists import as_str_list
     _, ext = os.path.splitext(file_path.lower())
-    return ext in get_config_value("DOCUMENT_EXTENSIONS", ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm'])
+    return ext in as_str_list(
+        get_config_value("DOCUMENT_EXTENSIONS",
+                         ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                          '.csv', '.json', '.html', '.htm']),
+        ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+         '.csv', '.json', '.html', '.htm'],
+    )
 
 
 def check_file_size(file_path: str, max_size_mb: int | None = None) -> bool:

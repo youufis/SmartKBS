@@ -140,9 +140,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         {"key": "essay", "label": "作文"},
         {"key": "subjective", "label": "主观题"},
     ],
-    # 消息通知类型（默认启用考试/系统/作业通知，管理员可在系统配置中调整）
+    # 消息通知类型（默认启用考试/系统/作业/认可通知，管理员可在系统配置中调整）
     # task 必须默认开：文件作业「发布成绩」靠它通知学生，静默丢弃会让教师以为已推送
-    "enabled_notification_types": ["exam", "system", "task"],
+    # success 必须默认开：教师给学生「认可」加分走的就是这个类型，缺失时通知会被白名单吞掉
+    "enabled_notification_types": ["exam", "system", "task", "success"],
     # 图片生成（通义万相，与对话模型共享 API Key）
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": DEFAULT_IMAGE_MODEL,
@@ -171,6 +172,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "CAST_DEFAULT_MINUTES": 5,             # 默认档位：讲演要讲完一个完整知识点，取 5 而不是播客的 3
     "CAST_MAX_SECONDS": 300,               # 硬上限（秒），超出按整页截断
     "CAST_MAX_PAGES": 10,                  # 页数上限，5 分钟约 9 页
+    "CAST_TTS_CONCURRENCY": 6,             # 讲演 TTS 合成并发（1~12）；按账号 QPS 调整
     # ── 课堂抽问（backend/api/class_drill_router.py）──
     # 页面上的「AI 生题」开关是否可用：关掉后课堂抽问只从题库取题，不再调用大模型（零 AI 计费）。
     # 页面开关是当堂临时选择，这里是全校总闸；两者都开才走 AI。
@@ -225,6 +227,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_pull_enabled": True,
     # AI 请求超时设置（秒）— 白板 AI 生成图示/板书等操作的超时时间
     "AI_REQUEST_TIMEOUT": 300,
+    # ── AI 输出形态与解析（backend/api/curriculum_router.py / question_router.py）──
+    # 这两项以前只在代码里读、配置页看不到（"隐键"）：网关不支持 json_object 时无处可关。
+    "AI_JSON_OBJECT_MODE": False,          # 强制 response_format=json_object（个别网关不支持，失败会自动降级）
+    "AI_STRICT_PARSE": True,               # 严格解析：不接受截断救回的残缺结果，并逐题做字段体检
+    "IMAGE_EXTRACT_MAX_TOKENS": 8000,      # 单次图片识别（题目提取）的 token 预算，长图/多图可上调
     # AI 线程池并发上限 — 全站同步 AI 调用（图示/板书/出题/批改/讨论/闯关）共用的工作线程数。
     # 这些线程只挂在网络等待上，放开到 8 不会压住数据库；调太小会让高峰期请求排队。
     "AI_MAX_CONCURRENCY": 8,
@@ -563,6 +570,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "CAST_DEFAULT_MINUTES": (1, 30),
     "CAST_MAX_SECONDS": (60, 1800),
     "CAST_MAX_PAGES": (3, 20),
+    "CAST_TTS_CONCURRENCY": (1, 12),
     "REWARD_DAILY_QUIZ_SESSIONS": (0, 20),
     "REWARD_DAILY_ACADEMIC_POINTS": (0, 500),
     "REWARD_DAILY_CLASS_POINTS": (0, 500),
@@ -571,6 +579,8 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
     "MAX_ALLOWED_REQUESTS": (1, 10000),
     "AI_REQUEST_TIMEOUT": (5, 900),
+    # 图片题目提取的 token 预算：下限防呆，上限按住模型上下文（超出只会白等一次超时）
+    "IMAGE_EXTRACT_MAX_TOKENS": (500, 32000),
     "AI_MAX_CONCURRENCY": (1, 32),
     "CHAT_MEMORY_MAX_TURNS": (1, 30),
     "CHAT_MEMORY_TTL_MINUTES": (1, 1440),
@@ -608,6 +618,7 @@ _BOOL_KEYS = {
     "PORTRAIT_ENABLED", "PORTRAIT_PERIOD_MONTHLY", "PORTRAIT_AUTO_PUSH",
     "SHOWCASE_AUTO_ENABLED",
     "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
+    "AI_JSON_OBJECT_MODE", "AI_STRICT_PARSE",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
     "HOMEWORK_ENABLE_VL",
 }
@@ -1152,12 +1163,16 @@ async def get_config_meta(request: Request):
     """
     user = get_current_user(request)
     require_admin(user)
+    from backend.notification_types import catalog as notification_type_catalog
+
     return {
         "num_ranges": {k: [lo, hi] for k, (lo, hi) in _NUM_RANGES.items()},
         "float_ranges": {k: [lo, hi] for k, (lo, hi) in _FLOAT_RANGES.items()},
         "bool_keys": sorted(_BOOL_KEYS),
         "str_limits": _STR_LIMITS,
         "strlist_keys": _STRLIST_KEYS,
+        # 通知类型目录：页面的勾选项由它渲染，避免"代码在发、页面勾不到"
+        "notification_types": notification_type_catalog(),
     }
 
 

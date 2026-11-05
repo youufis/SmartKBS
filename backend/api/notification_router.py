@@ -179,9 +179,15 @@ def _creator_name_map(creators: list[str]) -> dict[str, str]:
 # ── 通知类型黑白名单 ──
 
 def _get_enabled_notification_types() -> set[str]:
-    """获取系统当前启用的通知类型，默认启用考试和系统通知"""
+    """获取系统当前启用的通知类型，默认启用考试和系统通知。
+
+    用 as_str_list 解包：配置若被写成 "exam,system" 字符串，直接 set() 会碎成
+    单字符集合，导致所有通知被判为"未启用"而静默丢弃。
+    """
+    from backend.config_lists import as_str_list
+
     types = get_config_value("enabled_notification_types", ["exam", "system"])
-    return set(types)
+    return set(as_str_list(types, ["exam", "system"]))
 
 
 def _is_notification_type_enabled(type_: str) -> bool:

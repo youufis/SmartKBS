@@ -37,8 +37,19 @@ TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def _get_allowed_extensions() -> set[str]:
     """获取允许的文件扩展名集合（运行时读取，支持热更新）"""
-    img = get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'])
-    doc = get_config_value("DOCUMENT_EXTENSIONS", ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm'])
+    from backend.config_lists import as_str_list
+
+    img = as_str_list(
+        get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']),
+        ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'],
+    )
+    doc = as_str_list(
+        get_config_value("DOCUMENT_EXTENSIONS",
+                         ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                          '.csv', '.json', '.html', '.htm']),
+        ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+         '.csv', '.json', '.html', '.htm'],
+    )
     return set(img + doc)
 
 # ── 自动清理旧临时文件（每 24 小时检查一次，删除超过 24 小时的） ──

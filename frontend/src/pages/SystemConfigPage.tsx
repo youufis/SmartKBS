@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch, Radio,
   Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip,
-  AutoComplete,
   Collapse,
 } from 'antd'
 import {
@@ -17,6 +16,7 @@ import {
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
 import BackupPanel from '../components/BackupPanel'
+import { TagListInput, DurationPicker, SuggestionInput } from '../components/systemConfig/FieldControls'
 import { useAuthStore } from '../stores/authStore'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
@@ -60,10 +60,20 @@ interface ConfigField {
   descKey?: string
   /** 完整说明（原理、注意事项、取值范围）。说明行只放一句话，长文进 label 旁的 ⓘ */
   longDescKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate' | 'tags_select' | 'duration' | 'combobox'
   group: string
   /** 面向管理员的常用项，默认可见；未标注 = advanced */
   level?: 'basic' | 'advanced'
+  /**
+   * 存储形态（提交给后端的 JSON 类型）。**与控件无关**：
+   * list = string[]，csv = "3,4,5"，其余按 type 推导成纯量。
+   * 换控件只改渲染，提交形态由这里决定 —— 后端读取/校验不用跟着改。
+   */
+  storage?: 'list' | 'csv'
+  /** tags_select 的候选值（可点选，也可自填） */
+  presets?: string[]
+  /** tags_select 的扩展名模式：补前导点、转小写、按 ^\.[A-Za-z0-9]{1,10}$ 校验 */
+  extMode?: boolean
   required?: boolean
   placeholderKey?: string
   /** 数字单位（i18n key）：渲染成输入框后缀，配合后端 /api/config/meta 下发的范围 */
@@ -107,7 +117,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'ai',
     titleKey: 'zone_ai',
     descKey: 'zone_ai_desc',
-    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'memory', 'grading', 'imagegen', 'tts'],
+    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts'],
   },
   {
     id: 'storage',
@@ -133,6 +143,7 @@ const SECTION_TITLES: Record<string, string> = {
   knowledgebase: 'group_knowledgebase',
   chat: 'group_chat',
   quality: 'group_quality',
+  aioutput: 'group_aioutput',
   memory: 'group_memory',
   grading: 'group_grading',
   imagegen: 'group_imagegen',
@@ -186,6 +197,18 @@ const PORTRAIT_PERIOD_OPTIONS: FieldOption[] = [
   { value: true, labelKey: 'optPeriodMonthly' },
 ]
 
+// ── 列表型字段的候选值 ──
+// 只作"点一下就能加"的快捷项，清单外的值一律允许自填（与后端 _STRLIST_KEYS 的语义一致）。
+const SUBJECT_PRESETS = ['信息科技', '通用技术', '人工智能', '物理']
+const IMAGE_EXT_PRESETS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff']
+const DOC_EXT_PRESETS = ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm']
+const HOMEWORK_EXT_PRESETS = ['.docx', '.pdf', '.txt', '.md', '.xlsx', '.pptx', '.jpg', '.jpeg', '.png', '.webp', '.bmp']
+// 百炼 OpenAI 兼容端点：国内站 / 国际站。自建网关、私有代理照旧手填
+const QWEN_ENDPOINT_PRESETS = [
+  'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+]
+
 // 后端下发的校验元数据（GET /api/config/meta），前端不再自己复制一份取值范围
 interface ConfigMeta {
   num_ranges: Record<string, [number, number]>
@@ -193,6 +216,8 @@ interface ConfigMeta {
   bool_keys: string[]
   str_limits: Record<string, number>
   strlist_keys: Record<string, number>
+  /** 通知类型目录（后端单一来源）：value = 存储值，in_use = 当前代码里是否真有调用点 */
+  notification_types?: { value: string; in_use?: boolean }[]
 }
 
 // 语音合成可选音色（后端只下发**实测出声成功**的音色，跨模型混用会报 411）
@@ -245,7 +270,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', longDescKey: 'field_AGENT_EDITION_tip', type: 'text', group: 'brand', level: 'basic', required: false, placeholderKey: 'placeholder_agentEdition' },
   { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', level: 'basic', required: false, placeholderKey: 'placeholder_ORG_NAME' },
   // 课程与题型
-  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'curriculum', level: 'basic' },
+  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags_select', group: 'curriculum', level: 'basic', presets: SUBJECT_PRESETS },
   { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'curriculum', level: 'basic' },
   // 消息通知
   { key: 'enabled_notification_types', labelKey: 'field_enabled_notification_types', descKey: 'field_enabled_notification_types_desc', type: 'notifications', group: 'notify', level: 'basic' },
@@ -301,7 +326,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models', level: 'basic' },
   // 接入地址：专属域名优先（非必填），普通域名备用（默认已填）；两者通用，连不上自动回落
   { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', longDescKey: 'field_KB_API_BASE_tip', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
-  { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', longDescKey: 'field_QWEN_OPENAI_API_BASE_tip', type: 'text', group: 'models' },
+  { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', longDescKey: 'field_QWEN_OPENAI_API_BASE_tip', type: 'combobox', group: 'models', presets: QWEN_ENDPOINT_PRESETS },
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'model_select', optionsKind: 'long', group: 'models' },
   { key: 'HOMEWORK_ENABLE_VL', labelKey: 'field_HOMEWORK_ENABLE_VL', descKey: 'field_HOMEWORK_ENABLE_VL_desc', type: 'boolean', group: 'models' },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
@@ -321,6 +346,12 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'CHAT_IDENTITY_GUARD_ENABLED', labelKey: 'field_CHAT_IDENTITY_GUARD_ENABLED', descKey: 'field_CHAT_IDENTITY_GUARD_ENABLED_desc', type: 'boolean', group: 'quality', required: false },
   { key: 'CHAT_SKILL_SEGMENT_MODE', labelKey: 'field_CHAT_SKILL_SEGMENT_MODE', descKey: 'field_CHAT_SKILL_SEGMENT_MODE_desc', type: 'select', group: 'quality', required: false, options: SKILL_SEGMENT_OPTIONS },
   { key: 'CHAT_META_MAX_TOKENS', labelKey: 'field_CHAT_META_MAX_TOKENS', descKey: 'field_CHAT_META_MAX_TOKENS_desc', type: 'number', group: 'quality', required: false },
+  // AI 输出形态与解析（backend/api/curriculum_router.py / question_router.py）
+  // 这三项以前只写在代码里读、配置页看不到：网关不支持 json_object 时无处可关，
+  // 解析出脏题时也无处降级。默认值与代码里的 fallback 完全一致。
+  { key: 'AI_JSON_OBJECT_MODE', labelKey: 'field_AI_JSON_OBJECT_MODE', descKey: 'field_AI_JSON_OBJECT_MODE_desc', longDescKey: 'field_AI_JSON_OBJECT_MODE_tip', type: 'boolean', group: 'aioutput', required: false },
+  { key: 'AI_STRICT_PARSE', labelKey: 'field_AI_STRICT_PARSE', descKey: 'field_AI_STRICT_PARSE_desc', longDescKey: 'field_AI_STRICT_PARSE_tip', type: 'boolean', group: 'aioutput', required: false },
+  { key: 'IMAGE_EXTRACT_MAX_TOKENS', labelKey: 'field_IMAGE_EXTRACT_MAX_TOKENS', descKey: 'field_IMAGE_EXTRACT_MAX_TOKENS_desc', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
   // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
   { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', longDescKey: 'field_CHAT_MEMORY_ENABLED_tip', type: 'boolean', group: 'memory', level: 'basic' },
   { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitTurn' },
@@ -349,24 +380,25 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // AI 播客双主播音色：留空 = 按当前合成模型自动各挑一条（A 主讲默认男声、B 互动默认女声）
   { key: 'PODCAST_VOICE_A', labelKey: 'field_PODCAST_VOICE_A', descKey: 'field_PODCAST_VOICE_A_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
   { key: 'PODCAST_VOICE_B', labelKey: 'field_PODCAST_VOICE_B', descKey: 'field_PODCAST_VOICE_B_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
-  { key: 'PODCAST_DURATION_OPTIONS', labelKey: 'field_PODCAST_DURATION_OPTIONS', descKey: 'field_PODCAST_DURATION_OPTIONS_desc', type: 'text', group: 'tts', required: false, placeholderKey: 'placeholder_PODCAST_DURATION_OPTIONS' },
+  { key: 'PODCAST_DURATION_OPTIONS', labelKey: 'field_PODCAST_DURATION_OPTIONS', descKey: 'field_PODCAST_DURATION_OPTIONS_desc', type: 'duration', group: 'tts', required: false, placeholderKey: 'placeholder_PODCAST_DURATION_OPTIONS' },
   { key: 'PODCAST_MAX_SECONDS', labelKey: 'field_PODCAST_MAX_SECONDS', descKey: 'field_PODCAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
   // AI 讲演：与播客共用语音总闸和音色，档位与上限独立可调（改完即生效，无需重启）
-  { key: 'CAST_DURATION_OPTIONS', labelKey: 'field_CAST_DURATION_OPTIONS', descKey: 'field_CAST_DURATION_OPTIONS_desc', type: 'text', group: 'tts', required: false, placeholderKey: 'placeholder_CAST_DURATION_OPTIONS' },
+  { key: 'CAST_DURATION_OPTIONS', labelKey: 'field_CAST_DURATION_OPTIONS', descKey: 'field_CAST_DURATION_OPTIONS_desc', type: 'duration', group: 'tts', required: false, placeholderKey: 'placeholder_CAST_DURATION_OPTIONS' },
   { key: 'CAST_DEFAULT_MINUTES', labelKey: 'field_CAST_DEFAULT_MINUTES', descKey: 'field_CAST_DEFAULT_MINUTES_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitMinute' },
   { key: 'CAST_MAX_SECONDS', labelKey: 'field_CAST_MAX_SECONDS', descKey: 'field_CAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
   { key: 'CAST_MAX_PAGES', labelKey: 'field_CAST_MAX_PAGES', descKey: 'field_CAST_MAX_PAGES_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitPage' },
+  { key: 'CAST_TTS_CONCURRENCY', labelKey: 'field_CAST_TTS_CONCURRENCY', descKey: 'field_CAST_TTS_CONCURRENCY_desc', longDescKey: 'field_CAST_TTS_CONCURRENCY_tip', type: 'number', group: 'tts', required: false, unitKey: 'unitThread' },
 
   // ══ ④ 存储与安全 ══
   // 上传限制与类型白名单
   { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', descKey: 'field_MAX_DOC_SIZE_MB_desc', type: 'number', group: 'upload', level: 'basic', unitKey: 'unitMB' },
   { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', descKey: 'field_MAX_IMAGE_SIZE_MB_desc', type: 'number', group: 'upload', level: 'basic', unitKey: 'unitMB' },
-  { key: 'IMAGE_EXTENSIONS', labelKey: 'field_IMAGE_EXTENSIONS', descKey: 'field_IMAGE_EXTENSIONS_desc', type: 'tags', group: 'upload' },
-  { key: 'DOCUMENT_EXTENSIONS', labelKey: 'field_DOCUMENT_EXTENSIONS', descKey: 'field_DOCUMENT_EXTENSIONS_desc', type: 'tags', group: 'upload' },
+  { key: 'IMAGE_EXTENSIONS', labelKey: 'field_IMAGE_EXTENSIONS', descKey: 'field_IMAGE_EXTENSIONS_desc', type: 'tags_select', extMode: true, group: 'upload', presets: IMAGE_EXT_PRESETS },
+  { key: 'DOCUMENT_EXTENSIONS', labelKey: 'field_DOCUMENT_EXTENSIONS', descKey: 'field_DOCUMENT_EXTENSIONS_desc', type: 'tags_select', extMode: true, group: 'upload', presets: DOC_EXT_PRESETS },
   // ── 文件提交类作业（上传限额是天花板：教师建作业时只能在这个框里往下调）──
   { key: 'HOMEWORK_MAX_FILE_MB', labelKey: 'field_HOMEWORK_MAX_FILE_MB', descKey: 'field_HOMEWORK_MAX_FILE_MB_desc', longDescKey: 'field_HOMEWORK_MAX_FILE_MB_tip', type: 'number', group: 'upload', unitKey: 'unitMB', required: false },
   { key: 'HOMEWORK_MAX_FILES', labelKey: 'field_HOMEWORK_MAX_FILES', descKey: 'field_HOMEWORK_MAX_FILES_desc', type: 'number', group: 'upload', unitKey: 'unitCount', required: false },
-  { key: 'HOMEWORK_ALLOWED_EXTS', labelKey: 'field_HOMEWORK_ALLOWED_EXTS', descKey: 'field_HOMEWORK_ALLOWED_EXTS_desc', longDescKey: 'field_HOMEWORK_ALLOWED_EXTS_tip', type: 'tags', group: 'upload' },
+  { key: 'HOMEWORK_ALLOWED_EXTS', labelKey: 'field_HOMEWORK_ALLOWED_EXTS', descKey: 'field_HOMEWORK_ALLOWED_EXTS_desc', longDescKey: 'field_HOMEWORK_ALLOWED_EXTS_tip', type: 'tags_select', extMode: true, group: 'upload', presets: HOMEWORK_EXT_PRESETS },
   // 下载配额
   { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'quota', level: 'basic', unitKey: 'unitGB' },
   // 登录与会话
@@ -381,7 +413,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AUTH_FAIL_LIMIT', labelKey: 'field_AUTH_FAIL_LIMIT', descKey: 'field_AUTH_FAIL_LIMIT_desc', type: 'number', group: 'guard', unitKey: 'unitTime' },
   { key: 'AUTH_FAIL_WINDOW_SECONDS', labelKey: 'field_AUTH_FAIL_WINDOW_SECONDS', descKey: 'field_AUTH_FAIL_WINDOW_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
   { key: 'AUTH_FAIL_BAN_SECONDS', labelKey: 'field_AUTH_FAIL_BAN_SECONDS', descKey: 'field_AUTH_FAIL_BAN_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
-  { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'guard', required: false, placeholderKey: 'placeholder_ipDenylist', danger: true },
+  { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags_select', group: 'guard', required: false, placeholderKey: 'placeholder_ipDenylist', danger: true },
   // 登录闸门：升级维护时按角色或按来源关掉新登录入口，管理员不受影响。
   // 三项合成一张卡片渲染（渲染层按 type='login_gate' 归并），共用一条说明。
   { key: 'LOGIN_BLOCK_STUDENT', labelKey: 'field_LOGIN_BLOCK_STUDENT', descKey: 'field_LOGIN_BLOCK_desc', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
@@ -393,6 +425,57 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
 
 // tags 类字段的键：保存时统一把逗号分隔字符串转回数组（留空 -> []，允许清空）
 const TAG_FIELD_KEYS = GLOBAL_CONFIG_FIELDS.filter((f) => f.type === 'tags').map((f) => f.key)
+
+// ── 存储形态适配 ──
+// 字段的「存储形态」由字段声明决定，与渲染成什么控件无关：
+//   list -> string[]（学科、扩展名、IP 名单）
+//   csv  -> "3,4,5"（时长档位；后端按 _STR_LIMITS 文本校验）
+// 控件只与表单态交换结构化值，进出库的换算集中在这两个函数里，
+// 以后再把某个字段换一种控件，也不会顺手把提交类型改坏。
+const storageOf = (f: ConfigField): 'list' | 'csv' | 'str' =>
+  f.storage ?? (f.type === 'tags_select' ? 'list' : f.type === 'duration' ? 'csv' : 'str')
+
+const SPLIT_RE = /[,，、;；\n]+/
+const splitToList = (raw: unknown): string[] =>
+  typeof raw === 'string' ? raw.split(SPLIT_RE).map((x) => x.trim()).filter(Boolean) : []
+const splitToNumbers = (raw: unknown): number[] =>
+  (typeof raw === 'string' ? raw.split(/[,，、;；\s]+/) : [])
+    .map((x) => Number(String(x).trim()))
+    // 档位合法区间与后端 duration_options() 一致（1~30 分钟）；区间外的值后端会忽略，这里先滤掉
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 30)
+
+// 扩展名规范化：补前导点、转小写（后端比对时文件后缀已 lower()），格式不对返回空串由控件丢弃。
+// 与后端 _validate_config_updates 里的 _bad_ext 同一口径（点号 + 1~10 位字母数字）。
+const normalizeExt = (raw: string): string => {
+  const one = raw.trim().toLowerCase()
+  if (!one) return ''
+  const withDot = one.startsWith('.') ? one : `.${one}`
+  return /^\.[a-z0-9]{1,10}$/.test(withDot) ? withDot : ''
+}
+
+// 通知类型：后端只下发稳定的 type 值（meta.notification_types），文案留在 i18n 里。
+// NOTIF_TYPE_FALLBACK 仅在 meta 拉取失败时兜底，与后端目录保持一致。
+const NOTIF_LABEL_KEYS: Record<string, string> = {
+  exam: 'notifExam',
+  task: 'notifTask',
+  info: 'notifInfo',
+  success: 'notifSuccess',
+  score: 'notifScore',
+  rollcall: 'notifRollcall',
+  share: 'notifShare',
+  system: 'notifSystem',
+}
+
+const NOTIF_TYPE_FALLBACK: { value: string; in_use?: boolean }[] = [
+  { value: 'exam', in_use: true },
+  { value: 'task', in_use: true },
+  { value: 'info', in_use: true },
+  { value: 'success', in_use: true },
+  { value: 'score' },
+  { value: 'rollcall' },
+  { value: 'share' },
+  { value: 'system' },
+]
 
 // ── 题型列表编辑器 ──
 // 存储格式仍是「每行 key:标签」的多行文本（后端契约不变），但界面上不再让人手写格式：
@@ -489,24 +572,38 @@ const QuestionTypeEditor: React.FC<{
   )
 }
 
-// 后端配置 -> 表单值：tags 转逗号串、题型转多行 key:label，并补齐两个"配置文件里可能没写"的默认值
-// （否则老部署一保存就把它们顺手改掉了）。对已经是表单值的对象再调一次是幂等的。
+// 后端配置 -> 表单值：列表型保持数组、时长档位转 number[]、题型转多行 key:label，
+// 并补齐两个"配置文件里可能没写"的默认值（否则老部署一保存就把它们顺手改掉了）。
+// 对已经是表单值的对象再调一次是幂等的。
 const toFormValues = (raw: Record<string, unknown>): Record<string, unknown> => {
   const v = { ...raw }
   for (const key of TAG_FIELD_KEYS) {
     if (Array.isArray(v[key])) v[key] = (v[key] as string[]).join(',')
+  }
+  for (const f of GLOBAL_CONFIG_FIELDS) {
+    const storage = storageOf(f)
+    if (storage === 'list') {
+      v[f.key] = Array.isArray(v[f.key])
+        ? (v[f.key] as unknown[]).map((x) => String(x)).filter((x) => x.trim())
+        : splitToList(v[f.key])
+    } else if (storage === 'csv') {
+      v[f.key] = Array.isArray(v[f.key])
+        ? (v[f.key] as unknown[]).map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0)
+        : splitToNumbers(v[f.key])
+    }
   }
   if (Array.isArray(v['QUESTION_TYPES'])) {
     v['QUESTION_TYPES'] = (v['QUESTION_TYPES'] as { key: string; label: string }[])
       .map((item) => `${item.key}:${item.label}`)
       .join('\n')
   }
-  if (!v['enabled_notification_types']) v['enabled_notification_types'] = ['exam', 'system']
+  if (!v['enabled_notification_types']) v['enabled_notification_types'] = ['exam', 'system', 'task']
   if (typeof v['auto_pull_enabled'] !== 'boolean') v['auto_pull_enabled'] = true
   return v
 }
 
-// 表单值 -> 后端提交值：tags 逗号串转数组、题型多行文本转 [{key,label}]
+// 表单值 -> 后端提交值：按 storage 落型（list 提交数组、csv 提交逗号串），
+// tags 逗号串与题型多行文本一并转换。**类型在这里兜底，控件不参与**。
 const toApiValues = (raw: Record<string, unknown>): Record<string, unknown> => {
   const v = { ...raw }
   for (const key of TAG_FIELD_KEYS) {
@@ -514,6 +611,27 @@ const toApiValues = (raw: Record<string, unknown>): Record<string, unknown> => {
       // 分隔符与后端 _STRLIST_KEYS 的容错保持一致（中/英逗号、顿号、分号）；
       // 不按空格拆，避免把「AI 基础」这类含空格的科目名切断
       v[key] = (v[key] as string).split(/[,，、;；]+/).map((item) => item.trim()).filter(Boolean)
+    }
+  }
+  for (const f of GLOBAL_CONFIG_FIELDS) {
+    const storage = storageOf(f)
+    if (storage === 'list') {
+      const arr = Array.isArray(v[f.key]) ? (v[f.key] as unknown[]) : splitToList(v[f.key])
+      const seen = new Set<string>()
+      v[f.key] = arr
+        .map((x) => String(x).trim())
+        .filter((x) => {
+          if (!x || seen.has(x)) return false
+          seen.add(x)
+          return true
+        })
+    } else if (storage === 'csv') {
+      const arr = Array.isArray(v[f.key]) ? (v[f.key] as unknown[]) : splitToNumbers(v[f.key])
+      const nums = Array.from(new Set(
+        arr.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 30),
+      )).sort((a, b) => a - b)
+      // 必须回写成字符串：这两个键在后端 _STR_LIMITS 里，提交数组会被 400 拒
+      v[f.key] = nums.join(',')
     }
   }
   if (typeof v['QUESTION_TYPES'] === 'string') {
@@ -536,6 +654,59 @@ const normVal = (v: unknown): string => {
   if (Array.isArray(v)) return v.join(',')
   if (typeof v === 'object') return JSON.stringify(v)
   return String(v)
+}
+
+// ── 保存前自检 ──
+// 按字段声明的 storage + 后端 meta 的键级约束，断言"提交类型/上限"。
+// 全部通过才发请求：换控件最容易犯的错就是提交类型变了（数组→字符串），
+// 后端要么 400、要么整键丢弃，界面上都看不出来。这里就地拦下并说明是哪一项。
+interface ShapeProblem {
+  labelKey: string
+  reasonKey: string
+  params?: Record<string, unknown>
+}
+
+const checkValueShapes = (
+  values: Record<string, unknown>,
+  meta: ConfigMeta | null,
+): ShapeProblem[] => {
+  const problems: ShapeProblem[] = []
+  for (const f of GLOBAL_CONFIG_FIELDS) {
+    const val = values[f.key]
+    const storage = storageOf(f)
+    if (storage === 'list') {
+      if (!Array.isArray(val)) {
+        problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectList' })
+        continue
+      }
+      if (f.key === 'SUBJECTS' && val.length === 0) {
+        problems.push({ labelKey: f.labelKey, reasonKey: 'shapeSubjectEmpty' })
+        continue
+      }
+      const limit = meta?.strlist_keys?.[f.key]
+      if (limit && val.length > limit) {
+        problems.push({ labelKey: f.labelKey, reasonKey: 'shapeListMax', params: { n: limit } })
+      }
+      continue
+    }
+    if (storage === 'csv') {
+      if (typeof val !== 'string') {
+        problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectCsv' })
+      } else if (val) {
+        const nums = val.split(',').map((x) => Number(x))
+        if (nums.some((n) => !Number.isInteger(n) || n < 1 || n > 30)) {
+          problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectCsv' })
+        }
+      }
+      continue
+    }
+    if ((f.type === 'number' || f.type === 'float') && typeof val !== 'number') {
+      problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectNumber' })
+    } else if (f.type === 'boolean' && typeof val !== 'boolean') {
+      problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectNumber' })
+    }
+  }
+  return problems
 }
 
 // ═══════════════════════════════════════════════
@@ -2141,6 +2312,16 @@ const SystemConfigPage: React.FC = () => {
     } catch {
       return // 表单校验未通过，错误已就地标红
     }
+    // 提交形态自检：类型/上限不符就地拦下，不发请求（后端对这些只会 400 或整键丢弃）
+    const problems = checkValueShapes(values, meta)
+    if (problems.length) {
+      message.error(t('shapeAssertFailed', {
+        items: problems
+          .map((p) => `${t(p.labelKey)}（${t(p.reasonKey, p.params || {})}）`)
+          .join('、'),
+      }))
+      return
+    }
     // 涉及安全面/难以回退的项（关防护、改 IP 黑名单、开自动同步）改动后要求二次确认
     const risky = GLOBAL_CONFIG_FIELDS.filter((f) => f.danger && dirty.includes(f.key))
     if (risky.length) {
@@ -2309,20 +2490,13 @@ const SystemConfigPage: React.FC = () => {
       }))
   }, [modelOptions, t])
 
-  // ── AutoComplete 的过滤要按"用户实际键入的内容"，不能用输入框当前值 ──
-  // 踩过的坑：AutoComplete 默认拿当前输入值去过滤，而输入值就是已存的模型名 / 尺寸，
-  // 于是下拉一打开只剩自己那一项（2026-10-06 现场：三个候选只显示一个）。
-  const [freeSearch, setFreeSearch] = useState('')
-  const pickBySearch = useCallback((opts: { value: string; label: string }[]) => {
-    const q = freeSearch.trim().toLowerCase()
-    if (!q) return opts
-    return opts.filter((o) => `${o.value} ${o.label}`.toLowerCase().includes(q))
-  }, [freeSearch])
+  // 候选过滤与搜索词状态已收进 SuggestionInput（各实例独立），这里不再持有共享 state：
+  // 早先模型与生图尺寸共用一个 freeSearch，在模型框输入关键词会把尺寸候选筛成空。
 
   // 当前小节所属分区：右侧顶部用它显示「这一组管什么」，替代原来的大标题+分隔线
   const activeZone = CONFIG_ZONES.find((z) => z.sections.includes(activeSec))
   // 单列行式：label 固定宽 + 控件 + 一行说明。长说明收进 label 旁的 ⓘ，
-  // 高级项默认折叠（口径：改它需要懂实现原理），避免 105 项一次铺满。
+  // 高级项默认折叠（口径：改它需要懂实现原理），避免一百多项一次铺满。
   const renderGroup = (group: string) => {
     const fields = fieldsOf(group)
     if (!fields.length) return null
@@ -2509,13 +2683,18 @@ const SystemConfigPage: React.FC = () => {
                   extra={descNode(field)}
                 >
                   <Checkbox.Group>
-                    <Checkbox value="exam">{t('notifExam')}</Checkbox>
-                    <Checkbox value="share">{t('notifShare')}</Checkbox>
-                    <Checkbox value="score">{t('notifScore')}</Checkbox>
-                    <Checkbox value="task">{t('notifTask')}</Checkbox>
-                    <Checkbox value="rollcall">{t('notifRollcall')}</Checkbox>
-                    <Checkbox value="system">{t('notifSystem')}</Checkbox>
-                    <Checkbox value="info">{t('notifInfo')}</Checkbox>
+                    {/* 类型清单一律由后端目录下发（meta.notification_types）：
+                        以前是前端手抄一份，结果 reward_router 发的 "success" 不在清单里，
+                        该类型被白名单判为"未启用"，认可通知永远发不出去。 */}
+                    {(meta?.notification_types?.length ? meta.notification_types : NOTIF_TYPE_FALLBACK).map((nt) => (
+                      // Tooltip 放在 Checkbox 内部：Checkbox.Group 只读直接子级的 value，
+                      // 外面再包一层会让所有勾选项的 value 变成 undefined。
+                      <Checkbox key={nt.value} value={nt.value}>
+                        <Tooltip title={nt.in_use === false ? t('notifNoCaller') : undefined}>
+                          <span>{NOTIF_LABEL_KEYS[nt.value] ? t(NOTIF_LABEL_KEYS[nt.value]) : nt.value}</span>
+                        </Tooltip>
+                      </Checkbox>
+                    ))}
                   </Checkbox.Group>
                 </Form.Item>
               ) : field.type === 'wrong_book_sources' ? (
@@ -2560,12 +2739,9 @@ const SystemConfigPage: React.FC = () => {
                   rules={getRule(field)}
                   extra={descNode(field)}
                 >
-                  <AutoComplete
-                    options={pickBySearch(modelOptionsFor(field.optionsKind))}
+                  <SuggestionInput
+                    options={modelOptionsFor(field.optionsKind)}
                     placeholder={t('placeholder_modelSelect')}
-                    filterOption={false}
-                    onSearch={setFreeSearch}
-                    onOpenChange={(open) => { if (!open) setFreeSearch('') }}
                   />
                 </Form.Item>
               ) : field.type === 'image_size' ? (
@@ -2575,12 +2751,49 @@ const SystemConfigPage: React.FC = () => {
                   rules={getRule(field)}
                   extra={descNode(field)}
                 >
-                  <AutoComplete
-                    options={pickBySearch(imageSizeOptions)}
+                  <SuggestionInput
+                    options={imageSizeOptions}
                     placeholder={t('placeholder_imageSize')}
-                    filterOption={false}
-                    onSearch={setFreeSearch}
-                    onOpenChange={(open) => { if (!open) setFreeSearch('') }}
+                  />
+                </Form.Item>
+              ) : field.type === 'tags_select' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={descNode(field)}
+                >
+                  <TagListInput
+                    presets={field.presets}
+                    placeholder={field.placeholderKey ? t(field.placeholderKey) : t('placeholder_tagsSelect')}
+                    max={meta?.strlist_keys?.[field.key]}
+                    normalize={field.extMode ? normalizeExt : undefined}
+                    hintInvalid={field.extMode ? t('errExtFormat') : undefined}
+                    hintMax={t('errListMax', { n: meta?.strlist_keys?.[field.key] ?? '' })}
+                  />
+                </Form.Item>
+              ) : field.type === 'duration' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={descNode(field)}
+                >
+                  <DurationPicker
+                    placeholder={field.placeholderKey ? t(field.placeholderKey) : t('placeholder_duration')}
+                    hintInvalid={t('errDurationRange', { min: 1, max: 30 })}
+                  />
+                </Form.Item>
+              ) : field.type === 'combobox' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  rules={getRule(field)}
+                  extra={descNode(field)}
+                >
+                  <SuggestionInput
+                    options={(field.presets || []).map((v) => ({ value: v, label: v }))}
+                    placeholder={field.placeholderKey ? t(field.placeholderKey) : t('placeholder_endpoint')}
                   />
                 </Form.Item>
               ) : field.type === 'tts_model' ? (

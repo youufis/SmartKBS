@@ -12,12 +12,17 @@ DEFAULT_GRADES = ["一年级", "二年级", "三年级", "四年级", "五年级
 
 
 def get_subjects() -> list[str]:
-    """获取启用的课程列表"""
+    """获取启用的课程列表。
+
+    兼容历史脏数据：SUBJECTS 被写成逗号串时也照样拆开（以前只认 list，
+    写成字符串会静默回落成「人工智能」，表现成"课程列表被重置"）。
+    """
     try:
         from backend.api.config_router import load_config
+        from backend.config_lists import as_str_list
         cfg = load_config()
-        subjects = cfg.get("SUBJECTS", None)
-        if subjects and isinstance(subjects, list) and len(subjects) > 0:
+        subjects = as_str_list(cfg.get("SUBJECTS"), DEFAULT_SUBJECTS)
+        if subjects:
             return subjects
     except Exception:
         pass
