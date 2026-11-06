@@ -80,6 +80,10 @@ class BulkDeleteRequest(BaseModel):
     match_mode: str = "prefix"  # 匹配模式：prefix 前缀 / contains 包含 / exact 精确
 
 
+class RoleUpdateRequest(BaseModel):
+    role: int  # 0=管理员 1=教师 2=普通用户
+
+
 # ── 辅助函数 ──
 
 def _normalize_class(cls_val: str) -> str:
@@ -761,6 +765,106 @@ async def export_users(request: Request, keyword: Optional[str] = None):
     )
 
 
+def _caller_scope(current_user: dict) -> tuple[str, list]:
+    """调用方的可见范围条件（管理员不限；教师按 _teacher_visibility_filter）"""
+    if _caller_role(current_user) == 1:
+        return _teacher_visibility_filter(current_user["username"])
+    return "1=1", []
+
+
+@router.get("/stats", summary="用户概览统计(角色/状态/年级/班级分布)")
+async def user_stats(request: Request):
+    """台账顶部统计条与筛选下拉的数据源。
+
+    一次聚合返回：总数、按角色、在校/毕业、年级分布、有学生的班级列表。
+    不再让前端把全校用户拉下来自己数 —— 1410 个账号的列表页不该为了 4 个数字付全量传输的代价。
+    """
+    current_user = get_current_user(request)
+    if _caller_role(current_user) == 2:
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以查看用户统计")
+    where, params = _caller_scope(current_user)
+    p = tuple(params)
+
+    role_status = execute_query(
+        f"SELECT role, IFNULL(status,'active'), COUNT(*) FROM users WHERE {where} "
+        "GROUP BY role, IFNULL(status,'active')", p)
+    by_role = {0: 0, 1: 0, 2: 0}
+    active_students = 0
+    graduated = 0
+    for role_val, st_val, cnt in role_status:
+        if role_val in by_role:
+            by_role[role_val] += cnt
+        if st_val == "graduated":
+            graduated += cnt
+        elif role_val == 2:
+            active_students += cnt
+
+    grades = [
+        {"grade": g, "count": c} for g, c in execute_query(
+            f"SELECT grade, COUNT(*) FROM users WHERE {where} AND role=2 "
+            "AND IFNULL(status,'active')='active' AND IFNULL(grade,'')<>'' "
+            "GROUP BY grade ORDER BY grade", p)
+    ]
+    classes = [
+        {"class_id": cid, "grade": gname, "display_name": disp, "students": cnt}
+        for cid, gname, disp, cnt in execute_query(
+            "SELECT c.id, g.name, IFNULL(c.display_name, c.name), COUNT(u.username) "
+            "FROM classes c JOIN grades g ON g.id = c.grade_id "
+            "LEFT JOIN users u ON u.class_id = c.id AND u.role = 2 "
+            "AND IFNULL(u.status,'active')='active' "
+            "GROUP BY c.id, g.name, c.display_name ORDER BY g.sort_order, c.sort_order, c.id")
+        if cnt > 0
+    ]
+    return {
+        "total": sum(by_role.values()),
+        "admins": by_role[0],
+        "teachers": by_role[1],
+        "students": by_role[2],
+        "active_students": active_students,
+        "graduated": graduated,
+        "grades": grades,
+        "classes": classes,
+    }
+
+
+@router.patch("/{username}/role", summary="修改用户角色(仅管理员)")
+async def update_user_role(username: str, req: RoleUpdateRequest, request: Request):
+    """角色变更单独走一个窄接口。
+
+    旧实现把「角色」画成编辑表单里的单选，但 PUT /update 的 SQL 根本没有 role 列，
+    管理员改完会收到「已更新」而实际没变 —— 界面在说谎。这里补上真实写入。
+    """
+    current_user = get_current_user(request)
+    if _caller_role(current_user) != 0:
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以修改角色")
+    if req.role not in (0, 1, 2):
+        raise HTTPException(status_code=400, detail="角色取值非法（0=管理员 1=教师 2=普通用户）")
+
+    rows = execute_query("SELECT role, name FROM users WHERE username=?", (username,))
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"用户 '{username}' 不存在")
+    old_role, name_val = rows[0][0], rows[0][1]
+    if old_role == req.role:
+        return {"message": "角色未变更", "role": req.role, "changed": False}
+
+    # 不允许把系统里最后一个管理员降级，否则没人能再进用户管理
+    if old_role == 0:
+        admin_count = execute_query("SELECT COUNT(*) FROM users WHERE role=0")[0][0]
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="这是系统里唯一的管理员账号，不能降级")
+
+    execute_insert_update("UPDATE users SET role=? WHERE username=?", (req.role, username))
+    # 教师降为学生/管理员时清空任教安排，否则 teacher_assignments 里会留下悬空授权
+    if old_role == 1 and req.role != 1:
+        try:
+            clear_teacher_assignments(username)
+        except Exception as exc:
+            logger.warning(f"角色变更后清理任教安排失败（角色已更新）: {username} - {exc}")
+    logger.info(f"管理员 {current_user['username']} 修改角色: {username}({name_val}) {old_role} -> {req.role}")
+    label = {0: "管理员", 1: "教师", 2: "普通用户"}[req.role]
+    return {"message": f"账号 '{username}' 的角色已改为{label}", "role": req.role, "changed": True}
+
+
 @router.get("/{username}")
 async def get_user_info(username: str, request: Request):
     """查询用户信息(E-SCOPE: 本人或管理员不限; 教师可查看全部学生, 教师/管理员账号仍受限)"""
@@ -769,13 +873,14 @@ async def get_user_info(username: str, request: Request):
         _assert_can_manage_target(current_user, username, "查看", any_student=True)
 
     rows = execute_query(
-        "SELECT username, class, name, gender, role, grade FROM users WHERE username=?",
+        "SELECT username, class, name, gender, role, grade, IFNULL(status,'active'), "
+        "IFNULL(graduated_year,'') FROM users WHERE username=?",
         (username,),
     )
     if not rows:
         raise HTTPException(status_code=404, detail=f"用户 '{username}' 不存在")
 
-    username, class_val, name_val, gender_val, role_val, grade_val = rows[0]
+    username, class_val, name_val, gender_val, role_val, grade_val, status_val, grad_year = rows[0]
     role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
     gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
 
@@ -794,6 +899,8 @@ async def get_user_info(username: str, request: Request):
         "role_name": role_name,
         "grade": grade_val or "",
         "subjects": subjects,
+        "status": status_val,
+        "graduated_year": grad_year,
     }
 
 
@@ -826,6 +933,9 @@ async def get_all_users(
     request: Request,
     keyword: Optional[str] = None,
     status: Optional[str] = Query(None, description="学生状态：空=仅在校生，graduated=仅毕业归档，all=全部"),
+    grade: Optional[str] = Query(None, description="年级精确筛选，如 高一"),
+    class_id: Optional[int] = Query(None, description="班级 ID 筛选（classes.id）"),
+    role: Optional[int] = Query(None, ge=0, le=2, description="角色筛选：0=管理员 1=教师 2=学生"),
     page: int = Query(0, ge=0, description="0 表示不分页(默认, 兼容旧前端); >0 时按分页返回"),
     page_size: int = Query(200, ge=1, le=500, description="分页大小, 上限 500"),
 ):
@@ -833,33 +943,51 @@ async def get_all_users(
 
     U-SCOPE: 学生不再可见(旧实现只需登录即可导出全校 1410 个账号的姓名/班级/年级/角色);
     教师仅能看到同事目录 + 自己任教范围内的学生; 管理员不限。
+
+    分页时 total 走独立 COUNT：旧实现返回 len(users)，分页后那个数字只是"本页条数"，
+    前端拿它算总页数会永远只有 1 页。
     """
     current_user = get_current_user(request)
     caller_role = _caller_role(current_user)
     if caller_role == 2:
         raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以查看用户列表")
 
-    conds = ["(username LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')"] if (keyword and keyword.strip()) else []
+    conds: list[str] = []
     params: list = []
-    if conds:
+    if keyword and keyword.strip():
         kw = f"%{like_escape(keyword.strip())}%"
-        params = [kw, kw]
+        conds.append("(username LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')")
+        params.extend([kw, kw])
     # V6.9 毕业归档：默认列表只呈现在校生；毕业生需显式 status=graduated/all
     if status == "graduated":
         conds.append("IFNULL(status,'active')='graduated'")
     elif status != "all":
         conds.append("IFNULL(status,'active')='active'")
+    if grade and grade.strip():
+        conds.append("grade = ?")
+        params.append(grade.strip())
+    if class_id:
+        conds.append("class_id = ?")
+        params.append(int(class_id))
+    if role is not None:
+        conds.append("role = ?")
+        params.append(int(role))
     if caller_role == 1:
         scope_sql, scope_params = _teacher_visibility_filter(current_user["username"])
         conds.append("(" + scope_sql + ")")
         params.extend(scope_params)
     where = " WHERE " + " AND ".join(conds) if conds else ""
-    sql = "SELECT username, class, name, gender, role, grade, IFNULL(status,'active'), IFNULL(graduated_year,'') FROM users" + where + " ORDER BY username"
-    limit_sql = ""
+    base_sql = ("SELECT username, class, name, gender, role, grade, IFNULL(status,'active'), "
+                "IFNULL(graduated_year,'') FROM users" + where + " ORDER BY username")
+
     if page > 0:
-        limit_sql = " LIMIT ? OFFSET ?"
-        params.extend([page_size, (page - 1) * page_size])
-    rows = execute_query(sql + limit_sql, tuple(params))
+        total = execute_query("SELECT COUNT(*) FROM users" + where, tuple(params))[0][0]
+        rows = execute_query(base_sql + " LIMIT ? OFFSET ?",
+                             tuple(params + [page_size, (page - 1) * page_size]))
+    else:
+        rows = execute_query(base_sql, tuple(params))
+        total = len(rows)
+
     users = []
     for username, class_val, name_val, gender_val, role_val, grade_val, status_val, grad_year_val in rows:
         role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
@@ -881,7 +1009,7 @@ async def get_all_users(
             "graduated_year": grad_year_val,
         })
 
-    return {"users": users, "total": len(users)}
+    return {"users": users, "total": total}
 
 
 @router.post("/bulk-delete/preview")

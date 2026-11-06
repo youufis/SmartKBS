@@ -57,6 +57,7 @@
 > **Resources, curriculum & system**
 > - 🗂️ Three-column sharing with merged duplicates; 11 content types can be re-tagged and auto-sorted; one-click course tree, full question-bank stats
 > - ⚙️ System settings rebuilt into 4 groups / 24 sections with corrected control types and a new "AI output & parsing" section
+> - 🧑‍💼 User management collapsed into one ledger: stats strip, filters and paging; a row opens editing, password reset and role change; deletion needs confirmation
 > - 🔒 Static path traversal closed, production no longer exposes the API listing; AI concurrency and queue time are capped separately
 >
 > - ⚠️ **Breaking changes**: none
@@ -1216,6 +1217,7 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 **System & security**
 
 - ⚙️ System settings rebuilt into 4 groups / 24 sections, corrected control types, new "AI output & parsing" section and a config consistency check
+- 🧑‍💼 User management rebuilt as a single ledger: stats strip, search plus grade / class / role filters and server-side paging; a row opens a drawer for profile, password reset and role change; deletion requires typing the account name
 - 🔔 "Recognition bonus" notification added and switchable per type; "assignment" naming unified
 - 🔒 Static path traversal closed, production no longer exposes the API listing; AI concurrency and queue time capped separately
 - 🩹 Fixed true/false judgement errors, unresponsive coding-question saves and the whiteboard diagram spinner

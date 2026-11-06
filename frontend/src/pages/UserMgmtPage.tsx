@@ -1,119 +1,496 @@
-import React, { useState, useEffect, useRef } from 'react'
+/**
+ * 用户管理（台账式）
+ *
+ * 旧实现把 8 个后端接口做成了 8 个页签：查看一个学生要在「搜索 → 编辑 → 改密 → 删除」
+ * 之间反复跳，且编辑必须先输账号再失焦触发加载、删除没有二次确认。
+ * 现在是一张台账：统计条 → 筛选工具条 → 列表 → 点行进详情抽屉，
+ * 批量导入/批量删除/升年级收进工具条，班级维护留在独立页签。
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-// 用户管理
 import {
-  Layout, Card, Tabs, Form, Input, Button, message,
-  Modal, Progress, Table, Upload, Space, Radio, Select, Typography,
-  Tag, Checkbox, Alert, Popconfirm, Popover, Tooltip,
+  Alert, Button, Card, Col, Divider, Dropdown, Form, Input, Modal, Row, Select, Space, Table,
+  Tag, Typography, message,
 } from 'antd'
-import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, RollbackOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import {
+  CloudUploadOutlined, DownloadOutlined, MoreOutlined, PlusOutlined, ReloadOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 import * as usersApi from '../api/users'
 import type { UserItem } from '../types'
-import type {
-  ImportProgressEvent, ImportErrorItem, ImportErrorCode, BulkDeleteProgressEvent, BulkMatchMode,
-  GradePromotionPreview, GradePromotionResult,
-} from '../api/users'
 import { useAuthStore } from '../stores/authStore'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
-import { reportLoadError } from '../utils/loadError'
+import { useIsMobile } from '../hooks/useIsMobile'
+import ListFilterBar from '../components/ListFilterBar'
+import MobileCardTable from '../components/MobileCardTable'
+import type { MobileCardColumn } from '../components/MobileCardTable'
+import { ROLE_ADMIN, ROLE_LABEL, ROLE_STUDENT, ROLE_TEACHER, roleColor, roleToNumber } from './user-mgmt/roles'
+import { ScopeTags } from './user-mgmt/ScopeFields'
+import UserDetailDrawer from './user-mgmt/UserDetailDrawer'
+import CreateUserModal from './user-mgmt/CreateUserModal'
+import { BulkDeleteModal, ClassMgmtPanel, ImportUsersModal, PromoteGradesModal } from './user-mgmt/BulkOps'
 
 interface ApiError {
   response?: { data?: { detail?: string } }
 }
 
-/** 年级/班级维护 (仅管理员): 列出全部班级与在读人数, 支持删除自动建班残留的空壳班级 */
-const ClassMgmtTab: React.FC = () => {
-  const { t } = useTranslation('system')
-  const [rows, setRows] = useState<usersApi.ClassMgmtRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [onlyEmpty, setOnlyEmpty] = useState(true)
-  const [busyId, setBusyId] = useState<number | null>(null)
+const PAGE_SIZE_DEFAULT = 20
 
-  const load = async () => {
+type StatusFilter = 'active' | 'graduated' | 'all'
+
+interface Filters {
+  keyword: string
+  status: StatusFilter
+  grade: string
+  classId?: number
+  role?: number
+}
+
+// 默认视图 = 在校学生：台账最常见的用途是找人，教师只有几个人，顶部卡片一点就切过去。
+// 这样初始高亮的统计卡与列表内容、条数三者一致（旧实现默认"在校生"却把教师也算进去）。
+const EMPTY_FILTERS: Filters = {
+  keyword: '', status: 'active', grade: '', classId: undefined, role: ROLE_STUDENT,
+}
+
+/** 学生/普通用户：这一页只剩自助改密，不再伪装成「用户管理」 */
+const SelfPasswordCard: React.FC = () => {
+  const { t } = useTranslation('system')
+  const user = useAuthStore((s: { user: { username: string; role: string } | null }) => s.user)
+  const [form] = Form.useForm()
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    const v = await form.validateFields()
+    setSaving(true)
+    try {
+      const msg = await usersApi.changePassword(user?.username || '', v.new_password)
+      message.success(msg || t('passwordChanged'))
+      form.resetFields()
+    } catch (err) {
+      message.error((err as ApiError)?.response?.data?.detail || t('changePasswordFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card style={{ maxWidth: 460 }}>
+      <Typography.Title level={5} style={{ marginTop: 0 }}>{t('changePassword')}</Typography.Title>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {t('selfPasswordOnly')}
+      </Typography.Text>
+      <Form form={form} layout="vertical" style={{ marginTop: 16 }} onFinish={submit}>
+        <Form.Item label={t('usernameLabel')}>
+          <Input value={user?.username} disabled />
+        </Form.Item>
+        <Form.Item name="new_password" label={t('newPassword')} rules={[{ required: true, message: t('passwordRequired') }]}>
+          <Input.Password placeholder={t('newPassword')} autoComplete="new-password" />
+        </Form.Item>
+        <Form.Item name="confirm_password" label={t('confirmPassword')} dependencies={['new_password']}
+          rules={[
+            { required: true, message: t('passwordRequired') },
+            ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue('new_password') === value) return Promise.resolve()
+                return Promise.reject(new Error(t('passwordMismatch')))
+              },
+            }),
+          ]}>
+          <Input.Password placeholder={t('confirmPassword')} autoComplete="new-password" />
+        </Form.Item>
+        <Button type="primary" htmlType="submit" loading={saving}>{t('changePassword')}</Button>
+      </Form>
+    </Card>
+  )
+}
+
+const StatCell: React.FC<{
+  label: string; value: number; active?: boolean; onClick?: () => void
+}> = ({ label, value, active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    style={{
+      textAlign: 'left', cursor: onClick ? 'pointer' : 'default', padding: '10px 14px',
+      borderRadius: 10, minWidth: 130,
+      border: `1px solid ${active ? 'var(--primary-color)' : 'var(--border-color)'}`,
+      background: active ? 'var(--primary-color-soft, rgba(22,119,255,.08))' : 'var(--bg-container)',
+      transition: 'border-color .2s, background .2s',
+    }}
+  >
+    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</div>
+    <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.4, color: 'var(--text-primary)' }}>{value}</div>
+  </button>
+)
+
+const UserLedger: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
+  const { t } = useTranslation('system')
+  const isMobile = useIsMobile()
+  const { subjects } = useSubjectOptions()
+
+  const [stats, setStats] = useState<usersApi.UserStats | null>(null)
+  const [rows, setRows] = useState<UserItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
+  const [keywordInput, setKeywordInput] = useState('')
+
+  const [detailUser, setDetailUser] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [promoteOpen, setPromoteOpen] = useState(false)
+  const [classCleanupOpen, setClassCleanupOpen] = useState(false)
+
+  const loadStats = useCallback(async () => {
+    try {
+      setStats(await usersApi.getUserStats())
+    } catch {
+      /* 统计失败不该挡住列表，静默降级 */
+    }
+  }, [])
+
+  const loadRows = useCallback(async () => {
     setLoading(true)
     try {
-      setRows(await usersApi.listClassMgmt())
+      const { users, total: n } = await usersApi.queryUsers({
+        keyword: filters.keyword,
+        status: filters.status,
+        grade: filters.grade || undefined,
+        class_id: filters.classId,
+        role: filters.role,
+        page,
+        page_size: pageSize,
+      })
+      setRows(users)
+      setTotal(n)
     } catch (err) {
-      message.error((err as ApiError)?.response?.data?.detail || String(err))
+      message.error((err as ApiError)?.response?.data?.detail || t('loadUserListFailed'))
+      setRows([])
+      setTotal(0)
     } finally {
       setLoading(false)
     }
-  }
-  useEffect(() => { void load() }, [])
+  }, [filters, page, pageSize, t])
 
-  const handleDelete = async (row: usersApi.ClassMgmtRow) => {
-    setBusyId(row.class_id)
+  useEffect(() => { void loadStats() }, [loadStats])
+  useEffect(() => { void loadRows() }, [loadRows])
+
+  // 关键词防抖：每敲一个字都打后端会把 1400 人的表拖成幻灯片
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setFilters(f => (f.keyword === keywordInput.trim() ? f : { ...f, keyword: keywordInput.trim() }))
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(id)
+  }, [keywordInput])
+
+  const patch = (next: Partial<Filters>) => {
+    setFilters(f => ({ ...f, ...next }))
+    setPage(1)
+  }
+
+  const resetFilters = () => {
+    setFilters(EMPTY_FILTERS)
+    setKeywordInput('')
+    setPage(1)
+  }
+
+  const dirty = filters.keyword !== '' || filters.status !== EMPTY_FILTERS.status
+    || !!filters.grade || filters.classId !== undefined || filters.role !== EMPTY_FILTERS.role
+
+  const gradeOptions = useMemo(
+    () => (stats?.grades || []).map(g => ({ value: g.grade, label: `${g.grade}（${g.count}）` })),
+    [stats],
+  )
+  const classOptions = useMemo(() => {
+    const list = (stats?.classes || []).filter(c => !filters.grade || c.grade === filters.grade)
+    return list.map(c => ({ value: c.class_id, label: `${c.display_name}（${c.students}）` }))
+  }, [stats, filters.grade])
+
+  // 新建/详情里的年级班级下拉：学生班级是纯数字字符串，与筛选用的 class_id 不是一回事
+  const gradeNames = useMemo(() => (stats?.grades || []).map(g => g.grade), [stats])
+  const classOptionsForForm = useMemo(
+    () => (stats?.classes || []).map(c => {
+      const m = c.display_name.match(/(\d+)\s*班?\s*$/)
+      return { value: m ? m[1] : c.display_name, label: c.display_name }
+    }),
+    [stats],
+  )
+
+  const refreshAll = useCallback(() => {
+    void loadRows()
+    void loadStats()
+  }, [loadRows, loadStats])
+
+  const handleRestore = async (username: string) => {
     try {
-      message.success(await usersApi.deleteClassMgmt(row.class_id))
-      await load()
+      const res = await usersApi.restoreGraduatedUser(username)
+      message.success(res.message || t('restoreSuccess'))
+      refreshAll()
     } catch (err) {
-      message.error((err as ApiError)?.response?.data?.detail || String(err))
-    } finally {
-      setBusyId(null)
+      message.error((err as ApiError)?.response?.data?.detail || t('restoreFailed'))
     }
   }
 
-  const shown = onlyEmpty ? rows.filter(r => r.students === 0) : rows
-  const deleteReason = (r: usersApi.ClassMgmtRow): string =>
-    r.students > 0 ? t('cmReasonStudents', { count: r.students })
-      : r.teachers > 0 ? t('cmReasonTeachers', { count: r.teachers })
-        : ''
-  const columns = [
-    { title: t('cmGrade'), dataIndex: 'grade_name', key: 'grade', width: 100 },
-    { title: t('cmClass'), dataIndex: 'display_name', key: 'class', width: 180 },
-    { title: t('cmStudents'), dataIndex: 'students', key: 'students', width: 100 },
-    { title: t('cmTeachers'), dataIndex: 'teachers', key: 'teachers', width: 90 },
+  const handleExport = async () => {
+    const hide = message.loading(t('exporting'), 0)
+    try {
+      await usersApi.exportUsersCsv(filters.keyword || undefined)
+      hide()
+      message.success(t('exportSuccess'))
+    } catch (err) {
+      hide()
+      const ae = err as ApiError & { response?: { data?: ArrayBuffer } }
+      let detail = (ae?.response?.data as unknown as { detail?: string })?.detail
+      if (!detail && ae?.response?.data instanceof ArrayBuffer) {
+        try { detail = JSON.parse(new TextDecoder().decode(ae.response.data)).detail } catch { /* ignore */ }
+      }
+      message.error(detail || t('exportFailed'))
+    }
+  }
+
+  const columns = useMemo(() => [
     {
-      title: t('cmStatusCol'), key: 'state', width: 150,
-      render: (_: unknown, r: usersApi.ClassMgmtRow) =>
-        r.deletable
-          ? <Tag color="warning">{t('cmEmpty')}</Tag>
-          : r.students === 0
-            ? <Tag color="processing">{t('cmNoStudentHasTeacher')}</Tag>
-            : <Tag>{t('cmInUse')}</Tag>,
+      title: t('name'), dataIndex: 'name', key: 'name', width: 130,
+      render: (v: string) => <Typography.Text strong>{v || '—'}</Typography.Text>,
     },
     {
-      title: t('actionsCol'), key: 'act', width: 90,
-      render: (_: unknown, r: usersApi.ClassMgmtRow) => {
-        const reason = deleteReason(r)
-        const btn = (
-          <Popconfirm
-            title={t('cmDeleteConfirm', { name: r.display_name })}
-            okText={t('confirm')} cancelText={t('cancel')}
-            onConfirm={() => void handleDelete(r)}
-          >
-            <Button danger size="small" type="link" disabled={!r.deletable} loading={busyId === r.class_id}
-              style={{ padding: 0 }}>{t('cmDelete')}</Button>
-          </Popconfirm>
-        )
-        return reason
-          ? <Tooltip title={reason}><span>{btn}</span></Tooltip>
-          : btn
+      title: t('username'), dataIndex: 'username', key: 'username', width: 150,
+      render: (v: string) => <Typography.Text type="secondary" style={{ fontSize: 12 }}>{v}</Typography.Text>,
+    },
+    {
+      title: t('colGradeClass'), key: 'scope', width: 260,
+      render: (_: unknown, r: UserItem) => <ScopeTags grade={r.grade} cls={r.class} />,
+    },
+    {
+      title: t('gender'), dataIndex: 'gender', key: 'gender', width: 70,
+      render: (v: string) => v || '—',
+    },
+    {
+      title: t('role'), dataIndex: 'role', key: 'role', width: 100,
+      render: (v: string) => <Tag color={roleColor(v)}>{v}</Tag>,
+    },
+    {
+      title: t('statusCol'), key: 'status', width: 100,
+      render: (_: unknown, r: UserItem) => {
+        if (roleToNumber(r.role) !== ROLE_STUDENT) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+        return r.status === 'graduated'
+          ? <Tag color="orange">{t('graduateTag')}{r.graduated_year ? `·${r.graduated_year}` : ''}</Tag>
+          : <Tag color="green">{t('enrolledTag')}</Tag>
       },
     },
-  ]
+    {
+      title: t('teachingSubjects'), dataIndex: 'subjects', key: 'subjects', width: 160,
+      render: (_: unknown, r: UserItem) => {
+        if (roleToNumber(r.role) === ROLE_ADMIN) return <Typography.Text type="secondary">{t('allSubjects')}</Typography.Text>
+        if (roleToNumber(r.role) !== ROLE_TEACHER || !r.subjects?.length) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+        return <Typography.Text type="secondary">{r.subjects.join('、')}</Typography.Text>
+      },
+    },
+    {
+      title: t('actionsCol'), key: 'act', width: 140, fixed: 'right' as const,
+      render: (_: unknown, r: UserItem) => (
+        <Space size={4}>
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setDetailUser(r.username)}>
+            {t('viewDetail')}
+          </Button>
+          {r.status === 'graduated' && (
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={() => void handleRestore(r.username)}>
+              {t('restoreBtn')}
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+  ], [t])  // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Space orientation="vertical" style={{ width: '100%' }}>
-      <Space>
-        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>{t('cmRefresh')}</Button>
-        <Checkbox checked={onlyEmpty} onChange={e => setOnlyEmpty(e.target.checked)}>{t('cmOnlyEmpty')}</Checkbox>
-        <Popover
-          trigger="click" placement="rightTop"
-          title={t('cmHelpTitle')}
-          content={
-            <div style={{ maxWidth: 380 }}>
-              <Typography.Paragraph style={{ marginBottom: 8 }}>{t('cmHint')}</Typography.Paragraph>
-              <Typography.Paragraph style={{ marginBottom: 0 }}>{t('cmHintDetail')}</Typography.Paragraph>
-            </div>
-          }
-        >
-          <Button type="link" size="small" icon={<QuestionCircleOutlined />}>{t('cmHelp')}</Button>
-        </Popover>
-      </Space>
-      <Table dataSource={shown} columns={columns} rowKey="class_id" size="small"
-        loading={loading} pagination={{ pageSize: 30 }} />
-    </Space>
+    <div>
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        {[
+          {
+            key: 'all', label: t('statsAll'), value: stats?.total ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'all' }); setKeywordInput(''); setPage(1) },
+            active: filters.status === 'all' && filters.role === undefined && !filters.grade && filters.classId === undefined,
+          },
+          {
+            key: 'students', label: t('statsStudents'), value: stats?.active_students ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'active', role: ROLE_STUDENT }); setKeywordInput(''); setPage(1) },
+            active: filters.status === 'active' && filters.role === ROLE_STUDENT,
+          },
+          {
+            key: 'teachers', label: t('statsTeachers'), value: stats?.teachers ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'all', role: ROLE_TEACHER }); setKeywordInput(''); setPage(1) },
+            active: filters.role === ROLE_TEACHER,
+          },
+          {
+            key: 'graduated', label: t('statsGraduated'), value: stats?.graduated ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'graduated', role: ROLE_STUDENT }); setKeywordInput(''); setPage(1) },
+            active: filters.status === 'graduated',
+          },
+        ].map(c => (
+          <Col key={c.key} xs={12} sm={12} md={6}>
+            <StatCell label={c.label} value={c.value} active={c.active} onClick={c.onClick} />
+          </Col>
+        ))}
+      </Row>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <ListFilterBar
+          keyword={keywordInput}
+          onKeyword={setKeywordInput}
+          searchPlaceholder={t('searchPlaceholder')}
+          searchWidth={220}
+          status={filters.status}
+          statusOptions={[
+            { value: 'active', label: t('filterActive') },
+            { value: 'graduated', label: t('filterGraduated') },
+            { value: 'all', label: t('filterAll') },
+          ]}
+          onStatus={(v) => patch({ status: v as StatusFilter })}
+          dirty={dirty}
+          onReset={resetFilters}
+          extra={(
+            <Space wrap size={8}>
+              <Select
+                size="small" allowClear style={{ width: 130 }} placeholder={t('filterGrade')}
+                value={filters.grade || undefined}
+                onChange={(v) => patch({ grade: v || '', classId: undefined })}
+                options={gradeOptions}
+              />
+              <Select
+                size="small" allowClear style={{ width: 150 }} placeholder={t('filterClass')}
+                value={filters.classId}
+                onChange={(v) => patch({ classId: v })}
+                options={classOptions}
+              />
+              <Select
+                size="small" allowClear style={{ width: 130 }} placeholder={t('filterRole')}
+                value={filters.role}
+                onChange={(v) => patch({ role: v })}
+                options={[
+                  { value: ROLE_STUDENT, label: ROLE_LABEL[ROLE_STUDENT] },
+                  { value: ROLE_TEACHER, label: ROLE_LABEL[ROLE_TEACHER] },
+                  { value: ROLE_ADMIN, label: ROLE_LABEL[ROLE_ADMIN] },
+                ]}
+              />
+            </Space>
+          )}
+        />
+
+        <Space wrap style={{ marginBottom: 12, marginLeft: 'auto' }}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>{t('createUser')}</Button>
+          <Button icon={<CloudUploadOutlined />} onClick={() => setImportOpen(true)}>{t('batchImport')}</Button>
+          <Button icon={<DownloadOutlined />} onClick={handleExport}>{t('exportUsers')}</Button>
+          <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading} aria-label={t('refresh')} />
+          {isAdmin && (
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'bulk-delete', label: t('bulkDelete'), danger: true },
+                  { key: 'promote', label: t('batchUpgradeTitle') },
+                  { key: 'class-cleanup', label: t('cleanEmptyClasses') },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'bulk-delete') setBulkDeleteOpen(true)
+                  else if (key === 'promote') setPromoteOpen(true)
+                  else setClassCleanupOpen(true)
+                },
+              }}
+            >
+              <Button icon={<MoreOutlined />}>{t('moreActions')}</Button>
+            </Dropdown>
+          )}
+        </Space>
+      </div>
+
+      {total > 0 && (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {t('totalAccounts', { count: total })}
+        </Typography.Text>
+      )}
+
+      {isMobile ? (
+        <MobileCardTable
+          dataSource={rows as unknown as never[]}
+          columns={columns as unknown as MobileCardColumn[]}
+          rowKey="username"
+          loading={loading}
+          titleKey="name"
+          pagination={{ current: page, pageSize, total, onChange: setPage }}
+          emptyText={<Alert type="info" showIcon style={{ marginTop: 8 }} title={t('emptyUsers')} description={t('emptyUsersHint')} />}
+        />
+      ) : (
+        <Table
+          dataSource={rows}
+          columns={columns}
+          rowKey="username"
+          loading={loading}
+          size="middle"
+          scroll={{ x: 1120 }}
+          locale={{
+            emptyText: (
+              <div style={{ padding: '32px 0' }}>
+                <Typography.Text type="secondary">{t('emptyUsers')}</Typography.Text>
+                <div style={{ marginTop: 8 }}>
+                  <Button size="small" onClick={resetFilters}>{t('emptyUsersHint')}</Button>
+                </div>
+              </div>
+            ),
+          }}
+          onRow={(r: UserItem) => ({
+            onClick: () => setDetailUser(r.username),
+            style: { cursor: 'pointer' },
+          })}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: [20, 50, 100],
+            showTotal: (n: number) => t('totalAccounts', { count: n }),
+            onChange: (p: number, ps: number) => { setPage(p); setPageSize(ps) },
+          }}
+        />
+      )}
+
+      <UserDetailDrawer
+        username={detailUser}
+        open={!!detailUser}
+        onClose={() => setDetailUser(null)}
+        onChanged={refreshAll}
+        isAdmin={isAdmin}
+        gradeOptions={gradeNames}
+        classOptions={classOptionsForForm}
+        subjectOptions={subjects}
+      />
+      <CreateUserModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={refreshAll}
+        isAdmin={isAdmin}
+        gradeOptions={gradeNames}
+        classOptions={classOptionsForForm}
+        subjectOptions={subjects}
+      />
+      <ImportUsersModal open={importOpen} onClose={() => setImportOpen(false)} onImported={refreshAll} />
+      <BulkDeleteModal open={bulkDeleteOpen} onClose={() => setBulkDeleteOpen(false)} onDeleted={refreshAll} />
+      <PromoteGradesModal open={promoteOpen} onClose={() => setPromoteOpen(false)} isAdmin={isAdmin} onDone={refreshAll} />
+      {/* 空壳班级清理：不是日常页面，做成一次性动作，只在「更多」里出现 */}
+      <Modal
+        title={t('cleanEmptyClasses')}
+        open={classCleanupOpen}
+        onCancel={() => setClassCleanupOpen(false)}
+        footer={<Button onClick={() => setClassCleanupOpen(false)}>{t('cancel')}</Button>}
+        width={760}
+        styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' } }}
+      >
+        <ClassMgmtPanel />
+      </Modal>
+    </div>
   )
 }
 
@@ -123,1134 +500,30 @@ const UserMgmtPage: React.FC = () => {
   const isAdmin = user?.role === 'admin'
   const isTeacher = user?.role === 'teacher'
 
-  const { subjects } = useSubjectOptions()
-
-  // ── 注册 ──
-  const [regForm] = Form.useForm()
-  const handleRegister = async (values: Record<string, unknown>) => {
-    const v = values as Record<string, string> & { subjects?: string[] }
-    try {
-      const msg = await usersApi.registerUser({
-        username: v.username,
-        password: v.password,
-        class_val: v.class_val || '',
-        name: v.name || '',
-        gender: v.gender === '男' ? 1 : 0,
-        role: v.role === '管理员' ? 0 : v.role === '教师' ? 1 : 2,
-        grade: v.grade || '',
-        subjects: v.subjects || [],
-      })
-      message.success(msg)
-      regForm.resetFields()
-    } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || t('registerFailed'))
-    }
-  }
-
-  // ── 更新信息 ──
-  const [updForm] = Form.useForm()
-  // 表单当前承载的是哪个用户的信息(失焦加载成功后才算), 以及用户是否手动动过性别。
-  // 作用: 若用户没触发失焦就直接提交, 表单里除他填的字段外全是空 —— 直接提交会把
-  // 学生的年级/班级/性别清空(实测会把 grade_id/class_id 置 NULL, 该生随即从教师
-  // 的所有活动范围里消失)。此时先取回原值合并, 只让用户真正填写的字段生效。
-  const loadedUserRef = useRef('')
-  const genderTouchedRef = useRef(false)
-  const handleUpdateUsernameBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
-    const username = e.target.value?.trim()
-    if (!username) return
-    try {
-      const data = await usersApi.getUserInfo(username)
-      updForm.setFieldsValue({
-        name: data.name || '',
-        grade: data.grade || '',
-        class_val: data.class || '',
-        gender: data.gender === '男' ? '男' : '女',
-        role: data.role_name || '普通用户',
-        subjects: data.subjects || [],
-      })
-      // 管理员默认全部学科
-      if (data.role_name === '管理员') {
-        updForm.setFieldsValue({ subjects })
-      }
-      loadedUserRef.current = username
-      genderTouchedRef.current = false
-    } catch (err) {
-      loadedUserRef.current = ''
-      reportLoadError(err, { key: 'userMgmt.detail' })
-    }
-  }
-  const handleUpdate = async (values: Record<string, unknown>) => {
-    const v = values as Record<string, string> & { subjects?: string[] }
-    let classVal = v.class_val || ''
-    let nameVal = v.name || ''
-    let gradeVal = v.grade || ''
-    let genderNum = v.gender === '男' ? 1 : 0
-    let subjectList = v.subjects || []
-
-    if (loadedUserRef.current !== v.username) {
-      // 表单没装载过该用户的现有信息: 先取回来, 用户填了的字段优先、空字段沿用原值
-      try {
-        const cur = await usersApi.getUserInfo(v.username)
-        classVal = classVal.trim() || (cur.class || '')
-        nameVal = nameVal.trim() || (cur.name || '')
-        gradeVal = gradeVal.trim() || (cur.grade || '')
-        if (!genderTouchedRef.current) genderNum = cur.gender === '男' ? 1 : 0
-        if (!subjectList.length) subjectList = cur.subjects || []
-      } catch (err: unknown) {
-        message.error((err as ApiError)?.response?.data?.detail || t('loadUserDetailFailed'))
-        return
-      }
-    }
-
-    try {
-      const msg = await usersApi.updateUserInfo(
-        v.username, classVal, nameVal, genderNum, gradeVal, subjectList,
-      )
-      message.success(msg)
-    } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || t('updateFailed'))
-    }
-  }
-
-  // ── 修改密码 ──
-  const [pwdForm] = Form.useForm()
-  // 非管理员自动填入当前用户名
-  React.useEffect(() => {
-    if (!isAdmin && user?.username) {
-      pwdForm.setFieldsValue({ username: user.username })
-    }
-  }, [isAdmin, user?.username, pwdForm])
-  const handleChangePwd = async (values: Record<string, unknown>) => {
-    const v = values as Record<string, string>
-    if (!v.username || !v.new_password) {
-      message.warning(t('usernamePasswordRequired'))
-      return
-    }
-    // 普通学生只能改自己的; 教师可代改任教范围内学生(后端 U-SCOPE 校验), 管理员不限
-    if (!isAdmin && !isTeacher && v.username !== user?.username) {
-      message.error(t('permissionDenied') + '：' + t('selfPasswordOnly'))
-      return
-    }
-    try {
-      const msg = await usersApi.changePassword(v.username, v.new_password)
-      message.success(msg)
-      pwdForm.resetFields()
-    } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || t('changePasswordFailed'))
-    }
-  }
-
-  // ── 删除用户 ──
-  const [delForm] = Form.useForm()
-  const handleDelete = async (values: Record<string, unknown>) => {
-    const v = values as Record<string, string>
-    try {
-      const msg = await usersApi.deleteUser(v.username)
-      message.success(msg)
-      delForm.resetFields()
-    } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || t('deleteFailed'))
-    }
-  }
-
-  // ── 查询用户（支持用户名/姓名模糊搜索） ──
-  const [searchForm] = Form.useForm()
-  const [searchResult, setSearchResult] = useState<UserItem[]>([])
-  const [searchLoading, setSearchLoading] = useState(false)
-  const handleSearch = async (values: Record<string, unknown>) => {
-    const v = values as Record<string, string>
-    const keyword = v.keyword?.trim()
-    if (!keyword) {
-      message.warning(t('searchKeywordRequired'))
-      return
-    }
-    setSearchLoading(true)
-    try {
-      // 搜索覆盖全部状态（含毕业归档），结果表内可直接点「恢复」
-      const { users } = await usersApi.getAllUsers(keyword, 'all')
-      setSearchResult(users)
-    } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || t('searchFailed'))
-      setSearchResult([])
-    } finally {
-      setSearchLoading(false)
-    }
-  }
-
-  // ── 用户列表 ──
-  const [allUsers, setAllUsers] = useState<UserItem[]>([])
-  const [usersLoading, setUsersLoading] = useState(false)
-  // V6.9 毕业归档：列表状态过滤（默认只看在校生）
-  const [userStatusFilter, setUserStatusFilter] = useState<'active' | 'graduated' | 'all'>('active')
-  const handleListUsers = async () => {
-    setUsersLoading(true)
-    try {
-      const { users } = await usersApi.getAllUsers(undefined, userStatusFilter === 'active' ? undefined : userStatusFilter)
-      setAllUsers(users)
-    } catch {
-      message.error(t('loadUserListFailed'))
-    } finally {
-      setUsersLoading(false)
-    }
-  }
-  useEffect(() => {
-    // 学生没有用户列表权限(后端 /api/users 对 role=2 返回 403): 不主动拉取。
-    // 否则学生从菜单进「修改密码」时会先弹一句"获取用户列表失败", 像系统坏了
-    if (isAdmin || isTeacher) void handleListUsers()
-  }, [userStatusFilter, isAdmin, isTeacher])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleRestoreGraduate = async (username: string) => {
-    try {
-      const res = await usersApi.restoreGraduatedUser(username)
-      message.success(res.message || t('restoreSuccess'))
-      handleListUsers()
-    } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || t('restoreFailed'))
-    }
-  }
-
-  // ── 批量删除：先预览匹配结果 -> 二次确认 -> 流式删除（带进度） ──
-  const [bulkPattern, setBulkPattern] = useState('')
-  const [bulkMatchMode, setBulkMatchMode] = useState<BulkMatchMode>('prefix')
-  const [bulkPreview, setBulkPreview] = useState<usersApi.BulkDeletePreview | null>(null)
-  const [bulkPreviewOpen, setBulkPreviewOpen] = useState(false)
-  const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false)
-  const [bulkConfirmed, setBulkConfirmed] = useState(false)
-  const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{
-    visible: boolean
-    percent: number
-    current: number
-    total: number
-    deleted: number
-    errorCount: number
-    errors: string[]
-    message: string
-    done: boolean
-  }>({
-    visible: false,
-    percent: 0,
-    current: 0,
-    total: 0,
-    deleted: 0,
-    errorCount: 0,
-    errors: [],
-    message: '',
-    done: false,
-  })
-
-  /** 第一步：查询匹配到的用户（只读，不会删除任何数据） */
-  const openBulkDeletePreview = async () => {
-    const pattern = bulkPattern.trim()
-    if (!pattern) { message.warning(t('enterPattern')); return }
-    setBulkPreviewLoading(true)
-    try {
-      const preview = await usersApi.previewBulkDelete(pattern, bulkMatchMode)
-      setBulkPreview(preview)
-      setBulkConfirmed(false)
-      if (preview.matched_count === 0) {
-        setBulkPreviewOpen(false)
-        message.warning(t('noDeletableMatched'))
-        return
-      }
-      setBulkPreviewOpen(true)
-    } catch (err: unknown) {
-      message.error(usersApi.extractApiErrorDetail((err as ApiError)?.response?.data) || t('queryMatchFailed'))
-    } finally {
-      setBulkPreviewLoading(false)
-    }
-  }
-
-  const closeBulkDeletePreview = () => {
-    setBulkPreviewOpen(false)
-    setBulkConfirmed(false)
-  }
-
-  /** 第二步：用户确认后才真正删除（必须带 confirm=true） */
-  const handleBulkDelete = async () => {
-    if (!bulkPreview || bulkPreview.matched_count === 0) { closeBulkDeletePreview(); return }
-    if (!bulkConfirmed) { message.warning(t('tickConfirmFirst')); return }
-    setBulkPreviewOpen(false)
-    setBulkConfirmed(false)
-    setBulkDeleteProgress({
-      visible: true,
-      percent: 0,
-      current: 0,
-      total: bulkPreview.matched_count,
-      deleted: 0,
-      errorCount: 0,
-      errors: [],
-      message: t('startDeleteCount', { count: bulkPreview.matched_count }),
-      done: false,
-    })
-    try {
-      await usersApi.bulkDeleteUsersStream(
-        bulkPreview.pattern,
-        (event: BulkDeleteProgressEvent) => {
-          if (event.type === 'start') {
-            setBulkDeleteProgress(prev => ({
-              ...prev,
-              total: event.total || 0,
-              message: t('prepareDeleteCount', { count: event.total }),
-            }))
-          } else if (event.type === 'progress') {
-            setBulkDeleteProgress(prev => ({
-              ...prev,
-              percent: event.percent || 0,
-              current: event.current || 0,
-              total: event.total || 0,
-              deleted: event.deleted || 0,
-              errorCount: event.error_count || 0,
-              message: t('deletingProgress', { current: event.current, total: event.total }),
-            }))
-          } else if (event.type === 'done') {
-            const errList = event.errors || []
-            setBulkDeleteProgress(prev => ({
-              ...prev,
-              percent: 100,
-              current: prev.total,
-              deleted: event.deleted || 0,
-              errorCount: event.error_count || 0,
-              errors: errList,
-              message: event.message || t('batchDeleteDone'),
-              done: true,
-            }))
-            // 删除完成后刷新用户列表，界面立即反映结果
-            if ((event.deleted || 0) > 0) void handleListUsers()
-          }
-        },
-        bulkPreview.match_mode,
-        true,
-      )
-    } catch (err: unknown) {
-      setBulkDeleteProgress(prev => ({
-        ...prev,
-        message: err instanceof Error ? err.message : t('batchDeleteFailed'),
-        done: true,
-      }))
-    }
-  }
-
-  const handleBulkDeleteDone = () => {
-    setBulkDeleteProgress(prev => ({ ...prev, visible: false }))
-    setBulkPreview(null)
-    setBulkPattern('')
-  }
-
-  // ── 批量升年级 ──
-  const [promotePreview, setPromotePreview] = useState<GradePromotionPreview | null>(null)
-  const [promoteLoading, setPromoteLoading] = useState(false)
-  const [promoteExecuting, setPromoteExecuting] = useState(false)
-  const [promoteResult, setPromoteResult] = useState<GradePromotionResult | null>(null)
-  const [promoteReversing, setPromoteReversing] = useState(false)
-
-  const handlePreviewPromote = async () => {
-    setPromoteLoading(true)
-    setPromoteResult(null)
-    try {
-      const preview = await usersApi.previewPromoteGrades()
-      setPromotePreview(preview)
-    } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || t('promotePreviewFailed'))
-    } finally {
-      setPromoteLoading(false)
-    }
-  }
-
-  const handleExecutePromote = async () => {
-    // 动态构建升级描述
-    const promoteDesc = promotePreview?.grade_details
-      ?.filter(d => d.next_grade)
-      .map(d => `${d.grade}→${d.next_grade}`)
-      ?.join('，') || t('autoUpgradeByStage')
-    const graduateDesc = promotePreview?.grade_details
-      ?.filter(d => !d.next_grade && d.count > 0)
-      .map(d => t('gradeCountItem', { grade: d.grade, count: d.count }))
-      ?.join('、')
-
-    Modal.confirm({
-      title: t('confirmBatchUpgradeTitle'),
-      icon: <WarningOutlined />,
-      width: 520,
-      content: (
-        <div>
-          <p style={{ marginBottom: 12 }}>{t('promoteIntro')}</p>
-          <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
-            <li>{t('promoteStudentsLine', { desc: promoteDesc })}</li>
-            {graduateDesc && <li>{t('promoteGraduateLine', { desc: graduateDesc })}</li>}
-            <li>{t('promotePointsLine')}</li>
-            <li>{t('promoteClassLine')}</li>
-            <li>{t('promoteArchiveLine')}</li>
-          </ul>
-          <p style={{ color: '#fa8c16', marginTop: 8 }}>{t('promoteIrreversible')}</p>
-        </div>
-      ),
-      okText: t('confirmExecute'),
-      okType: 'danger',
-      cancelText: t('cancel'),
-      onOk: async () => {
-        setPromoteExecuting(true)
-        try {
-          const result = await usersApi.executePromoteGrades({ confirm: true })
-          setPromoteResult(result)
-          if (result.success) {
-            message.success(t('promoteExecSuccess'))
-            // 刷新预览
-            handlePreviewPromote()
-          }
-        } catch (err: unknown) {
-          message.error((err as ApiError)?.response?.data?.detail || t('promoteExecFailed'))
-        } finally {
-          setPromoteExecuting(false)
-        }
-      },
-    })
-  }
-
-  const handleReversePromote = async () => {
-    // 构建降级描述
-    const reverseDesc = promotePreview?.grade_details
-      ?.filter(d => d.next_grade)
-      .map(d => `${d.next_grade}→${d.grade}`)
-      ?.join('，') || ''
-
-    Modal.confirm({
-      title: t('confirmBatchDemoteTitle'),
-      icon: <WarningOutlined />,
-      width: 520,
-      content: (
-        <div>
-          <p style={{ marginBottom: 12 }}>{t('demoteIntro')}</p>
-          <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
-            <li>{reverseDesc || t('demoteByUpgradeMap')}</li>
-            <li>{t('demotePointsLine')}</li>
-            <li>{t('demoteClassLine')}</li>
-            <li>{t('demoteRestoreLine')}</li>
-          </ul>
-          <p style={{ color: '#fa8c16', marginTop: 8 }}>{t('demoteNote')}</p>
-        </div>
-      ),
-      okText: t('confirmDemote'),
-      okType: 'danger',
-      cancelText: t('cancel'),
-      onOk: async () => {
-        setPromoteReversing(true)
-        try {
-          const result = await usersApi.reversePromoteGrades({ confirm: true })
-          if (result.success) {
-            message.success(t('demoteSuccess'))
-            setPromotePreview(null)
-            setPromoteResult(result)
-            // 刷新预览
-            handlePreviewPromote()
-          }
-        } catch (err: unknown) {
-          message.error((err as ApiError)?.response?.data?.detail || t('demoteFailed'))
-        } finally {
-          setPromoteReversing(false)
-        }
-      },
-    })
-  }
-
-  // ── CSV 导入（含进度提示） ──
-  const [importProgress, setImportProgress] = useState<{
-    visible: boolean
-    percent: number
-    current: number
-    total: number
-    imported: number
-    errorCount: number
-    errors: string[]
-    /** 结构化明细 + 汇总：后端一次回传前 100 条，超出部分用 errorCount 说明 */
-    errorItems: ImportErrorItem[]
-    errorCodes: ImportErrorCode[]
-    truncated: boolean
-    aborted: boolean
-    warnings: string[]
-    message: string
-    done: boolean
-  }>({
-    visible: false,
-    percent: 0,
-    current: 0,
-    total: 0,
-    imported: 0,
-    errorCount: 0,
-    errors: [],
-    errorItems: [],
-    errorCodes: [],
-    truncated: false,
-    aborted: false,
-    warnings: [],
-    message: '',
-    done: false,
-  })
-
-  const handleImport = async (file: File) => {
-    setImportProgress({
-      visible: true,
-      percent: 0,
-      current: 0,
-      total: 0,
-      imported: 0,
-      errorCount: 0,
-      errors: [],
-      errorItems: [],
-      errorCodes: [],
-      truncated: false,
-      aborted: false,
-      warnings: [],
-      message: t('parsingFile'),
-      done: false,
-    })
-
-    try {
-      await usersApi.importUsersStream(file, (event: ImportProgressEvent) => {
-        if (event.type === 'start') {
-          setImportProgress(prev => ({
-            ...prev,
-            total: event.total || 0,
-            message: t('prepareImportCount', { count: event.total }),
-          }))
-        } else if (event.type === 'progress') {
-          setImportProgress(prev => ({
-            ...prev,
-            percent: event.percent || 0,
-            current: event.current || 0,
-            total: event.total || 0,
-            imported: event.imported || 0,
-            errorCount: event.error_count || 0,
-            message: t('importingProgress', { current: event.current, total: event.total }),
-          }))
-        } else if (event.type === 'done') {
-          setImportProgress(prev => ({
-            ...prev,
-            percent: 100,
-            current: event.total ?? prev.total,
-            imported: event.imported || 0,
-            errorCount: event.error_count || 0,
-            errors: event.errors || [],
-            errorItems: event.error_items || [],
-            errorCodes: event.error_codes || [],
-            truncated: !!event.truncated,
-            aborted: !!event.aborted,
-            warnings: event.warnings || [],
-            message: event.message || t('importDone'),
-            done: true,
-          }))
-        }
-      })
-    } catch (err: unknown) {
-      setImportProgress(prev => ({
-        ...prev,
-        message: err instanceof Error ? err.message : t('importFailed'),
-        done: true,
-      }))
-    }
-    return false
-  }
-
-  const handleImportDone = () => {
-    setImportProgress(prev => ({ ...prev, visible: false }))
-  }
-
-  // ── 下载模板 ──
-  const handleDownloadTemplate = async () => {
-    window.open('/api/users/import/template', '_blank')
-  }
-
-  const genderRadios = [
-    { label: t('male'), value: '男' },
-    { label: t('female'), value: '女' },
-  ]
-  const roleRadiosAll = [
-    { label: t('student'), value: '普通用户' },
-    { label: t('teacher'), value: '教师' },
-    { label: t('admin'), value: '管理员' },
-  ]
-  // U-SCOPE: 教师只能创建/管理学生账号, 角色选项同步收紧(后端也会拒绝)
-  const roleRadios = isAdmin ? roleRadiosAll : roleRadiosAll.slice(0, 1)
-
-  const userColumns = [
-    { title: t('username'), dataIndex: 'username', key: 'username', width: 120 },
-    { title: t('name'), dataIndex: 'name', key: 'name', width: 100 },
-    { title: t('grade'), dataIndex: 'grade', key: 'grade', width: 60 },
-    { title: t('class_'), dataIndex: 'class', key: 'class', width: 80 },
-    { title: t('gender'), dataIndex: 'gender', key: 'gender', width: 60 },
-    { title: t('role'), dataIndex: 'role', key: 'role', width: 80 },
-    {
-      title: t('teachingSubjects'),
-      dataIndex: 'subjects',
-      key: 'subjects',
-      width: 180,
-      render: (_: any, record: any) => {
-        if (record.role === '管理员') return t('allSubjects')
-        if (record.role !== '教师' || !record.subjects?.length) return '-'
-        return record.subjects.join('、')
-      },
-    },
-    {
-      title: t('statusCol'), key: 'status', width: 100,
-      render: (_: any, record: any) => {
-        if (record.role !== '普通用户') return '-'
-        return record.status === 'graduated'
-          ? <Tag color="orange">{t('graduateTag')}{record.graduated_year ? `·${record.graduated_year}` : ''}</Tag>
-          : <Tag color="green">{t('enrolledTag')}</Tag>
-      },
-    },
-    {
-      title: t('actionsCol'), key: 'restore', width: 70,
-      render: (_: any, record: any) => (
-        record.status === 'graduated' ? (
-          <Popconfirm title={t('restoreConfirm')} okText={t('confirmOk')} cancelText={t('cancel')}
-            onConfirm={() => handleRestoreGraduate(record.username)}>
-            <Button type="link" size="small" style={{ padding: 0 }}>{t('restoreBtn')}</Button>
-          </Popconfirm>
-        ) : null
-      ),
-    },
-  ]
-
-  // 定义各标签页的可见权限
-  // 教师和管理员拥有相同的用户管理权限
-  const tabPermissions: Record<string, boolean> = {
-    register: isAdmin || isTeacher,
-    update: isAdmin || isTeacher,
-    password: true,            // 所有人可用
-    delete: isAdmin || isTeacher,
-    search: isAdmin || isTeacher,
-    list: isAdmin || isTeacher,
-    import: isAdmin || isTeacher,
-    classes: isAdmin,  // 班级维护仅管理员
-  }
-
-  const tabItems = [
-    {
-      key: 'register',
-      label: t('addUser'),
-      children: (
-        <Form form={regForm} layout="vertical" onFinish={handleRegister} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}>
-            <Input placeholder={t('usernamePlaceholder')} />
-          </Form.Item>
-          <Form.Item name="password" label={t('passwordLabel')} rules={[{ required: true }]}>
-            <Input.Password placeholder={t('passwordPlaceholder')} />
-          </Form.Item>
-          <Form.Item name="grade" label={t('gradeLabel')} extra={<>{t('multiGradeHelp')}</>}>
-            <Input placeholder={t('gradePlaceholder')} />
-          </Form.Item>
-          <Form.Item name="class_val" label={t('classLabel')} extra={<>{t('multiClassHelp')}</>}>
-            <Input placeholder={t('classPlaceholder')} />
-          </Form.Item>
-          <Form.Item name="name" label={t('nameLabel')}><Input placeholder={t('namePlaceholder')} /></Form.Item>
-          <Form.Item name="gender" label={t('genderLabel')} initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
-          <Form.Item name="role" label={t('roleLabel')} initialValue="普通用户"><Radio.Group options={roleRadios} /></Form.Item>
-          <Form.Item shouldUpdate={(prev, cur) => prev.role !== cur.role} noStyle>
-            {({ getFieldValue }) => {
-              const role = getFieldValue('role')
-              const isTeacherOrAdmin = role === '教师' || role === '管理员'
-              return (
-                <Form.Item name="subjects" label={t('teachingSubjectsLabel')} hidden={!isTeacherOrAdmin}
-                  initialValue={role === '管理员' ? [...subjects] : undefined}
-                  extra={<>{t('configSubjectsFirst')}<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>{t('configSubjectsLink')}</Button></>}>
-                  <Select mode="multiple" placeholder={t('selectSubjectsPlaceholder')} allowClear
-                    options={subjects.map(s => ({ label: s, value: s }))} />
-                </Form.Item>
-              )
-            }}
-          </Form.Item>
-          <Button type="primary" htmlType="submit">{t('register')}</Button>
-        </Form>
-      ),
-    },
-    {
-      key: 'update',
-      label: t('editUser'),
-      children: (
-        <Form form={updForm} layout="vertical" onFinish={handleUpdate} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}>
-            <Input placeholder={t('usernameSearchPlaceholder')} onBlur={handleUpdateUsernameBlur} />
-          </Form.Item>
-          <Form.Item name="role" label={t('roleLabel')}>
-            <Radio.Group options={roleRadios} disabled={!isAdmin} />
-          </Form.Item>
-          <Form.Item shouldUpdate={(prev, cur) => prev.role !== cur.role} noStyle>
-            {({ getFieldValue }) => {
-              const role = getFieldValue('role')
-              const isTeacherOrAdmin = role === '教师' || role === '管理员'
-              return (
-                <Form.Item name="subjects" label={t('teachingSubjectsLabel')} hidden={!isTeacherOrAdmin}
-                  initialValue={role === '管理员' ? [...subjects] : undefined}
-                  extra={<>{t('configSubjectsFirst')}<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>{t('configSubjectsLink')}</Button></>}>
-                  <Select mode="multiple" placeholder={t('selectSubjectsPlaceholder')} allowClear
-                    options={subjects.map(s => ({ label: s, value: s }))} />
-                </Form.Item>
-              )
-            }}
-          </Form.Item>
-          <Form.Item name="grade" label={t('gradeLabel')} extra={<>{t('multiGradeHelp')}</>}>
-            <Input placeholder={t('gradePlaceholder')} />
-          </Form.Item>
-          <Form.Item name="class_val" label={t('classLabel')} extra={<>{t('multiClassHelp')}</>}>
-            <Input placeholder={t('classPlaceholder')} />
-          </Form.Item>
-          <Form.Item name="name" label={t('nameLabel')}><Input /></Form.Item>
-          <Form.Item name="gender" label={t('genderLabel')} initialValue="男">
-            <Radio.Group options={genderRadios} onChange={() => { genderTouchedRef.current = true }} />
-          </Form.Item>
-          <Button type="primary" htmlType="submit">{t('edit')}</Button>
-        </Form>
-      ),
-    },
-    {
-      key: 'password',
-      label: t('changePassword'),
-      children: (
-        <Form form={pwdForm} layout="vertical" onFinish={handleChangePwd} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}
-            extra={isTeacher ? t('teacherResetPwdHint') : undefined}>
-            <Input placeholder={t('usernameLabel')} disabled={!isAdmin && !isTeacher} />
-          </Form.Item>
-          <Form.Item name="new_password" label={t('newPassword')} rules={[{ required: true }]}>
-            <Input.Password placeholder={t('newPassword')} />
-          </Form.Item>
-          <Form.Item
-            name="confirm_password"
-            label={t('confirmPassword')}
-            dependencies={['new_password']}
-            rules={[
-              { required: true, message: t('passwordRequired') },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue('new_password') === value) {
-                    return Promise.resolve()
-                  }
-                  return Promise.reject(new Error(t('passwordMismatch')))
-                },
-              }),
-            ]}
-          >
-            <Input.Password placeholder={t('confirmPassword')} />
-          </Form.Item>
-          <Button type="primary" htmlType="submit">{t('changePassword')}</Button>
-        </Form>
-      ),
-    },
-    {
-      key: 'delete',
-      label: t('deleteUser'),
-      children: (
-        <Form form={delForm} layout="vertical" onFinish={handleDelete} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}><Input placeholder={t('usernameLabel')} /></Form.Item>
-          <Button type="primary" danger htmlType="submit">{t('deleteUser')}</Button>
-        </Form>
-      ),
-    },
-    {
-      key: 'search',
-      label: t('searchUser'),
-      children: (
-        <Space orientation="vertical" style={{ width: '100%' }}>
-          <Form form={searchForm} layout="inline" onFinish={handleSearch}>
-            <Form.Item name="keyword" rules={[{ required: true }]}>
-              <Input placeholder={t('searchPlaceholder')} style={{ width: 240 }} />
-            </Form.Item>
-            <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={searchLoading}>{t('search')}</Button>
-          </Form>
-          {searchResult.length > 0 && (
-            <>
-              <Typography.Text type="secondary">{t('searchResults')} ({searchResult.length})</Typography.Text>
-              <Table dataSource={searchResult} columns={userColumns} rowKey="username"
-                size="small" pagination={{ pageSize: 30 }} scroll={{ y: 400 }} />
-            </>
-          )}
-          {searchResult.length === 0 && !searchLoading && (
-            <Typography.Text type="secondary">{t('searchPlaceholder')}</Typography.Text>
-          )}
+  if (!isAdmin && !isTeacher) {
+    return (
+      <div style={{ padding: 24, background: 'var(--bg-container)', borderRadius: 8, minHeight: 'calc(100vh - 112px)' }}>
+        <Space align="center" style={{ marginBottom: 12 }}>
+          <UserOutlined style={{ color: 'var(--primary-color)', fontSize: 18 }} />
+          <Typography.Title level={4} style={{ margin: 0 }}>{t('changePassword')}</Typography.Title>
         </Space>
-      ),
-    },
-    {
-      key: 'list',
-      // 页面标题已经叫「用户管理」了，这个 tab 是名单视图，改叫「用户列表」免得同名
-      label: t('userList'),
-      children: (
-        <Space orientation="vertical" style={{ width: '100%' }}>
-          <Space>
-            <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>{t('refresh')}</Button>
-            <Select value={userStatusFilter} onChange={(v) => setUserStatusFilter(v)} style={{ width: 130 }}
-              options={[
-                { value: 'active', label: t('filterActive') },
-                { value: 'graduated', label: t('filterGraduated') },
-                { value: 'all', label: t('filterAll') },
-              ]} />
-          </Space>
-          {allUsers.length > 0 && (
-            <Table dataSource={allUsers} columns={userColumns} rowKey="username"
-              size="small" pagination={{ pageSize: 30 }} scroll={{ y: 400 }} />
-          )}
-        </Space>
-      ),
-    },
-    {
-      key: 'import',
-      label: t('batchImport'),
-      children: (
-        <Space orientation="vertical" style={{ width: '100%' }}>
-          <Card size="small" title={t('bulkImport')}>
-            <Space>
-              <Upload beforeUpload={handleImport} showUploadList={false} accept=".csv" disabled={importProgress.visible}>
-                <Button icon={<UploadOutlined />} disabled={importProgress.visible}>
-                  {importProgress.visible ? t('importing') : t('selectCsv')}
-                </Button>
-              </Upload>
-              <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>{t('downloadTemplate')}</Button>
-              <Button icon={<DownloadOutlined />} onClick={async () => {
-                const hide = message.loading(t('exporting'), 0)
-                try {
-                  await usersApi.exportUsersCsv()
-                  hide()
-                  message.success(t('exportSuccess'))
-                } catch (err: unknown) {
-                  hide()
-                  const ae = err as ApiError
-                  // responseType=arraybuffer 时错误 data 也是 ArrayBuffer，需转文本
-                  let detail = ae?.response?.data?.detail
-                  if (!detail && ae?.response?.data instanceof ArrayBuffer) {
-                    try {
-                      const text = new TextDecoder().decode(ae.response.data)
-                      detail = JSON.parse(text).detail
-                    } catch { /* ignore */ }
-                  }
-                  message.error(detail || t('exportFailed'))
-                }
-              }}>{t('exportUsers')}</Button>
-            </Space>
-            {/* 导入进度弹窗 */}
-            <Modal
-              title={t('bulkImport')}
-              open={importProgress.visible}
-              footer={
-                importProgress.done
-                  ? <Button type="primary" onClick={handleImportDone}>{t('confirm')}</Button>
-                  : null
-              }
-              closable={importProgress.done}
-              mask={{ closable: importProgress.done }}
-              onCancel={handleImportDone}
-            >
-              <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-                <Progress percent={importProgress.percent} status={importProgress.done ? (importProgress.errorCount > 0 ? 'exception' : 'success') : 'active'} />
-                <Typography.Text>{importProgress.message}</Typography.Text>
-                {importProgress.total > 0 && (
-                  <Typography.Text type="secondary">
-                    {t('processed')} {importProgress.current} / {importProgress.total}
-                    ｜ {t('success')} {importProgress.imported}
-                    ｜ {t('failed')} {importProgress.errorCount}
-                  </Typography.Text>
-                )}
-                {importProgress.errorCodes.length > 0 && (
-                  <div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('importErrSummary')}：</Typography.Text>
-                    <Space wrap size={4} style={{ marginTop: 4 }}>
-                      {importProgress.errorCodes.map(c => (
-                        <Tag key={c.code} color="red" title={c.label}>{c.label} × {c.count}</Tag>
-                      ))}
-                    </Space>
-                  </div>
-                )}
-                {importProgress.errors.length > 0 && (
-                  <div style={{ maxHeight: 200, overflow: 'auto', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4, padding: '8px 12px' }}>
-                    <Typography.Text type="danger" strong>{t('errorDetails')}:</Typography.Text>
-                    {importProgress.errors.map((err, i) => (
-                      <Typography.Text key={i} type="danger" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{err}</Typography.Text>
-                    ))}
-                    {importProgress.truncated && (
-                      <Typography.Text type="warning" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
-                        {t('importTruncated', { count: importProgress.errorCount, shown: importProgress.errors.length })}
-                      </Typography.Text>
-                    )}
-                  </div>
-                )}
-                {importProgress.aborted && (
-                  <Typography.Text type="danger" strong style={{ display: 'block' }}>
-                    <CloseCircleOutlined /> {t('importFailed')}
-                  </Typography.Text>
-                )}
-                {importProgress.warnings.length > 0 && (
-                  <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4, padding: '8px 12px' }}>
-                    <Typography.Text type="warning" strong>{t('importWarnings')}:</Typography.Text>
-                    {importProgress.warnings.map((w, i) => (
-                      <Typography.Text key={i} type="warning" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{w}</Typography.Text>
-                    ))}
-                  </div>
-                )}
-              </Space>
-            </Modal>
-          </Card>
-          <Card size="small" title={t('bulkDelete')}>
-            <Space wrap>
-              <Select
-                value={bulkMatchMode}
-                onChange={(v: BulkMatchMode) => setBulkMatchMode(v)}
-                style={{ width: 120 }}
-                options={[
-                  { value: 'prefix', label: t('matchPrefix') },
-                  { value: 'contains', label: t('matchContains') },
-                  { value: 'exact', label: t('matchExact') },
-                ]}
-              />
-              <Input placeholder={t('enterPattern')} value={bulkPattern}
-                onChange={(e) => setBulkPattern(e.target.value)}
-                onPressEnter={openBulkDeletePreview}
-                style={{ width: 240 }} allowClear />
-              <Button danger icon={<WarningOutlined />} loading={bulkPreviewLoading}
-                disabled={bulkDeleteProgress.visible} onClick={openBulkDeletePreview}>
-                {t('bulkDelete')}
-              </Button>
-            </Space>
-            <div style={{ marginTop: 8 }}>
-              <Typography.Text type="secondary">
-                {t('batchDeleteHint')}
-              </Typography.Text>
-            </div>
-          </Card>
-
-          {/* 批量删除：匹配结果二次确认弹窗 */}
-          <Modal
-            title={t('confirmBatchDeleteTitle')}
-            open={bulkPreviewOpen}
-            okText={t('confirmDeleteBtn')}
-            cancelText={t('cancel')}
-            okButtonProps={{ danger: true, disabled: !bulkConfirmed }}
-            onOk={handleBulkDelete}
-            onCancel={closeBulkDeletePreview}
-            maskClosable={false}
-            closable={!bulkDeleteProgress.visible}
-          >
-            {bulkPreview && (
-              <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-                <Alert
-                  type="error"
-                  showIcon
-                  title={t('deleteWarnCount', { count: bulkPreview.matched_count })}
-                  description={bulkPreview.message}
-                />
-                {bulkPreview.preview.length > 0 && (
-                  <div>
-                    <Typography.Text strong>
-                      {t('matchPreviewHead', { count: bulkPreview.preview.length })}
-                    </Typography.Text>
-                    <div style={{ marginTop: 6 }}>
-                      {bulkPreview.preview.map((u) => <Tag key={u} color="red">{u}</Tag>)}
-                    </div>
-                    {bulkPreview.matched_count > bulkPreview.preview.length && (
-                      <Typography.Text type="secondary">
-                        {t('moreMatched', { count: bulkPreview.matched_count - bulkPreview.preview.length })}
-                      </Typography.Text>
-                    )}
-                  </div>
-                )}
-                {bulkPreview.skipped_admin_count > 0 && (
-                  <Typography.Text type="warning">
-                    {t('skippedAdmins', { count: bulkPreview.skipped_admin_count })}
-                  </Typography.Text>
-                )}
-                <Checkbox
-                  checked={bulkConfirmed}
-                  onChange={(e) => setBulkConfirmed(e.target.checked)}
-                >
-                  {t('iConfirmDelete', { count: bulkPreview.matched_count })}
-                </Checkbox>
-              </Space>
-            )}
-          </Modal>
-
-            {/* 批量删除进度弹窗 */}
-            <Modal
-              title={t('bulkDelete')}
-              open={bulkDeleteProgress.visible}
-              footer={
-                bulkDeleteProgress.done
-                  ? <Button type="primary" onClick={handleBulkDeleteDone}>{t('confirm')}</Button>
-                  : null
-              }
-              closable={bulkDeleteProgress.done}
-              mask={{ closable: bulkDeleteProgress.done }}
-              onCancel={handleBulkDeleteDone}
-            >
-              <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-                <Progress percent={bulkDeleteProgress.percent} status={bulkDeleteProgress.done ? (bulkDeleteProgress.errorCount > 0 ? 'exception' : 'success') : 'active'} />
-                <Typography.Text>{bulkDeleteProgress.message}</Typography.Text>
-                {bulkDeleteProgress.total > 0 && (
-                  <Typography.Text type="secondary">
-                    {t('processed')} {bulkDeleteProgress.current} / {bulkDeleteProgress.total}
-                    ｜ {t('success')} {bulkDeleteProgress.deleted}
-                    ｜ {t('failed')} {bulkDeleteProgress.errorCount}
-                  </Typography.Text>
-                )}
-                {bulkDeleteProgress.errors.length > 0 && (
-                  <div style={{ maxHeight: 200, overflow: 'auto', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4, padding: '8px 12px' }}>
-                    <Typography.Text type="danger" strong>{t('errorDetails')}:</Typography.Text>
-                    {bulkDeleteProgress.errors.map((err, i) => (
-                      <Typography.Text key={i} type="danger" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{err}</Typography.Text>
-                    ))}
-                  </div>
-                )}
-              </Space>
-            </Modal>
-
-          {/* ── 批量升年级 ── */}
-          <Card size="small" title={<span><RiseOutlined /> {t('batchUpgradeTitle')}</span>}
-            extra={isAdmin ? null : <Typography.Text type="warning">{t('adminOnlyHint')}</Typography.Text>}>
-            {isAdmin ? (
-              <Space orientation="vertical" style={{ width: '100%' }}>
-                <Typography.Text type="secondary">
-                  {t('upgradePathHint')}
-                  {t('gradRetainHint')}
-                </Typography.Text>
-
-                {/* 预览区域 */}
-                <Space>
-                  <Button icon={<RiseOutlined />} onClick={handlePreviewPromote} loading={promoteLoading}>
-                    {t('previewUpgrade')}
-                  </Button>
-                  {promotePreview && (
-                    <span style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>
-                      {t('totalStudentsN', { count: promotePreview.total_students })}
-                    </span>
-                  )}
-                </Space>
-
-                {promotePreview && (
-                  <>
-                    <Table
-                      dataSource={promotePreview.grade_details}
-                      columns={[
-                        { title: t('curGrade'), dataIndex: 'grade', key: 'grade', width: 100 },
-                        { title: t('headcount'), dataIndex: 'count', key: 'count', width: 60 },
-                        {
-                          title: t('nextGrade'), dataIndex: 'next_grade', key: 'next_grade', width: 120,
-                          render: (val: string | null) => val
-                            ? <Tag color="blue">{val}</Tag>
-                            : <Tag color="orange">{t("graduateTag")}</Tag>,
-                        },
-                        {
-                          title: t('classCol'), dataIndex: 'classes', key: 'classes',
-                          render: (val: string[]) => val?.length ? val.join('、') : '-',
-                        },
-                      ]}
-                      rowKey="grade"
-                      size="small"
-                      pagination={false}
-                      style={{ marginBottom: 12 }}
-                    />
-
-                    {/* 行为已固化：三项同步永远执行（关闭只会产生脏数据），不再提供开关 */}
-                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-                      {t('upgradeFixedEffects')}
-                    </Typography.Text>
-
-                    {/* 执行按钮 */}
-                    <Space>
-                      <Button type="primary" icon={<RiseOutlined />}
-                        loading={promoteExecuting} onClick={handleExecutePromote}>
-                        {t('executeUpgrade')}
-                      </Button>
-                      <Button icon={<RollbackOutlined />}
-                        loading={promoteReversing} onClick={handleReversePromote}>
-                        {t('reverseDemote')}
-                      </Button>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        {t('upgradeReversibleHint')}
-                      </Typography.Text>
-                    </Space>
-                  </>
-                )}
-
-                {/* 执行结果 */}
-                {promoteResult && (
-                  <Card size="small" type="inner"
-                    title={
-                      <span>
-                        {promoteResult.success
-                          ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                          : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-                        }
-                        {' '}执行结果
-                      </span>
-                    }
-                    style={{ marginTop: 12, background: promoteResult.success ? '#f6ffed' : '#fff2f0' }}>
-                    <Space orientation="vertical">
-                      {!promoteResult.success && (
-                        <Typography.Text type="danger">{t('promoteFailedRollback')}</Typography.Text>
-                      )}
-                      {promoteResult.errors?.map((e, i) => (
-                        <Typography.Text key={i} type="danger" style={{ fontSize: 12 }}>{e}</Typography.Text>
-                      ))}
-                      {promoteResult.success && (
-                        <>
-                          <Typography.Text>✅ {promoteResult.direction === 'up' ? t('upgradedLabel') : t('demotedLabel')}{t('studentsColon')}{Object.entries(promoteResult.promoted).map(([g, c]) => t('gradeMoveSummary', { from: g, to: c })).join('、')}</Typography.Text>
-                          {Object.keys(promoteResult.not_moved).length > 0 && (
-                            <Typography.Text>
-                              {promoteResult.direction === 'up' ? t('graduatedLabel') : t('lowestGradeLabel')}
-                              {Object.entries(promoteResult.not_moved).map(([g, c]) => t('gradeCountPlain', { grade: g, count: c })).join('、')}
-                            </Typography.Text>
-                          )}
-                          {promoteResult.skipped && promoteResult.skipped.length > 0 && (
-                            <Typography.Text type="warning">{t('promoteSkippedNoGrade', { count: promoteResult.skipped.length })}</Typography.Text>
-                          )}
-                          {promoteResult.graduated && Object.keys(promoteResult.graduated).length > 0 && (
-                            <Typography.Text>
-                              🎓 {t('graduatedArchiveLabel')}
-                              {Object.entries(promoteResult.graduated).map(([g, c]) => t('gradeCountPlain', { grade: g, count: c })).join('、')}
-                            </Typography.Text>
-                          )}
-                          {!!promoteResult.restored && (
-                            <Typography.Text>{t('restoredLabel', { n: promoteResult.restored })}</Typography.Text>
-                          )}
-                          {!!promoteResult.unmatched_class && (
-                            <Typography.Text type="warning">⚠️ {t('unmatchedClassHint', { n: promoteResult.unmatched_class })}</Typography.Text>
-                          )}
-                          <Typography.Text type="secondary">
-                            更新 users 表 {promoteResult.updated_users} 条
-                            ｜ 更新 scores 表 {promoteResult.updated_scores} 条
-                            ｜ 更新 rollcall 表 {promoteResult.updated_rollcall} 条
-                          </Typography.Text>
-                        </>
-                      )}
-                    </Space>
-                  </Card>
-                )}
-              </Space>
-            ) : (
-              <Typography.Text type="secondary">{t('promoteAdminOnly')}</Typography.Text>
-            )}
-          </Card>
-        </Space>
-      ),
-    },
-    {
-      key: 'classes',
-      label: t('classMgmtTab'),
-      children: <ClassMgmtTab />,
-    },
-  ]
-
-  // 按权限过滤可见的标签页
-  const visibleTabs = tabItems.filter(t => tabPermissions[t.key])
-  // 学生只有「修改密码」一个页签: 标题就该叫修改密码, 而不是"用户管理"
-  // 管理员/教师: 标题取侧边栏同名项 userManagement(用户管理) ——
-  // 旧实现用 system.title, 那是侧边栏"系统管理"分组名, 页面标题挂错了层级
-  const showUserTitle = visibleTabs.some(tb => tb.key !== 'password')
+        <SelfPasswordCard />
+      </div>
+    )
+  }
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
-      <Typography.Title level={4} style={{ marginTop: 0 }}>
-        {showUserTitle ? `👥 ${t('userManagement')}` : `🔑 ${t('changePassword')}`}
-      </Typography.Title>
-      <Tabs items={visibleTabs} />
-    </Layout>
+    <div style={{ padding: 24, background: 'var(--bg-container)', borderRadius: 8, minHeight: 'calc(100vh - 112px)' }}>
+      <Space align="center" style={{ marginBottom: 4 }}>
+        <UserOutlined style={{ color: 'var(--primary-color)', fontSize: 18 }} />
+        <Typography.Title level={4} style={{ margin: 0 }}>{t('userManagement')}</Typography.Title>
+      </Space>
+      <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
+        {t('userMgmtIntro')}
+      </Typography.Paragraph>
+      <Divider style={{ margin: '8px 0 12px' }} />
+      <UserLedger isAdmin={isAdmin} />
+    </div>
   )
 }
 
