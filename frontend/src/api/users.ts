@@ -58,6 +58,63 @@ export async function getAllUsers(keyword?: string, status?: string): Promise<{ 
   return data;
 }
 
+/** 用户台账查询参数（服务端筛选 + 分页） */
+export interface UserQuery {
+  keyword?: string;
+  /** 学生状态：不传=仅在校生；graduated=仅毕业归档；all=全部 */
+  status?: 'active' | 'graduated' | 'all';
+  grade?: string;
+  class_id?: number;
+  /** 0=管理员 1=教师 2=学生 */
+  role?: number;
+  page?: number;
+  page_size?: number;
+}
+
+/**
+ * 分页查询用户台账。
+ * page 从 1 开始；后端 page>0 时才 LIMIT，total 走独立 COUNT，可直接用来算总页数。
+ */
+export async function queryUsers(q: UserQuery = {}): Promise<{ users: UserItem[]; total: number }> {
+  const params: Record<string, string | number> = {};
+  if (q.keyword?.trim()) params.keyword = q.keyword.trim();
+  if (q.status) params.status = q.status;
+  if (q.grade) params.grade = q.grade;
+  if (q.class_id) params.class_id = q.class_id;
+  if (q.role !== undefined && q.role !== null) params.role = q.role;
+  if (q.page && q.page > 0) {
+    params.page = q.page;
+    params.page_size = q.page_size || 20;
+  }
+  const { data } = await apiClient.get('/api/users', { params });
+  return data;
+}
+
+/** 台账顶部统计与筛选下拉的数据源 */
+export interface UserStats {
+  total: number;
+  admins: number;
+  teachers: number;
+  students: number;
+  active_students: number;
+  graduated: number;
+  grades: Array<{ grade: string; count: number }>;
+  classes: Array<{ class_id: number; grade: string; display_name: string; students: number }>;
+}
+
+export async function getUserStats(): Promise<UserStats> {
+  const { data } = await apiClient.get<UserStats>('/api/users/stats');
+  return data;
+}
+
+/** 修改角色（仅管理员；后端拒绝降级最后一个管理员） */
+export async function updateUserRole(
+  username: string, role: number,
+): Promise<{ message: string; role: number; changed: boolean }> {
+  const { data } = await apiClient.patch(`/api/users/${encodeURIComponent(username)}/role`, { role });
+  return data;
+}
+
 /** 恢复毕业归档账号为在校（仅管理员） */
 export async function restoreGraduatedUser(username: string): Promise<{ message: string }> {
   const { data } = await apiClient.post(`/api/users/${encodeURIComponent(username)}/restore`);
