@@ -195,15 +195,20 @@ def delete_media_file(url: str | None, source: str = SOURCE_BANK,
 
 
 def archive_bank_dir(question_id: Any) -> str | None:
-    """题库题目软删时归档配图目录（可完整恢复），到期由日志保留任务物理清除
+    """题库题目**被删除**时归档配图目录（可完整恢复），到期由日志保留任务物理清除
 
     只搬 ``question_media/<id>``，绝不碰 ``quest/``、``whiteboard_ai/`` 等子命名空间。
+    目录里没有图片就只回收空壳、不生成归档条目：历史上 ``question_media/1`` 被
+    ``ensure_media_dir`` 反复重建，每轮治理都搬出一个空 ``1__<时间戳>``，攒了几十个。
     """
     qid = _safe_token(question_id)
     if not qid:
         return None
     src = media_dir(SOURCE_BANK, qid)
     if not _contained(src) or not src.is_dir():
+        return None
+    if not any(p.is_file() for p in src.rglob("*")):
+        shutil.rmtree(src, ignore_errors=True)
         return None
     dst_root = media_root() / ARCHIVE_DIR_NAME
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -261,7 +266,10 @@ def resolve_media_path(url: str | None, question_id: Any = None) -> Path | None:
 
 def sweep_orphan_dirs(keep_ids: set[str], older_than_days: int = 30,
                       dry_run: bool = False) -> tuple[int, int]:
-    """孤儿目录回收（供日志保留任务调用）
+    """孤儿目录回收 —— **不再由定时任务调用**（2026-11-07），只允许人工磁盘清理显式使用
+
+    规矩：只有题目被删除才允许移除它的配图。按目录年龄回收会误删「题目还在、题池/考试/
+    练习/错题本快照仍在引用」的图，``_maintain_question_media`` 已停用本函数。
 
     只处理 ``question_media/<纯数字>`` 这种「题库题目录」：
       - 数字名 + 不在 keep_ids + 目录超过 N 天 → 回收
@@ -302,6 +310,10 @@ def sweep_orphan_dirs(keep_ids: set[str], older_than_days: int = 30,
 def sweep_stale_files(questions: list[dict[str, Any]], older_than_days: int = 30,
                       dry_run: bool = False, extra_referenced: set[str] | None = None) -> tuple[int, int]:
     """文件级对账：把「本题 manifest 没记录、其它来源也没引用、且超过 N 天」的图移入归档
+
+    **不再由定时任务调用**（2026-11-07）：manifest 丢了引用不等于图该删 —— 历史上就有
+    一批题的 media_files 被后续写库覆盖成空数组、图其实生成成功了（现场见 906/1299/
+    1304/1322/1325），按清单差异回收正好和下面 ``plan_salvage`` 的抢救目标相反。
 
     注意是**移入 ``.archived``**而不是直接删：历史上有一批题的 media_files 被后续写库
     覆盖成空数组（图片其实生成成功了），归档保留 30 天可恢复窗口，配合

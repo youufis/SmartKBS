@@ -172,12 +172,21 @@ def _maintain_exam_attempts() -> None:
 
 
 def _maintain_question_media() -> None:
-    """题库配图磁盘治理(Q6):
-    - ``question_media/.archived/`` 里超过 30 天的归档目录物理清除(软删题目的图先归档保留 30 天以便恢复)
-    - 软删但仍留着配图目录的题，目录移入归档
-    - **孤儿回收只认「数字命名的题库目录」**：闯关（quest/）与白板（whiteboard_ai/）
-      不在题库 id 集合里，过去被当孤儿整目录删掉，属于静默数据损坏
-    - 补一层文件级对账：删掉 manifest 不再引用、且超过 30 天的残留图片
+    """题库配图磁盘维护(Q6) —— 规矩只有一条：**只有题目被删除，才允许动它的配图**。
+
+    这里只做三件事，全是"加"或"清除已归档"，绝不按年龄或清单差异删在用的图：
+    - ``question_media/.archived/`` 里超过 30 天的归档目录物理清除（删除题目时先把配图
+      归档，留 30 天恢复窗口）；清除前逐个目录落一行审计日志，事后查得到删了什么。
+    - 已删除（``status='deleted'``）却还留着配图目录的题，目录移入归档。空目录直接回收，
+      不生成归档条目 —— 历史上 ``question_media/1`` 每轮被重建又被归档，攒了几十个空壳。
+    - 把"图在盘上、manifest 却丢了"的题重新挂接回去（纯修复，不删任何文件）。
+
+    2026-11-07 起**不再调用** ``sweep_orphan_dirs``（按目录年龄回收孤儿目录）与
+    ``sweep_stale_files``（按 manifest 差异回收残留文件）：两者都只按"当前题库状态"判断
+    归属，看不见题池快照 / 考试 / 练习 / 错题本这些第二引用方，题目一改状态图就先没、
+    引用还留着（排查 ``question_media/902`` 缺图时确认：11-01 清了 8 项 6.6MB、
+    11-06 19:34 清了 24 项 23.4MB，是这台机器上唯一带真实图片体量的清除）。
+    要腾磁盘请人工显式调用这两个函数，先核对引用面。
     """
     import os
     import shutil
@@ -191,8 +200,6 @@ def _maintain_question_media() -> None:
             dump_json,
             media_root,
             plan_salvage,
-            sweep_orphan_dirs,
-            sweep_stale_files,
             _safe_token,
         )
         root = media_root()
@@ -214,18 +221,30 @@ def _maintain_question_media() -> None:
 
         archived = root / ".archived"
         if archived.exists():
-            for name in os.listdir(archived):
+            purged: list[str] = []
+            for name in sorted(os.listdir(archived)):
                 p = archived / name
                 try:
-                    if p.is_dir() and p.stat().st_mtime < month_ago:
-                        freed += _dir_size(p)
-                        shutil.rmtree(p, ignore_errors=True)
-                        removed += 1
+                    if not (p.is_dir() and p.stat().st_mtime < month_ago):
+                        continue
+                    files = sorted(f.name for f in p.rglob("*") if f.is_file())
+                    size = _dir_size(p)
+                    freed += size
+                    shutil.rmtree(p, ignore_errors=True)
+                    removed += 1
+                    head = ",".join(n[:12] for n in files[:3])
+                    purged.append(f"{name}[{len(files)}张 {size // 1024}KB {head}]")
                 except OSError:
                     continue
+            if purged:
+                more = f" …共 {len(purged)} 个" if len(purged) > 20 else ""
+                logger.info(f"[log_retention] 配图归档到期清除: "
+                            f"{'; '.join(purged[:20])}{more}")
 
-        # 先收敛历史状态: 软删题若仍留着配图目录, 移入归档(新删除路径已在 delete 时归档)
-        soft_deleted = [str(r["id"]) for r in q_exec("SELECT id FROM question_bank WHERE status <> 'active'")]
+        # 收敛历史状态：只认 deleted 这一个状态。``status <> 'active'`` 会把将来新增的
+        # 待审/停用等状态一并当成"已删除"顺手删图，正是误删入口。删除路径本身已在
+        # delete 时归档（question_router._archive_media_dir）。
+        soft_deleted = [str(r["id"]) for r in q_exec("SELECT id FROM question_bank WHERE status='deleted'")]
         for sid in soft_deleted:
             try:
                 if archive_bank_dir(_safe_token(sid)):
@@ -235,10 +254,6 @@ def _maintain_question_media() -> None:
 
         rows = [dict(r) for r in q_exec(
             "SELECT id, media_files, media_placeholders FROM question_bank")]
-        known = {str(r["id"]) for r in rows}
-        # 闯关题历史上也往 question_media/<数字id> 写过（现在改到 quest/ 下了）。
-        # 把这些 id 也算进"已知"，老数据才不会被孤儿回收误删。
-        known |= _quest_known_ids()
 
         # 先把"图片在盘上、manifest 却丢了"的题救回来（历史上 media_files 被后续写库
         # 覆盖成空数组的题就是这种），剩下的才允许进归档
@@ -261,21 +276,9 @@ def _maintain_question_media() -> None:
                 continue
         if salvaged:
             logger.info(f"题库配图对账: 重新挂接 {salvaged} 张丢失引用的配图")
-        orphan_dirs, orphan_bytes = sweep_orphan_dirs(known, older_than_days=30)
-        removed += orphan_dirs
-        freed += orphan_bytes
-
-        # 文件级对账（跨表引用也算引用：闯关/白板与题库历史上可能共用过同一目录）
-        extra_refs: set[str] = set(_quest_referenced_files())
-
-        stale_files, stale_bytes = sweep_stale_files(
-            rows, older_than_days=30, extra_referenced=extra_refs,
-        )
-        removed += stale_files
-        freed += stale_bytes
 
         if removed:
-            logger.info(f"题库配图治理: 清理 {removed} 项, 释放 {freed / 1048576:.1f}MB")
+            logger.info(f"题库配图维护: 归档/清除 {removed} 项, 释放 {freed / 1048576:.1f}MB")
     except Exception as e:
         logger.warning(f"题库配图治理失败: {e}")
 
