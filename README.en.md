@@ -60,6 +60,10 @@
 > - 🧑‍💼 User management collapsed into one ledger: stats strip, filters and paging; a row opens editing, password reset and role change; deletion needs confirmation
 > - 🔒 Static path traversal closed, production no longer exposes the API listing; AI concurrency and queue time are capped separately
 >
+> **Unified page chrome (refactor)**
+> - 🎛️ 30+ pages now share one header: icon + title + subtitle + actions on the right; page-level actions settle into "1 primary + 2 secondary + More"
+> - 🧹 Gradient banners and card-in-card nesting removed, stat cards become one line of text; toolbars stay visible on scroll in long and split-pane pages
+>
 > - ⚠️ **Breaking changes**: none
 >
 > 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes are applied automatically at startup.
@@ -1175,6 +1179,13 @@ Git-based online incremental upgrade system:
 Current version **9.0.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.9.0 is merged into one section below.
 
 ### v9.0.0
+
+**UI & interaction (refactor)**
+
+- 🎛️ One page header everywhere: 30+ pages (student side included) use icon + title + subtitle + right-side actions, extracted into a shared component
+- 🎯 Actions by layer: page-level in the header (1 primary + 2 secondary + More), filters in the toolbar, row actions in the list, risky actions under "More"
+- 🧹 Visual cleanup: gradient banners and card-in-card nesting removed, four stat cards become one line, icon-only buttons on the board page gain labels
+- 📌 Actions survive scrolling: curriculum's two panes keep their headers pinned, reusable on any long list page
 
 **Data safety & backups**
 
