@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import {
   Card, Table, Typography, Button, Space, Modal, Form, Input,
   Select, message, Empty, Tag, Switch, Popconfirm, Pagination,
@@ -271,24 +272,29 @@ const AnnouncementsPage: React.FC = () => {
 
   return (
     <div>
-      <Card
-        title={<Space><BellOutlined />{t('announcements')}</Space>}
-        extra={
-          <Space>
+      <PageHeader
+        icon={<BellOutlined />}
+        title={t('announcements')}
+        subtitle={t('announcementsSubtitle')}
+        extra={(
+          <>
+            <Button icon={<ReloadOutlined />} onClick={() => fetchAnnouncements(page, pageSize)}
+              aria-label={t('refresh')} />
             {isAdminOrTeacher && (
               <>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
-                  {t('addAnnouncement')}
-                </Button>
                 <Button icon={<BulbOutlined />} onClick={() => { setAiModal(true); aiForm.resetFields(); }}>
                   {t('aiDraft')}
                 </Button>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
+                  {t('addAnnouncement')}
+                </Button>
               </>
             )}
-            <Button icon={<ReloadOutlined />} onClick={() => fetchAnnouncements(page, pageSize)}>{t('refresh')}</Button>
-          </Space>
-        }
-      >
+          </>
+        )}
+      />
+
+      <Card>
         {isMobile ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {announcements.length === 0 && !loading && <Empty description={t('noAnnouncements')} />}

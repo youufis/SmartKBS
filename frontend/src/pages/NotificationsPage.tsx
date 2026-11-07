@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import {
   Card, Tag, Typography, Button, Space, Empty, Spin, Pagination,
   message, Popconfirm, Segmented, Tabs, Checkbox, theme,
@@ -7,7 +8,7 @@ import {
 import {
   CheckOutlined, DeleteOutlined, ReloadOutlined,
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
-  AuditOutlined, InfoCircleOutlined, CustomerServiceOutlined, LikeOutlined,
+  AuditOutlined, InfoCircleOutlined, CustomerServiceOutlined, LikeOutlined, BellOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -189,10 +190,20 @@ const NotificationsPage: React.FC = () => {
   }
 
   return (
-    <Card
-      title={<Space><InfoCircleOutlined />{t('notifications')}</Space>}
-      extra={
-        activeTab === 'system' ? (
+    <div>
+      <PageHeader
+        icon={<BellOutlined />}
+        title={t('notifications')}
+        subtitle={t('notificationsSubtitle')}
+        extra={(
+          <Button icon={<ReloadOutlined />} onClick={() => { fetchNotifications(); fetchPushes() }}
+            aria-label={t('refresh')} />
+        )}
+      />
+
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        {activeTab === 'system' ? (
           <Space>
             {selectedNotifIds.size > 0 && <>
               <Popconfirm title={t('confirmBatchDelete', { count: selectedNotifIds.size })} onConfirm={handleBatchDeleteNotifs}>
@@ -214,9 +225,9 @@ const NotificationsPage: React.FC = () => {
             <Button icon={<CheckOutlined />} onClick={handlePushMarkAllRead}>{t('markAllAsRead')}</Button>
             <Button icon={<ReloadOutlined />} onClick={fetchPushes}>{t('refresh')}</Button>
           </Space>
-        )
-      }
-    >
+        )}
+        </div>
+
       <Tabs
         activeKey={activeTab}
         onChange={(key) => { setActiveTab(key); setPage(1); setPushPage(1) }}
@@ -269,7 +280,8 @@ const NotificationsPage: React.FC = () => {
           }] : []),
         ]}
       />
-    </Card>
+      </Card>
+    </div>
   )
 }
 

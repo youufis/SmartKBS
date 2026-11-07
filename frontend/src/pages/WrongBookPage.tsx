@@ -3,6 +3,7 @@ import { Layout, Card, Button, message, Tag, Space, Typography, Spin, Collapse, 
 import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined, SearchOutlined, CheckCircleFilled, CloseCircleFilled, DownOutlined, UpOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import PageHeader from '../components/PageHeader'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -658,26 +659,59 @@ const WrongBookPage: React.FC = () => {
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-        <div className="page-header-flex" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Space wrap>
-            <Title level={4} style={{ margin: 0 }}>📕 {t('wrongBook')}</Title>
-            {!!data && (
-              <Text type="secondary">
-                {t('totalQuestions', { count: data.total_wrong })}，{t('fromExams', { count: data.exams.length })}
-              </Text>
-            )}
-            {/* 接入范围要一直看得见：老师还没选学生时，最需要知道"为什么这里没有某个活动" */}
-            {!!sources?.sources?.length && (
-              <Tooltip title={t('wbScopeTip')}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  · {t('wbScope')}: {sources.sources.map((s) => sources.labels?.[s] || s).join(' / ')}
-                </Text>
-              </Tooltip>
-            )}
-          </Space>
-          <Space wrap>
-            {!isStudent && (
-              <>
+        <PageHeader
+          icon={<BookOutlined />}
+          title={t('wrongBook')}
+          subtitle={(
+            <>
+              {!!data && (
+                <>{t('totalQuestions', { count: data.total_wrong })}，{t('fromExams', { count: data.exams.length })}</>
+              )}
+              {/* 接入范围要一直看得见：老师还没选学生时，最需要知道"为什么这里没有某个活动" */}
+              {!!sources?.sources?.length && (
+                <>
+                  {' · '}
+                  <Tooltip title={t('wbScopeTip')}>
+                    {t('wbScope')}: {sources.sources.map((s) => sources.labels?.[s] || s).join(' / ')}
+                  </Tooltip>
+                </>
+              )}
+            </>
+          )}
+          extra={(
+            <>
+              <Button icon={<ReloadOutlined />} loading={loading} aria-label={t('refresh')} onClick={() => {
+                if (isStudent) { void loadData(); return }
+                void loadData(selectedStudent)
+                void loadAutoStatus(selectedStudent)
+              }} />
+              {!isStudent && (
+                <Button icon={<RobotOutlined />} onClick={loadReviewPlan} loading={planLoading}
+                  disabled={!data || counts.all === 0}>
+                  {t('aiReviewPlan')}
+                </Button>
+              )}
+              <Button icon={<DownloadOutlined />} onClick={exportWrongBook}
+                disabled={!data || counts.all === 0}>
+                {t('wbExport')}
+              </Button>
+              {!isStudent && (
+                <Button type="primary" icon={<RobotOutlined />} onClick={() => setCountModal(true)}
+                  disabled={!data || counts.all === 0}>
+                  {t('practiceWrong')}
+                </Button>
+              )}
+              {isStudent && (
+                <Button type="primary" icon={<RobotOutlined />} loading={selfBusy}
+                  onClick={selfPractice} disabled={!data || counts.pending === 0}>
+                  {t('practiceWrong')}
+                </Button>
+              )}
+            </>
+          )}
+        >
+          {!isStudent && (
+            <Space wrap>
                 <Select
                   style={{ width: 100 }}
                   placeholder={t('selectGrade')}
@@ -701,37 +735,9 @@ const WrongBookPage: React.FC = () => {
                   optionFilterProp="label"
                   options={students.map(s => ({ label: `${s.name} (${s.username})`, value: s.username }))}
                 />
-              </>
-            )}
-            {!isStudent && (
-              <Button icon={<RobotOutlined />} onClick={loadReviewPlan} loading={planLoading}
-                disabled={!data || counts.all === 0}>
-                {t('aiReviewPlan')}
-              </Button>
-            )}
-            {!isStudent && (
-              <Button icon={<RobotOutlined />} onClick={() => setCountModal(true)}
-                disabled={!data || counts.all === 0}>
-                {t('practiceWrong')}
-              </Button>
-            )}
-            {isStudent && (
-              <Button type="primary" icon={<RobotOutlined />} loading={selfBusy}
-                onClick={selfPractice} disabled={!data || counts.pending === 0}>
-                {t('practiceWrong')}
-              </Button>
-            )}
-            <Button icon={<DownloadOutlined />} onClick={exportWrongBook}
-              disabled={!data || counts.all === 0}>
-              {t('wbExport')}
-            </Button>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => {
-              if (isStudent) { void loadData(); return }
-              void loadData(selectedStudent)
-              void loadAutoStatus(selectedStudent)
-            }}>{t('refresh')}</Button>
-          </Space>
-        </div>
+            </Space>
+          )}
+        </PageHeader>
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>

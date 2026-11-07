@@ -1660,5 +1660,7 @@
   "importCsvHint": "支持 CSV 批量导入，列名见模板；导入过程中会逐行列出错误原因。",
   "execResult": "执行结果",
   "cleanEmptyClasses": "清理空壳班级",
-  "taskPageSubtitle": "布置、提交与批改，一条流水线"
+  "taskPageSubtitle": "布置、提交与批改，一条流水线",
+  "announcementsSubtitle": "发布通知、置顶重要事项、查看谁读过",
+  "notificationsSubtitle": "系统通知与推送，按类型筛选与批量处理"
 }

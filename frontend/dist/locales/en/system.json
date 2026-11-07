@@ -1660,5 +1660,7 @@
   "importCsvHint": "Bulk import from CSV; see the template for columns. Row-level errors are listed while importing.",
   "execResult": "Result",
   "cleanEmptyClasses": "Clean up empty classes",
-  "taskPageSubtitle": "Assign, submit and grade in one pipeline"
+  "taskPageSubtitle": "Assign, submit and grade in one pipeline",
+  "announcementsSubtitle": "Publish notices, pin what matters, see who read them",
+  "notificationsSubtitle": "System notices and pushes, filter by type and bulk-handle"
 }

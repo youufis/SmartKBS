@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
+import PageHeader from '../components/PageHeader'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import ScopeTag from '../components/ScopeTag'
@@ -479,22 +480,6 @@ const InteractionPage: React.FC = () => {
       label: <span><ThunderboltOutlined /> {t('title')}</span>,
       children: (
         <div>
-          {isTeacherOrAdmin && (
-            <Space style={{ marginBottom: 16 }}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setQuizEditorOpen(true)}>
-                {t('createQuiz')}
-              </Button>
-              <Button icon={<RobotOutlined />} onClick={() => {
-                setAiQuizModal(true); setAiQuizResult(null)
-                aiQuizForm.resetFields()
-                // 学科默认第一个（resetFields 走的是字段注册时的 initialValue，
-                // 若学科清单当时还没加载完就会留空 → 这里显式补一次）
-                aiQuizForm.setFieldValue('subject', subjectOptions[0] || '')
-              }}>
-                AI {t('createQuiz')}
-              </Button>
-            </Space>
-          )}
           {/* 使用 QuizEditor 组件（完整编辑器） */}
           <QuizEditor
             open={quizEditorOpen}
@@ -688,19 +673,28 @@ const InteractionPage: React.FC = () => {
   ]
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Space>
-            <ThunderboltOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('title')}</Title>
-            {/* 原先这里又写了一遍标题，横幅上同一个词出现两次；换成一句有用的说明 */}
-            <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              {isStudent ? t('ipListSub') : t('ipMyProgress', { todo: quizTodoCount, done: quizDoneCount })}
-            </Text>
-          </Space>
-        </div>
-      </Card>
+    <div>
+      <PageHeader
+        icon={<ThunderboltOutlined />}
+        title={t('title')}
+        subtitle={isStudent
+          ? t('ipListSub')
+          : t('ipMyProgress', { todo: quizTodoCount, done: quizDoneCount })}
+        extra={isTeacherOrAdmin ? (
+          <>
+            <Button icon={<RobotOutlined />} onClick={() => {
+              setAiQuizModal(true); setAiQuizResult(null)
+              aiQuizForm.resetFields()
+              aiQuizForm.setFieldValue('subject', subjectOptions[0] || '')
+            }}>
+              AI {t('createQuiz')}
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setQuizEditorOpen(true)}>
+              {t('createQuiz')}
+            </Button>
+          </>
+        ) : undefined}
+      />
 
       {/* 整页只有「随堂测验」一个页签，Tabs 只是白占一行（学生端尤其明显） */}
       <Card>
@@ -1271,13 +1265,7 @@ const InteractionPage: React.FC = () => {
           {/* 状态不在这里改：列表上的「发布开关」负责发布/结束/重开，各有前置校验 */}
         </Form>
       </Modal>
-
-
-
-
-
-
-    </Card>
+    </div>
   )
 }
 
