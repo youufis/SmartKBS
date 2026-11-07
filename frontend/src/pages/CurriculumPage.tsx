@@ -1817,6 +1817,11 @@ const CurriculumPage: React.FC = () => {
                 cursor: 'pointer',
                 color: 'var(--text-secondary)',
                 fontSize: 16,
+                // 课程树很长时，折叠按钮与下面的开关一起钉住，滚动不丢操作
+                position: 'sticky',
+                top: 0,
+                zIndex: 6,
+                background: 'var(--bg-container)',
               }}
               onClick={() => setSiderCollapsed(!siderCollapsed)}
             >
@@ -1827,7 +1832,14 @@ const CurriculumPage: React.FC = () => {
             {!siderCollapsed && (
               <>
                 {/* 侧栏头部 */}
-                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)' }}>
+                <div style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid var(--border-color)',
+                  position: 'sticky',
+                  top: 48,
+                  zIndex: 5,
+                  background: 'var(--bg-container)',
+                }}>
                   {isTeacherOrAdmin && (
                     <Tooltip title={t('showInactiveCoursesHint')}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
