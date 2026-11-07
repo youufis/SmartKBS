@@ -1,21 +1,23 @@
 /** 每日精选管理（教师/管理员） */
 import React, { useEffect, useState } from 'react'
 import {
-  Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Popconfirm,
-  Row, Select, Space, Statistic, Table, Tag, Typography, message,
+  Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm,
+  Select, Space, Table, Tag, Typography, message,
 } from 'antd'
 import {
   EditOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, CheckCircleOutlined,
-  EyeOutlined,
+  EyeOutlined, CompassOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
+import StatLine from '../components/StatLine'
 import { useAuthStore } from '../stores/authStore'
 import {
   bulkAdminCards, getAdminCards, getAdminHealth, updateAdminCard,
   type DiscoveryAdminCard, type DiscoveryAdminHealth,
 } from '../api/dailyDiscovery'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 const DailyDiscoveryAdminPage: React.FC = () => {
@@ -168,28 +170,33 @@ const DailyDiscoveryAdminPage: React.FC = () => {
   ]
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-        <div>
-          <Title level={3} style={{ margin: 0 }}>{t('pageTitle')}</Title>
-          <Text type="secondary">{t('subtitle')}</Text>
-        </div>
-        <Space>
-          <Button icon={<EyeOutlined />} onClick={() => window.open('/daily-discovery', '_blank')}>
-            {t('previewStudent')}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => { void load(); void loadHealth() }}>
-            {t('refresh')}
-          </Button>
-        </Space>
-      </Space>
+    <div>
+      <PageHeader
+        icon={<CompassOutlined />}
+        title={t('pageTitle')}
+        subtitle={t('subtitle')}
+        extra={(
+          <>
+            <Button icon={<EyeOutlined />} onClick={() => window.open('/daily-discovery', '_blank')}>
+              {t('previewStudent')}
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { void load(); void loadHealth() }}
+              aria-label={t('refresh')} />
+          </>
+        )}
+      />
 
-      <Row gutter={12} style={{ marginTop: 16 }}>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('poolActive')} value={health?.total_active ?? 0} /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('poolDisabled')} value={health?.total_disabled ?? 0} /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('refillThreshold')} value={health?.refill_threshold ?? 0} /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('lastRefill')} value={health?.last_refill_at || '—'} /></Card></Col>
-      </Row>
+      <StatLine
+        style={{ marginBottom: 16 }}
+        items={[
+          { key: 'active', label: t('poolActive'), value: health?.total_active ?? 0 },
+          { key: 'disabled', label: t('poolDisabled'), value: health?.total_disabled ?? 0 },
+          { key: 'threshold', label: t('refillThreshold'), value: health?.refill_threshold ?? 0 },
+          { key: 'refill', label: t('lastRefill'), value: health?.last_refill_at || '—' },
+        ]}
+      />
+
+      <Card style={{ borderRadius: 8 }}>
 
       <Card size="small" style={{ marginTop: 12 }}>
         <Space wrap>
@@ -314,7 +321,8 @@ const DailyDiscoveryAdminPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-    </Card>
+      </Card>
+    </div>
   )
 }
 

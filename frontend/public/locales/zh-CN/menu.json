@@ -224,5 +224,6 @@
   "kind.other": "其他",
   "kind.dir": "文件夹",
   "mobileMore": "菜单",
-  "mobileDrawerTitle": "全部功能"
+  "mobileDrawerTitle": "全部功能",
+  "htmlFilesSubtitle": "在线网页资源，预览、分组与分发"
 }

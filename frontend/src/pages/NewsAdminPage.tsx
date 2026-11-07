@@ -1,14 +1,16 @@
 /** 新闻管理（教师/管理员） */
 import React, { useEffect, useState } from 'react'
 import {
-  Alert, Button, Card, Col, DatePicker, Form, Input, Modal, Popconfirm,
-  Row, Select, Space, Statistic, Table, Tag, Typography, message,
+  Alert, Button, Card, DatePicker, Form, Input, Modal, Popconfirm,
+  Select, Space, Table, Tag, Typography, message,
 } from 'antd'
 import {
-  DeleteOutlined, EditOutlined, ReloadOutlined, StopOutlined, CheckCircleOutlined,
+  DeleteOutlined, EditOutlined, ReloadOutlined, StopOutlined, CheckCircleOutlined, ReadOutlined,
   SafetyCertificateOutlined, SyncOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
+import StatLine from '../components/StatLine'
 import { useAuthStore } from '../stores/authStore'
 import {
   bulkAdminNews, diagnoseNewsFeeds, getAdminNews, getAdminNewsHealth,
@@ -16,7 +18,7 @@ import {
   type NewsAdminArticle, type NewsAdminHealth,
 } from '../api/news'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 const { RangePicker } = DatePicker
 
@@ -209,31 +211,36 @@ const NewsAdminPage: React.FC = () => {
   ]
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-        <div>
-          <Title level={3} style={{ margin: 0 }}>{t('newsTitle')}</Title>
-          <Text type="secondary">{t('newsSubtitle')}</Text>
-        </div>
-        <Space wrap>
-          <Button icon={<EyeOutlined />} onClick={() => window.open('/news-hub', '_blank')}>
-            {t('previewStudent')}
-          </Button>
-          <Button icon={<SafetyCertificateOutlined />} loading={diagnosing} onClick={diagnose}>
-            {t('sourceHealth')}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => { void load(); void loadHealth() }}>
-            {t('refresh')}
-          </Button>
-        </Space>
-      </Space>
+    <div>
+      <PageHeader
+        icon={<ReadOutlined />}
+        title={t('newsTitle')}
+        subtitle={t('newsSubtitle')}
+        extra={(
+          <>
+            <Button icon={<EyeOutlined />} onClick={() => window.open('/news-hub', '_blank')}>
+              {t('previewStudent')}
+            </Button>
+            <Button icon={<SafetyCertificateOutlined />} loading={diagnosing} onClick={diagnose}>
+              {t('sourceHealth')}
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { void load(); void loadHealth() }}
+              aria-label={t('refresh')} />
+          </>
+        )}
+      />
 
-      <Row gutter={12} style={{ marginTop: 16 }}>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('newsActive')} value={health?.active ?? 0} /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('newsHidden')} value={health?.hidden ?? 0} /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('sourceName')} value={Object.keys(health?.sources || {}).length} /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title={t('fetchedAt')} value={health?.last_fetch?.fetched_at?.slice(0, 16) || '—'} /></Card></Col>
-      </Row>
+      <StatLine
+        style={{ marginBottom: 16 }}
+        items={[
+          { key: 'active', label: t('newsActive'), value: health?.active ?? 0 },
+          { key: 'hidden', label: t('newsHidden'), value: health?.hidden ?? 0 },
+          { key: 'sources', label: t('sourceName'), value: Object.keys(health?.sources || {}).length },
+          { key: 'fetched', label: t('fetchedAt'), value: health?.last_fetch?.fetched_at?.slice(0, 16) || '—' },
+        ]}
+      />
+
+      <Card style={{ borderRadius: 8 }}>
 
       <Card size="small" style={{ marginTop: 12 }}>
         <Space wrap style={{ marginBottom: 12 }}>
@@ -369,7 +376,8 @@ const NewsAdminPage: React.FC = () => {
           ]}
         />
       </Modal>
-    </Card>
+      </Card>
+    </div>
   )
 }
 

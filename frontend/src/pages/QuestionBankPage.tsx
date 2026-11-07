@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image,
-  DatePicker,
+  DatePicker, Dropdown,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
@@ -18,6 +18,7 @@ import { pollAiTask, runAiTaskJob, type AiTaskProgress } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import AnswerLine from '../components/AnswerLine'
 import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
@@ -875,28 +876,15 @@ const QuestionBankPage: React.FC = () => {
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-        {/* ── 标题和操作栏 ── */}
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-              📝 {t('title')}
-            </Typography.Title>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {t('title')}
-            </Typography.Text>
-          </Col>
-          <Col>
-            <Space>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setShowGeneratePanel(!showGeneratePanel)}
-              >
-                {showGeneratePanel ? t('collapsePanel') : t('generateExtract')}
-              </Button>
-              <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}>
-                {t('refresh')}
-              </Button>
+        {/* ── 统一页面头：标题 / 副标题 / 主次操作 ── */}
+        <PageHeader
+          icon={<BookOutlined />}
+          title={t('title')}
+          subtitle={t('pageSubtitle')}
+          extra={(
+            <>
+              <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}
+                aria-label={t('refresh')} />
               <Button icon={<BarChartOutlined />} onClick={() => navigate('/question-bank/analytics')}>
                 {t('analyticsTitle')}
               </Button>
@@ -904,15 +892,25 @@ const QuestionBankPage: React.FC = () => {
                 {t('dedup')}
               </Button>
               {user?.role === 'admin' && (
-                <Tooltip title={t('tagFillTip')}>
-                  <Button icon={<TagsOutlined />} onClick={handleTagFill} loading={tagFillLoading}>
-                    {t('tagFill')}
-                  </Button>
-                </Tooltip>
+                <Dropdown
+                  menu={{
+                    items: [{ key: 'tag', label: t('tagFill'), icon: <TagsOutlined /> }],
+                    onClick: () => { void handleTagFill() },
+                  }}
+                >
+                  <Button loading={tagFillLoading}>{t('moreActions')}</Button>
+                </Dropdown>
               )}
-            </Space>
-          </Col>
-        </Row>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setShowGeneratePanel(!showGeneratePanel)}
+              >
+                {showGeneratePanel ? t('collapsePanel') : t('generateExtract')}
+              </Button>
+            </>
+          )}
+        />
 
         {/* ── 试题生成/提取面板 ── */}
         {showGeneratePanel && (

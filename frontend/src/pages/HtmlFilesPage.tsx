@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Alert, Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, Radio, Select, Spin, theme } from 'antd'
-import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { ReloadOutlined, FileOutlined, FileTextOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
@@ -11,6 +11,7 @@ import ResourceBrowser, { type BrowserItem } from '../components/ResourceBrowser
 import { subKindLabel } from '../utils/resourceType'
 import KindTag from '../components/KindTag'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 
 const HtmlFilesPage: React.FC = () => {
   const { t } = useTranslation(['menu', 'curriculum'])
@@ -478,22 +479,25 @@ const HtmlFilesPage: React.FC = () => {
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={14}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-            {isAdminOrTeacher ? `📄 ${t('resourceCenter')}` : `📄 ${t('sharedResources')}`}
-          </Typography.Title>
-          <Space>
-            <Input
-              placeholder={t('searchResource')}
-              prefix={<SearchOutlined />}
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              allowClear
-              style={{ width: 220 }}
-            />
-            <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
-          </Space>
-        </div>
+        <PageHeader
+          icon={<FileTextOutlined />}
+          title={isAdminOrTeacher ? t('resourceCenter') : t('sharedResources')}
+          subtitle={t('htmlFilesSubtitle')}
+          extra={(
+            <>
+              <Input
+                placeholder={t('searchResource')}
+                prefix={<SearchOutlined />}
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                allowClear
+                style={{ width: 220 }}
+              />
+              <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}
+                aria-label={t('refresh')} />
+            </>
+          )}
+        />
 
         {isAdminOrTeacher ? (
           <Tabs defaultActiveKey="mine" onChange={() => { setGroupPages({}); setActiveGroup(null); }} items={[

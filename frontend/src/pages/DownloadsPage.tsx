@@ -5,13 +5,14 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Button, Card, Dropdown, Drawer, Empty, Input, Layout, Modal, Space, Table, Tooltip, Typography, message, theme,
+  Button, Card, Dropdown, Drawer, Empty, Input, Layout, Modal, Space, Tooltip, Typography, message, theme,
 } from 'antd'
 import {
-  DeleteOutlined, DownloadOutlined, FolderOpenOutlined, FolderOutlined, ReloadOutlined,
+  DeleteOutlined, DownloadOutlined, CloudDownloadOutlined, FolderOpenOutlined, FolderOutlined, ReloadOutlined,
   SearchOutlined, ShareAltOutlined, UploadOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import * as sharingApi from '../api/sharing'
 import apiClient from '../api/client'
 import ShareDialog from '../components/ShareDialog'
@@ -423,12 +424,15 @@ const DownloadsPage: React.FC = () => {
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-            {isStudent ? t('sharedFiles') : t('fileCenter')}
-          </Typography.Title>
-          <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
-        </div>
+        <PageHeader
+          icon={<CloudDownloadOutlined />}
+          title={isStudent ? t('sharedFiles') : t('fileCenter')}
+          subtitle={t('downloadsSubtitle')}
+          extra={(
+            <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}
+              aria-label={t('refresh')} />
+          )}
+        />
 
         {!isStudent && (
           <>

@@ -224,5 +224,6 @@
   "kind.other": "Other",
   "kind.dir": "Folder",
   "mobileMore": "Menu",
-  "mobileDrawerTitle": "All features"
+  "mobileDrawerTitle": "All features",
+  "htmlFilesSubtitle": "Web resources: preview, group and share"
 }

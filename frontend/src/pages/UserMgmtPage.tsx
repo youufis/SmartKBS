@@ -23,6 +23,7 @@ import { useSubjectOptions } from '../hooks/useSubjectOptions'
 import { useIsMobile } from '../hooks/useIsMobile'
 import ListFilterBar from '../components/ListFilterBar'
 import PageHeader from '../components/PageHeader'
+import StatLine from '../components/StatLine'
 import MobileCardTable from '../components/MobileCardTable'
 import type { MobileCardColumn } from '../components/MobileCardTable'
 import { ROLE_ADMIN, ROLE_LABEL, ROLE_STUDENT, ROLE_TEACHER, roleColor, roleToNumber } from './user-mgmt/roles'
@@ -104,38 +105,6 @@ const SelfPasswordCard: React.FC = () => {
     </Card>
   )
 }
-
-const StatLine: React.FC<{
-  items: Array<{ key: string; label: string; value: number; active?: boolean; onClick?: () => void }>
-}> = ({ items }) => (
-  <div
-    style={{
-      display: 'flex', flexWrap: 'wrap', alignItems: 'baseline',
-      gap: '4px 20px', marginBottom: 12, fontSize: 13,
-    }}
-  >
-    {items.map(it => (
-      <button
-        key={it.key}
-        type="button"
-        onClick={it.onClick}
-        style={{
-          display: 'inline-flex', alignItems: 'baseline', gap: 6,
-          border: 'none', background: 'none', padding: 0,
-          cursor: it.onClick ? 'pointer' : 'default',
-        }}
-      >
-        <span style={{ color: it.active ? 'var(--primary-color)' : 'var(--text-secondary)' }}>
-          {it.label}
-        </span>
-        <b style={{
-          fontSize: 15, fontWeight: 600,
-          color: it.active ? 'var(--primary-color)' : 'var(--text-primary)',
-        }}>{it.value}</b>
-      </button>
-    ))}
-  </div>
-)
 
 const UserLedger: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
   const { t } = useTranslation('system')

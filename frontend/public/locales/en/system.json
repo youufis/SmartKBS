@@ -1663,5 +1663,6 @@
   "taskPageSubtitle": "Assign, submit and grade in one pipeline",
   "announcementsSubtitle": "Publish notices, pin what matters, see who read them",
   "notificationsSubtitle": "System notices and pushes, filter by type and bulk-handle",
-  "systemConfigSubtitle": "API keys, models, storage and runtime options"
+  "systemConfigSubtitle": "API keys, models, storage and runtime options",
+  "downloadsSubtitle": "Files shared by teachers, in one place"
 }
