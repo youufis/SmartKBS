@@ -2102,6 +2102,7 @@ const CurriculumPage: React.FC = () => {
                     />
                   )}
                   <Card
+                    className="sticky-card-head"
                     title={
                       <Space>
                         <BookOutlined />

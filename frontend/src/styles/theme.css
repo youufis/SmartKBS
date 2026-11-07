@@ -102,3 +102,23 @@ body {
 .teacher-scope-detail-count {
   color: var(--text-tertiary);
 }
+
+/* 长列表卡片：滚动时把卡片头（标题 + 操作按钮）钉在顶部
+   用在「左右分栏、右侧独立滚动」的页面（如课程管理详情），避免滚动后找不到操作入口 */
+.sticky-card-head > .ant-card-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-container);
+  border-radius: 10px 10px 0 0;
+}
+/* 卡片顶边有圆角缝隙，滚动内容会从缝里露出来一窄条，用一块同色遮罩盖住 */
+.sticky-card-head > .ant-card-head::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10px;
+  height: 10px;
+  background: var(--bg-container);
+}
