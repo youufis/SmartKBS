@@ -108,15 +108,16 @@ export function useLadderSetup(a: Args) {
   }, [session, t, message, setSession])
 
   const topic = courseKp.trim()
-  const ready = Boolean(grade && cls && (topic || subject))
+  // 学科、知识点都可留空（＝整库随机），硬门槛只剩年级 + 班级
+  const ready = Boolean(grade && cls)
 
   const doOpenSession = useCallback(async () => {
-    if (!ready) { message.warning(t('selectTopicOrSubject')); return }
+    if (!ready) { message.warning(t('selectGradeClass')); return }
     setOpening(true)
     try {
       const s = await openLadderSession({
         grade, class: cls, subject, topic,
-        allow_ai: allowAi, question_type: questionType,
+        allow_ai: allowAi && Boolean(topic), question_type: questionType,
         time_limit_sec: timeLimit, pool_size: poolSize, skin: activeSkin,
       })
       setSession(s)

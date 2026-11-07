@@ -819,19 +819,20 @@ async def open_session(request: Request):
     topic = "、".join(topics)
     skin = str(body.get("skin") or "")
 
-    if not topic and not subject:
-        raise HTTPException(status_code=400, detail="请至少选择学科，或输入一个知识点")
-
     # 结束上一场（同一老师同一班级）
     old = _load_active_session(teacher, grade, cls)
     if old:
         execute_insert_update("UPDATE class_ladder_sessions SET status='ended', updated_at=? WHERE id=?",
                               (_now(), old["id"]))
 
+    # 学科、知识点都留空＝整库随机：题池按关卡难度分桶，走 question_select 的
+    # no_kp_constraint 分支，关卡曲线不会塌。AI 补题则必须有主题——没主题无从下手，
+    # 生成的题也挂不上知识点边（等于往题库塞脏数据），所以 ai_enabled 按 topic 兜住，
+    # 不依赖前端把开关置灰。
     session = _create_session(
         teacher, grade, cls,
         subject=subject, topic=topic,
-        ai_enabled=bool(body.get("allow_ai")),
+        ai_enabled=bool(body.get("allow_ai")) and bool(topic),
         question_type="true_false" if body.get("question_type") == "true_false" else "single",
         time_limit_sec=_as_time_limit(body.get("time_limit_sec")),
         pool_size=int(body.get("pool_size") or DEFAULT_POOL_SIZE),

@@ -1,4 +1,4 @@
-import { Button, Popconfirm, Select, Space, Switch, Tooltip, Typography } from 'antd'
+import { Button, Popconfirm, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { DatabaseOutlined, RobotOutlined, RocketOutlined, SettingOutlined, SoundOutlined, MutedOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { LadderConfig, LadderSession } from '../../../api/classLadder'
@@ -24,6 +24,11 @@ interface Props {
 export default function LadderSetupBar(p: Props) {
   const { t } = useTranslation('classLadder')
   const { setup, config, session, setupOpen } = p
+  // 题池的随机范围：开场后以会话为准（题池就是按它建的），还没开场就跟着当前选择
+  const scopeTopic = String((session ? session.topic : setup.topic) || '').trim()
+  const scopeSubject = String((session ? session.subject : setup.subject) || '').trim()
+  const scopeText = scopeTopic
+    || (scopeSubject ? t('scopeSubject', { subject: scopeSubject }) : t('scopeAny'))
   return (
     <div className="cl-setup">
       {setupOpen && (<>
@@ -36,7 +41,8 @@ export default function LadderSetupBar(p: Props) {
           onChange={(v) => { setup.setSubject(v || ''); setup.setCourseKp('') }}
           style={{ width: 118 }} options={setup.subjects.map((s) => ({ label: s, value: s }))} />
         <KnowledgePointSelect multiple={false} subject={setup.subject} value={setup.courseKp}
-          onChange={(v) => setup.setCourseKp(String(v || ''))} style={{ width: 200 }} />
+          onChange={(v) => setup.setCourseKp(String(v || ''))}
+          placeholder={t('kpPlaceholder')} style={{ width: 200 }} />
 
         <Select value={setup.questionType} onChange={setup.setQuestionType} style={{ width: 116 }}
           options={(config?.question_types || [{ value: 'single', label: t('qtSingle') }]).map((o) => ({
@@ -63,14 +69,25 @@ export default function LadderSetupBar(p: Props) {
           icon={p.soundOn && p.soundAvailable ? <SoundOutlined /> : <MutedOutlined />}
           onClick={p.onToggleSound} />
       </Tooltip>
-      <Tooltip title={config && !config.ai_enabled ? t('aiDisabledByAdmin') : t('aiSwitchHint')}>
+      {/* 知识点留空＝整库随机：AI 补题没有主题可依，出回来的题也挂不上知识点边，这里置灰 */}
+      <Tooltip title={
+        config && !config.ai_enabled ? t('aiDisabledByAdmin')
+          : !setup.topic ? t('aiNeedTopicHint') : t('aiSwitchHint')
+      }>
         <Space size={6}>
-          <Switch checked={setup.allowAi} disabled={!config?.ai_enabled} onChange={setup.setAllowAi} size="small" />
-          <Text type={config?.ai_enabled ? undefined : 'secondary'} style={{ fontSize: 13 }}>
+          <Switch checked={setup.allowAi && Boolean(setup.topic)}
+            disabled={!config?.ai_enabled || !setup.topic} onChange={setup.setAllowAi} size="small" />
+          <Text type={config?.ai_enabled && setup.topic ? undefined : 'secondary'} style={{ fontSize: 13 }}>
             <RobotOutlined /> {t('aiSwitch')}
           </Text>
         </Space>
       </Tooltip>
+      {/* 范围标签：整库随机 / 学科 / 知识点，投屏时一眼看出这局题从哪来 */}
+      <Tag color={scopeTopic ? 'cyan' : 'default'} title={scopeText}
+        style={{ maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis',
+                 whiteSpace: 'nowrap', verticalAlign: 'middle', marginInlineEnd: 0 }}>
+        {scopeText}
+      </Tag>
       {setupOpen && (<>
         <Button type="primary" icon={<RocketOutlined />} loading={setup.opening} disabled={!setup.ready} onClick={setup.doOpenSession}>
           {session ? t('resetSession') : t('startSession')}

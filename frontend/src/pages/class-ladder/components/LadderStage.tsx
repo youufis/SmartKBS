@@ -30,8 +30,10 @@ export default function LadderStage({ currentQ, selected, reveal, hiddenKeys, bu
               <span className="cl-pill">{t('difficulty')}：{currentQ.difficulty === 'easy' ? t('diffEasy') : currentQ.difficulty === 'hard' ? t('diffHard') : t('diffMedium')}</span>
             </div>
             <div className="cl-stem"><FormulaRenderer content={currentQ.question} /></div>
+            {/* 配图与课堂抽问同一口径：按图自身比例缩到 180 高、居中排在题干下方，
+                不占左右两栏；投影要看细节点图放大 */}
             <MediaDisplay svgContent={currentQ.svg_content} hasSvg={currentQ.has_svg}
-              mediaFiles={currentQ.media_files as never} size="large" />
+              mediaFiles={currentQ.media_files as never} size="fluid" maxHeight={180} />
             <div className="cl-opts">
               {(currentQ.options || []).map((opt, i) => {
                 const key = optionKey(opt, i, currentQ.type)

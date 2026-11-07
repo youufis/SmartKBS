@@ -125,21 +125,24 @@
 .cl-whochip .sf{font-size:12px;color:var(--cl-ink-dim);}
 
 .cl-qcard{flex:1;min-height:0;overflow:auto;padding:22px 28px;display:flex;flex-direction:column;
+  /* 题卡基准字号＝页面默认 14px：题干与选项都从这里继承，不再各自放大 */
+  font-size:14px;
   background:linear-gradient(180deg,var(--cl-panel),var(--cl-panel2));
   border:1px solid color-mix(in srgb,var(--cl-a3) 42%,transparent);border-radius:20px;
   box-shadow:0 14px 36px color-mix(in srgb,#000 calc(24% * var(--cl-star)), transparent);}
 .cl-qmeta{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
-.cl-pill{padding:5px 14px;border-radius:999px;font-size:15px;color:var(--cl-ink);
+.cl-pill{padding:3px 10px;border-radius:999px;font-size:13px;color:var(--cl-ink);
   background:color-mix(in srgb,var(--cl-a2) 14%,var(--cl-chip));
   border:1px solid color-mix(in srgb,var(--cl-a2) 44%,transparent);}
 .cl-pill.point{background:color-mix(in srgb,var(--cl-a1) 16%,var(--cl-chip));
   border-color:color-mix(in srgb,var(--cl-a1) 48%,transparent);font-weight:600;}
-.cl-stem{font-size:30px;font-weight:700;line-height:1.45;margin-bottom:18px;color:var(--cl-ink);}
-.cl-opts{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-.cl-opt{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:14px;font-size:22px;
+.cl-stem{font-weight:700;line-height:1.6;margin-bottom:14px;color:var(--cl-ink);}
+/* 选项单栏整宽（与课堂抽问一致）：两栏会把长选项挤成三四行，读题顺序也乱 */
+.cl-opts{display:grid;grid-template-columns:1fr;gap:8px;}
+.cl-opt{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:8px;
   background:var(--cl-opt);border:2px solid var(--cl-line);color:var(--cl-ink);cursor:pointer;transition:.15s;}
 .cl-opt:hover{border-color:color-mix(in srgb,var(--cl-a2) 55%,transparent);}
-.cl-opt .k{width:38px;height:38px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#0a1024;
+.cl-opt .k{width:24px;height:24px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#0a1024;
   background:linear-gradient(135deg,color-mix(in srgb,var(--cl-a2) 70%,#fff),var(--cl-a2));}
 .cl-opt .txt{flex:1;min-width:0;}
 .cl-opt.sel{border-color:var(--cl-a2);background:color-mix(in srgb,var(--cl-a2) 16%,var(--cl-opt));
@@ -150,8 +153,8 @@
 .cl-opt.wrong{border-color:var(--cl-bad);background:color-mix(in srgb,var(--cl-bad) 16%,transparent);animation:cl-shake .4s;}
 .cl-opt.gone{opacity:.28;text-decoration:line-through;}
 @keyframes cl-shake{0%,100%{transform:translateX(0);}25%{transform:translateX(-7px);}75%{transform:translateX(7px);}}
-.cl-opt .mark{margin-left:auto;font-size:18px;font-weight:800;color:var(--cl-ok);white-space:nowrap;}
-.cl-footline{margin-top:auto;display:flex;align-items:center;gap:12px;padding-top:12px;color:var(--cl-ink-dim);font-size:16px;flex-wrap:wrap;}
+.cl-opt .mark{margin-left:auto;font-size:14px;font-weight:800;color:var(--cl-ok);white-space:nowrap;}
+.cl-footline{margin-top:auto;display:flex;align-items:center;gap:12px;padding-top:12px;color:var(--cl-ink-dim);font-size:13px;flex-wrap:wrap;}
 
 .cl-board{width:198px;flex:0 0 auto;padding:11px;display:flex;flex-direction:column;}
 .cl-board h2{font-size:14px;letter-spacing:1.5px;margin:0 0 8px;color:color-mix(in srgb,var(--cl-a1) 68%,var(--cl-ink));}
@@ -224,6 +227,4 @@ body.cl-fs .cl-root{border-radius:12px}
 .cl-ladder .cl-rungs{overflow:auto;}
 @media (max-width:1440px){
   .cl-main{min-height:470px;}
-  .cl-stem{font-size:26px;}
-  .cl-opt{font-size:19px;}
 }
