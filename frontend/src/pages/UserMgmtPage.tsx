@@ -9,11 +9,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Alert, Button, Card, Col, Divider, Dropdown, Form, Input, Modal, Row, Select, Space, Table,
+  Alert, Button, Card, Dropdown, Form, Input, Modal, Select, Space, Table,
   Tag, Typography, message,
 } from 'antd'
 import {
-  CloudUploadOutlined, DownloadOutlined, MoreOutlined, PlusOutlined, ReloadOutlined,
+  CloudUploadOutlined, MoreOutlined, PlusOutlined, ReloadOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import * as usersApi from '../api/users'
@@ -22,6 +22,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
 import { useIsMobile } from '../hooks/useIsMobile'
 import ListFilterBar from '../components/ListFilterBar'
+import PageHeader from '../components/PageHeader'
 import MobileCardTable from '../components/MobileCardTable'
 import type { MobileCardColumn } from '../components/MobileCardTable'
 import { ROLE_ADMIN, ROLE_LABEL, ROLE_STUDENT, ROLE_TEACHER, roleColor, roleToNumber } from './user-mgmt/roles'
@@ -104,23 +105,36 @@ const SelfPasswordCard: React.FC = () => {
   )
 }
 
-const StatCell: React.FC<{
-  label: string; value: number; active?: boolean; onClick?: () => void
-}> = ({ label, value, active, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
+const StatLine: React.FC<{
+  items: Array<{ key: string; label: string; value: number; active?: boolean; onClick?: () => void }>
+}> = ({ items }) => (
+  <div
     style={{
-      textAlign: 'left', cursor: onClick ? 'pointer' : 'default', padding: '10px 14px',
-      borderRadius: 10, minWidth: 130,
-      border: `1px solid ${active ? 'var(--primary-color)' : 'var(--border-color)'}`,
-      background: active ? 'var(--primary-color-soft, rgba(22,119,255,.08))' : 'var(--bg-container)',
-      transition: 'border-color .2s, background .2s',
+      display: 'flex', flexWrap: 'wrap', alignItems: 'baseline',
+      gap: '4px 20px', marginBottom: 12, fontSize: 13,
     }}
   >
-    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</div>
-    <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.4, color: 'var(--text-primary)' }}>{value}</div>
-  </button>
+    {items.map(it => (
+      <button
+        key={it.key}
+        type="button"
+        onClick={it.onClick}
+        style={{
+          display: 'inline-flex', alignItems: 'baseline', gap: 6,
+          border: 'none', background: 'none', padding: 0,
+          cursor: it.onClick ? 'pointer' : 'default',
+        }}
+      >
+        <span style={{ color: it.active ? 'var(--primary-color)' : 'var(--text-secondary)' }}>
+          {it.label}
+        </span>
+        <b style={{
+          fontSize: 15, fontWeight: 600,
+          color: it.active ? 'var(--primary-color)' : 'var(--text-primary)',
+        }}>{it.value}</b>
+      </button>
+    ))}
+  </div>
 )
 
 const UserLedger: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
@@ -309,36 +323,41 @@ const UserLedger: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
 
   return (
     <div>
-      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        {[
-          {
-            key: 'all', label: t('statsAll'), value: stats?.total ?? 0,
-            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'all' }); setKeywordInput(''); setPage(1) },
-            active: filters.status === 'all' && filters.role === undefined && !filters.grade && filters.classId === undefined,
-          },
-          {
-            key: 'students', label: t('statsStudents'), value: stats?.active_students ?? 0,
-            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'active', role: ROLE_STUDENT }); setKeywordInput(''); setPage(1) },
-            active: filters.status === 'active' && filters.role === ROLE_STUDENT,
-          },
-          {
-            key: 'teachers', label: t('statsTeachers'), value: stats?.teachers ?? 0,
-            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'all', role: ROLE_TEACHER }); setKeywordInput(''); setPage(1) },
-            active: filters.role === ROLE_TEACHER,
-          },
-          {
-            key: 'graduated', label: t('statsGraduated'), value: stats?.graduated ?? 0,
-            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'graduated', role: ROLE_STUDENT }); setKeywordInput(''); setPage(1) },
-            active: filters.status === 'graduated',
-          },
-        ].map(c => (
-          <Col key={c.key} xs={12} sm={12} md={6}>
-            <StatCell label={c.label} value={c.value} active={c.active} onClick={c.onClick} />
-          </Col>
-        ))}
-      </Row>
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <PageHeader
+        icon={<UserOutlined />}
+        title={t('userManagement')}
+        subtitle={t('userMgmtIntro')}
+        extra={(
+          <>
+            <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading} aria-label={t('refresh')} />
+            <Button icon={<CloudUploadOutlined />} onClick={() => setImportOpen(true)}>{t('batchImport')}</Button>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'export', label: t('exportUsers') },
+                  ...(isAdmin ? [
+                    { type: 'divider' as const },
+                    { key: 'bulk-delete', label: t('bulkDelete'), danger: true },
+                    { key: 'promote', label: t('batchUpgradeTitle') },
+                    { key: 'class-cleanup', label: t('cleanEmptyClasses') },
+                  ] : []),
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'export') handleExport()
+                  else if (key === 'bulk-delete') setBulkDeleteOpen(true)
+                  else if (key === 'promote') setPromoteOpen(true)
+                  else if (key === 'class-cleanup') setClassCleanupOpen(true)
+                },
+              }}
+            >
+              <Button icon={<MoreOutlined />}>{t('moreActions')}</Button>
+            </Dropdown>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              {t('createUser')}
+            </Button>
+          </>
+        )}
+      >
         <ListFilterBar
           keyword={keywordInput}
           onKeyword={setKeywordInput}
@@ -353,6 +372,7 @@ const UserLedger: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           onStatus={(v) => patch({ status: v as StatusFilter })}
           dirty={dirty}
           onReset={resetFilters}
+          style={{ marginBottom: 0 }}
           extra={(
             <Space wrap size={8}>
               <Select
@@ -380,32 +400,31 @@ const UserLedger: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
             </Space>
           )}
         />
+      </PageHeader>
 
-        <Space wrap style={{ marginBottom: 12, marginLeft: 'auto' }}>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>{t('createUser')}</Button>
-          <Button icon={<CloudUploadOutlined />} onClick={() => setImportOpen(true)}>{t('batchImport')}</Button>
-          <Button icon={<DownloadOutlined />} onClick={handleExport}>{t('exportUsers')}</Button>
-          <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading} aria-label={t('refresh')} />
-          {isAdmin && (
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'bulk-delete', label: t('bulkDelete'), danger: true },
-                  { key: 'promote', label: t('batchUpgradeTitle') },
-                  { key: 'class-cleanup', label: t('cleanEmptyClasses') },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'bulk-delete') setBulkDeleteOpen(true)
-                  else if (key === 'promote') setPromoteOpen(true)
-                  else setClassCleanupOpen(true)
-                },
-              }}
-            >
-              <Button icon={<MoreOutlined />}>{t('moreActions')}</Button>
-            </Dropdown>
-          )}
-        </Space>
-      </div>
+      <StatLine items={[
+          {
+            key: 'all', label: t('statsAll'), value: stats?.total ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'all' }); setKeywordInput(''); setPage(1) },
+            active: filters.status === 'all' && filters.role === undefined && !filters.grade && filters.classId === undefined,
+          },
+          {
+            key: 'students', label: t('statsStudents'), value: stats?.active_students ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'active', role: ROLE_STUDENT }); setKeywordInput(''); setPage(1) },
+            active: filters.status === 'active' && filters.role === ROLE_STUDENT,
+          },
+          {
+            key: 'teachers', label: t('statsTeachers'), value: stats?.teachers ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'all', role: ROLE_TEACHER }); setKeywordInput(''); setPage(1) },
+            active: filters.role === ROLE_TEACHER,
+          },
+          {
+            key: 'graduated', label: t('statsGraduated'), value: stats?.graduated ?? 0,
+            onClick: () => { setFilters({ ...EMPTY_FILTERS, status: 'graduated', role: ROLE_STUDENT }); setKeywordInput(''); setPage(1) },
+            active: filters.status === 'graduated',
+          },
+      ]} />
+
 
       {total > 0 && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -513,15 +532,7 @@ const UserMgmtPage: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: 24, background: 'var(--bg-container)', borderRadius: 8, minHeight: 'calc(100vh - 112px)' }}>
-      <Space align="center" style={{ marginBottom: 4 }}>
-        <UserOutlined style={{ color: 'var(--primary-color)', fontSize: 18 }} />
-        <Typography.Title level={4} style={{ margin: 0 }}>{t('userManagement')}</Typography.Title>
-      </Space>
-      <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
-        {t('userMgmtIntro')}
-      </Typography.Paragraph>
-      <Divider style={{ margin: '8px 0 12px' }} />
+    <div>
       <UserLedger isAdmin={isAdmin} />
     </div>
   )

@@ -273,10 +273,20 @@ const ClassSummaryPage: React.FC = () => {
         icon={<RobotOutlined />}
         title={t('aiClassSummary')}
         subtitle={t('classSummaryDesc')}
-      />
-
-      <Card style={{ borderRadius: 8 }}>
-        <Space wrap style={{ marginBottom: 16 }}>
+        extra={(
+          <>
+            <Button icon={<DownloadOutlined />} onClick={handleExport} loading={exporting}
+              disabled={!summary} title={!summary ? t('classSummaryReportNotReady') : undefined}>
+              {t('exportWord')}
+            </Button>
+            <Button type="primary" icon={<RobotOutlined />} onClick={handleClassSummary} loading={loading}
+              disabled={!selectedGrade || !selectedClass}>
+              {t('aiClassSummary')}
+            </Button>
+          </>
+        )}
+      >
+        <Space wrap>
           <Select
             placeholder={t('selectGrade')}
             value={selectedGrade || undefined}
@@ -312,26 +322,10 @@ const ClassSummaryPage: React.FC = () => {
               { label: t('classSummaryLast30Days'), value: [dayjs().subtract(29, 'day').startOf('day'), dayjs()] },
             ]}
           />
-          <Button
-            type="primary"
-            icon={<RobotOutlined />}
-            onClick={handleClassSummary}
-            loading={loading}
-            disabled={!selectedGrade || !selectedClass}
-          >
-            {t('aiClassSummary')}
-          </Button>
-          <Button
-            icon={<DownloadOutlined />}
-            onClick={handleExport}
-            loading={exporting}
-            disabled={!summary}
-            title={!summary ? t('classSummaryReportNotReady') : undefined}
-          >
-            {t('exportWord')}
-          </Button>
         </Space>
+      </PageHeader>
 
+      <Card style={{ borderRadius: 8 }}>
         <Space wrap style={{ marginBottom: 12 }}>
           <Tag icon={<BarChartOutlined />}>
             {windowLabel || `${range[0].format('YYYY-MM-DD HH:mm')} ~ ${range[1].format('YYYY-MM-DD HH:mm')}`}
