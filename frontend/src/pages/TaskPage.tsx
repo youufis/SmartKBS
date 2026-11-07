@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
 import ListFilterBar from '../components/ListFilterBar'
+import PageHeader from '../components/PageHeader'
 import { useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -718,28 +719,29 @@ const TaskPage: React.FC = () => {
 
   return (
     <div>
-      <Card>
-        <Space style={{ marginBottom: 12 }} wrap>
-          <Typography.Title level={4} style={{ margin: 0 }}>{t('taskManagement')}</Typography.Title>
-          <Button size="small" type="text" icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)}>
-            {t('guide.showTip')}
-          </Button>
-          {isAdminOrTeacher && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
-              {t('createTask')}
+      <PageHeader
+        icon={<CheckCircleOutlined />}
+        title={t('taskManagement')}
+        subtitle={t('taskPageSubtitle')}
+        extra={(
+          <>
+            <Button icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)}>
+              {t('guide.showTip')}
             </Button>
-          )}
-          {isAdminOrTeacher && (
-            <Button icon={<BulbOutlined />} onClick={openAiDraft}>{t('aiCreateTask')}</Button>
-          )}
-          <Button icon={<ReloadOutlined />} onClick={loadTasks}>{t('refresh')}</Button>
-          {isAdminOrTeacher && (
-            <Checkbox checked={pendingOnly} onChange={(e) => setPendingFilter(e.target.checked)}>
-              {t('pendingGradeFilter')}
-            </Checkbox>
-          )}
-        </Space>
-
+            <Tooltip title={t('refresh')}>
+              <Button icon={<ReloadOutlined />} onClick={loadTasks} />
+            </Tooltip>
+            {isAdminOrTeacher && (
+              <Button icon={<BulbOutlined />} onClick={openAiDraft}>{t('aiCreateTask')}</Button>
+            )}
+            {isAdminOrTeacher && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
+                {t('createTask')}
+              </Button>
+            )}
+          </>
+        )}
+      >
         <ListFilterBar
           keyword={taskKw}
           onKeyword={(v) => { setTaskKw(v); setMPage(1) }}
@@ -754,11 +756,20 @@ const TaskPage: React.FC = () => {
           subject={taskSubjectFilter}
           onSubject={(v) => { setTaskSubjectFilter(v); setMPage(1) }}
           subjectOptions={subjectOptions.map((s) => ({ value: s, label: s }))}
+          subjectPlaceholder={t('subject')}
           dirty={!!taskKw || taskFilter !== 'all' || !!taskSubjectFilter}
           onReset={() => { setTaskKw(''); setTaskFilter('all'); setTaskSubjectFilter(''); setMPage(1) }}
           resetLabel={t('clearFilter')}
+          style={{ marginBottom: 0 }}
+          extra={isAdminOrTeacher && (
+            <Checkbox checked={pendingOnly} onChange={(e) => setPendingFilter(e.target.checked)}>
+              {t('pendingGradeFilter')}
+            </Checkbox>
+          )}
         />
+      </PageHeader>
 
+      <Card>
         <Spin spinning={loading}>
           {isMobile ? (
             /* 窄屏：师生一律改卡片。教师端原来保持表格，实测「作业要求」长文把表撑到

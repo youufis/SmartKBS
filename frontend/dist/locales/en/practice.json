@@ -447,5 +447,6 @@
   "wbNoMatch": "No records match the current filters",
   "systemGenerated": "System",
   "pSearchPh": "Search title / knowledge point",
-  "noMatchFilter": "No records match the current filters"
+  "noMatchFilter": "No records match the current filters",
+  "teacherSubtitle": "Publish practice, track progress, reinforce mistakes"
 }

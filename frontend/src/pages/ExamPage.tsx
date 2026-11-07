@@ -16,6 +16,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
+import PageHeader from '../components/PageHeader'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
@@ -1146,36 +1147,32 @@ const ExamPage: React.FC = () => {
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-        {/* ── 标题和操作栏 ── */}
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-              📋 {t('title')}
-            </Typography.Title>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {isStudent ? t('studentDesc') : t('teacherDesc')}
-            </Typography.Text>
-          </Col>
-          <Col>
-            <Space>
-              {isTeacherOrAdmin && (
-                <Button type="primary" icon={<PlusOutlined />}
-                  onClick={() => { setCreateModal(true); createForm.resetFields() }}>
-                  {t('createExam')}
-                </Button>
-              )}
+        {/* ── 统一页面头：标题 / 副标题 / 主次操作 ── */}
+        <PageHeader
+          icon={<FileTextOutlined />}
+          title={t('title')}
+          subtitle={isStudent ? t('studentDesc') : t('teacherDesc')}
+          style={{ marginBottom: 0 }}
+          extra={(
+            <>
+              <Button icon={<ReloadOutlined />} onClick={loadExams} loading={loading}>
+                {t('refresh')}
+              </Button>
               {isTeacherOrAdmin && (
                 <Tooltip title={t('paperHealthDesc')}>
                   <Button icon={<SafetyCertificateOutlined />}
                     onClick={openPaperHealth}>{t('paperHealth')}</Button>
                 </Tooltip>
               )}
-              <Button icon={<ReloadOutlined />} onClick={loadExams} loading={loading}>
-                {t('refresh')}
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+              {isTeacherOrAdmin && (
+                <Button type="primary" icon={<PlusOutlined />}
+                  onClick={() => { setCreateModal(true); createForm.resetFields() }}>
+                  {t('createExam')}
+                </Button>
+              )}
+            </>
+          )}
+        />
 
         {/* ── 搜索 + 筛选（长的行自动换行，不做横向滚动） ── */}
         <Row gutter={[12, 8]} align="middle">

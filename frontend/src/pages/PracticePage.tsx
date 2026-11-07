@@ -32,6 +32,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { reportLoadError } from '../utils/loadError'
 import AnswerNav from '../components/AnswerNav'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
+import PageHeader from '../components/PageHeader'
 import { draftKey, loadDraft, clearDraft, useDebouncedDraft, countAnswered } from '../utils/answerDraft'
 import { toPercent, percentStatus, percentColor, percentLevelKey } from '../utils/score'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -585,10 +586,18 @@ const StudentView: React.FC = () => {
 
   return (
     <div>
-      <Title level={4}><FormOutlined /> {t('practiceHistory')}</Title>
-      {/* 副标题原先写的是「练习完成」（从交卷完成页抄来的），列表页语义不对 —— 换成真实统计 */}
-      <Text type="secondary">{t('stuListSummary', { total: sessions.length, todo: todoCount, done: doneCount })}</Text>
-      <Divider />
+      <PageHeader
+        icon={<FormOutlined />}
+        title={t('practiceHistory')}
+        subtitle={t('stuListSummary', { total: sessions.length, todo: todoCount, done: doneCount })}
+        extra={(
+          <Tooltip title={t('refresh')}>
+            <Button icon={<ReloadOutlined />} onClick={() => void loadSessions()} />
+          </Tooltip>
+        )}
+      />
+
+      <Card>
       {loading ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : sessions.length === 0
         ? <Result icon={<FileTextOutlined />} title={t('noPracticeTitle')} subTitle={t('noPracticeHint')} />
@@ -680,6 +689,7 @@ const StudentView: React.FC = () => {
                   </div>
                 </>}
           </>}
+      </Card>
     </div>
   )
 }
@@ -1210,19 +1220,23 @@ const TeacherView: React.FC = () => {
 
   return (
     <div>
-      <Title level={4}>{t('syncPractice')}</Title>
-      <Space style={{ marginBottom: 16 }}>
-        {/* 已发布练习在前：它是默认落地页，AI 生成是想新建练习时才点 */}
-        <Button type={tab === 'sessions' ? 'primary' : 'default'} onClick={() => setTab('sessions')}>
-          {t('publishedPractices')}{classSessions.length > 0 ? ` (${classSessions.length})` : ''}
-        </Button>
-        {/* 错题巩固（系统按人推送）单独一页，不和普通练习混排 */}
-        <Button type={tab === 'wrongbook' ? 'primary' : 'default'} onClick={() => setTab('wrongbook')}>
-          {t('wrongBookPractices')}{wrongBookSessions.length > 0 ? ` (${wrongBookSessions.length})` : ''}
-        </Button>
-        <Button type={tab === 'generate' ? 'primary' : 'default'} onClick={() => setTab('generate')}>{t('aiGenerate')}</Button>
-      </Space>
+      <PageHeader
+        icon={<FormOutlined />}
+        title={t('syncPractice')}
+        subtitle={t('teacherSubtitle')}
+      >
+        <Segmented
+          value={tab}
+          onChange={(v) => setTab(v as 'sessions' | 'wrongbook' | 'generate')}
+          options={[
+            { value: 'sessions', label: `${t('publishedPractices')}${classSessions.length > 0 ? ` (${classSessions.length})` : ''}` },
+            { value: 'wrongbook', label: `${t('wrongBookPractices')}${wrongBookSessions.length > 0 ? ` (${wrongBookSessions.length})` : ''}` },
+            { value: 'generate', label: t('aiGenerate') },
+          ]}
+        />
+      </PageHeader>
 
+      <Card>
       {tab === 'generate' && (
         <>
           <Card size="small" style={{ marginBottom: 16 }}>
@@ -1652,6 +1666,7 @@ const TeacherView: React.FC = () => {
           </div>
         )}
       </Modal>
+      </Card>
     </div>
   )
 }
@@ -1663,9 +1678,9 @@ const PracticePage: React.FC = () => {
   const user = useAuthStore(s => s.user)
   const isTeacher = user?.role === 'admin' || user?.role === 'teacher'
   return (
-    <Card style={{ borderRadius: 8 }}>
+    <div>
       {isTeacher ? <TeacherView /> : <StudentView />}
-    </Card>
+    </div>
   )
 }
 

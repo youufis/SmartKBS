@@ -451,5 +451,6 @@
   "listNoMatch": "No discussions match the filters",
   "all": "All",
   "wbSearchPh": "Search title / room code",
-  "wbNoMatch": "No whiteboards match the filters"
+  "wbNoMatch": "No whiteboards match the filters",
+  "pageSubtitle": "Group, discuss and review afterwards"
 }

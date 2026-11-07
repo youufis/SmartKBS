@@ -1659,5 +1659,6 @@
   "roleChangeDesc": "把 {{name}} 改为「{{role}}」。教师转学生时会自动清空其任教安排。",
   "importCsvHint": "支持 CSV 批量导入，列名见模板；导入过程中会逐行列出错误原因。",
   "execResult": "执行结果",
-  "cleanEmptyClasses": "清理空壳班级"
+  "cleanEmptyClasses": "清理空壳班级",
+  "taskPageSubtitle": "布置、提交与批改，一条流水线"
 }

@@ -10,6 +10,7 @@ import {
   BulbOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
+import PageHeader from '../components/PageHeader'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { pollAiTaskWithProgress } from '../api/aiTask'
@@ -17,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import LearningProgress from '../components/LearningProgress'
 import { reportLoadError } from '../utils/loadError'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 interface QuestionAccuracy {
   id: number
@@ -453,18 +454,14 @@ const AnalyticsPage: React.FC = () => {
   }
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div className="page-header-flex" style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <RobotOutlined style={{ fontSize: 28 }} />
-          <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('analytics.title')}</Title>
-          <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 4 }}>
-            {t('analytics.description')}
-          </Text>
-        </div>
-      </Card>
+    <div>
+      <PageHeader
+        icon={<RobotOutlined />}
+        title={t('analytics.title')}
+        subtitle={t('analytics.description')}
+      />
 
-      <Card>
+      <Card style={{ borderRadius: 8 }}>
         <Tabs activeKey={activeTab} onChange={setActiveTab}
           items={[
             {
@@ -796,7 +793,7 @@ const AnalyticsPage: React.FC = () => {
           ]}
         />
       </Card>
-    </Card>
+    </div>
   )
 }
 

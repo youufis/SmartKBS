@@ -17,6 +17,7 @@ import {
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import FormulaRenderer from '../components/FormulaRenderer'
+import PageHeader from '../components/PageHeader'
 import SVGViewer from '../components/SVGViewer'
 import PlaceholderManager from '../components/PlaceholderManager'
 import MobileCardTable from '../components/MobileCardTable'
@@ -24,7 +25,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useTranslation } from 'react-i18next'
 import ScopeTag from '../components/ScopeTag'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 // ── 闯关记录类型 ──
@@ -1088,15 +1089,16 @@ const QuestAdminPage: React.FC = () => {
   ]
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <Title level={4} style={{ marginBottom: 12 }}>
-        <TrophyOutlined style={{ marginRight: 8 }} />
-        {t('questManagement')}
-      </Title>
+    <div>
+      <PageHeader
+        icon={<TrophyOutlined />}
+        title={t('questManagement')}
+        subtitle={t('questManageSubtitle')}
+      />
       <Card style={{ borderRadius: 8 }}>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
-    </Card>
+    </div>
   )
 }
 

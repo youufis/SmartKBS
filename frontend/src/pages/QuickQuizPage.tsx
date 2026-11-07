@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { RowList } from '../components/RowList'
+import PageHeader from '../components/PageHeader'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
@@ -29,7 +30,7 @@ import ResetActivityButton from '../components/ResetActivityButton'
 import ListFilterBar from '../components/ListFilterBar'
 import { reportLoadError } from '../utils/loadError'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 /** 房间创建时间: 列表双行显示用 */
@@ -412,40 +413,32 @@ const QuickQuizPage: React.FC = () => {
   )
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      {/* 顶栏 */}
-      <Card style={{ borderRadius: 12, marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}
-        styles={{ body: { padding: '16px 24px' } }}>
-        <Space>
-          <ThunderboltOutlined style={{ fontSize: 28, color: '#fff' }} />
-          <div>
-            <Title level={4} style={{ color: '#fff', margin: 0 }}>{t('quickQuiz')}</Title>
-            <Text style={{ color: 'rgba(255,255,255,0.85)' }}>
-              {isTeacherOrAdmin ? t('quizManageDesc') : t('quizPlayDesc')}
-            </Text>
-          </div>
-        </Space>
-      </Card>
-
-      {/* 操作按钮 */}
-      <Card style={{ borderRadius: 12, marginBottom: 16 }} styles={{ body: { padding: '12px 16px' } }}>
-        <Space wrap>
-          {isTeacherOrAdmin && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
-              {t('createQuizActivity')}
-            </Button>
-          )}
-          {isStudent && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setJoinModal(true)}>
-              {t('enterCodeJoin')}
-            </Button>
-          )}
-          <Button icon={<HistoryOutlined />} onClick={loadRooms}>{t('refreshList')}</Button>
-        </Space>
-      </Card>
+    <div>
+      <PageHeader
+        icon={<ThunderboltOutlined />}
+        title={t('quickQuiz')}
+        subtitle={isTeacherOrAdmin ? t('quizManageDesc') : t('quizPlayDesc')}
+        extra={(
+          <>
+            <Tooltip title={t('refreshList')}>
+              <Button icon={<HistoryOutlined />} onClick={loadRooms} />
+            </Tooltip>
+            {isTeacherOrAdmin && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
+                {t('createQuizActivity')}
+              </Button>
+            )}
+            {isStudent && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setJoinModal(true)}>
+                {t('enterCodeJoin')}
+              </Button>
+            )}
+          </>
+        )}
+      />
 
       {/* 房间列表 */}
-      <Card title={t('activityList', { count: visibleRooms.length })} style={{ borderRadius: 12 }}>
+      <Card title={t('activityList', { count: visibleRooms.length })} style={{ borderRadius: 8 }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
         ) : rooms.length === 0 ? (
@@ -467,6 +460,7 @@ const QuickQuizPage: React.FC = () => {
               subject={roomSubject}
               onSubject={(v) => { setRoomSubject(v); setRoomPage(1) }}
               subjectOptions={roomSubjects}
+              subjectPlaceholder={t('subject')}
               dirty={!!roomKw || roomStatus !== 'all' || !!roomSubject}
               onReset={() => { setRoomKw(''); setRoomStatus('all'); setRoomSubject(''); setRoomPage(1) }}
               resetLabel={t('clearFilter')}
@@ -763,7 +757,7 @@ const QuickQuizPage: React.FC = () => {
           </Space>
         )}
       </Modal>
-    </Card>
+    </div>
   )
 }
 

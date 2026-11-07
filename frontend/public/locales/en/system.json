@@ -1659,5 +1659,6 @@
   "roleChangeDesc": "Change {{name}} to {{role}}. Teaching assignments are cleared when a teacher becomes a student.",
   "importCsvHint": "Bulk import from CSV; see the template for columns. Row-level errors are listed while importing.",
   "execResult": "Result",
-  "cleanEmptyClasses": "Clean up empty classes"
+  "cleanEmptyClasses": "Clean up empty classes",
+  "taskPageSubtitle": "Assign, submit and grade in one pipeline"
 }

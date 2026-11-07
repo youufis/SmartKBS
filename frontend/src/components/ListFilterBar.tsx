@@ -32,6 +32,8 @@ interface Props {
   onReset?: () => void
   resetLabel?: string
   extra?: React.ReactNode
+  /** 外层样式覆盖（放进 PageHeader 工具条时用来去掉底部外边距） */
+  style?: React.CSSProperties
 }
 
 const ListFilterBar: React.FC<Props> = ({
@@ -39,10 +41,10 @@ const ListFilterBar: React.FC<Props> = ({
   status, statusOptions, onStatus,
   subject, subjectOptions, onSubject, subjectPlaceholder = '',
   dirty = false, onReset, resetLabel = '清除筛选',
-  extra,
+  extra, style,
 }) => {
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12, ...style }}>
       <Input
         allowClear
         prefix={<SearchOutlined />}

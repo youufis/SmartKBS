@@ -24,6 +24,7 @@ import FormulaRenderer from '../components/FormulaRenderer'
 import { RowList } from '../components/RowList'
 import ScopeTag from '../components/ScopeTag'
 import ListFilterBar from '../components/ListFilterBar'
+import PageHeader from '../components/PageHeader'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import { reportLoadError } from '../utils/loadError'
 import PollOptionsEditor, { POLL_OPTION_MAX, POLL_OPTION_MIN } from '../components/polls/PollOptionsEditor'
@@ -31,7 +32,7 @@ import PollResultsView from '../components/polls/PollResultsView'
 import type { PollResultsData } from '../components/polls/PollResultsView'
 import '../styles/poll.css'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 interface PollItem {
   id: number
@@ -350,50 +351,55 @@ const QuickPollPage: React.FC = () => {
   const endedCount = polls.filter(p => p.ended).length
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <Card style={{ marginBottom: 16, border: 'none', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <Space align="center">
-            <BarChartOutlined style={{ fontSize: 26, color: '#fff' }} />
-            <div>
-              <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('poll')}</Title>
-              <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{t('pollSubtitle')}</Text>
-            </div>
-          </Space>
-          {isTeacherOrAdmin && (
-            <Space wrap>
-              <Button icon={<RobotOutlined />} onClick={() => setAiOpen(true)}>{t('aiCreatePoll')}</Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                {t('createPoll')}
-              </Button>
-            </Space>
-          )}
-        </div>
-      </Card>
-
-      <Spin spinning={loading}>
-        {polls.length === 0 ? <Empty description={t('noPolls')} /> : (
+    <div>
+      <PageHeader
+        icon={<BarChartOutlined />}
+        title={t('poll')}
+        subtitle={t('pollSubtitle')}
+        extra={(
           <>
-            <ListFilterBar
-              keyword={kw}
-              onKeyword={(v) => { setKw(v); setPage(1) }}
-              searchPlaceholder={t('listSearchPh')}
-              status={statusFilter}
-              onStatus={(v) => { setStatusFilter(v as 'all' | 'active' | 'ended'); setPage(1) }}
-              statusOptions={[
-                { value: 'all', label: `${t('all')} (${polls.length})` },
-                { value: 'active', label: `${t('pollStatusActive')} (${activeCount})` },
-                { value: 'ended', label: `${t('pollStatusEnded')} (${endedCount})` },
-              ]}
-              subject={subjectFilter}
-              onSubject={(v) => { setSubjectFilter(v); setPage(1) }}
-              subjectOptions={subjectOptionsInList}
-              subjectPlaceholder={t('subject')}
-              dirty={!!kw || statusFilter !== 'all' || !!subjectFilter}
-              onReset={() => { setKw(''); setStatusFilter('all'); setSubjectFilter(''); setPage(1) }}
-              resetLabel={t('clearFilter')}
-              extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadPolls()}>{t('refresh')}</Button>}
-            />
+            <Tooltip title={t('refresh')}>
+              <Button icon={<ReloadOutlined />} onClick={() => void loadPolls()} />
+            </Tooltip>
+            {isTeacherOrAdmin && (
+              <>
+                <Button icon={<RobotOutlined />} onClick={() => setAiOpen(true)}>{t('aiCreatePoll')}</Button>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                  {t('createPoll')}
+                </Button>
+              </>
+            )}
+          </>
+        )}
+      >
+        {polls.length > 0 && (
+          <ListFilterBar
+            keyword={kw}
+            onKeyword={(v) => { setKw(v); setPage(1) }}
+            searchPlaceholder={t('listSearchPh')}
+            status={statusFilter}
+            onStatus={(v) => { setStatusFilter(v as 'all' | 'active' | 'ended'); setPage(1) }}
+            statusOptions={[
+              { value: 'all', label: `${t('all')} (${polls.length})` },
+              { value: 'active', label: `${t('pollStatusActive')} (${activeCount})` },
+              { value: 'ended', label: `${t('pollStatusEnded')} (${endedCount})` },
+            ]}
+            subject={subjectFilter}
+            onSubject={(v) => { setSubjectFilter(v); setPage(1) }}
+            subjectOptions={subjectOptionsInList}
+            subjectPlaceholder={t('subject')}
+            dirty={!!kw || statusFilter !== 'all' || !!subjectFilter}
+            onReset={() => { setKw(''); setStatusFilter('all'); setSubjectFilter(''); setPage(1) }}
+            resetLabel={t('clearFilter')}
+            style={{ marginBottom: 0 }}
+          />
+        )}
+      </PageHeader>
+
+      <Card style={{ borderRadius: 8 }}>
+        <Spin spinning={loading}>
+          {polls.length === 0 ? <Empty description={t('noPolls')} /> : (
+            <>
 
             {visible.length === 0 ? <Empty description={t('listNoMatch')} /> : (
               <>
@@ -503,7 +509,8 @@ const QuickPollPage: React.FC = () => {
             )}
           </>
         )}
-      </Spin>
+        </Spin>
+      </Card>
 
       {/* ── 投票 / 改投 ── */}
       <Modal
@@ -785,7 +792,7 @@ const QuickPollPage: React.FC = () => {
           </>
         )}
       </Modal>
-    </Card>
+    </div>
   )
 }
 

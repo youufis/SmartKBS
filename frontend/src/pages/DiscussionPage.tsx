@@ -17,6 +17,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import ListFilterBar from '../components/ListFilterBar'
+import PageHeader from '../components/PageHeader'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import ScopeTag from '../components/ScopeTag'
@@ -516,23 +517,23 @@ const DiscussionPage: React.FC = () => {
 
   return (
     <div>
-      <Card>
-        <Space style={{ marginBottom: 16 }}>
-          <TeamOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-          <Title level={4} style={{ margin: 0 }}>{t('title')}</Title>
-        </Space>
-
-        {/* 手机端只用于进组与讨论：建组与 AI 方案是十几项的重表单，留在电脑上做 */}
-        {isTeacherOrAdmin && !isMobile && (
-          <Space style={{ marginBottom: 16 }}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              {t('createDiscussion')}
-            </Button>
+      <PageHeader
+        icon={<TeamOutlined />}
+        title={t('title')}
+        subtitle={t('pageSubtitle')}
+        extra={isTeacherOrAdmin && !isMobile ? (
+          <>
             <Button icon={<BulbOutlined />} onClick={() => { setAiModal(true); aiForm.resetFields(); }}>
               {t('aiGeneratePlan')}
             </Button>
-          </Space>
-        )}
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              {t('createDiscussion')}
+            </Button>
+          </>
+        ) : undefined}
+      />
+
+      <Card>
 
         <ListFilterBar
           keyword={discKw}
@@ -541,6 +542,7 @@ const DiscussionPage: React.FC = () => {
           subject={discSubject}
           onSubject={(v) => { setDiscSubject(v); setMPage(1) }}
           subjectOptions={discSubjects}
+          subjectPlaceholder={t('subject')}
           dirty={!!discKw || !!discSubject}
           onReset={() => { setDiscKw(''); setDiscSubject(''); setMPage(1) }}
           resetLabel={t('clearFilter')}

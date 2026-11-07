@@ -15,13 +15,14 @@ import {
 } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import FormulaRenderer from '../components/FormulaRenderer'
+import PageHeader from '../components/PageHeader'
 import apiClient from '../api/client'
 import { pollAiTaskWithProgress } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { reportLoadError } from '../utils/loadError'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { RangePicker } = DatePicker
 
 interface SummaryStats {
@@ -267,20 +268,14 @@ const ClassSummaryPage: React.FC = () => {
   }
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Space>
-            <RobotOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('aiClassSummary')}</Title>
-            <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              {t('classSummaryDesc')}
-            </Text>
-          </Space>
-        </div>
-      </Card>
+    <div>
+      <PageHeader
+        icon={<RobotOutlined />}
+        title={t('aiClassSummary')}
+        subtitle={t('classSummaryDesc')}
+      />
 
-      <Card>
+      <Card style={{ borderRadius: 8 }}>
         <Space wrap style={{ marginBottom: 16 }}>
           <Select
             placeholder={t('selectGrade')}
@@ -411,7 +406,7 @@ const ClassSummaryPage: React.FC = () => {
           <Empty description={t('classSummaryEmpty')} />
         )}
       </Card>
-    </Card>
+    </div>
   )
 }
 
