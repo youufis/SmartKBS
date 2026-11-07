@@ -84,6 +84,43 @@ class PollCreate(BaseModel):
     target_grade: str = ""
     target_class: str = ""
     target_users: str = ""
+    anonymous: bool = False    # 匿名投票：结果不区分人（票依旧记名，用于改票与去重）
+    ends_at: str = ""          # 截止时间 "YYYY-MM-DD HH:MM:SS"，空=不限期
+    max_choices: int = 0       # 多选上限，0=不限
+
+
+class PollStatusUpdate(BaseModel):
+    status: str  # active / ended
+
+
+POLL_OPTION_MIN = 2
+POLL_OPTION_MAX = 10
+
+
+def _normalize_poll_options(raw: list[str]) -> list[str]:
+    """修剪、去空、去重（保留首次出现顺序），并校验 2-10 个"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in raw or []:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text[:200])
+    if len(out) < POLL_OPTION_MIN:
+        raise HTTPException(status_code=400, detail=f"至少需要 {POLL_OPTION_MIN} 个不同的选项")
+    if len(out) > POLL_OPTION_MAX:
+        raise HTTPException(status_code=400, detail=f"最多 {POLL_OPTION_MAX} 个选项")
+    return out
+
+
+def _poll_expired(ends_at: str) -> bool:
+    if not ends_at:
+        return False
+    try:
+        return datetime.strptime(ends_at, "%Y-%m-%d %H:%M:%S") <= datetime.now()
+    except ValueError:
+        return False
 
 
 class QuestionCreate(BaseModel):
@@ -418,15 +455,18 @@ async def ai_generate_poll(req: AiGeneratePoll, request: Request):
 
     if not req.topic.strip():
         raise HTTPException(status_code=400, detail="请输入主题")
-    if req.option_count < 2 or req.option_count > 10:
-        raise HTTPException(status_code=400, detail="选项数量范围为 2-10")
+    # 0 = 自动：让 AI 按主题自己定个数（3-6），其余限定 2-10
+    if req.option_count and (req.option_count < 2 or req.option_count > 10):
+        raise HTTPException(status_code=400, detail="选项数量范围为 2-10，或填 0 交给 AI 决定")
 
     api_key, _ = get_api_keys(username)
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
 
+    count_hint = (f"包含 {req.option_count} 个选项" if req.option_count
+                  else "选项数量由你根据主题决定，控制在 3-6 个")
     prompt = (
-        '请根据主题"' + req.topic + '"生成一个课堂投票，包含' + str(req.option_count) + '个选项。\n\n'
+        '请根据主题"' + req.topic + '"生成一个课堂投票，' + count_hint + '。\n\n'
         '请严格按照以下JSON格式输出，不要包含任何其他文字：\n'
         '{\n'
         '  "question": "投票问题",\n'
@@ -864,10 +904,19 @@ async def update_poll(poll_id: int, req: PollUpdate, request: Request):
         execute_insert_update("UPDATE interaction_polls SET question = ? WHERE id = ?",
                               (req.question, poll_id))
     if req.options is not None:
+        new_options = _normalize_poll_options(req.options)
+        old_row = execute_query("SELECT options FROM interaction_polls WHERE id = ?", (poll_id,))
+        old_options = json.loads(old_row[0][0]) if old_row and isinstance(old_row[0][0], str) else []
+        voted = execute_query(
+            "SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = ?", (poll_id,))[0][0]
+        # 旧实现只要带 options 就把该投票的所有票删掉 —— 老师改个错别字，全班白投一次。
+        # 现在：已有票时只允许"等量改文案"（索引不变，票仍然有效）；增删选项一律拒绝。
+        if voted and len(new_options) != len(old_options):
+            raise HTTPException(
+                status_code=400,
+                detail=f"已有 {voted} 条投票记录，不能增删选项；只改文字可以，或先结束该投票再新建")
         execute_insert_update("UPDATE interaction_polls SET options = ? WHERE id = ?",
-                              (json.dumps(req.options, ensure_ascii=False), poll_id))
-        # 选项变更时清理旧投票记录，避免统计错误
-        execute_insert_update("DELETE FROM interaction_poll_votes WHERE poll_id = ?", (poll_id,))
+                              (json.dumps(new_options, ensure_ascii=False), poll_id))
     if req.poll_type is not None:
         execute_insert_update("UPDATE interaction_polls SET poll_type = ? WHERE id = ?",
                               (req.poll_type, poll_id))
@@ -1523,11 +1572,23 @@ async def create_poll(req: PollCreate, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可创建投票")
 
-    if len(req.options) < 2:
-        raise HTTPException(status_code=400, detail="至少需要2个选项")
+    options = _normalize_poll_options(req.options)
 
     if req.poll_type not in ("single", "multiple"):
         raise HTTPException(status_code=400, detail="poll_type 必须是 single 或 multiple")
+
+    if req.ends_at and not _poll_expired(req.ends_at):
+        try:
+            datetime.strptime(req.ends_at, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="截止时间格式应为 YYYY-MM-DD HH:MM:SS")
+    elif req.ends_at:
+        raise HTTPException(status_code=400, detail="截止时间必须晚于当前时间")
+
+    # 多选上限：0=不限；超过选项数没有意义，直接夹到选项数
+    max_choices = 0
+    if req.poll_type == "multiple" and req.max_choices and req.max_choices > 0:
+        max_choices = min(int(req.max_choices), len(options))
 
     # R5: 发布范围必须落在本人任教范围内(与公告共用同一道闸)
     from backend.api.notification_router import validate_activity_scope
@@ -1539,11 +1600,13 @@ async def create_poll(req: PollCreate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     poll_id = execute_insert_update(
         """INSERT INTO interaction_polls (creator_username, question, options, poll_type, status, created_at,
-                                          subject, target_scope, target_grade, target_class, target_users)
-           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
-        (user["username"], req.question, json.dumps(req.options, ensure_ascii=False), req.poll_type, now,
+                                          subject, target_scope, target_grade, target_class, target_users,
+                                          anonymous, ends_at, max_choices)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user["username"], req.question, json.dumps(options, ensure_ascii=False), req.poll_type, now,
          (req.subject or "").strip(),
-         req.target_scope, req.target_grade, req.target_class, req.target_users),
+         req.target_scope, req.target_grade, req.target_class, req.target_users,
+         1 if req.anonymous else 0, (req.ends_at or "").strip(), max_choices),
     )
 
     # ── 异步通知学生（不阻塞创建操作） ──
@@ -1570,116 +1633,105 @@ async def create_poll(req: PollCreate, request: Request):
     return {"message": "投票创建成功", "poll_id": poll_id}
 
 
-@router.get("/polls", summary="获取活跃投票")
-async def list_polls(request: Request):
-    """获取当前活跃的投票列表"""
+@router.get("/polls", summary="获取投票列表")
+async def list_polls(
+    request: Request,
+    status: str = Query("all", description="active=进行中 / ended=已结束 / all=全部"),
+):
+    """获取投票列表（含已结束，便于回看结果）
+
+    旧实现：只取 status='active'，投票一旦创建就永远结束不了；
+    且每个选项单独 COUNT，50 条投票 × 6 个选项要发 300 条 SQL。现在一次 GROUP BY 统计。
+    """
     user = get_current_user(request)
     role = user.get("role", 2)
     username = user["username"]
 
+    cols = ("p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at, "
+            "p.target_scope, p.target_grade, p.target_class, p.target_users, "
+            "COALESCE(u.name, u.username) AS creator_name, COALESCE(p.subject, '') AS subject, "
+            "IFNULL(p.anonymous, 0), IFNULL(p.ends_at, ''), IFNULL(p.max_choices, 0)")
+
+    where: list[str] = []
+    params: list = []
+    if status in ("active", "ended"):
+        where.append("p.status = ?")
+        params.append(status)
+
     if role == 2:
-        # 学生：获取所有活跃投票后按目标范围过滤
-        s_grade, s_class = get_user_grade_class(username)
-        # 注意：列顺序必须与后续索引访问一致
-        all_rows = execute_query(
-            """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
-                      p.target_scope, p.target_grade, p.target_class, p.target_users,
-                      COALESCE(u.name, u.username) AS creator_name,
-                      COALESCE(p.subject, '') AS subject
-               FROM interaction_polls p
-               JOIN users u ON p.creator_username = u.username AND u.role IN (0, 1)
-               WHERE p.status = 'active'
-               ORDER BY p.created_at DESC LIMIT 50""",
-        )
-        rows = []
-        for r in all_rows:
-            if check_activity_visibility(
-                student_username=username,
-                student_grade=s_grade,
-                student_class=s_class,
-                creator_username=r[1],
-                target_scope=r[7] if len(r) > 7 else "teacher_classes",
-                target_grade=r[8] if len(r) > 8 else "",
-                target_class=r[9] if len(r) > 9 else "",
-                target_users=r[10] if len(r) > 10 else "",
-            ):
-                rows.append(r)
-    elif role == 1:
-        # 教师：只看自己创建的投票
-        rows = execute_query(
-            """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
-                        p.target_scope, p.target_grade, p.target_class, p.target_users,
-                        COALESCE(u.name, u.username) AS creator_name,
-                      COALESCE(p.subject, '') AS subject
-               FROM interaction_polls p
-               LEFT JOIN users u ON p.creator_username = u.username
-               WHERE p.status = 'active' AND p.creator_username = ?
-               ORDER BY p.created_at DESC LIMIT 50""",
-            (username,),
-        )
+        # 学生只看教师/管理员创建的，再按发布范围逐个过滤（范围是字符串组合，SQL 里还原不了）
+        sql = (f"SELECT {cols} FROM interaction_polls p "
+               "JOIN users u ON p.creator_username = u.username AND u.role IN (0, 1)")
     else:
-        rows = execute_query(
-            """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
-                        p.target_scope, p.target_grade, p.target_class, p.target_users,
-                        COALESCE(u.name, u.username) AS creator_name,
-                      COALESCE(p.subject, '') AS subject
-               FROM interaction_polls p
-               LEFT JOIN users u ON p.creator_username = u.username
-               WHERE p.status = 'active'
-               ORDER BY p.created_at DESC LIMIT 50""",
-        )
+        sql = (f"SELECT {cols} FROM interaction_polls p "
+               "LEFT JOIN users u ON p.creator_username = u.username")
+        if role == 1:
+            where.append("p.creator_username = ?")
+            params.append(username)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY p.status = 'active' DESC, p.created_at DESC LIMIT 100"
+
+    rows = list(execute_query(sql, tuple(params)))
+    if role == 2:
+        s_grade, s_class = get_user_grade_class(username)
+        rows = [r for r in rows if check_activity_visibility(
+            student_username=username, student_grade=s_grade, student_class=s_class,
+            creator_username=r[1],
+            target_scope=r[7] or "teacher_classes", target_grade=r[8] or "",
+            target_class=r[9] or "", target_users=r[10] or "",
+        )]
+
+    ids = [r[0] for r in rows]
+    counts: dict[tuple[int, int], int] = {}
+    voters: dict[int, int] = {}
+    my_choices: dict[int, list[int]] = {}
+    if ids:
+        ph = ",".join("?" * len(ids))
+        for pid, opt, cnt in execute_query(
+            f"SELECT poll_id, selected_option, COUNT(*) FROM interaction_poll_votes "
+            f"WHERE poll_id IN ({ph}) GROUP BY poll_id, selected_option", tuple(ids)):
+            counts[(pid, opt)] = cnt
+        for pid, cnt in execute_query(
+            f"SELECT poll_id, COUNT(DISTINCT student_username) FROM interaction_poll_votes "
+            f"WHERE poll_id IN ({ph}) GROUP BY poll_id", tuple(ids)):
+            voters[pid] = cnt
+        for pid, opt in execute_query(
+            f"SELECT poll_id, selected_option FROM interaction_poll_votes "
+            f"WHERE poll_id IN ({ph}) AND student_username=?", tuple(ids + [username])):
+            my_choices.setdefault(pid, []).append(opt)
 
     polls = []
     for r in rows:
         options = json.loads(r[3]) if isinstance(r[3], str) else r[3]
-        poll_type = r[4] if r[4] else "single"
-        # 学生/教师/管理员三条路径现同为同一列布局: 7-10 = target_*(scope/grade/class/users), 11 = creator_name
-        creator_name = r[11] if len(r) > 11 else (r[7] if len(r) > 7 else r[1])
-        vote_counts = []
-        for i in range(len(options)):
-            cnt = execute_query(
-                "SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = ? AND selected_option = ?",
-                (r[0], i),
-            )
-            vote_counts.append(cnt[0][0] if cnt else 0)
-
-        # 对于多选投票，计算每人投了几项
-        total_votes = sum(vote_counts)
-        unique_voters = 0
-        if poll_type == "multiple":
-            voters = execute_query(
-                "SELECT COUNT(DISTINCT student_username) FROM interaction_poll_votes WHERE poll_id = ?",
-                (r[0],),
-            )
-            unique_voters = voters[0][0] if voters else 0
-
-        # 学生端标记是否已投票
-        voted = False
-        if role == 2:
-            voted_row = execute_query(
-                "SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?",
-                (r[0], username),
-            )
-            voted = (voted_row[0][0] if voted_row else 0) > 0
-
+        poll_type = r[4] or "single"
+        ends_at = r[14] or ""
+        effective_ended = (r[5] != "active") or _poll_expired(ends_at)
+        vote_counts = [int(counts.get((r[0], i), 0)) for i in range(len(options))]
+        picks = sorted(my_choices.get(r[0], []))
         polls.append({
             "id": r[0],
             "creator_username": r[1],
-            "creator_name": creator_name,
+            "creator_name": r[11] or r[1],
             "question": r[2],
             "poll_type": poll_type,
             "options": [{"index": i, "text": opt, "votes": vote_counts[i]} for i, opt in enumerate(options)],
-            "total_votes": total_votes,
-            "unique_voters": unique_voters or total_votes,
-            "voted": voted,
+            "option_count": len(options),
+            "total_votes": sum(vote_counts),
+            "unique_voters": int(voters.get(r[0], 0)),
+            "voted": bool(picks),
+            "my_indices": picks,
             "created_at": r[6],
-            # 列表展示目标范围(年级/班级), 与考试/测验同口径
-            "target_scope": (r[7] if len(r) > 10 else "") or "teacher_classes",
-            "target_grade": (r[8] if len(r) > 10 else "") or "",
-            "target_class": (r[9] if len(r) > 10 else "") or "",
-            "target_users": (r[10] if len(r) > 10 else "") or "",
-            # 学科：第 13 列（两条 SELECT 都加了；老查询没有这列时给空串）
-            "subject": (r[12] if len(r) > 12 else "") or "",
+            "status": "ended" if effective_ended else "active",
+            "ended": effective_ended,
+            "anonymous": bool(r[13]),
+            "ends_at": ends_at,
+            "max_choices": int(r[15] or 0),
+            "target_scope": r[7] or "teacher_classes",
+            "target_grade": r[8] or "",
+            "target_class": r[9] or "",
+            "target_users": r[10] or "",
+            "subject": r[12] or "",
         })
 
     return {"polls": polls}
@@ -1697,13 +1749,17 @@ async def submit_vote(
     username = user["username"]
 
     poll_rows = execute_query_dict(
-        "SELECT * FROM interaction_polls WHERE id = ? AND status = 'active'",
+        "SELECT * FROM interaction_polls WHERE id = ?",
         (poll_id,),
     )
     if not poll_rows:
-        raise HTTPException(status_code=404, detail="投票不存在或已结束")
+        raise HTTPException(status_code=404, detail="投票不存在")
 
     poll_row = poll_rows[0]
+    if (poll_row.get("status") or "active") != "active":
+        raise HTTPException(status_code=400, detail="投票已结束，不能再投票")
+    if _poll_expired(poll_row.get("ends_at") or ""):
+        raise HTTPException(status_code=400, detail="投票已到截止时间，不能再投票")
 
     # 学生只能参与自己权限范围内的投票
     role = user.get("role", 2)
@@ -1739,6 +1795,11 @@ async def submit_vote(
             raise HTTPException(status_code=400, detail="选项索引格式错误")
         if not selected_indices:
             raise HTTPException(status_code=400, detail="请至少选择一个选项")
+        max_choices = int(poll_row.get("max_choices") or 0)
+        if max_choices and len(set(selected_indices)) > max_choices:
+            raise HTTPException(status_code=400, detail=f"最多只能选 {max_choices} 项")
+
+    selected_indices = list(dict.fromkeys(selected_indices))
 
     # 验证所有选项索引
     for idx in selected_indices:
@@ -1848,18 +1909,80 @@ async def get_poll_results(poll_id: int, request: Request):
     unique_voters = voters[0][0] if voters else 0
     poll_type = poll_row.get("poll_type") or "single"
     denominator = unique_voters if unique_voters > 0 else total
+    # 应投人数：按发布范围算一次，用于"已投 8 / 应投 30"与大屏进度
+    expected = 0
+    try:
+        from backend.permission_service import get_students_by_scope
+        expected = len(get_students_by_scope(
+            poll_row.get("creator_username") or "",
+            target_scope=poll_row.get("target_scope") or "teacher_classes",
+            target_grade=poll_row.get("target_grade") or "",
+            target_class=poll_row.get("target_class") or "",
+            target_users=poll_row.get("target_users") or "",
+        ) or [])
+    except Exception as exc:
+        logger.warning(f"统计投票应投人数失败: {exc}")
+
+    has_voted = False
+    my_indices: list[int] = []
+    if role == 2:
+        for (opt,) in execute_query(
+            "SELECT selected_option FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?",
+            (poll_id, user["username"]),
+        ):
+            my_indices.append(int(opt))
+        has_voted = bool(my_indices)
+
+    ends_at = poll_row.get("ends_at") or ""
+    ended = (poll_row.get("status") or "active") != "active" or _poll_expired(ends_at)
+    best = max(vote_counts) if vote_counts else 0
+    leading = [i for i, c in enumerate(vote_counts) if c == best and best > 0]
+
     return {
         "poll_id": poll_id,
         "question": poll_row["question"],
         "poll_type": poll_type,
         "options": [
             {"index": i, "text": opt, "votes": vote_counts[i],
+             "leading": i in leading,
              "percentage": round(vote_counts[i] / max(denominator, 1) * 100, 1)}
             for i, opt in enumerate(options)
         ],
         "total_votes": total,
         "unique_voters": unique_voters,
+        "expected_voters": expected,
+        "status": "ended" if ended else "active",
+        "ended": ended,
+        "anonymous": bool(poll_row.get("anonymous") or 0),
+        "ends_at": ends_at,
+        "max_choices": int(poll_row.get("max_choices") or 0),
+        "has_voted": has_voted,
+        "my_indices": my_indices,
     }
+
+
+@router.patch("/polls/{poll_id}/status", summary="结束或重新开启投票")
+async def update_poll_status(poll_id: int, req: PollStatusUpdate, request: Request):
+    """结束/重开投票（仅创建者或管理员）。
+
+    旧实现没有这个动作：投票只能建、不能结束，列表只显示 active，越攒越多。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作投票")
+    if req.status not in ("active", "ended"):
+        raise HTTPException(status_code=400, detail="status 只能是 active 或 ended")
+
+    rows = execute_query("SELECT creator_username FROM interaction_polls WHERE id = ?", (poll_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="投票不存在")
+    if role == 1 and rows[0][0] != user["username"]:
+        raise HTTPException(status_code=403, detail="只能操作自己创建的投票")
+
+    execute_insert_update("UPDATE interaction_polls SET status = ? WHERE id = ?", (req.status, poll_id))
+    logger.info(f"投票状态变更: poll={poll_id} -> {req.status} by {user['username']}")
+    return {"message": "投票已结束" if req.status == "ended" else "投票已重新开启", "status": req.status}
 
 
 # ── AI 内容审核 + 重复/频率限制（用于提问和回答的合规检查） ──

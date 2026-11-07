@@ -914,6 +914,10 @@ def init_db():
                 ("target_users", "TEXT DEFAULT ''"),
                 # 学科：投票的创建弹窗原先没有这一项，活动监控/列表的"科目"只能显示"-"
                 ("subject", "TEXT DEFAULT ''"),
+                # 课堂投票增强：匿名展示、截止时间、多选上限（0=不限）
+                ("anonymous", "INTEGER DEFAULT 0"),
+                ("ends_at", "TEXT DEFAULT ''"),
+                ("max_choices", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE interaction_polls ADD COLUMN {col_def[0]} {col_def[1]}")

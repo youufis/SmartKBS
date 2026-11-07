@@ -1,17 +1,18 @@
 /**
- * QuickPollPage — 快速投票（独立页）
- * 从 InteractionPage 提取，独立的投票功能页面
+ * QuickPollPage — 课堂投票
+ *
+ * 本轮重做：选项数量 2-10（滑杆 + 3/4/5 快捷 + 自动）、投票可结束/重开、投完可改、
+ * 多选可限项、结果排序与自动刷新、投屏大屏、匿名与截止时间。
  */
-import React, { useState, useEffect, useMemo } from 'react'
-import FormulaRenderer from '../components/FormulaRenderer'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Card, Button, Space, Typography, Tag, Modal,
-  Form, Input, Select, message, Empty, Spin, Radio, Popconfirm, Tooltip,
-  Checkbox, Progress, Divider, Pagination,
+  Button, Card, Checkbox, Divider, Empty, Form, Input, Modal, Pagination, Segmented,
+  Select, Slider, Space, Spin, Switch, Tag, Tooltip, Typography, message,
 } from 'antd'
 import {
-  BarChartOutlined, PlusOutlined, CheckCircleOutlined,
-  RobotOutlined, EditOutlined, DeleteOutlined, DownloadOutlined,
+  BarChartOutlined, CheckCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined,
+  FullscreenOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, RobotOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
@@ -19,524 +20,770 @@ import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
-import { reportLoadError } from '../utils/loadError'
+import FormulaRenderer from '../components/FormulaRenderer'
 import { RowList } from '../components/RowList'
 import ScopeTag from '../components/ScopeTag'
-import useSubjectOptions from '../hooks/useSubjectOptions'
 import ListFilterBar from '../components/ListFilterBar'
+import useSubjectOptions from '../hooks/useSubjectOptions'
+import { reportLoadError } from '../utils/loadError'
+import PollOptionsEditor, { POLL_OPTION_MAX, POLL_OPTION_MIN } from '../components/polls/PollOptionsEditor'
+import PollResultsView from '../components/polls/PollResultsView'
+import type { PollResultsData } from '../components/polls/PollResultsView'
+import '../styles/poll.css'
 
 const { Title, Text } = Typography
-const { TextArea } = Input
+
+interface PollItem {
+  id: number
+  creator_username: string
+  creator_name: string
+  question: string
+  poll_type: string
+  options: Array<{ index: number; text: string; votes: number }>
+  option_count: number
+  total_votes: number
+  unique_voters: number
+  voted: boolean
+  my_indices: number[]
+  created_at: string
+  status: 'active' | 'ended'
+  ended: boolean
+  anonymous: boolean
+  ends_at: string
+  max_choices: number
+  target_scope: string
+  target_grade: string
+  target_class: string
+  target_users: string
+  subject: string
+}
+
+const EMPTY_SCOPE: ActivityScopeValue = {
+  target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '',
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+const fmtDateTime = (d: Date) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} `
+  + `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+
+/** 剩余时间的人话表述；已截止返回空串 */
+const remaining = (endsAt: string): string => {
+  if (!endsAt) return ''
+  const end = new Date(endsAt.replace(' ', 'T'))
+  const diff = end.getTime() - Date.now()
+  if (Number.isNaN(diff) || diff <= 0) return ''
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins} 分钟`
+  const hours = Math.floor(mins / 60)
+  return hours < 24 ? `${hours} 小时 ${mins % 60} 分` : `${Math.floor(hours / 24)} 天`
+}
+
+/** 删除按钮：需要翻译与确认框，抽成组件避免在 renderItem 里堆 UI */
+const DeletePollButton: React.FC<{ onConfirm: () => void }> = ({ onConfirm }) => {
+  const { t } = useTranslation('interaction')
+  return (
+    <Tooltip title={t('delete')}>
+      <Button
+        size="small"
+        type="text"
+        danger
+        icon={<DeleteOutlined />}
+        onClick={(e) => {
+          e.stopPropagation()
+          Modal.confirm({
+            title: t('confirmDeletePoll'),
+            okText: t('confirm'),
+            okType: 'danger',
+            cancelText: t('cancel'),
+            onOk: onConfirm,
+          })
+        }}
+      />
+    </Tooltip>
+  )
+}
 
 const QuickPollPage: React.FC = () => {
   const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
-
-  // ── 投票 ──
-  const [polls, setPolls] = useState<any[]>([])
-  const [pollLoading, setPollLoading] = useState(false)
-  const [pollModal, setPollModal] = useState(false)
-  const [votedPolls, setVotedPolls] = useState<Record<number, boolean>>({})
-  const [selectedOption, setSelectedOption] = useState<Record<number, number | null>>({})
-  const [selectedOptions, setSelectedOptions] = useState<Record<number, number[]>>({})
-  const [pollForm] = Form.useForm()
-  const [takingPoll, setTakingPoll] = useState<any>(null)
-  const [pollResult, setPollResult] = useState<any>(null)
-  const [aiPollModal, setAiPollModal] = useState(false)
-  const [aiPollLoading, setAiPollLoading] = useState(false)
-  const [aiPollResult, setAiPollResult] = useState<any>(null)
-  const [aiPollForm] = Form.useForm()
-  const [editPollModal, setEditPollModal] = useState<any>(null)
-  const [editPollForm] = Form.useForm()
-  // 学科：与其它活动一致（默认取系统配置的第一个），落库后列表/活动监控才显示科目
   const { subjects: subjectOptions } = useSubjectOptions()
-  const [pollScope, setPollScope] = useState<ActivityScopeValue>({
-    target_scope: 'teacher_classes',
-    target_grade: '',
-    target_class: '',
-    target_users: '',
-  })
 
-  // 列表分页
-  // 列表查找/分类
-  const [pollKw, setPollKw] = useState('')
-  const [pollFilter, setPollFilter] = useState('all')
-  const [pollSubject, setPollSubject] = useState('')
-  const [pollPage, setPollPage] = useState(1)
-  const [pollPageSize, setPollPageSize] = useState(10)
+  const [polls, setPolls] = useState<PollItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [kw, setKw] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'ended'>('all')
+  const [subjectFilter, setSubjectFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
 
-  // 加载投票列表
-  const loadPolls = async () => {
-    setPollLoading(true)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createForm] = Form.useForm()
+  const [pollScope, setPollScope] = useState<ActivityScopeValue>(EMPTY_SCOPE)
+  const pollType = Form.useWatch('poll_type', createForm) || 'single'
+
+  const [editPoll, setEditPoll] = useState<PollItem | null>(null)
+  const [editForm] = Form.useForm()
+
+  const [votePoll, setVotePoll] = useState<PollItem | null>(null)
+  const [picked, setPicked] = useState<number[]>([])
+
+  const [resultPollId, setResultPollId] = useState<number | null>(null)
+  const [resultData, setResultData] = useState<PollResultsData | null>(null)
+  const [bigScreen, setBigScreen] = useState(false)
+
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiForm] = Form.useForm()
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiPreview, setAiPreview] = useState<{ question: string; options: string[] } | null>(null)
+  const aiAuto = Form.useWatch('auto_count', aiForm)
+  const aiCount = Form.useWatch('option_count', aiForm) ?? 4
+
+  const loadPolls = useCallback(async () => {
+    setLoading(true)
     try {
-      const { data } = await apiClient.get('/api/interaction/polls')
-      const polls = data.polls || []
-      setPolls(polls)
-      const votedMap: Record<number, boolean> = {}
-      for (const p of polls) {
-        votedMap[p.id] = p.voted === true
-      }
-      setVotedPolls(votedMap)
-    } catch (err) { reportLoadError(err, { key: 'quickPoll.list' }) }
-    setPollLoading(false)
-  }
-
-  useEffect(() => {
-    loadPolls()
+      const { data } = await apiClient.get('/api/interaction/polls', { params: { status: 'all' } })
+      setPolls(data.polls || [])
+    } catch (err) {
+      reportLoadError(err, { key: 'quickPoll.list' })
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  // ── AI 生成投票 ──
-  const handleAiGeneratePoll = async (values: any) => {
-    setAiPollLoading(true)
-    setAiPollResult(null)
+  useEffect(() => { void loadPolls() }, [loadPolls])
+
+  // ── 结果拉取 + 自动刷新（结果弹窗或投屏打开时每 3 秒） ──
+  const fetchResults = useCallback(async (pollId: number, silent = false) => {
     try {
-      const { data } = await apiClient.post('/api/interaction/polls/ai-generate', values, { timeout: 120000 })
-      setAiPollResult(data)
-      if (data.poll) {
-        message.success(t('aiPollGenerated'))
-      } else if (data.error) {
-        message.warning(data.error)
-      }
-    } catch { message.error(t('aiGenerateFailed')) }
-    setAiPollLoading(false)
-  }
-
-  const handleApplyAiPoll = () => {
-    if (aiPollResult?.poll) {
-      pollForm.setFieldsValue({
-        question: aiPollResult.poll.question,
-        options: aiPollResult.poll.options.join('\n'),
-        poll_type: aiPollForm.getFieldValue('poll_type') || 'single',
-        // AI 弹窗里选的学科要一起带进创建表单，否则保存出来投票的科目又是空的
-        subject: aiPollForm.getFieldValue('subject') || subjectOptions[0] || '',
-      })
-      message.success(t('pollFilled'))
-      setAiPollModal(false)
+      const { data } = await apiClient.get<PollResultsData>(`/api/interaction/polls/${pollId}/results`)
+      setResultData(data)
+    } catch (err: any) {
+      if (!silent) message.error(err?.response?.data?.detail || t('loadResultsFailed'))
     }
-  }
+  }, [t])
 
-  // ── 创建投票 ──
-  const handleCreatePoll = async (values: any) => {
-    const options = values.options.split('\n').filter((l: string) => l.trim())
-    if (options.length < 2) { message.warning(t('minOptions')); return }
+  useEffect(() => {
+    if (resultPollId == null) { setResultData(null); return }
+    void fetchResults(resultPollId)
+    const timer = setInterval(() => { void fetchResults(resultPollId, true) }, 3000)
+    return () => clearInterval(timer)
+  }, [resultPollId, fetchResults])
+
+  const openResults = (poll: PollItem) => { setResultPollId(poll.id); setBigScreen(false) }
+  const openBigScreen = (poll: PollItem) => { setResultPollId(poll.id); setBigScreen(true) }
+
+  // ── 创建 ──
+  const submitCreate = async () => {
+    const v = await createForm.validateFields()
+    const options: string[] = (v.options || []).map((o: string) => String(o).trim()).filter(Boolean)
+    const unique = Array.from(new Set(options))
+    if (unique.length < POLL_OPTION_MIN) { message.warning(t('minOptions')); return }
+    if (unique.length !== options.length) { message.warning(t('pollDuplicateOptions')); return }
+    const minutes = Number(v.duration || 0)
     try {
       await apiClient.post('/api/interaction/polls', {
-        question: values.question,
-        options,
-        poll_type: values.poll_type || 'single',
-        subject: values.subject || subjectOptions[0] || '',
-        target_scope: pollScope.target_scope,
-        target_grade: pollScope.target_grade,
-        target_class: pollScope.target_class,
-        target_users: pollScope.target_users,
+        question: v.question,
+        options: unique,
+        poll_type: v.poll_type || 'single',
+        subject: v.subject || '',
+        anonymous: !!v.anonymous,
+        ends_at: minutes > 0 ? fmtDateTime(new Date(Date.now() + minutes * 60000)) : '',
+        max_choices: v.poll_type === 'multiple' ? Number(v.max_choices || 0) : 0,
+        ...pollScope,
       })
       message.success(t('pollCreated'))
-      setPollModal(false)
-      pollForm.resetFields()
-      setPollScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
+      setCreateOpen(false)
+      createForm.resetFields()
+      setPollScope(EMPTY_SCOPE)
       await loadPolls()
     } catch (err: any) {
-      message.error(err.response?.data?.detail || t('createFailed'))
+      message.error(err?.response?.data?.detail || t('createFailed'))
     }
   }
 
-  // ── 投票 ──
-  const handleVote = async (pollId: number) => {
-    const poll = polls.find(p => p.id === pollId)
-    if (!poll) return
-    const isMultiple = poll.poll_type === 'multiple'
-
-    if (isMultiple) {
-      const selOpts = selectedOptions[pollId] || []
-      if (selOpts.length === 0) { message.warning(t('selectOptionFirst')); return }
-      const indicesStr = selOpts.sort().join(',')
-      try {
-        await apiClient.post(`/api/interaction/polls/${pollId}/vote`, null, {
-          params: { option_indices: indicesStr },
-        })
-        message.success(t('voteSuccess'))
-        setVotedPolls({ ...votedPolls, [pollId]: true })
-        await loadPolls()
-        setTakingPoll(null)
-      } catch (err: any) {
-        message.error(err.response?.data?.detail || t('voteFailed'))
-      }
-    } else {
-      const selOpt = selectedOption[pollId]
-      if (selOpt === undefined || selOpt === null) { message.warning(t('selectOptionFirst')); return }
-      try {
-        await apiClient.post(`/api/interaction/polls/${pollId}/vote`, null, {
-          params: { option_index: selOpt },
-        })
-        message.success(t('voteSuccess'))
-        setVotedPolls({ ...votedPolls, [pollId]: true })
-        await loadPolls()
-        setTakingPoll(null)
-      } catch (err: any) {
-        message.error(err.response?.data?.detail || t('voteFailed'))
-      }
-    }
+  // ── 投票 / 改投 ──
+  const startVote = (poll: PollItem) => {
+    setVotePoll(poll)
+    setPicked(poll.my_indices || [])
   }
 
-  const handleViewPollResults = async (pollId: number) => {
+  const submitVote = async () => {
+    if (!votePoll) return
+    if (!picked.length) { message.warning(t('selectOptionFirst')); return }
     try {
-      const { data } = await apiClient.get(`/api/interaction/polls/${pollId}/results`)
-      setPollResult(data)
-    } catch (err: any) { message.error(err?.response?.data?.detail || t('loadResultsFailed')) }
-  }
-
-  const handleStartPoll = (poll: any) => {
-    setSelectedOption({})
-    setSelectedOptions({})
-    setTakingPoll(poll)
-    setPollResult(null)
-  }
-
-  // ── 编辑/删除 ──
-  const handleDeletePoll = async (id: number) => {
-    try { await apiClient.delete(`/api/interaction/polls/${id}`); message.success(t('deleteSuccess')); await loadPolls() }
-    catch { message.error(t('deleteFailed')) }
-  }
-
-  const handleEditPoll = async () => {
-    const values = await editPollForm.validateFields()
-    try {
-      await apiClient.put(`/api/interaction/polls/${editPollModal.id}`, {
-        question: values.question,
-        options: values.options.split('\n').filter((l: string) => l.trim()),
-        poll_type: values.poll_type || 'single',
-        subject: values.subject || '',
+      await apiClient.post(`/api/interaction/polls/${votePoll.id}/vote`, null, {
+        params: votePoll.poll_type === 'multiple'
+          ? { option_indices: [...picked].sort((a, b) => a - b).join(',') }
+          : { option_index: picked[0] },
       })
-      message.success(t('updateSuccess')); setEditPollModal(null); await loadPolls()
-    } catch { message.error(t('updateFailed')) }
+      message.success(t('voteSuccess'))
+      setVotePoll(null)
+      await loadPolls()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('voteFailed'))
+    }
   }
 
-  // ── 列表查找/分类（数据本地全量，切筛选即时生效） ──
-  const pollHasVoted = (p: any) => Boolean(p.voted ?? votedPolls[p.id])
-  const pollSubjects = useMemo(
-    () => Array.from(new Set(polls.map((p: any) => String(p.subject || '').trim()).filter(Boolean)))
+  const togglePick = (index: number) => {
+    if (!votePoll) return
+    if (votePoll.poll_type !== 'multiple') { setPicked([index]); return }
+    const max = votePoll.max_choices || 0
+    if (picked.includes(index)) { setPicked(picked.filter(i => i !== index)); return }
+    if (max && picked.length >= max) { message.warning(t('pollMaxChoices', { count: max })); return }
+    setPicked([...picked, index])
+  }
+
+  // ── 结束 / 重开 / 删除 / 编辑 ──
+  const setPollStatus = async (poll: PollItem, next: 'active' | 'ended') => {
+    try {
+      const { data } = await apiClient.patch(`/api/interaction/polls/${poll.id}/status`, { status: next })
+      message.success(data.message)
+      await loadPolls()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('updateFailed'))
+    }
+  }
+
+  const removePoll = async (poll: PollItem) => {
+    try {
+      await apiClient.delete(`/api/interaction/polls/${poll.id}`)
+      message.success(t('deleteSuccess'))
+      await loadPolls()
+    } catch { message.error(t('deleteFailed')) }
+  }
+
+  const openEdit = (poll: PollItem) => {
+    editForm.setFieldsValue({
+      question: poll.question,
+      poll_type: poll.poll_type,
+      subject: poll.subject || '',
+      options: poll.options.map(o => o.text),
+    })
+    setEditPoll(poll)
+  }
+
+  const submitEdit = async () => {
+    if (!editPoll) return
+    const v = await editForm.validateFields()
+    const options = (v.options || []).map((o: string) => String(o).trim()).filter(Boolean)
+    try {
+      await apiClient.put(`/api/interaction/polls/${editPoll.id}`, {
+        question: v.question,
+        options,
+        poll_type: v.poll_type || 'single',
+        subject: v.subject || '',
+      })
+      message.success(t('updateSuccess'))
+      setEditPoll(null)
+      await loadPolls()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('updateFailed'))
+    }
+  }
+
+  // ── AI 生成 ──
+  const generateAi = async () => {
+    const v = await aiForm.validateFields()
+    setAiLoading(true)
+    setAiPreview(null)
+    try {
+      const { data } = await apiClient.post('/api/interaction/polls/ai-generate', {
+        topic: v.topic,
+        poll_type: v.poll_type || 'single',
+        option_count: v.auto_count ? 0 : Number(v.option_count || 4),
+      }, { timeout: 120000 })
+      if (data.poll?.options?.length) {
+        setAiPreview({
+          question: data.poll.question || v.topic,
+          options: data.poll.options.map((o: string) => String(o)),
+        })
+      } else {
+        message.warning(data.error || t('aiGenerateFailed'))
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('aiGenerateFailed'))
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const applyAi = () => {
+    if (!aiPreview) return
+    createForm.setFieldsValue({
+      question: aiPreview.question,
+      options: aiPreview.options,
+      poll_type: aiForm.getFieldValue('poll_type') || 'single',
+      subject: aiForm.getFieldValue('subject') || subjectOptions[0] || '',
+      anonymous: false,
+      duration: 0,
+      max_choices: 0,
+    })
+    setAiOpen(false)
+    setAiPreview(null)
+    setCreateOpen(true)
+  }
+
+  // ── 列表过滤（数据一次拉回，切筛选即时生效） ──
+  const subjectOptionsInList = useMemo(
+    () => Array.from(new Set(polls.map(p => p.subject).filter(Boolean)))
       .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
-      .map((s) => ({ value: s, label: s })),
+      .map(s => ({ value: s, label: s })),
     [polls],
   )
-  const visiblePolls = useMemo(() => {
-    const k = pollKw.trim().toLowerCase()
-    return polls.filter((p: any) => {
-      if (pollFilter === 'single' && p.poll_type === 'multiple') return false
-      if (pollFilter === 'multiple' && p.poll_type !== 'multiple') return false
-      if (pollFilter === 'todo' && pollHasVoted(p)) return false
-      if (pollFilter === 'done' && !pollHasVoted(p)) return false
-      if (pollSubject && String(p.subject || '').trim() !== pollSubject) return false
+
+  const visible = useMemo(() => {
+    const k = kw.trim().toLowerCase()
+    return polls.filter(p => {
+      if (statusFilter === 'active' && p.ended) return false
+      if (statusFilter === 'ended' && !p.ended) return false
+      if (subjectFilter && p.subject !== subjectFilter) return false
       if (!k) return true
-      return `${p.question || ''} ${p.creator_name || p.creator_username || ''}`.toLowerCase().includes(k)
+      return `${p.question} ${p.creator_name}`.toLowerCase().includes(k)
     })
-  }, [polls, pollKw, pollFilter, pollSubject, votedPolls])
+  }, [polls, kw, statusFilter, subjectFilter])
+
+  const paged = visible.slice((page - 1) * pageSize, page * pageSize)
+  const activeCount = polls.filter(p => !p.ended).length
+  const endedCount = polls.filter(p => p.ended).length
 
   return (
     <Card style={{ borderRadius: 8 }}>
-      <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Space>
-            <BarChartOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('poll')}</Title>
-            <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              {t('poll')}
-            </Text>
+      <Card style={{ marginBottom: 16, border: 'none', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <Space align="center">
+            <BarChartOutlined style={{ fontSize: 26, color: '#fff' }} />
+            <div>
+              <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('poll')}</Title>
+              <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{t('pollSubtitle')}</Text>
+            </div>
           </Space>
+          {isTeacherOrAdmin && (
+            <Space wrap>
+              <Button icon={<RobotOutlined />} onClick={() => setAiOpen(true)}>{t('aiCreatePoll')}</Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                {t('createPoll')}
+              </Button>
+            </Space>
+          )}
         </div>
       </Card>
 
-      <Card>
-        {isTeacherOrAdmin && (
-          <Space style={{ marginBottom: 16 }}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setPollModal(true)}>
-              {t('createPoll')}
-            </Button>
-            <Button icon={<RobotOutlined />} onClick={() => setAiPollModal(true)}>
-              {t('aiCreatePoll')}
-            </Button>
-          </Space>
-        )}
-        <Spin spinning={pollLoading}>
-          {polls.length === 0 ? <Empty description={t('noPolls')} /> : (
-            <>
-            {/* 查找 + 分类：教师按题型分，学生按「投没投」分；再叠加学科 */}
-            <ListFilterBar
-              keyword={pollKw}
-              onKeyword={(v) => { setPollKw(v); setPollPage(1) }}
-              searchPlaceholder={t('listSearchPh')}
-              status={pollFilter}
-              onStatus={(v) => { setPollFilter(v); setPollPage(1) }}
-              statusOptions={isTeacherOrAdmin
-                ? [
-                    { value: 'all', label: `${t('all')} (${polls.length})` },
-                    { value: 'single', label: `${t('single')} (${polls.filter((p: any) => p.poll_type !== 'multiple').length})` },
-                    { value: 'multiple', label: `${t('multiple')} (${polls.filter((p: any) => p.poll_type === 'multiple').length})` },
-                  ]
-                : [
-                    { value: 'all', label: `${t('all')} (${polls.length})` },
-                    { value: 'todo', label: `${t('pollTodo')} (${polls.filter((p: any) => !(p.voted ?? votedPolls[p.id])).length})` },
-                    { value: 'done', label: `${t('pollDone')} (${polls.filter((p: any) => (p.voted ?? votedPolls[p.id])).length})` },
-                  ]}
-              subject={pollSubject}
-              onSubject={(v) => { setPollSubject(v); setPollPage(1) }}
-              subjectOptions={pollSubjects}
-              dirty={!!pollKw || pollFilter !== 'all' || !!pollSubject}
-              onReset={() => { setPollKw(''); setPollFilter('all'); setPollSubject(''); setPollPage(1) }}
-              resetLabel={t('clearFilter')}
-            />
-            {visiblePolls.length === 0 ? <Empty description={t('listNoMatch')} /> : (
-            <>
-            <RowList
-              items={visiblePolls.slice((pollPage - 1) * pollPageSize, pollPage * pollPageSize)}
-              split={false}
-              renderItem={(poll: any) => {
-                const isMultiple = poll.poll_type === 'multiple'
-                const hasVoted = poll.voted ?? votedPolls[poll.id]
-                return (
-                  <Card size="small" style={{ marginBottom: 8 }}>
-                    <div className="page-header-flex stack-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1 }}>
-                        <Text strong><FormulaRenderer content={poll.question} /></Text>
-                        <div style={{ marginTop: 4 }}>
-                          <Tag color={isMultiple ? 'purple' : 'blue'}>
-                            {isMultiple ? t('multiple') : t('single')}
-                          </Tag>
-                          <Tag color="blue">{poll.creator_username || poll.creator_name}</Tag>
-                          {poll.subject && <Tag color="cyan">{poll.subject}</Tag>}
-                          {isTeacherOrAdmin && (
-                            <ScopeTag scope={poll.target_scope} grade={poll.target_grade}
-                              classes={poll.target_class} users={poll.target_users} />
-                          )}
-                          <Text type="secondary" style={{ fontSize: 12 }}>{t('peopleCount', { count: poll.unique_voters || poll.total_votes })}</Text>
-                        </div>
-                      </div>
-                      <Space>
-                        {isStudent && !hasVoted && (
-                          <Button size="small" type="primary" icon={<CheckCircleOutlined />}
-                            onClick={() => handleStartPoll(poll)}>{t('vote')}</Button>
-                        )}
-                        {isStudent && hasVoted && (
-                          <Tooltip title={t('results')}>
-                            <Button size="small" icon={<BarChartOutlined />}
-                              onClick={() => handleViewPollResults(poll.id)} />
-                          </Tooltip>
-                        )}
-                        {isTeacherOrAdmin && (
-                          <>
-                            {/* 操作按钮只留图标 + tooltip：文字按钮太占地方，整行会被挤长 */}
-                            <Tooltip title={t('results')}>
-                              <Button size="small" icon={<BarChartOutlined />}
-                                onClick={() => handleViewPollResults(poll.id)} />
-                            </Tooltip>
-                            <Tooltip title={t('export')}>
-                              <Button size="small" icon={<DownloadOutlined />}
-                                onClick={() => window.open(`/api/export/poll/${poll.id}`, '_blank')} />
-                            </Tooltip>
-                            <Tooltip title={t('edit')}>
-                              <Button size="small" type="text" icon={<EditOutlined />}
-                                onClick={() => {
-                                  editPollForm.setFieldsValue({
-                                    question: poll.question,
-                                    options: poll.options.map((o: any) => o.text).join('\n'),
-                                    poll_type: poll.poll_type,
-                                    subject: poll.subject || '',
-                                  })
-                                  setEditPollModal(poll)
-                                }} />
-                            </Tooltip>
-                            <ResetActivityButton activityType="poll" activityId={poll.id}
-                                iconOnly stopPropagation onSuccess={loadPolls} />
-                            <Popconfirm title={t('confirmDeletePoll')} onConfirm={() => handleDeletePoll(poll.id)}>
-                              <Tooltip title={t('delete')}>
-                                <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                              </Tooltip>
-                            </Popconfirm>
-                          </>
-                        )}
-                      </Space>
-                    </div>
-                  </Card>
-                )
-              }}
-            />
-            <div style={{ marginTop: 12, textAlign: 'center' }}>
-              <Pagination
-                current={pollPage} pageSize={pollPageSize} total={visiblePolls.length}
-                showSizeChanger showTotal={(total) => t('totalPolls', { count: total })}
-                pageSizeOptions={['5', '10', '20', '50']}
-                onChange={(p, ps) => { setPollPage(p); setPollPageSize(ps) }}
-                size="small"
-              />
-            </div>
-            </>
-            )}
-            </>
-          )}
-        </Spin>
-      </Card>
-
-      {/* ── 投票弹窗 ── */}
-      <Modal maskClosable={false} title={takingPoll?.question} open={!!takingPoll && !pollResult}
-        onCancel={() => { setTakingPoll(null); setPollResult(null) }}
-        footer={[
-          <Button key="submit" type="primary" onClick={() => handleVote(takingPoll?.id)}>{t('vote')}</Button>,
-        ]}
-        width={500}>
-        {takingPoll?.options?.map((opt: any, i: number) => (
-          <div key={i} style={{ marginBottom: 8, padding: '8px 12px', background: 'var(--bg-layout)', borderRadius: 4, border: '1px solid var(--border-color)' }}>
-            {takingPoll.poll_type === 'multiple' ? (
-              <Checkbox
-                checked={(selectedOptions[takingPoll.id] || []).includes(i)}
-                onChange={(e) => {
-                  const current = selectedOptions[takingPoll.id] || []
-                  const updated = e.target.checked
-                    ? [...current, i]
-                    : current.filter((v: number) => v !== i)
-                  setSelectedOptions({ ...selectedOptions, [takingPoll.id]: updated })
-                }}
-              >
-                {opt.text}
-              </Checkbox>
-            ) : (
-              <Radio
-                checked={selectedOption[takingPoll.id] === i}
-                onChange={() => setSelectedOption({ ...selectedOption, [takingPoll.id]: i })}
-              >
-                {opt.text}
-              </Radio>
-            )}
-          </div>
-        ))}
-      </Modal>
-
-      {/* ── 投票结果弹窗（投票后或教师查看） ── */}
-      <Modal title={pollResult?.question || t('pollResults')} open={!!pollResult}
-        onCancel={() => setPollResult(null)}
-        footer={<Button onClick={() => setPollResult(null)}>{t('close')}</Button>}
-        width={500}>
-        {pollResult && (
+      <Spin spinning={loading}>
+        {polls.length === 0 ? <Empty description={t('noPolls')} /> : (
           <>
-            <Space style={{ marginBottom: 12 }}>
-              <Tag color={pollResult.poll_type === 'multiple' ? 'purple' : 'blue'}>
-                {pollResult.poll_type === 'multiple' ? t('multiple') : t('single')}
-              </Tag>
-            </Space>
-            {pollResult.options?.map((opt: any, i: number) => (
-              <div key={i} style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text>{opt.text}</Text>
-                  <Text type="secondary">{t('votesCount', { count: opt.votes })} ({opt.percentage || 0}%)</Text>
+            <ListFilterBar
+              keyword={kw}
+              onKeyword={(v) => { setKw(v); setPage(1) }}
+              searchPlaceholder={t('listSearchPh')}
+              status={statusFilter}
+              onStatus={(v) => { setStatusFilter(v as 'all' | 'active' | 'ended'); setPage(1) }}
+              statusOptions={[
+                { value: 'all', label: `${t('all')} (${polls.length})` },
+                { value: 'active', label: `${t('pollStatusActive')} (${activeCount})` },
+                { value: 'ended', label: `${t('pollStatusEnded')} (${endedCount})` },
+              ]}
+              subject={subjectFilter}
+              onSubject={(v) => { setSubjectFilter(v); setPage(1) }}
+              subjectOptions={subjectOptionsInList}
+              subjectPlaceholder={t('subject')}
+              dirty={!!kw || statusFilter !== 'all' || !!subjectFilter}
+              onReset={() => { setKw(''); setStatusFilter('all'); setSubjectFilter(''); setPage(1) }}
+              resetLabel={t('clearFilter')}
+              extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadPolls()}>{t('refresh')}</Button>}
+            />
+
+            {visible.length === 0 ? <Empty description={t('listNoMatch')} /> : (
+              <>
+                <RowList
+                  items={paged}
+                  split={false}
+                  renderItem={(poll: PollItem) => {
+                    const canVote = isStudent && !poll.ended
+                    const canSeeResult = isTeacherOrAdmin || poll.voted || poll.ended
+                    return (
+                      <Card size="small" style={{ marginBottom: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <Space size={6} wrap>
+                              <Tag color={poll.ended ? 'default' : 'processing'}>
+                                {poll.ended ? t('pollStatusEnded') : t('pollStatusActive')}
+                              </Tag>
+                              <Text strong><FormulaRenderer content={poll.question} /></Text>
+                            </Space>
+                            <div style={{ marginTop: 6 }}>
+                              <Tag color={poll.poll_type === 'multiple' ? 'purple' : 'blue'}>
+                                {poll.poll_type === 'multiple' ? t('multiple') : t('single')}
+                              </Tag>
+                              <Tag color="blue">{poll.creator_name || poll.creator_username}</Tag>
+                              {poll.subject && <Tag color="cyan">{poll.subject}</Tag>}
+                              {poll.anonymous && <Tag>{t('pollAnonymous')}</Tag>}
+                              {poll.poll_type === 'multiple' && !!poll.max_choices && (
+                                <Tag>{t('pollMaxChoices', { count: poll.max_choices })}</Tag>
+                              )}
+                              {isTeacherOrAdmin && (
+                                <ScopeTag scope={poll.target_scope} grade={poll.target_grade}
+                                  classes={poll.target_class} users={poll.target_users} />
+                              )}
+                            </div>
+                            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-tertiary)' }}>
+                              {t('pollOptionCount', { count: poll.option_count })}
+                              {' · '}
+                              {t('pollVotersShort', { count: poll.unique_voters })}
+                              {poll.ends_at && (
+                                <> {' · '}
+                                  {t('pollDeadline')} {poll.ends_at.slice(5, 16)}
+                                  {!poll.ended && remaining(poll.ends_at)
+                                    && `（${t('pollRemaining', { time: remaining(poll.ends_at) })}）`}
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <Space wrap size={4}>
+                            {canVote && (
+                              <Button size="small" type={poll.voted ? 'default' : 'primary'}
+                                icon={<CheckCircleOutlined />} onClick={() => startVote(poll)}>
+                                {poll.voted ? t('pollChangeVote') : t('vote')}
+                              </Button>
+                            )}
+                            {canSeeResult && (
+                              <Tooltip title={t('results')}>
+                                <Button size="small" icon={<BarChartOutlined />} onClick={() => openResults(poll)} />
+                              </Tooltip>
+                            )}
+                            {isTeacherOrAdmin && (
+                              <>
+                                <Tooltip title={t('pollBigScreen')}>
+                                  <Button size="small" icon={<FullscreenOutlined />} onClick={() => openBigScreen(poll)} />
+                                </Tooltip>
+                                <Tooltip title={t('export')}>
+                                  <Button size="small" icon={<DownloadOutlined />}
+                                    onClick={() => window.open(`/api/export/poll/${poll.id}`, '_blank')} />
+                                </Tooltip>
+                                <Tooltip title={t('edit')}>
+                                  <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(poll)} />
+                                </Tooltip>
+                                <Tooltip title={poll.ended ? t('pollReopen') : t('pollEnd')}>
+                                  <Button size="small" type="text"
+                                    icon={poll.ended ? <PlayCircleOutlined /> : <StopOutlined />}
+                                    onClick={() => {
+                                      if (poll.ended) { void setPollStatus(poll, 'active'); return }
+                                      Modal.confirm({
+                                        title: t('pollEnd'),
+                                        content: t('pollEndConfirm'),
+                                        okText: t('confirm'),
+                                        cancelText: t('cancel'),
+                                        onOk: () => setPollStatus(poll, 'ended'),
+                                      })
+                                    }} />
+                                </Tooltip>
+                                <ResetActivityButton activityType="poll" activityId={poll.id}
+                                  iconOnly stopPropagation onSuccess={loadPolls} />
+                                <DeletePollButton onConfirm={() => removePoll(poll)} />
+                              </>
+                            )}
+                          </Space>
+                        </div>
+                      </Card>
+                    )
+                  }}
+                />
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                  <Pagination
+                    current={page} pageSize={pageSize} total={visible.length}
+                    showSizeChanger showTotal={(total) => t('totalPolls', { count: total })}
+                    pageSizeOptions={['5', '10', '20', '50']}
+                    onChange={(p, ps) => { setPage(p); setPageSize(ps) }} size="small"
+                  />
                 </div>
-                <Progress percent={opt.percentage || 0} size="small" />
-              </div>
-            ))}
-            <Divider />
-            <Text type="secondary">{t('peopleCount', { count: pollResult.unique_voters || pollResult.total_votes })}</Text>
-            {pollResult.poll_type === 'multiple' && pollResult.unique_voters ? (
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                {t('totalVotes', { count: pollResult.total_votes })}
+              </>
+            )}
+          </>
+        )}
+      </Spin>
+
+      {/* ── 投票 / 改投 ── */}
+      <Modal
+        open={!!votePoll}
+        title={votePoll?.question}
+        onCancel={() => setVotePoll(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setVotePoll(null)}>{t('cancel')}</Button>,
+          <Button key="ok" type="primary" onClick={submitVote}>
+            {votePoll?.voted ? t('pollUpdateVote') : t('vote')}
+          </Button>,
+        ]}
+        width={520}
+      >
+        {votePoll && (
+          <>
+            {votePoll.poll_type === 'multiple' && (
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                {votePoll.max_choices
+                  ? t('pollMaxChoices', { count: votePoll.max_choices })
+                  : t('pollMultiHint')}
               </Text>
-            ) : null}
+            )}
+            <Space orientation="vertical" style={{ width: '100%' }} size={8}>
+              {votePoll.options.map(opt => {
+                const checked = picked.includes(opt.index)
+                return (
+                  <div
+                    key={opt.index}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => togglePick(opt.index)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') togglePick(opt.index) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                      padding: '10px 12px', borderRadius: 8,
+                      border: `1px solid ${checked ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                      background: checked ? 'rgba(22,119,255,0.06)' : 'var(--bg-container)',
+                    }}
+                  >
+                    {votePoll.poll_type === 'multiple'
+                      ? <Checkbox checked={checked} />
+                      : (
+                        <span style={{
+                          width: 16, height: 16, borderRadius: 8, flex: '0 0 16px',
+                          border: `1px solid ${checked ? 'var(--primary-color)' : 'var(--border-color-secondary)'}`,
+                          background: checked ? 'var(--primary-color)' : 'transparent',
+                        }} />
+                      )}
+                    <span>{opt.text}</span>
+                  </div>
+                )
+              })}
+            </Space>
           </>
         )}
       </Modal>
 
-      {/* ── AI 生成投票弹窗 ── */}
-      <Modal maskClosable={false} title={<Space><RobotOutlined />{t('aiGeneratePoll')}</Space>} open={aiPollModal}
-        onCancel={() => { setAiPollModal(false); setAiPollResult(null) }}
-        footer={aiPollResult?.poll ? [
-          <Button key="cancel" onClick={() => { setAiPollModal(false); setAiPollResult(null) }}>{t('cancel')}</Button>,
-          <Button key="apply" type="primary" onClick={handleApplyAiPoll}>{t('fillForm')}</Button>,
-        ] : null}>
-        <Form form={aiPollForm} layout="vertical" onFinish={handleAiGeneratePoll}>
-          <Form.Item name="topic" label={t('pollTopic')} rules={[{ required: true }]}>
-            <Input placeholder={t('pollTopicPlaceholder')} />
-          </Form.Item>
-          <Form.Item name="poll_type" label={t('pollType')} initialValue="single">
-            <Select>
-              <Select.Option value="single">{t('singleChoice')}</Select.Option>
-              <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
-            </Select>
-          </Form.Item>
-          {/* 学科：落库后投票列表与活动监控的"科目"列才显示得出来 */}
-          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
-            <Select options={subjectOptions.map((s) => ({ value: s, label: s }))} />
-          </Form.Item>
-          <Form.Item name="option_count" label={t('optionCount')} initialValue={4}>
-            <Select>
-              {[2, 3, 4, 5, 6].map(n => <Select.Option key={n} value={n}>{t('optionsCountValue', { n })}</Select.Option>)}
-            </Select>
-          </Form.Item>
-          <Button type="primary" htmlType="submit" loading={aiPollLoading} icon={<RobotOutlined />} block>
-            {t('aiGenerate')}
-          </Button>
-        </Form>
-        {aiPollResult?.poll && (
-          <div style={{ marginTop: 12 }}>
-            <Text strong>{t('previewLabel')}</Text>
-            <Text>{aiPollResult.poll.question}</Text>
-            <div style={{ marginTop: 8 }}>
-              {aiPollResult.poll.options.map((opt: string, i: number) => (
-                <div key={i} style={{ padding: '2px 0' }}>• {opt}</div>
-              ))}
+      {/* ── 结果弹窗（3 秒自动刷新） ── */}
+      <Modal
+        open={resultPollId != null && !bigScreen}
+        title={resultData?.question || t('pollResults')}
+        onCancel={() => setResultPollId(null)}
+        footer={[
+          <Button key="big" icon={<FullscreenOutlined />} onClick={() => setBigScreen(true)}>
+            {t('pollBigScreen')}
+          </Button>,
+          <Button key="close" onClick={() => setResultPollId(null)}>{t('close')}</Button>,
+        ]}
+        width={560}
+      >
+        <PollResultsView data={resultData} />
+      </Modal>
+
+      {/* ── 投屏大屏 ── */}
+      <Modal
+        open={bigScreen}
+        onCancel={() => setBigScreen(false)}
+        footer={null}
+        width="92vw"
+        style={{ top: 16, maxWidth: 1400 }}
+        styles={{ body: { background: '#151922', borderRadius: 12, padding: 32 } }}
+      >
+        {resultData && (
+          <div className="poll-bigscreen">
+            <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>
+              {t('pollLiveResults')}
             </div>
+            <div style={{ fontSize: 30, fontWeight: 500, lineHeight: 1.35, marginBottom: 24 }}>
+              {resultData.question}
+            </div>
+            <PollResultsView data={resultData} big highlightMine={false} />
           </div>
         )}
       </Modal>
 
-      {/* ── 创建投票弹窗 ── */}
-      <Modal maskClosable={false} title={t('createPoll')} open={pollModal}
-        onCancel={() => { setPollModal(false); setPollScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
-        footer={null}
-        width={640}>
-        <Form form={pollForm} layout="vertical" onFinish={handleCreatePoll}>
+      {/* ── 创建投票 ── */}
+      <Modal
+        open={createOpen}
+        title={t('createPoll')}
+        onCancel={() => setCreateOpen(false)}
+        onOk={submitCreate}
+        okText={t('createPoll')}
+        cancelText={t('cancel')}
+        width={640}
+        styles={{ body: { maxHeight: 'calc(100vh - 240px)', overflowY: 'auto' } }}
+      >
+        <Form form={createForm} layout="vertical" initialValues={{ poll_type: 'single', duration: 0 }}>
           <Form.Item name="question" label={t('pollQuestion')} rules={[{ required: true }]}>
-            <Input placeholder={t('pollQuestionPlaceholder')} />
+            <Input placeholder={t('pollQuestionPlaceholder')} maxLength={200} />
           </Form.Item>
-          <Form.Item name="poll_type" label={t('pollType')} initialValue="single">
-            <Select>
-              <Select.Option value="single">{t('singleChoice')}</Select.Option>
-              <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
-            </Select>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <Form.Item name="poll_type" label={t('pollType')} style={{ flex: '0 0 200px' }}>
+              <Segmented block options={[
+                { value: 'single', label: t('singleChoice') },
+                { value: 'multiple', label: t('multipleChoice') },
+              ]} />
+            </Form.Item>
+            <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''} style={{ flex: '1 1 180px' }}>
+              <Select options={subjectOptions.map(s => ({ value: s, label: s }))} />
+            </Form.Item>
+            <Form.Item name="duration" label={t('pollDuration')} style={{ flex: '0 0 150px' }}>
+              <Select options={[
+                { value: 0, label: t('pollNoDeadline') },
+                { value: 5, label: `5 ${t('minutesShort')}` },
+                { value: 10, label: `10 ${t('minutesShort')}` },
+                { value: 30, label: `30 ${t('minutesShort')}` },
+                { value: 60, label: `1 ${t('hoursShort')}` },
+                { value: 120, label: `2 ${t('hoursShort')}` },
+              ]} />
+            </Form.Item>
+          </div>
+          <Form.Item
+            name="options"
+            label={t('pollOptionsLabel')}
+            initialValue={['', '']}
+            rules={[{
+              validator: (_, value: string[]) => {
+                const filled = (value || []).map(v => String(v).trim()).filter(Boolean)
+                if (filled.length < POLL_OPTION_MIN) return Promise.reject(new Error(t('minOptions')))
+                if (filled.length !== new Set(filled).size) {
+                  return Promise.reject(new Error(t('pollDuplicateOptions')))
+                }
+                return Promise.resolve()
+              },
+            }]}
+          >
+            <PollOptionsEditor />
           </Form.Item>
-          {/* 学科：创建投票时选（默认第一个），落库后投票列表与活动监控的"科目"列才显示得出来 */}
-          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
-            <Select options={subjectOptions.map((s) => ({ value: s, label: s }))} />
+          {pollType === 'multiple' && (
+            <Form.Item name="max_choices" label={t('pollMaxChoicesLabel')} initialValue={0} style={{ maxWidth: 220 }}>
+              <Select options={[
+                { value: 0, label: t('pollUnlimited') },
+                ...[2, 3, 4, 5, 6].map(n => ({ value: n, label: String(n) })),
+              ]} />
+            </Form.Item>
+          )}
+          <Form.Item name="anonymous" label={t('pollAnonymous')} valuePropName="checked" initialValue={false}
+            extra={t('pollAnonymousHint')} style={{ marginBottom: 12 }}>
+            <Switch />
           </Form.Item>
-          <Form.Item name="options" label={t('optionsPerLine')} rules={[{ required: true }]}>
-            <TextArea rows={4} placeholder={t('optionsPlaceholder')} />
-          </Form.Item>
+          <Divider style={{ margin: '4px 0 12px' }} />
           <Form.Item label={t('targetScope')}>
             <ActivityScopeSelector value={pollScope} onChange={setPollScope} />
           </Form.Item>
-          <Button type="primary" htmlType="submit" block>{t('createPoll')}</Button>
         </Form>
       </Modal>
 
-      {/* ── 编辑投票弹窗 ── */}
-      <Modal maskClosable={false} title={t('editPoll')} open={!!editPollModal} onCancel={() => setEditPollModal(null)}
-        onOk={handleEditPoll} okText={t('save')}>
-        <Form form={editPollForm} layout="vertical">
+      {/* ── 编辑投票 ── */}
+      <Modal
+        open={!!editPoll}
+        title={t('editPoll')}
+        onCancel={() => setEditPoll(null)}
+        onOk={submitEdit}
+        okText={t('save')}
+        cancelText={t('cancel')}
+        width={600}
+        destroyOnHidden
+        styles={{ body: { maxHeight: 'calc(100vh - 260px)', overflowY: 'auto' } }}
+      >
+        <Form form={editForm} layout="vertical">
           <Form.Item name="question" label={t('question')} rules={[{ required: true }]}>
-            <Input />
+            <Input maxLength={200} />
           </Form.Item>
           <Form.Item name="poll_type" label={t('pollType')}>
-            <Select>
-              <Select.Option value="single">{t('singleChoice')}</Select.Option>
-              <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
-            </Select>
+            <Segmented options={[
+              { value: 'single', label: t('singleChoice') },
+              { value: 'multiple', label: t('multipleChoice') },
+            ]} />
           </Form.Item>
-          <Form.Item name="options" label={t('optionsPerLine')} rules={[{ required: true }]}>
-            <TextArea rows={4} />
-          </Form.Item>
-          {/* 学科：老投票可以在这里补上（列表与活动监控随即显示） */}
           <Form.Item name="subject" label={t('subject')}>
-            <Select allowClear options={subjectOptions.map((s) => ({ value: s, label: s }))} />
+            <Select allowClear options={subjectOptions.map(s => ({ value: s, label: s }))} />
           </Form.Item>
+          <Form.Item name="options" label={t('pollOptionsLabel')} rules={[{ required: true }]}>
+            <PollOptionsEditor />
+          </Form.Item>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('pollEditLockHint')}</Text>
         </Form>
+      </Modal>
+
+      {/* ── AI 生成投票 ── */}
+      <Modal
+        open={aiOpen}
+        title={<Space><RobotOutlined />{t('aiGeneratePoll')}</Space>}
+        onCancel={() => { setAiOpen(false); setAiPreview(null) }}
+        footer={aiPreview ? [
+          <Button key="again" icon={<ReloadOutlined />} onClick={generateAi} loading={aiLoading}>
+            {t('pollRegenerate')}
+          </Button>,
+          <Button key="ok" type="primary" onClick={applyAi}>{t('fillForm')}</Button>,
+        ] : [
+          <Button key="cancel" onClick={() => setAiOpen(false)}>{t('cancel')}</Button>,
+          <Button key="gen" type="primary" icon={<RobotOutlined />} loading={aiLoading} onClick={generateAi}>
+            {t('aiGenerate')}
+          </Button>,
+        ]}
+        width={600}
+        styles={{ body: { maxHeight: 'calc(100vh - 240px)', overflowY: 'auto' } }}
+      >
+        <Form form={aiForm} layout="vertical" initialValues={{ poll_type: 'single', option_count: 4, auto_count: false }}>
+          <Form.Item name="topic" label={t('pollTopic')} rules={[{ required: true }]}>
+            <Input placeholder={t('pollTopicPlaceholder')} />
+          </Form.Item>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <Form.Item name="poll_type" label={t('pollType')} style={{ flex: '0 0 220px' }}>
+              <Segmented block options={[
+                { value: 'single', label: t('singleChoice') },
+                { value: 'multiple', label: t('multipleChoice') },
+              ]} />
+            </Form.Item>
+            <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''} style={{ flex: '1 1 180px' }}>
+              <Select options={subjectOptions.map(s => ({ value: s, label: s }))} />
+            </Form.Item>
+          </div>
+
+          <Form.Item label={t('optionCount')} style={{ marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <Form.Item name="auto_count" noStyle valuePropName="checked">
+                <Switch size="small" />
+              </Form.Item>
+              <Text style={{ fontSize: 12 }}>{t('pollAutoCount')}</Text>
+              {!aiAuto && (
+                <Space size={4} style={{ marginLeft: 'auto' }}>
+                  <Text style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    {t('optionsCountValue', { n: aiCount })}
+                  </Text>
+                  {[3, 4, 5].map(n => (
+                    <Button key={n} size="small" onClick={() => aiForm.setFieldValue('option_count', n)}>
+                      {n}
+                    </Button>
+                  ))}
+                </Space>
+              )}
+            </div>
+          </Form.Item>
+          {!aiAuto && (
+            <Form.Item name="option_count" style={{ marginBottom: 8 }}>
+              <Slider min={POLL_OPTION_MIN} max={POLL_OPTION_MAX}
+                style={{ marginRight: 10 }}
+                tooltip={{ formatter: (v) => t('optionsCountValue', { n: v }) }}
+                marks={{ 2: '2', 4: '4', 6: '6', 10: '10' }} />
+            </Form.Item>
+          )}
+        </Form>
+
+        {aiPreview && (
+          <>
+            <Divider style={{ margin: '4px 0 12px' }} />
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>{t('previewLabel')}</Text>
+            <Input
+              value={aiPreview.question}
+              onChange={e => setAiPreview({ ...aiPreview, question: e.target.value })}
+              style={{ marginBottom: 10 }}
+            />
+            <PollOptionsEditor
+              value={aiPreview.options}
+              onChange={opts => setAiPreview({ ...aiPreview, options: opts })}
+            />
+          </>
+        )}
       </Modal>
     </Card>
   )

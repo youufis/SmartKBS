@@ -1,0 +1,21 @@
+/* 投屏大屏：投影场景固定深色底，antd 的文字/进度条默认跟随浅色主题，这里单独校正 */
+.poll-bigscreen {
+  color: #ffffff;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.72);
+  --text-tertiary: rgba(255, 255, 255, 0.55);
+  --primary-color: #6ea8ff;
+  --border-color: rgba(255, 255, 255, 0.18);
+}
+
+.poll-bigscreen .ant-typography {
+  color: #ffffff;
+}
+
+.poll-bigscreen .ant-typography-secondary {
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.poll-bigscreen .ant-progress-inner {
+  background: rgba(255, 255, 255, 0.14);
+}

@@ -25,6 +25,8 @@ interface Props {
   subject?: string
   subjectOptions?: FilterOption[]
   onSubject?: (v: string) => void
+  /** 学科下拉的空值提示（不传则保持原样：无提示） */
+  subjectPlaceholder?: string
   /** 有任一筛选生效时显示「清除筛选」 */
   dirty?: boolean
   onReset?: () => void
@@ -35,7 +37,7 @@ interface Props {
 const ListFilterBar: React.FC<Props> = ({
   keyword, onKeyword, searchPlaceholder = '', searchWidth = 220,
   status, statusOptions, onStatus,
-  subject, subjectOptions, onSubject,
+  subject, subjectOptions, onSubject, subjectPlaceholder = '',
   dirty = false, onReset, resetLabel = '清除筛选',
   extra,
 }) => {
@@ -62,7 +64,7 @@ const ListFilterBar: React.FC<Props> = ({
           size="small"
           allowClear
           value={subject || undefined}
-          placeholder=""
+          placeholder={subjectPlaceholder}
           style={{ width: 130 }}
           options={subjectOptions as { value: string; label: string }[]}
           onChange={(v) => onSubject(v || '')}
