@@ -481,5 +481,7 @@
   "reward.subjectNightlyNote": "学科称号看「答了多少题 + 答得对不对」：正确率不足会压低等级，乱答刷不出高段；统计每天夜间更新。",
   "expand": "展开",
   "collapse": "收起",
-  "pageSubtitle": "课堂积分与排行，规则透明可查"
+  "pageSubtitle": "课堂积分与排行，规则透明可查",
+  "portraitSubtitle": "我的学习画像：积分、徽章与成长轨迹",
+  "scoreManageSubtitle": "按年级/班级查看积分发放与排行"
 }

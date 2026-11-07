@@ -1664,5 +1664,7 @@
   "announcementsSubtitle": "Publish notices, pin what matters, see who read them",
   "notificationsSubtitle": "System notices and pushes, filter by type and bulk-handle",
   "systemConfigSubtitle": "API keys, models, storage and runtime options",
-  "downloadsSubtitle": "Files shared by teachers, in one place"
+  "downloadsSubtitle": "Files shared by teachers, in one place",
+  "aboutSubtitle": "Version, updates and open-source licenses",
+  "passwordSubtitle": "Rotate your password regularly for safety"
 }

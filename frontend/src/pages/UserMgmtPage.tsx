@@ -13,7 +13,7 @@ import {
   Tag, Typography, message,
 } from 'antd'
 import {
-  CloudUploadOutlined, MoreOutlined, PlusOutlined, ReloadOutlined,
+  CloudUploadOutlined, LockOutlined, MoreOutlined, PlusOutlined, ReloadOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import * as usersApi from '../api/users'
@@ -490,12 +490,15 @@ const UserMgmtPage: React.FC = () => {
 
   if (!isAdmin && !isTeacher) {
     return (
-      <div style={{ padding: 24, background: 'var(--bg-container)', borderRadius: 8, minHeight: 'calc(100vh - 112px)' }}>
-        <Space align="center" style={{ marginBottom: 12 }}>
-          <UserOutlined style={{ color: 'var(--primary-color)', fontSize: 18 }} />
-          <Typography.Title level={4} style={{ margin: 0 }}>{t('changePassword')}</Typography.Title>
-        </Space>
-        <SelfPasswordCard />
+      <div>
+        <PageHeader
+          icon={<LockOutlined />}
+          title={t('changePassword')}
+          subtitle={t('passwordSubtitle')}
+        />
+        <Card>
+          <SelfPasswordCard />
+        </Card>
       </div>
     )
   }

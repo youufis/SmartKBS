@@ -448,5 +448,6 @@
   "systemGenerated": "系统推送",
   "pSearchPh": "搜索练习标题 / 知识点",
   "noMatchFilter": "当前筛选条件下没有记录，可清除筛选再试",
-  "teacherSubtitle": "发布练习、看进度、错题自动巩固"
+  "teacherSubtitle": "发布练习、看进度、错题自动巩固",
+  "submissionCount": "提交次数"
 }

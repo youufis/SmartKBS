@@ -1,6 +1,7 @@
 import FormulaRenderer from '../components/FormulaRenderer'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import ScopeTag from '../components/ScopeTag'
 import {
   Card, Row, Col, Typography, Spin, Button, Tag, Space, Tabs,
@@ -11,7 +12,7 @@ import {
   EditOutlined, HeartOutlined, HeartFilled, ShareAltOutlined,
   GlobalOutlined, TeamOutlined, LockOutlined, DeleteOutlined,
   DownloadOutlined, EyeOutlined, CalendarOutlined,
-  ThunderboltOutlined, StarOutlined,
+  ThunderboltOutlined, StarOutlined, UserOutlined,
   FireOutlined, PictureOutlined, WarningOutlined,
   ExclamationCircleOutlined, ReloadOutlined,
   IdcardOutlined, IdcardFilled,
@@ -1158,13 +1159,13 @@ const PortraitPage: React.FC = () => {
   // 主渲染
   // ─────────────────────────────────────────
   return (
-    <Card style={{ borderRadius: 8 }}>
-      {/* ── 主题选择器 ── */}
-      <div style={{
-        display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
-        marginBottom: 12, gap: 8,
-      }}>
-        <Button
+    <div>
+      <PageHeader
+        icon={<UserOutlined />}
+        title={t('weeklyPortrait')}
+        subtitle={t('portraitSubtitle')}
+        extra={(
+          <Button
           type="text"
           size="small"
           icon={<span style={{
@@ -1175,9 +1176,12 @@ const PortraitPage: React.FC = () => {
           }} />}
           onClick={() => setThemePickerOpen(!themePickerOpen)}
         >
-          {themeKey === 'auto' ? '🎨 ' + t('ptAutoTheme') : `🎨 ${themeLabel(theme.key, theme.name)}`}
-        </Button>
-      </div>
+            {themeKey === 'auto' ? '🎨 ' + t('ptAutoTheme') : `🎨 ${themeLabel(theme.key, theme.name)}`}
+          </Button>
+        )}
+      />
+
+      <Card style={{ borderRadius: 8 }}>
       {themePickerOpen && (
         <div style={{
           background: 'var(--bg-layout)', borderRadius: 10, padding: '12px 16px',
@@ -1247,7 +1251,8 @@ const PortraitPage: React.FC = () => {
 
       {renderDetailModal()}
       {renderShareModal()}
-    </Card>
+      </Card>
+    </div>
   )
 }
 

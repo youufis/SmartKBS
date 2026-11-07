@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Typography, Alert, Button, message } from 'antd'
+import { Alert, Button, message } from 'antd'
+import { InfoCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import PageHeader from '../components/PageHeader'
 import { LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -74,13 +76,17 @@ const AboutPage: React.FC = () => {
   }, [content, navClickRef])
 
   return (
-    <div onClick={handlePageClick} style={{
-      width: '100%', padding: 24,
-      background: 'var(--bg-container)', borderRadius: 8, minHeight: 'calc(100vh - 160px)',
-    }}>
-      <Typography.Title level={3} style={{ userSelect: 'none' }}>
-        ℹ️ {t('about')}
-      </Typography.Title>
+    <div onClick={handlePageClick} style={{ width: '100%', minHeight: 'calc(100vh - 160px)' }}>
+      <PageHeader
+        icon={<InfoCircleOutlined />}
+        title={t('about')}
+        subtitle={t('aboutSubtitle')}
+        extra={(
+          <Button icon={<ReloadOutlined />} onClick={() => window.location.reload()}>
+            {t('refresh')}
+          </Button>
+        )}
+      />
 
       {showEntry && (
         <Alert

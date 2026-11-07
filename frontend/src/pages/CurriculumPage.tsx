@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchGrades } from '../api/gradeClass'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
@@ -11,7 +12,7 @@ import {
 const { Sider, Content } = Layout
 import type { DataNode } from 'antd/es/tree'
 import {
-  BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
+  BookOutlined, ReadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   FileOutlined, FileTextOutlined, DownloadOutlined, FormOutlined,
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
@@ -1719,7 +1720,35 @@ const CurriculumPage: React.FC = () => {
   } : null
 
   return (
-    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: 'var(--bg-layout)' }}>
+    <div style={{
+      // 用父级给定高度，避免多出 24px 触发整页滚动条（滚动条会把页头挤窄、看着像没对齐）
+      padding: 12, height: '100%', boxSizing: 'border-box',
+      background: 'var(--bg-layout)', display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{ flex: '0 0 auto' }}>
+        <PageHeader
+          icon={<ReadOutlined />}
+          title={isStudent ? t('studentGuide') : t('courseTitle')}
+          subtitle={t('pageSubtitle')}
+          extra={(
+            <>
+              <Button icon={<ReloadOutlined />} onClick={loadTree} aria-label={t('refresh')} />
+              {isTeacherOrAdmin && (
+                <>
+                  <Button icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
+                    {t('aiImport')}
+                  </Button>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
+                    {t('newCourse')}
+                  </Button>
+                </>
+              )}
+            </>
+          )}
+          style={{ marginBottom: 12 }}
+        />
+      </div>
+
       {/* ── 加载中 ── */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
@@ -1761,7 +1790,7 @@ const CurriculumPage: React.FC = () => {
       )}
 
       {!loading && (courses.length > 0 || inactiveCourses.length > 0) && (
-        <Layout style={{ height: 'calc(100vh - 64px)', background: 'var(--bg-layout)', overflow: 'hidden' }}>
+        <Layout style={{ flex: '1 1 auto', minHeight: 0, background: 'transparent', overflow: 'hidden', borderRadius: 10 }}>
           {/* ── 左侧：课程分类导航（可折叠） ── */}
           <Sider
             width={260}
@@ -1798,23 +1827,7 @@ const CurriculumPage: React.FC = () => {
             {!siderCollapsed && (
               <>
                 {/* 侧栏头部 */}
-                <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--border-color)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <Typography.Title level={5} style={{ margin: 0 }}>
-                      {isStudent ? t('studentGuide') : t('courseTitle')}
-                    </Typography.Title>
-                    <Button size="small" icon={<ReloadOutlined />} onClick={loadTree} />
-                  </div>
-                  {isTeacherOrAdmin && (
-                    <Space wrap style={{ marginBottom: 8 }}>
-                      <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
-                        {t('newCourse')}
-                      </Button>
-                      <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
-                        {t('aiImport')}
-                      </Button>
-                    </Space>
-                  )}
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)' }}>
                   {isTeacherOrAdmin && (
                     <Tooltip title={t('showInactiveCoursesHint')}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2038,7 +2051,7 @@ const CurriculumPage: React.FC = () => {
           </Sider>
 
           {/* ── 右侧：课程内容区域 ── */}
-          <Content style={{ padding: '0 12px', overflow: 'auto', height: '100%' }}>
+          <Content style={{ padding: '0 0 0 12px', overflow: 'auto', height: '100%' }}>
             {!activeCourse ? (
               <div style={{ textAlign: 'center', padding: '120px 40px' }}>
                 <BookOutlined style={{ fontSize: 64, color: 'var(--border-color-secondary)', marginBottom: 24 }} />
@@ -2797,7 +2810,7 @@ const CurriculumPage: React.FC = () => {
         onChanged={loadTree}
       />
 
-    </Layout>
+    </div>
   )
 }
 

@@ -23,10 +23,11 @@ import {
 } from '../api/summaryExport'
 import apiClient from '../api/client'
 import MobileCardTable from '../components/MobileCardTable'
+import PageHeader from '../components/PageHeader'
 import ScopeTag from '../components/ScopeTag'
 import { useIsMobile } from '../hooks/useIsMobile'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { RangePicker } = DatePicker
 
 type CsvSheetKey = 'records' | 'student' | 'activity' | 'class'
@@ -346,10 +347,18 @@ const SummaryExportPage: React.FC = () => {
 
   return (
     <div style={{ padding: 16 }}>
-      <Title level={4} style={{ marginBottom: 4 }}>{t('summaryExport.title')}</Title>
-      <Text type="secondary">{t('summaryExport.subtitle')}</Text>
+      <PageHeader
+        icon={<FileExcelOutlined />}
+        title={t('summaryExport.title')}
+        subtitle={t('summaryExport.subtitle')}
+        extra={(
+          <Tooltip title={t('summaryExport.reloadMetaTip')}>
+            <Button icon={<ReloadOutlined />} onClick={() => void loadMeta()} aria-label={t('summaryExport.reloadMetaTip')} />
+          </Tooltip>
+        )}
+      />
 
-      <Card size="small" style={{ margin: '12px 0' }}>
+      <Card size="small" style={{ margin: '0 0 12px' }}>
         <Space wrap size={8}>
           <Select
             style={{ minWidth: 120 }} allowClear placeholder={t('summaryExport.grade')}
@@ -395,9 +404,6 @@ const SummaryExportPage: React.FC = () => {
               options={(meta.teachers || []).map((x) => ({ value: x.username, label: `${x.name} (${x.username})` }))}
             />
           )}
-          <Tooltip title={t('summaryExport.reloadMetaTip')}>
-            <Button icon={<ReloadOutlined />} onClick={() => void loadMeta()} />
-          </Tooltip>
           <Button type="primary" icon={<ThunderboltOutlined />} loading={loading} onClick={() => void doPreview()}>
             {t('summaryExport.query')}
           </Button>

@@ -452,5 +452,6 @@
   "all": "All",
   "wbSearchPh": "Search title / room code",
   "wbNoMatch": "No whiteboards match the filters",
-  "pageSubtitle": "Group, discuss and review afterwards"
+  "pageSubtitle": "Group, discuss and review afterwards",
+  "wbPageSubtitle": "Create a board, invite students, revisit the notes"
 }

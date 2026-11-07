@@ -481,5 +481,7 @@
   "reward.subjectNightlyNote": "Subject titles weigh both volume and accuracy: low accuracy caps the level, so guessing cannot grind upward. Stats refresh nightly.",
   "expand": "Expand",
   "collapse": "Collapse",
-  "pageSubtitle": "Points and leaderboard with transparent rules"
+  "pageSubtitle": "Points and leaderboard with transparent rules",
+  "portraitSubtitle": "My learning portrait: points, badges and growth",
+  "scoreManageSubtitle": "Points and ranking by grade and class"
 }

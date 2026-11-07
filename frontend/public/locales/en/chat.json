@@ -208,5 +208,6 @@
   "modeLlm": "LLM",
   "modeAgent": "Agent",
   "modeKb": "Knowledge Base",
-  "modeBadgeTip": "The chat pipeline is set by system config (priority: knowledge base > agent > LLM); admins adjust it in System Settings"
+  "modeBadgeTip": "The chat pipeline is set by system config (priority: knowledge base > agent > LLM); admins adjust it in System Settings",
+  "pageTitle": "Knowledge Q&A"
 }

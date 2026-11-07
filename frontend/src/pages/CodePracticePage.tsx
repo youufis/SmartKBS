@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import {
   Card, Typography, Button, Space, Tag, Modal, Spin, message, Tabs, Empty, Select,
   Table, Descriptions, Input, Alert, InputNumber, Pagination, Grid, Switch, Tooltip,
@@ -8,7 +9,7 @@ import {
 import {
   PlayCircleOutlined, RobotOutlined, FileTextOutlined, BarChartOutlined,
   EditOutlined, DeleteOutlined, PlusSquareOutlined, MinusSquareOutlined,
-  DownloadOutlined, ReloadOutlined, SearchOutlined,
+  DownloadOutlined, ReloadOutlined, SearchOutlined, CodeOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
@@ -30,7 +31,7 @@ function toPercent(score: any, maxScore: any): number | null {
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 interface CreateFormState {
   title: string
@@ -1255,14 +1256,14 @@ const CodePracticePage: React.FC = () => {
 
 
   return (
-    <Card style={{ borderRadius: 8, height: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>{t('codePractice')}</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>{t('codePracticeIntro')}</Text>
-        </div>
-      </div>
+    <div>
+      <PageHeader
+        icon={<CodeOutlined />}
+        title={t('codePractice')}
+        subtitle={t('codePracticeIntro')}
+      />
 
+      <Card style={{ borderRadius: 8, height: '100%' }}>
       {listView}
 
       {/* ── 创建题目 ── */}
@@ -1385,7 +1386,8 @@ const CodePracticePage: React.FC = () => {
           {renderAiReviewBody(reviewModalData)}
         </Spin>
       </Modal>
-    </Card>
+      </Card>
+    </div>
   )
 }
 

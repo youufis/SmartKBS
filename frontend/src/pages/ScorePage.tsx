@@ -14,6 +14,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 import { PointsCell } from '../components/PointsCell'
 import { reportLoadError } from '../utils/loadError'
@@ -555,7 +556,14 @@ const ScorePage: React.FC = () => {
   ]
 
   return (
-    <Card style={{ borderRadius: 8 }}>
+    <div>
+      <PageHeader
+        icon={<TrophyOutlined />}
+        title={t('scoreManage')}
+        subtitle={t('scoreManageSubtitle')}
+      />
+
+      <Card style={{ borderRadius: 8 }}>
       {/* ── 顶栏：年级/班级选择 + 统计 ── */}
       {isStudent ? null : (
       <Card style={{ marginBottom: 16 }}>
@@ -925,6 +933,7 @@ const ScorePage: React.FC = () => {
       </Modal>
 
     </Card>
+    </div>
   )
 }
 

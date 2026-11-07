@@ -10,7 +10,7 @@ import {
   EyeOutlined, UploadOutlined,
   DeleteOutlined, CheckOutlined, RightOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
   CopyOutlined, CameraOutlined, ReloadOutlined, SearchOutlined, DownOutlined, UpOutlined,
-  MoreOutlined, EditOutlined, DownloadOutlined,
+  MoreOutlined, EditOutlined, DownloadOutlined, MessageOutlined,
 } from '@ant-design/icons'
 import type { Message, TreeNode, TaskInfo } from '../types'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -891,6 +891,15 @@ const ChatPage: React.FC = () => {
           : '#fff',
         transition: 'all 0.3s ease',
       }}>
+        {/* 页面标识：聊天页是全高工作区，不额外压一条页头，标题并进这条模式栏 */}
+        <Space size={8} style={{ marginRight: 4, flexShrink: 0 }}>
+          <MessageOutlined style={{ color: 'var(--primary-color)', fontSize: 16 }} />
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+            {t('pageTitle')}
+          </span>
+        </Space>
+        <span style={{ width: 1, height: 16, background: 'var(--border-color)', flexShrink: 0 }} />
+
         {(curRole === 'student' || curRole === 'teacher' || curRole === 'admin') && (
           <>
             <Button

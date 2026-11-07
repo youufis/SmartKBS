@@ -452,5 +452,6 @@
   "all": "全部",
   "wbSearchPh": "搜索白板标题 / 房间码",
   "wbNoMatch": "没有符合筛选条件的白板",
-  "pageSubtitle": "建组、讨论与过程回看"
+  "pageSubtitle": "建组、讨论与过程回看",
+  "wbPageSubtitle": "创建白板、邀请协作、回看板书"
 }

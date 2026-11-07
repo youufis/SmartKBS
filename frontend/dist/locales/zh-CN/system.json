@@ -1664,5 +1664,7 @@
   "announcementsSubtitle": "发布通知、置顶重要事项、查看谁读过",
   "notificationsSubtitle": "系统通知与推送，按类型筛选与批量处理",
   "systemConfigSubtitle": "接口密钥、模型、存储与运行参数",
-  "downloadsSubtitle": "教师下发的文件与共享资料"
+  "downloadsSubtitle": "教师下发的文件与共享资料",
+  "aboutSubtitle": "版本信息、更新检查与开源许可",
+  "passwordSubtitle": "定期更换密码更安全，忘记可用管理员账号重置"
 }

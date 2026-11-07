@@ -448,5 +448,6 @@
   "systemGenerated": "System",
   "pSearchPh": "Search title / knowledge point",
   "noMatchFilter": "No records match the current filters",
-  "teacherSubtitle": "Publish practice, track progress, reinforce mistakes"
+  "teacherSubtitle": "Publish practice, track progress, reinforce mistakes",
+  "submissionCount": "Submissions"
 }

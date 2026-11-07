@@ -9,10 +9,11 @@ import {
 import {
   PlusOutlined, CopyOutlined, PlayCircleOutlined,
   StopOutlined, DeleteOutlined, ReloadOutlined,
-  EyeOutlined, EditOutlined, UnlockOutlined,
+  EyeOutlined, EditOutlined, UnlockOutlined, PictureOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import { useAuthStore } from '../stores/authStore'
 import * as whiteboardApi from '../api/whiteboard'
 import type { WhiteboardRoom, WhiteboardMode } from '../types'
@@ -21,7 +22,7 @@ import ListFilterBar from '../components/ListFilterBar'
 import { RowList } from '../components/RowList'
 import ActivityScopeSelector, { type ActivityScopeValue } from '../components/ActivityScopeSelector'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const WhiteboardPage: React.FC = () => {
   const { t } = useTranslation('discussion')
@@ -289,33 +290,26 @@ const WhiteboardPage: React.FC = () => {
   }, [rooms, wbKw, wbStatus])
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={3} style={{ margin: 0 }}>🎨 {t('whiteboard')}</Title>
-        <Space>
-          {isStudent && (
-            <Tooltip title={t('wpJoin')}>
-              <Button type="default" icon={<EyeOutlined />} onClick={() => setJoinOpen(true)} />
-            </Tooltip>
-          )}
-          {isTeacher && (
-            <Tooltip title={t('wpCreate')}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)} />
-            </Tooltip>
-          )}
-          <Tooltip title={t('wpRefresh')}>
-            <Button icon={<ReloadOutlined />} onClick={loadRooms} />
-          </Tooltip>
-        </Space>
-      </div>
-
-      {loading && rooms.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
-      ) : rooms.length === 0 ? (
-        <Empty description={isStudent ? t('noWhiteboardsStudent') : t('noWhiteboards')} />
-      ) : (
-        <>
-          <ListFilterBar
+    <div>
+      <PageHeader
+        icon={<PictureOutlined />}
+        title={t('whiteboard')}
+        subtitle={t('wbPageSubtitle')}
+        extra={(
+          <>
+            <Button icon={<ReloadOutlined />} onClick={loadRooms}>{t('wpRefresh')}</Button>
+            {isStudent && (
+              <Button icon={<EyeOutlined />} onClick={() => setJoinOpen(true)}>{t('wpJoin')}</Button>
+            )}
+            {isTeacher && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                {t('wpCreate')}
+              </Button>
+            )}
+          </>
+        )}
+      >
+        <ListFilterBar
             keyword={wbKw}
             onKeyword={(v) => { setWbKw(v); setPage(1) }}
             searchPlaceholder={t('wbSearchPh')}
@@ -329,8 +323,16 @@ const WhiteboardPage: React.FC = () => {
             dirty={!!wbKw || wbStatus !== 'all'}
             onReset={() => { setWbKw(''); setWbStatus('all'); setPage(1) }}
             resetLabel={t('clearFilter')}
+            style={{ marginBottom: 0 }}
           />
-          {visibleRooms.length === 0 ? <Empty description={t('wbNoMatch')} /> : (
+      </PageHeader>
+
+      <Card style={{ borderRadius: 8 }}>
+        {loading && rooms.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+        ) : rooms.length === 0 ? (
+          <Empty description={isStudent ? t('noWhiteboardsStudent') : t('noWhiteboards')} />
+        ) : visibleRooms.length === 0 ? <Empty description={t('wbNoMatch')} /> : (
           <>
           <RowList items={visibleRooms.slice((page - 1) * pageSize, page * pageSize)}
             split={false} renderItem={renderRoomCard} />
@@ -344,9 +346,7 @@ const WhiteboardPage: React.FC = () => {
             />
           </div>
           </>
-          )}
-        </>
-      )}
+        )}
 
       {/* ── 创建房间弹窗 ── */}
       <Modal maskClosable={false}
@@ -458,7 +458,8 @@ const WhiteboardPage: React.FC = () => {
           </div>
         </Space>
       </Modal>
-    </Card>
+      </Card>
+    </div>
   )
 }
 
