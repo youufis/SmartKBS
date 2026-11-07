@@ -332,9 +332,11 @@ async def _draw_question(*, teacher: str, username: str, grade: str, cls: str, s
 
     if not filled.questions:
         reason = "；".join(filled.notes) if filled.notes else ""
-        reason = reason or "题库中暂无匹配该知识点的题目"
+        # 不限知识点时不能说"匹配该知识点"——池子就是整库，空了就是题库真没可用题
+        reason = reason or ("题库中没有可用题目" if not topic else "题库中暂无匹配该知识点的题目")
         if not allow_ai:
-            reason += "。可开启「AI 生题」让系统即时生成，或更换知识点"
+            reason += ("。可指定知识点后开启「AI 生题」现出，或先往题库入库"
+                       if not topic else "。可开启「AI 生题」让系统即时生成，或更换知识点")
         raise HTTPException(status_code=404, detail=reason)
 
     used_ai = filled.ai_count > 0
@@ -411,12 +413,13 @@ async def draw_question(request: Request):
     body = await request.json()
     teacher, grade, cls = _scope_from_request(request, user, body)
 
+    # 知识点留空＝「不限知识点」：整池随机（走 question_select 的 no_kp_constraint 分支，
+    # 给了学科就按学科族隔离，没给就全库）。这时 AI 没有主题可依，出回来的题也挂不上
+    # 知识点边，等于往题库塞脏数据，所以后端一并兜住，不依赖前端把开关置灰。
     topic = str(body.get("topic") or "").strip()
-    if not topic:
-        raise HTTPException(status_code=400, detail="请先选择或输入知识点")
     subject = str(body.get("subject") or "").strip()
     raw_type = str(body.get("question_type") or "mixed").strip()
-    allow_ai = bool(body.get("allow_ai")) and _ai_enabled_by_admin()
+    allow_ai = bool(body.get("allow_ai")) and _ai_enabled_by_admin() and bool(topic)
     exclude_ids = body.get("exclude_ids") or []
     if not isinstance(exclude_ids, list):
         exclude_ids = []

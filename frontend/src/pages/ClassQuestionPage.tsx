@@ -68,6 +68,9 @@ const ClassQuestionPage: React.FC = () => {
   const [drawing, setDrawing] = useState(false)
   const [showAnswer, setShowAnswer] = useState(false)
   const [usedIds, setUsedIds] = useState<number[]>([])
+  // 抽这道题时用的随机范围（空＝整库）。题卡右上角那枚 Tag 要说的是"这道题从哪来"，
+  // 不是老师事后又把知识点框改成了什么，所以单独存一份。
+  const [drawnScope, setDrawnScope] = useState('')
 
   // ── 抽人 ──
   const [studentNames, setStudentNames] = useState<string[]>([])
@@ -105,7 +108,8 @@ const ClassQuestionPage: React.FC = () => {
   const frameRef = useRef(0)
 
   const topic = courseKp.trim()   // 知识点：统一用同一个控件（下拉选或手输都落在 courseKp）
-  const ready = Boolean(grade && cls && topic)
+  // 知识点留空＝不限知识点（整库随机），硬门槛只剩年级 + 班级
+  const ready = Boolean(grade && cls)
 
   const clearAllTimers = useCallback(() => {
     if (rollInterval.current) {
@@ -187,17 +191,18 @@ const ClassQuestionPage: React.FC = () => {
 
   // ── 抽题 ──
   const drawQuestion = useCallback(async () => {
-    if (!ready) { message.warning(t('selectGradeClassKp')); return }
+    if (!ready) { message.warning(t('selectGradeClass')); return }
     setDrawing(true)
     try {
       const data = await drawDrillQuestion({
         grade, class: cls, subject,
         topic,
         question_type: questionType,
-        allow_ai: allowAi,
+        allow_ai: allowAi && Boolean(topic),
         exclude_ids: usedIds,
       })
       setQuestion(data.question)
+      setDrawnScope(topic)
       setShowAnswer(false)
       setLastPoints(null)
       setSelectedIdx(null)
@@ -340,6 +345,7 @@ const ClassQuestionPage: React.FC = () => {
       clearAllTimers()
       setRecords([])
       setQuestion(null)
+      setDrawnScope('')
       setUsedIds([])
       setDisplayName('🎯'); setLastPicked(''); setLastPickId(null); setLastPoints(null)
       message.success(t('resetDone'))
@@ -406,6 +412,7 @@ const ClassQuestionPage: React.FC = () => {
             subject={subject}
             value={courseKp}
             onChange={(v) => setCourseKp(String(v || ''))}
+            placeholder={t('kpPlaceholder')}
             style={{ width: 220 }}
           />
           <Select
@@ -416,13 +423,18 @@ const ClassQuestionPage: React.FC = () => {
               { value: 'mixed', label: t('qtMixed') },
             ]).map((o) => ({ label: o.value === 'single' ? t('qtSingle') : o.value === 'true_false' ? t('qtTrueFalse') : t('qtMixed'), value: o.value }))}
           />
-          <Tooltip title={config && !config.ai_enabled ? t('aiDisabledByAdmin') : t('aiSwitchHint')}>
+          {/* 知识点留空时 AI 没有主题可依，出回来的题也挂不上知识点边（等于往题库塞脏数据），
+              这里置灰；后端同样兜一层，不依赖前端 */}
+          <Tooltip title={
+            config && !config.ai_enabled ? t('aiDisabledByAdmin')
+              : !topic ? t('aiNeedKpHint') : t('aiSwitchHint')
+          }>
             <Space>
               <Switch
-                checked={allowAi} disabled={!config?.ai_enabled}
+                checked={allowAi && Boolean(topic)} disabled={!config?.ai_enabled || !topic}
                 onChange={(v) => setAllowAi(v)}
               />
-              <Text type={config?.ai_enabled ? undefined : 'secondary'}>
+              <Text type={config?.ai_enabled && topic ? undefined : 'secondary'}>
                 <RobotOutlined /> {t('aiSwitch')}
               </Text>
             </Space>
@@ -446,6 +458,13 @@ const ClassQuestionPage: React.FC = () => {
         title={<Space><BulbOutlined />{t('questionCard')}</Space>}
         extra={question && (
           <Space>
+            <Tag
+              color={drawnScope ? 'cyan' : 'default'} title={drawnScope || t('scopeAnyKp')}
+              style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis',
+                       whiteSpace: 'nowrap', verticalAlign: 'middle' }}
+            >
+              {drawnScope || t('scopeAnyKp')}
+            </Tag>
             <Tag color={question.source === 'ai' ? 'purple' : 'blue'} icon={question.source === 'ai' ? <RobotOutlined /> : <DatabaseOutlined />}>
               {question.source === 'ai' ? t('sourceAi') : t('sourceBank')}
             </Tag>
@@ -455,19 +474,21 @@ const ClassQuestionPage: React.FC = () => {
       >
         {question ? (
           <div>
-            <div style={{ fontSize: 26, lineHeight: 1.6, marginBottom: 16, fontWeight: 600 }}>
+            <div style={{ lineHeight: 1.6, marginBottom: 12, fontWeight: 600 }}>
               <FormulaRenderer content={question.question} />
             </div>
-            {/* 配图（SVG 流程图/电路图 或 万相生图）：题库里约 1/8 的选择题带图，
-                "如右图所示"这类题干没有图就没法作答；点图可放大（投影用） */}
+            {/* 配图（SVG 流程图/电路图 或 万相生图）：单栏内联在题干下方，按图自身比例缩到 180 高，
+                不再切左右两栏。题库里约 1/8 的选择题带图，"如右图所示"这类题干没图就没法作答；
+                投影要看细节时点图放大 */}
             <MediaDisplay
               svgContent={question.svg_content}
               hasSvg={question.has_svg}
               mediaFiles={question.media_files}
-              size="large"
+              size="fluid"
+              maxHeight={180}
             />
             {/* 选项可直接点选：选中后点「提交作答」由服务端判对错（答对 +5 / 答错 +2） */}
-            <Space orientation="vertical" style={{ width: '100%' }} size={10}>
+            <Space orientation="vertical" style={{ width: '100%' }} size={6}>
               {(question.options || []).map((opt, i) => {
                 const key = optionKey(opt, i, question.type)
                 const active = selectedIdx === i
@@ -478,11 +499,11 @@ const ClassQuestionPage: React.FC = () => {
                     key={i}
                     onClick={() => { if (!submitted) { setSelectedIdx(i); setShowAnswer(false) } }}
                     style={{
-                      fontSize: 20, padding: '10px 16px', borderRadius: 10,
+                      padding: '6px 12px', borderRadius: 8,
                       cursor: submitted ? 'default' : 'pointer',
                       border: `2px solid ${isCorrect ? '#52c41a' : active ? '#1677ff' : 'transparent'}`,
                       background: isCorrect ? '#f6ffed' : active ? '#e6f4ff' : 'var(--bg-layout, #fafafa)',
-                      transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 10,
+                      transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 8,
                     }}
                   >
                     {/* 选项必须走 FormulaRenderer：题库里的选项常带 $...$ LaTeX
@@ -497,10 +518,10 @@ const ClassQuestionPage: React.FC = () => {
               })}
             </Space>
             {showAnswer && (
-              <div style={{ marginTop: 14 }}>
+              <div style={{ marginTop: 12 }}>
                 <Alert
                   type="success" showIcon
-                  message={<span style={{ fontSize: 18 }}>{t('answerIs')} <b>{question.answer}</b></span>}
+                  message={<span>{t('answerIs')} <b>{question.answer}</b></span>}
                   description={question.explanation ? <FormulaRenderer content={question.explanation} /> : undefined}
                 />
               </div>
