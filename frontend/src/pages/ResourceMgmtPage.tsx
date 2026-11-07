@@ -8,6 +8,7 @@ import KindTag from '../components/KindTag'
 import { getFileIcon } from '../utils/fileIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import { reportLoadError } from '../utils/loadError'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 
@@ -409,15 +410,22 @@ const ResourceMgmtPage: React.FC = () => {
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
+      <PageHeader
+        icon={<FolderOutlined />}
+        title={t('resource.title')}
+        subtitle={t('resource.subtitle')}
+        extra={(
+          <Button icon={<ReloadOutlined />} onClick={loadTree} loading={loading}>{t('refresh')}</Button>
+        )}
+      />
       <Tabs defaultActiveKey="files" items={[
         {
           key: 'files',
           label: <Space><FolderOutlined />{t('resource.fileManagement')}</Space>,
           children: (
             <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-              {/* 顶部栏：标题 + 搜索 + 视图切换 + 刷新 */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                <Typography.Title level={4} style={{ margin: 0 }}>{t('resource.title')}</Typography.Title>
+              {/* 工具条：搜索 + 视图切换（标题与刷新已收到页头） */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                 <Space wrap>
                   <Input
                     placeholder={t('resource.searchPlaceholder')}
@@ -435,7 +443,6 @@ const ResourceMgmtPage: React.FC = () => {
                       { value: 'grid', icon: <AppstoreOutlined /> },
                     ]}
                   />
-                  <Button icon={<ReloadOutlined />} onClick={loadTree} loading={loading}>{t('refresh')}</Button>
                 </Space>
               </div>
 

@@ -13,12 +13,13 @@ import {
   LoginOutlined, StopOutlined, SoundOutlined, MutedOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { reportLoadError } from '../utils/loadError'
 import useNameSpeech from '../hooks/useNameSpeech'
 
-const { Text, Title } = Typography
+const { Text } = Typography
 
 // ============================================================
 // 类型定义
@@ -761,19 +762,21 @@ const SessionsManager: React.FC = () => {
 
   return (
     <>
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <Space>
-            <HistoryOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-            <Title level={4} style={{ margin: 0 }}>{t('rollcall')}</Title>
-          </Space>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={loading}>{t('refresh')}</Button>
+      <PageHeader
+        icon={<HistoryOutlined />}
+        title={t('rollcall')}
+        subtitle={t('pageSubtitle')}
+        extra={(
+          <>
+            <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={loading} aria-label={t('refresh')} />
             <Button icon={<DownloadOutlined />} onClick={() => window.open('/api/export/rollcall', '_blank')}>
               {t('exportRecords')}
             </Button>
-          </Space>
-        </div>
+          </>
+        )}
+      />
+
+      <Card>
 
         {sessions.length === 0 && !loading ? (
           <Empty description={t('noRollcallData')} />

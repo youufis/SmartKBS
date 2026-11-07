@@ -1662,5 +1662,6 @@
   "cleanEmptyClasses": "Clean up empty classes",
   "taskPageSubtitle": "Assign, submit and grade in one pipeline",
   "announcementsSubtitle": "Publish notices, pin what matters, see who read them",
-  "notificationsSubtitle": "System notices and pushes, filter by type and bulk-handle"
+  "notificationsSubtitle": "System notices and pushes, filter by type and bulk-handle",
+  "systemConfigSubtitle": "API keys, models, storage and runtime options"
 }

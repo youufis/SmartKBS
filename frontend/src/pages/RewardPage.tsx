@@ -15,12 +15,13 @@ import {
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 import { reportLoadError } from '../utils/loadError'
 import { PointsCell } from '../components/PointsCell'
 import NarrowTable from '../components/NarrowTable'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 // 与 backend/reward_engine.py 的 ACTIVITY_TYPE_NAMES 一一对应（18 类），名称走词典 reward.activityType.*
 const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
@@ -1039,17 +1040,16 @@ const RewardPage: React.FC = () => {
 
   return (
     <div>
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <Space>
-            <TrophyOutlined style={{ fontSize: 24, color: '#faad14' }} />
-            <Title level={4} style={{ margin: 0 }}>{t('reward.pageTitle')}</Title>
-          </Space>
-          <Button type="link" icon={<TrophyOutlined />} onClick={() => setRulesOpen(true)}>
-            {t('scoreRules')}
-          </Button>
-        </div>
+      <PageHeader
+        icon={<TrophyOutlined />}
+        title={t('reward.pageTitle')}
+        subtitle={t('pageSubtitle')}
+        extra={(
+          <Button icon={<TrophyOutlined />} onClick={() => setRulesOpen(true)}>{t('scoreRules')}</Button>
+        )}
+      />
 
+      <Card>
         {isStudent ? renderStudentView() : (
         <Tabs
           activeKey={activeTab}

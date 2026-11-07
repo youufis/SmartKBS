@@ -18,6 +18,7 @@ import apiClient from '../api/client'
 import BackupPanel from '../components/BackupPanel'
 import { TagListInput, DurationPicker, SuggestionInput } from '../components/systemConfig/FieldControls'
 import { useAuthStore } from '../stores/authStore'
+import PageHeader from '../components/PageHeader'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
   fetchSkillStats,
@@ -3072,17 +3073,19 @@ const SystemConfigPage: React.FC = () => {
   }
 
   return (
-    <Card style={{ borderRadius: 8 }}>
-      {/* 页面标题只说一次：Tab 里不再重复「系统配置」；右上角挂清理缓存的快捷图标 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-        <Space>
-          <SettingOutlined style={{ fontSize: 22, color: '#1677ff' }} />
-          <Title level={4} style={{ margin: 0 }}>{t('systemConfig')}</Title>
-        </Space>
-        <Tooltip title={t('clearTempFiles')}>
-          <Button icon={<DeleteOutlined />} onClick={handleCleanupCache} aria-label={t('clearTempFiles')} />
-        </Tooltip>
-      </div>
+    <div>
+      <PageHeader
+        icon={<SettingOutlined />}
+        title={t('systemConfig')}
+        subtitle={t('systemConfigSubtitle')}
+        extra={(
+          <Tooltip title={t('clearTempFiles')}>
+            <Button icon={<DeleteOutlined />} onClick={handleCleanupCache} aria-label={t('clearTempFiles')} />
+          </Tooltip>
+        )}
+      />
+
+      <Card style={{ borderRadius: 8 }}>
 
         {apikeyStatus && !apikeyStatus.configured && (
           <Alert
@@ -3292,8 +3295,8 @@ const SystemConfigPage: React.FC = () => {
           },
           ]}
         />
-
-    </Card>
+      </Card>
+    </div>
   )
 }
 

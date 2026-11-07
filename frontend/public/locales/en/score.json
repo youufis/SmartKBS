@@ -480,5 +480,6 @@
   "reward.subjectAccuracy": "Accuracy {{pct}}%",
   "reward.subjectNightlyNote": "Subject titles weigh both volume and accuracy: low accuracy caps the level, so guessing cannot grind upward. Stats refresh nightly.",
   "expand": "Expand",
-  "collapse": "Collapse"
+  "collapse": "Collapse",
+  "pageSubtitle": "Points and leaderboard with transparent rules"
 }

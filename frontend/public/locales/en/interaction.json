@@ -746,5 +746,6 @@
   "pollDuplicateOptions": "Duplicate options — please fix before saving",
   "pollEditLockHint": "Once votes exist you can reword options but cannot add or remove them",
   "pollRegenerate": "Regenerate",
-  "pollAutoCount": "Auto (let the AI decide)"
+  "pollAutoCount": "Auto (let the AI decide)",
+  "pageSubtitle": "Attendance records by class"
 }

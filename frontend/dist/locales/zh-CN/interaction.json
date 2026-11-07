@@ -746,5 +746,6 @@
   "pollDuplicateOptions": "有重复选项，保存前请改掉",
   "pollEditLockHint": "已有投票记录时只能改选项文字，不能增删选项",
   "pollRegenerate": "重新生成",
-  "pollAutoCount": "自动（由 AI 决定个数）"
+  "pollAutoCount": "自动（由 AI 决定个数）",
+  "pageSubtitle": "按班级查看点名记录与出勤"
 }

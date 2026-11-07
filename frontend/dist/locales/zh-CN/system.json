@@ -1662,5 +1662,6 @@
   "cleanEmptyClasses": "清理空壳班级",
   "taskPageSubtitle": "布置、提交与批改，一条流水线",
   "announcementsSubtitle": "发布通知、置顶重要事项、查看谁读过",
-  "notificationsSubtitle": "系统通知与推送，按类型筛选与批量处理"
+  "notificationsSubtitle": "系统通知与推送，按类型筛选与批量处理",
+  "systemConfigSubtitle": "接口密钥、模型、存储与运行参数"
 }
