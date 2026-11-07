@@ -466,34 +466,28 @@ async def rename_history_title(request: Request):
     logger.info(f"[历史记录] 标题已更新: user={username} file={rel} title={title!r}")
     return {"message": "标题已更新", "title": title, "path": rel}
 
-@router.delete("/file")
-async def delete_history_file(request: Request, path: str = Query(...)):
-    """删除历史文件或目录(仅限本人 ChatHistory 之内)"""
-    user = get_current_user(request)
-    username = user["username"]
-    chat_dir = os.path.realpath(get_account_chat_history_dir(username))
+def _delete_one_history_path(username: str, chat_dir: str, path: str) -> str:
+    """删除单个历史文件/目录（仅限本人 chat_dir 内），返回提示文案。
+
+    单条 /file 与批量 /delete-batch 共用，避免两处安全校验走样。
+    """
     target_path = os.path.realpath(os.path.join(chat_dir, path))
     # H2: 禁止删根目录本身
     if not path_within(chat_dir, target_path) or target_path == chat_dir:
         raise HTTPException(status_code=403, detail="无权删除该文件")
 
     if not os.path.exists(target_path):
-        # 磁盘上可能已经被手动删除，但 DB 中仍保留索引。
-        # 在此情况下不应该直接返回 404，而是尝试从 conversations 表中移除对应的索引。
+        # 磁盘上可能已被手动删除，但 DB 里还留着索引 → 只清索引
         rel = os.path.relpath(target_path, chat_dir).replace("\\", "/")
-        # 防止误删除根目录
         if rel in (".", ""):
             raise HTTPException(status_code=400, detail="不能删除根目录")
-
         try:
-            # 删除与该文件或目录匹配的索引（文件精确匹配或目录前缀匹配）
             execute_insert_update(
                 "DELETE FROM conversations WHERE username=? AND (filename=? OR filename LIKE ? ESCAPE '\\')",
                 (username, rel, _like_prefix_escape(rel) + "/%"),
             )
-            msg = f"路径在磁盘上不存在，已从索引中移除: {rel}"
             logger.info(f"历史记录索引已移除: username={username}, rel={rel}")
-            return {"message": msg}
+            return f"路径在磁盘上不存在，已从索引中移除: {rel}"
         except Exception as e:
             logger.error(f"删除历史记录索引失败: {e}")
             raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
@@ -501,27 +495,88 @@ async def delete_history_file(request: Request, path: str = Query(...)):
     try:
         if os.path.isfile(target_path):
             os.remove(target_path)
-            # 删除 DB 索引
             rel = os.path.relpath(target_path, chat_dir).replace("\\", "/")
             execute_insert_update("DELETE FROM conversations WHERE username=? AND filename=?", (username, rel))
-            msg = f"文件 {os.path.basename(target_path)} 已删除"
-        elif os.path.isdir(target_path):
+            return f"文件 {os.path.basename(target_path)} 已删除"
+        if os.path.isdir(target_path):
             shutil.rmtree(target_path)
-            # 删除 DB 索引（匹配该日期目录下所有文件）
             rel_prefix = os.path.relpath(target_path, chat_dir).replace("\\", "/")
             execute_insert_update(
                 "DELETE FROM conversations WHERE username=? AND filename LIKE ? ESCAPE '\\'",
                 (username, _like_prefix_escape(rel_prefix) + "/%"),
             )
-            msg = f"目录 {os.path.basename(target_path)} 已删除"
-        else:
-            raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
-        return {"message": msg}
+            return f"目录 {os.path.basename(target_path)} 已删除"
+        raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"删除历史记录失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+@router.delete("/file")
+async def delete_history_file(request: Request, path: str = Query(...)):
+    """删除历史文件或目录(仅限本人 ChatHistory 之内)"""
+    user = get_current_user(request)
+    username = user["username"]
+    chat_dir = os.path.realpath(get_account_chat_history_dir(username))
+    return {"message": _delete_one_history_path(username, chat_dir, path)}
+
+
+# 一次批量删除的上限：防止误选全量历史后把整个目录一次清空
+_MAX_BATCH_DELETE = 200
+
+
+@router.post("/delete-batch")
+async def delete_history_batch(request: Request) -> dict[str, Any]:
+    """批量删除历史记录。
+
+    逐条复用单条删除的路径校验与索引清理；某条失败不影响其余条目，
+    失败明细回传前端用于保留选中项重试。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    try:
+        body = await request.json() if request.headers.get("content-type") else {}
+    except Exception:
+        body = {}
+    paths = body.get("paths") if isinstance(body, dict) else None
+    if not isinstance(paths, list) or not paths:
+        raise HTTPException(status_code=400, detail="请先选择要删除的记录")
+    if len(paths) > _MAX_BATCH_DELETE:
+        raise HTTPException(status_code=400, detail=f"单次最多删除 {_MAX_BATCH_DELETE} 条")
+
+    wanted: list[str] = []
+    seen: set[str] = set()
+    for raw in paths:
+        p = str(raw).strip() if isinstance(raw, (str, int, float)) else ""
+        if not p or len(p) > 512 or p in seen:
+            continue
+        seen.add(p)
+        wanted.append(p)
+    if not wanted:
+        raise HTTPException(status_code=400, detail="请先选择要删除的记录")
+
+    chat_dir = os.path.realpath(get_account_chat_history_dir(username))
+    failed: list[dict[str, str]] = []
+    deleted = 0
+    for p in wanted:
+        try:
+            _delete_one_history_path(username, chat_dir, p)
+            deleted += 1
+        except HTTPException as e:
+            failed.append({"path": p, "error": str(e.detail)})
+        except Exception as e:
+            logger.error(f"[历史记录] 批量删除异常: user={username} path={p!r} err={e}")
+            failed.append({"path": p, "error": "删除失败"})
+
+    logger.info(f"[历史记录] 批量删除: user={username} requested={len(wanted)} "
+                f"deleted={deleted} failed={len(failed)}")
+    return {
+        "deleted": deleted,
+        "failed": failed,
+        "message": f"已删除 {deleted} 条历史记录" + (f"，{len(failed)} 条失败" if failed else ""),
+    }
 
 
 # ═══════════════════════════════════════════════════════════

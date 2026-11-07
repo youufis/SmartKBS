@@ -279,6 +279,11 @@ const ChatPage: React.FC = () => {
   const [renameNode, setRenameNode] = useState<TreeNode | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteNode, setDeleteNode] = useState<TreeNode | null>(null)
+  // 批量管理：进入后每条记录前出现复选框，退出时清空选择
+  const [historyBatchMode, setHistoryBatchMode] = useState(false)
+  const [historyChecked, setHistoryChecked] = useState<string[]>([])
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false)
+  const [batchDeleting, setBatchDeleting] = useState(false)
   // 历史抽屉宽度：可拖拽并记住；窄屏直接铺满
   const [historyWidth, setHistoryWidth] = useState(() => {
     if (window.innerWidth < 768) return window.innerWidth
@@ -394,6 +399,89 @@ const ChatPage: React.FC = () => {
   // 展开/收起合成一个开关：全展开时再点就是收起，省一个按钮位
   const historyAllExpanded = historyView.length > 0 && historyView.every(g => historyExpanded.includes(g.key))
 
+  // ── 批量管理：选中项存的是历史文件相对路径（= Tree node.key）──
+  // 当前视图的可见叶子，用于「全选当前列表」；正文命中组可能与日期组重复，按 key 去重
+  const historyVisibleLeaves = useMemo(() => {
+    const keys: string[] = []
+    const seen = new Set<string>()
+    for (const g of historyView) {
+      for (const leaf of g.children || []) {
+        if (leaf.isLeaf && leaf.key && !seen.has(leaf.key)) { seen.add(leaf.key); keys.push(leaf.key) }
+      }
+    }
+    return keys
+  }, [historyView])
+
+  // 标题字典覆盖全量树（含搜索命中），筛选变化后确认框仍能看到已选项的名称
+  const historyLeafTitles = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const folder of historyTree) {
+      for (const leaf of folder.children || []) {
+        if (leaf.key) map.set(leaf.key, leaf.title || leaf.filename || leaf.key)
+      }
+    }
+    for (const hit of historyHits) {
+      if (hit.key && !map.has(hit.key)) map.set(hit.key, hit.title || hit.key)
+    }
+    return map
+  }, [historyTree, historyHits])
+
+  const historyCheckedSet = useMemo(() => new Set(historyChecked), [historyChecked])
+
+  const exitHistoryBatch = useCallback(() => {
+    setHistoryBatchMode(false)
+    setHistoryChecked([])
+    setBatchConfirmOpen(false)
+  }, [])
+
+  const toggleHistoryCheck = useCallback((key: string) => {
+    setHistoryChecked(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }, [])
+
+  const toggleHistoryGroup = useCallback((node: TreeNode) => {
+    const keys = (node.children || []).filter(c => c.isLeaf && c.key).map(c => c.key)
+    if (!keys.length) return
+    setHistoryChecked(prev => {
+      const next = new Set(prev)
+      const allChecked = keys.every(k => next.has(k))
+      keys.forEach(k => { if (allChecked) next.delete(k); else next.add(k) })
+      return Array.from(next)
+    })
+  }, [])
+
+  const toggleHistoryCheckAll = useCallback(() => {
+    setHistoryChecked(prev => {
+      const next = new Set(prev)
+      const allChecked = historyVisibleLeaves.length > 0 && historyVisibleLeaves.every(k => next.has(k))
+      historyVisibleLeaves.forEach(k => { if (allChecked) next.delete(k); else next.add(k) })
+      return Array.from(next)
+    })
+  }, [historyVisibleLeaves])
+
+  const doBatchDelete = useCallback(async () => {
+    const paths = historyChecked
+    if (!paths.length) return
+    if (paths.length > 200) { message.warning(t('historyBatchLimit')); return }
+    setBatchDeleting(true)
+    try {
+      const res = await historyApi.deleteHistoryBatch(paths)
+      const failedKeys = (res.failed || []).map(f => f.path)
+      paths.filter(p => !failedKeys.includes(p)).forEach(p => { delete previewCacheRef.current[p] })
+      if (res.deleted > 0) message.success(t('historyBatchDeleted', { n: res.deleted }))
+      if (failedKeys.length > 0) message.warning(t('historyBatchPartial', { n: failedKeys.length }), 6)
+      // 失败项留在选中列表里可重试；全部成功则退出批量模式
+      setHistoryChecked(failedKeys)
+      setBatchConfirmOpen(false)
+      if (failedKeys.length === 0) exitHistoryBatch()
+      await loadHistoryTree()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      message.error(err?.response?.data?.detail || err?.message || t('deleteFailed'))
+    } finally {
+      setBatchDeleting(false)
+    }
+  }, [historyChecked, loadHistoryTree, t, exitHistoryBatch])
+
   const runHistoryContentSearch = useCallback(async () => {
     const q = historyQuery.trim()
     if (q.length < 2) { setHistoryHits([]); return }
@@ -486,6 +574,7 @@ const ChatPage: React.FC = () => {
 
   // 点击历史文件：面板里还有对话时先确认，再替换
   const handleHistorySelect = useCallback(async (selectedKeys: React.Key[], info: { node: TreeNode }) => {
+    if (historyBatchMode) return;   // 批量模式下点行不载入对话，只由复选框接管
     const node = info.node as TreeNode;
     const key = node.key || (selectedKeys.length > 0 ? String(selectedKeys[0]) : '');
     if (!node.isLeaf || !key) return;
@@ -498,7 +587,7 @@ const ChatPage: React.FC = () => {
       return;
     }
     await openHistoryNode(target);
-  }, [openHistoryNode, historyDontAsk]);
+  }, [openHistoryNode, historyDontAsk, historyBatchMode]);
 
   // 删除历史文件或目录
   const handleHistoryDelete = useCallback(async (path: string) => {
@@ -557,8 +646,9 @@ const ChatPage: React.FC = () => {
     setHistoryQuery('');
     setHistoryHits([]);
     setHistoryOnlyToday(false);
+    exitHistoryBatch();
     loadHistoryTree();
-  }, [loadHistoryTree]);
+  }, [loadHistoryTree, exitHistoryBatch]);
 
   // 悬浮预览：懒读开头一段并缓存，避免"只想看一眼"却把当前对话换掉
   const onHoverPreview = useCallback(async (node: TreeNode, open: boolean) => {
@@ -1580,7 +1670,7 @@ const ChatPage: React.FC = () => {
         placement="left"
         size={historyWidth}
         open={historyOpen}
-        onClose={() => { setHistoryOpen(false); }}
+        onClose={() => { setHistoryOpen(false); exitHistoryBatch(); }}
       >
         {/* 右边缘拖拽改宽度；窄屏铺满时不显示 */}
         {historyOpen && historyWidth < window.innerWidth - 1 && (
@@ -1630,7 +1720,39 @@ const ChatPage: React.FC = () => {
             >
               {t(historyAllExpanded ? 'historyCollapseAll' : 'historyExpandAll')}
             </Button>
+            <Button
+              size="small"
+              type={historyBatchMode ? 'primary' : 'text'}
+              icon={<CheckOutlined />}
+              onClick={() => { if (historyBatchMode) exitHistoryBatch(); else setHistoryBatchMode(true) }}
+            >
+              {t(historyBatchMode ? 'historyBatchExit' : 'historyBatchMode')}
+            </Button>
           </Space>
+          {historyBatchMode && (
+            <div style={{
+              border: '1px solid var(--border-color-secondary)', borderRadius: 6,
+              padding: '6px 8px', background: 'var(--bg-layout)',
+            }}>
+              <Space size={4} wrap>
+                <Typography.Text style={{ fontSize: 12 }}>
+                  {t('historyBatchSelected', { n: historyChecked.length })}
+                </Typography.Text>
+                <Button size="small" type="link" onClick={toggleHistoryCheckAll}
+                  disabled={!historyVisibleLeaves.length}>
+                  {t('historyBatchSelectAll')}
+                </Button>
+                <Button size="small" type="link" onClick={() => setHistoryChecked([])}
+                  disabled={!historyChecked.length}>
+                  {t('historyBatchClear')}
+                </Button>
+                <Button size="small" danger icon={<DeleteOutlined />}
+                  disabled={!historyChecked.length} onClick={() => setBatchConfirmOpen(true)}>
+                  {t('historyBatchDelete')}
+                </Button>
+              </Space>
+            </div>
+          )}
         </Space>
 
         <Spin spinning={historyLoading || historySearching}>
@@ -1640,8 +1762,8 @@ const ChatPage: React.FC = () => {
               showLine
               expandedKeys={historyExpanded}
               onExpand={(keys) => setHistoryExpanded(keys as React.Key[])}
-              selectedKeys={historySelected}
-              onSelect={handleHistorySelect}
+              selectedKeys={historyBatchMode ? [] : historySelected}
+              onSelect={historyBatchMode ? undefined : handleHistorySelect}
               titleRender={(node: TreeNode) => {
                 // 类型看文件名前缀；标题由后端给（首条学生发言），解析不出来时才回退成时间戳
                 const fname = (node.filename || node.title || '') as string
@@ -1652,14 +1774,25 @@ const ChatPage: React.FC = () => {
                 if (node.isGroup) {
                   // 只覆盖一个日期目录的分组才给删除键，跨月的分组不给（一次删太多天太危险）
                   const dates = Array.from(new Set((node.children || []).map(c => c.date || '').filter(Boolean)))
+                  const groupKeys = (node.children || []).filter(c => c.isLeaf && c.key).map(c => c.key)
+                  const checkedCount = groupKeys.filter(k => historyCheckedSet.has(k)).length
                   return (
                     <Space size={4} style={{ width: '100%' }}>
+                      {historyBatchMode && (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={groupKeys.length > 0 && checkedCount === groupKeys.length}
+                            indeterminate={checkedCount > 0 && checkedCount < groupKeys.length}
+                            onChange={() => toggleHistoryGroup(node)}
+                          />
+                        </span>
+                      )}
                       <FolderOutlined />
                       <span style={{ fontSize: 13, fontWeight: 600 }}>{displayTitle}</span>
                       <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
                         {node.count ?? (node.children?.length ?? 0)}
                       </span>
-                      {dates.length === 1 && (
+                      {!historyBatchMode && dates.length === 1 && (
                         <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
                           style={{ flexShrink: 0, opacity: 0.4, marginLeft: 'auto' }}>
                           <Popconfirm title={t('confirmDeleteDirCount', { count: node.children?.length ?? 0 })}
@@ -1674,6 +1807,12 @@ const ChatPage: React.FC = () => {
                 return (
                   <Space orientation="vertical" size={0} style={{ width: '100%' }} className="history-tree-node">
                     <Space size={4} style={{ width: '100%' }}>
+                      {historyBatchMode && (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <Checkbox checked={historyCheckedSet.has(node.key)}
+                            onChange={() => toggleHistoryCheck(node.key)} />
+                        </span>
+                      )}
                       {isCompanion ? <span>🧠</span> : <FileOutlined />}
                       {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('companionLabel')}</Tag>}
                       {isTask && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('taskLabel')}</Tag>}
@@ -1700,7 +1839,7 @@ const ChatPage: React.FC = () => {
                       {meta && (
                         <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{meta}</span>
                       )}
-                      <Dropdown
+                      {!historyBatchMode && (<Dropdown
                         trigger={['click']}
                         menu={{
                           items: [
@@ -1718,7 +1857,7 @@ const ChatPage: React.FC = () => {
                         <span onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
                           <Button type="text" size="small" icon={<MoreOutlined />} />
                         </span>
-                      </Dropdown>
+                      </Dropdown>)}
                     </Space>
                     {node.snippet && (
                       <span style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 18, wordBreak: 'break-all' }}>
@@ -1837,6 +1976,40 @@ const ChatPage: React.FC = () => {
         }}
       >
         <Typography.Text style={{ fontSize: 13 }}>{deleteNode?.title}</Typography.Text>
+      </Modal>
+
+      {/* 批量删除确认：列出待删条目，避免筛选切换后误删看不见的记录 */}
+      <Modal
+        maskClosable={false}
+        open={batchConfirmOpen}
+        width={460}
+        title={t('historyBatchConfirmTitle')}
+        okText={t('delete')}
+        okButtonProps={{ danger: true, loading: batchDeleting }}
+        cancelText={t('historyCancel')}
+        onCancel={() => { if (!batchDeleting) setBatchConfirmOpen(false) }}
+        onOk={() => { void doBatchDelete() }}
+      >
+        <Space orientation="vertical" size={6} style={{ width: '100%' }}>
+          <Typography.Text style={{ fontSize: 13 }}>
+            {t('historyBatchConfirmDesc', { n: historyChecked.length })}
+          </Typography.Text>
+          <div style={{
+            maxHeight: 180, overflow: 'auto', padding: 8, borderRadius: 4,
+            background: 'var(--bg-layout)',
+          }}>
+            {historyChecked.slice(0, 8).map(k => (
+              <Typography.Text key={k} style={{ fontSize: 12, display: 'block' }} ellipsis>
+                · {historyLeafTitles.get(k) || k}
+              </Typography.Text>
+            ))}
+            {historyChecked.length > 8 && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('historyBatchMore', { n: historyChecked.length - 8 })}
+              </Typography.Text>
+            )}
+          </div>
+        </Space>
       </Modal>
 
       {/* 摄像头拍照 Modal */}

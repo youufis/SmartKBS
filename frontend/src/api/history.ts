@@ -63,6 +63,18 @@ export async function deleteHistoryFile(path: string): Promise<string> {
   return data.message;
 }
 
+export interface HistoryBatchDeleteResult {
+  deleted: number;
+  failed: { path: string; error: string }[];
+  message: string;
+}
+
+/** 批量删除：一次请求逐条校验，返回成功数与失败明细（失败项可保留重试） */
+export async function deleteHistoryBatch(paths: string[]): Promise<HistoryBatchDeleteResult> {
+  const { data } = await apiClient.post('/api/history/delete-batch', { paths });
+  return data as HistoryBatchDeleteResult;
+}
+
 export async function saveConversation(content: string, session_id?: string, filename?: string): Promise<string> {
   const { data } = await apiClient.post('/api/history/save', { content, session_id, filename });
   return data.message;
