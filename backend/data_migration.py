@@ -536,6 +536,19 @@ def migrate_legacy_data() -> dict:
         # ②b 升级备份与状态文件：以前写在安装目录，下一次覆盖安装会被一起删掉
         _relocate_runtime_state(records)
 
+        # ②c 节点身份文件：安装器钩子会救，这里兜住「绕过安装器直接双击后端 exe」的旁路场景
+        node_src = legacy_db / ".node_id"
+        node_dst = Path(DB_DIR) / ".node_id"
+        if node_src.exists() and not node_dst.exists() and not _same_path(node_src, node_dst):
+            try:
+                node_dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(node_src, node_dst)
+                records.append({"type": "file", "from": str(node_src), "to": str(node_dst),
+                                "size": node_src.stat().st_size})
+                logger.info("[迁移] 已复制节点身份 %s → %s", node_src, node_dst)
+            except Exception as exc:
+                logger.warning("[迁移] .node_id 搬迁失败（不影响启动）：%s", exc)
+
         # ③ 库内绝对路径归一（画像等历史写法，搬目录后会失效）
         _normalize_absolute_paths(records)
 
