@@ -225,5 +225,6 @@
   "kind.dir": "Folder",
   "mobileMore": "Menu",
   "mobileDrawerTitle": "All features",
-  "htmlFilesSubtitle": "Web resources: preview, group and share"
+  "htmlFilesSubtitle": "Web resources: preview, group and share",
+  "exploreCanvas": "Explore Canvas"
 }

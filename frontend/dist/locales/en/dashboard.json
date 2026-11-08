@@ -358,7 +358,8 @@
         "confirm_mismatch": "The confirmation text does not match the activity name, reset rejected"
       },
       "failed": "Request failed, please try again later"
-    }
+    },
+    "tabExplore": "Explore Canvas"
   },
   "analytics": {
     "title": "AI Learning Analytics",
