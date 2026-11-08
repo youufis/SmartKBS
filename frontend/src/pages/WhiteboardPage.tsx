@@ -196,7 +196,6 @@ const WhiteboardPage: React.FC = () => {
   const modeLabels: Record<string, { color: string; label: string }> = {
     demo: { color: 'blue', label: t('demo') },
     interactive: { color: 'orange', label: t('interactive') },
-    self_study: { color: 'purple', label: t('selfStudy') },
   }
 
   // 卡片列表（与随堂测验/抢答/同步练习/活动监控/考试中心同款）：
@@ -373,12 +372,10 @@ const WhiteboardPage: React.FC = () => {
             <Radio.Group value={mode} onChange={(e) => setMode(e.target.value as WhiteboardMode)} style={{ marginTop: 8 }}>
               <Radio.Button value="demo">{t('demoMode')}</Radio.Button>
               <Radio.Button value="interactive">{t('interactiveMode')}</Radio.Button>
-              <Radio.Button value="self_study">{t('selfStudyMode')}</Radio.Button>
             </Radio.Group>
             <div style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
               {mode === 'demo' && t('demoModeDesc')}
               {mode === 'interactive' && t('interactiveModeDesc')}
-              {mode === 'self_study' && t('selfStudyModeDesc')}
             </div>
           </div>
           <div>
@@ -448,12 +445,10 @@ const WhiteboardPage: React.FC = () => {
             <Radio.Group value={editMode} onChange={(e) => setEditMode(e.target.value as WhiteboardMode)} style={{ marginTop: 8 }}>
               <Radio.Button value="demo">{t('demoMode')}</Radio.Button>
               <Radio.Button value="interactive">{t('interactiveMode')}</Radio.Button>
-              <Radio.Button value="self_study">{t('selfStudyMode')}</Radio.Button>
             </Radio.Group>
             <div style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
               {editMode === 'demo' && t('demoModeDesc')}
               {editMode === 'interactive' && t('interactiveModeDesc')}
-              {editMode === 'self_study' && t('selfStudyModeDesc')}
             </div>
           </div>
         </Space>

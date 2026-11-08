@@ -626,7 +626,9 @@ class WhiteboardManager:
         return self.rooms.get(room_id, {}).get("connections", {}).get(username, {}).get("role", "student")
 
     def get_mode(self, room_id: int) -> str:
-        return self.rooms.get(room_id, {}).get("mode", "demo")
+        mode = self.rooms.get(room_id, {}).get("mode", "demo")
+        # 自习模式已停用：存量房间按演示对待（学生只读），教师切换模式后自然收敛
+        return "demo" if mode == "self_study" else mode
 
     def set_mode(self, room_id: int, mode: str):
         if room_id in self.rooms:

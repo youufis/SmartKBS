@@ -3,13 +3,13 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Button, Space, Typography, Tag, message, Modal, Input, Drawer,
-  Tooltip, Badge, Divider, Segmented, Alert,
+  Button, Space, Typography, Tag, message, Modal, Drawer,
+  Tooltip, Badge, Segmented, Alert,
 } from 'antd'
 import {
-  ArrowLeftOutlined, TeamOutlined, SettingOutlined,
-  StopOutlined, CopyOutlined, RobotOutlined,
-  ReloadOutlined, ExpandOutlined, CompressOutlined,
+  ArrowLeftOutlined, TeamOutlined,
+  StopOutlined, CopyOutlined,
+  ExpandOutlined, CompressOutlined,
   CustomerServiceOutlined, ClearOutlined,
   UndoOutlined, RedoOutlined, DownloadOutlined,
 } from '@ant-design/icons'
@@ -127,10 +127,6 @@ const WhiteboardRoomPage: React.FC = () => {
           setDrawDenied('')
         }
       }
-      if (msg.type === 'student_submitted') {
-        message.success(t('studentSubmitted', { username: msg.username }))
-        if (isTeacher) loadMembers()
-      }
       if (msg.type === 'room_ended') {
         message.info(t('roomEnded'))
         setRoomStatus('ended')
@@ -214,16 +210,6 @@ const WhiteboardRoomPage: React.FC = () => {
         }
       },
     })
-  }
-
-  const handleSpotlight = async (username: string) => {
-    try {
-      await whiteboardApi.spotlightStudent(rid, username)
-      setSelectedStudent(username)
-      message.info(t('spotlighted', { username: username }))
-    } catch {
-      message.error(t('screenCastFailed'))
-    }
   }
 
   const handleGrantControl = async (username: string) => {
@@ -316,8 +302,8 @@ const WhiteboardRoomPage: React.FC = () => {
     navigate('/whiteboard')
   }
 
-  // 演示模式：学生只读；互动模式：授权后可操作；自习：学生各自操作
-  const readOnly = !isTeacher && mode !== 'self_study' && (!grantedToMe || mode !== 'interactive')
+  // 演示模式：学生只读；互动模式：授权后可操作
+  const readOnly = !isTeacher && (!grantedToMe || mode !== 'interactive')
   // 房间已结束、或教师只是同年级旁观：一律只读。服务端此时同样拒绝写入与注册，
   // 界面不给"能画"的错觉，老师才不会在半死的房间里写学生永远看不到的板书。
   const canDraw = roomStatus === 'active' && (!isTeacher || canManage)
@@ -356,7 +342,6 @@ const WhiteboardRoomPage: React.FC = () => {
               options={[
                 { value: 'demo', label: t('wbModeDemo') },
                 { value: 'interactive', label: t('wbModeInter') },
-                { value: 'self_study', label: t('wbModeSelf') },
               ]}
             />
           )}
@@ -467,7 +452,7 @@ const WhiteboardRoomPage: React.FC = () => {
       ) : null}
 
       {/* ── 主区域：白板 + AI 面板（占位模式） ── */}
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <WhiteboardCanvas roomId={rid} readOnly={boardReadOnly} isBroadcaster={isBroadcaster} ws={ws} externalEditorRef={editorRef} />
         </div>
@@ -497,7 +482,6 @@ const WhiteboardRoomPage: React.FC = () => {
           {' '}|{' '}
           {mode === 'demo' && t('wbDemoHint')}
           {mode === 'interactive' && t('wbModeInterHint')}
-          {mode === 'self_study' && t('wbModeSelfHint')}
           {spectator && <span style={{ color: '#faad14' }}> · {t('wbSpectator')}</span>}
           {drawDenied && <span style={{ color: '#faad14' }}> · {drawDenied}</span>}
         </span>
@@ -543,14 +527,6 @@ const WhiteboardRoomPage: React.FC = () => {
                     {t('wbGrant')}
                   </Button>
                 )}
-              </Space>
-            )}
-            {isTeacher && mode === 'self_study' && (
-              <Space>
-                {m.self_snapshot && <Tag color="green">{t('wbSubmitted')}</Tag>}
-                <Button size="small" onClick={() => handleSpotlight(m.username)}>
-                  {t('wbView')}
-                </Button>
               </Space>
             )}
           </div>

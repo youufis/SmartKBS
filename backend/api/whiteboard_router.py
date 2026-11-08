@@ -79,8 +79,6 @@ def _can_write_board(user: dict, room_id: int) -> bool:
         room = _room_brief(room_id)
         return bool(room) and _is_room_manager(user, room)
     mode = whiteboard_manager.get_mode(room_id)
-    if mode == "self_study":
-        return True
     if mode == "interactive":
         return whiteboard_manager.is_granted(room_id, user.get("username", ""))
     return False
@@ -266,8 +264,6 @@ def _operate_denied_reason(role: str, mode: str, can_manage: bool) -> str:
         return "当前状态不允许书写，请重新进入房间"
     if mode == "interactive":
         return "还没有老师授权你上台，请等待授权"
-    if mode == "self_study":
-        return "自习模式已切换，请重新进入房间"
     return "演示模式下学生只读，需要老师切到互动模式并授权"
 
 
@@ -304,7 +300,7 @@ def _get_ai_timeout() -> int:
 class CreateRoomRequest(BaseModel):
     title: str
     room_type: str = "classroom"        # classroom / course / temporary
-    mode: str = "demo"                  # demo / interactive / self_study
+    mode: str = "demo"                  # demo / interactive（自习模式已停用，个人创作走探索画布）
     course_kp_id: int | None = None
     grade: str = ""
     class_name: str = ""
@@ -349,6 +345,8 @@ async def create_room(req: CreateRoomRequest, request: Request):
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师和管理员可创建白板房间")
+    if (req.mode or "").strip() not in ("demo", "interactive"):
+        raise HTTPException(status_code=400, detail="自习模式已停用：个人自由创作请使用「探索画布」")
 
     # 如果教师未指定年级，自动从用户信息中补全
     grade = req.grade
@@ -536,6 +534,8 @@ async def update_room(room_id: int, req: UpdateRoomRequest, request: Request):
         fields.append("title=?")
         values.append(req.title)
     if req.mode is not None:
+        if req.mode not in ("demo", "interactive"):
+            raise HTTPException(status_code=400, detail="自习模式已停用：个人自由创作请使用「探索画布」")
         fields.append("mode=?")
         values.append(req.mode)
         whiteboard_manager.set_mode(room_id, req.mode)
@@ -2106,9 +2106,25 @@ def _wb_history_text(history, limit: int = 6, per_msg: int = 400) -> str:
 
 
 def _whiteboard_ai_stream(prompt: str, username: str, api_key: str, kb_query: str = ""):
-    """白板 AI 流式生成器（上游每帧已是全文快照，原样透传，前端只替换不追加）"""
+    """白板 AI 流式生成器（上游每帧已是全文快照，原样透传，前端只替换不追加）。
+
+    先下发 references 事件：与接管链同口径做一次检索，仅用于前端展示教材来源；
+    资料注入仍由统一接管链完成，这里不重复注入。检索失败静默，绝不阻塞回答。
+    """
+    refs: list = []
+    try:
+        if kb_query and len(kb_query.strip()) >= 4:
+            from backend import bailian_kb
+            ok, _reason = bailian_kb.kb_ready()
+            if ok:
+                from backend.rag import retrieve_knowledge_v2
+                _ctx, refs = retrieve_knowledge_v2(kb_query, username)
+    except Exception as e:
+        logger.debug(f"[白板AI] 引用检索失败（忽略）: {e}")
     from backend.api.chat_router import _agent_chat_stream
     try:
+        if refs:
+            yield "data: " + json.dumps({"type": "references", "items": refs}, ensure_ascii=False) + "\n\n";
         # 保留知识库，但只用教师这句话去检索：以前不传 kb_query，检索拿的是整段
         # 系统提示词（「按白板与提问自行判定学科作答…」），命中一堆无关片段还拖慢首字。
         for chunk in _agent_chat_stream(prompt, None, api_key, username,
@@ -3138,26 +3154,6 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                             "last_snapshot_seq", -1),
                     })
 
-            # ── 自习模式：学生保存自己的白板 ──
-            elif msg_type == "self_save":
-                if role == "student" and whiteboard_manager.get_mode(room_id) == "self_study":
-                    execute_insert_update(
-                        "UPDATE whiteboard_room_members SET self_snapshot=? WHERE room_id=? AND username=?",
-                        (data.get("snapshot", "{}"), room_id, username),
-                    )
-
-            # ── 自习模式：学生提交 ──
-            elif msg_type == "self_submit":
-                if role == "student" and whiteboard_manager.get_mode(room_id) == "self_study":
-                    execute_insert_update(
-                        "UPDATE whiteboard_room_members SET self_snapshot=? WHERE room_id=? AND username=?",
-                        (data.get("snapshot", "{}"), room_id, username),
-                    )
-                    await whiteboard_manager.broadcast(room_id, {
-                        "type": "student_submitted",
-                        "username": username,
-                    })
-
     except WebSocketDisconnect:
         await whiteboard_manager.leave_room(room_id, username)
     except Exception as e:
@@ -3186,6 +3182,4 @@ def _can_operate(room_id: int, username: str, role: str, mode: str,
         return can_manage
     if mode == "interactive":
         return whiteboard_manager.is_granted(room_id, username)
-    if mode == "self_study":
-        return True  # 自习模式各自可操作
     return False  # demo 模式学生不可操作

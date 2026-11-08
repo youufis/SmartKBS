@@ -1,6 +1,6 @@
 /**
  * 白板画布组件 — 基于 TLDraw
- * 支持三种模式：演示/互动/自习
+ * 支持两种模式：演示/互动
  */
 import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react'
 import { isAxiosError } from 'axios'
@@ -27,7 +27,7 @@ const minimalComponents: TLComponents = {
 interface Props {
   roomId: number
   readOnly?: boolean
-  isBroadcaster?: boolean  // 教师端可广播；自习模式下学生虽非只读，但不广播
+  isBroadcaster?: boolean  // 教师端可广播
   ws: ReturnType<typeof useWhiteboardWS>
   externalEditorRef?: React.MutableRefObject<Editor | null>  // 外部 editor ref（供 AI 面板使用）
 }
@@ -337,7 +337,6 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       const tick = setInterval(() => pushPatch(STAGE_MAX_WAIT_MS), PUSH_TICK_MS)
       return () => { clearInterval(tick) }
     }
-    // 自习模式学生：自己画自己的，不做任何同步
   }, [roomId, store.mode, readOnly, isBroadcaster, ws.isConnected, ws.send, takeSnapshot])
 
   // 连接建立/重连：声明能力；只读端/台上学生本地可能落后，要一份 keyframe 重新对齐。
@@ -371,6 +370,9 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     return () => { editorRef.current = null }
   }, [tldrawEditor])
 
+  const drawWatchRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => drawWatchRef.current?.(), [])
+
   const handleMount = useCallback((editor: Editor) => {
     if (readOnly) {
       editor.updateInstanceState({ isReadonly: true })
@@ -378,6 +380,16 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
 
     setReady(true)
     setTldrawEditor(editor)
+
+    // 笔画圈事件：本地用户画下的笔迹落地时广播，AI 助手据此提取「圈住的内容」（与探索画布同口径）
+    drawWatchRef.current?.()
+    drawWatchRef.current = editor.store.listen(({ changes }) => {
+      for (const rec of Object.values((changes as any)?.added || {})) {
+        if (rec && String((rec as any).type) === 'draw') {
+          window.dispatchEvent(new CustomEvent('wb:draw-created', { detail: { id: (rec as any).id } }))
+        }
+      }
+    }, { source: 'user', scope: 'document' })
 
     // 重放编辑就绪前缓存的快照
     const pending = pendingSnapshots.current

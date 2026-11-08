@@ -32,10 +32,6 @@ interface WhiteboardState {
   aiLoading: boolean
   sidebarCollapsed: boolean
 
-  // 自习模式
-  selfSnapshot: string | null
-  submitted: boolean
-
   // 操作
   setRoom: (room: WhiteboardRoom | null) => void
   setRoomCode: (code: string) => void
@@ -58,8 +54,6 @@ interface WhiteboardState {
   setAiPanelOpen: (open: boolean) => void
   setAiLoading: (loading: boolean) => void
   setSidebarCollapsed: (v: boolean) => void
-  setSelfSnapshot: (snap: string | null) => void
-  setSubmitted: (v: boolean) => void
   reset: () => void
 }
 
@@ -79,8 +73,6 @@ const initialState = {
   aiPanelOpen: false,
   aiLoading: false,
   sidebarCollapsed: false,
-  selfSnapshot: null,
-  submitted: false,
 }
 
 export const useWhiteboardStore = create<WhiteboardState>((set) => ({
@@ -120,7 +112,5 @@ export const useWhiteboardStore = create<WhiteboardState>((set) => ({
   setAiPanelOpen: (open) => set({ aiPanelOpen: open }),
   setAiLoading: (loading) => set({ aiLoading: loading }),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
-  setSelfSnapshot: (snap) => set({ selfSnapshot: snap }),
-  setSubmitted: (v) => set({ submitted: v }),
   reset: () => set({ ...initialState }),
 }))

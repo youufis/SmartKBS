@@ -483,7 +483,7 @@ export interface CurriculumResource {
 
 // ── 协作白板类型 ──
 
-export type WhiteboardMode = 'demo' | 'interactive' | 'self_study'
+export type WhiteboardMode = 'demo' | 'interactive'
 export type WhiteboardRoomType = 'classroom' | 'course' | 'temporary'
 
 export interface WhiteboardRoom {

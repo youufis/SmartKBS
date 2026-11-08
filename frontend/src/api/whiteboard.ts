@@ -131,6 +131,8 @@ export async function aiChatStream(
     history?: { role: 'user' | 'assistant'; content: string }[]
     /** 整页截图（data URL）：手写/图片/文本框只有看图才认得出来 */
     pageImage?: string
+    /** 教材知识库命中来源（展示用，不影响注入） */
+    onReferences?: (items: { doc_name?: string; title?: string; score?: number }[]) => void
   },
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token')
@@ -182,6 +184,9 @@ export async function aiChatStream(
         try {
           const data = JSON.parse(line.slice(6))
           switch (data.type) {
+            case 'references':
+              options?.onReferences?.(data.items || [])
+              break
             case 'delta':
               onDelta(data.content)
               break

@@ -3,6 +3,7 @@
  * 支持：流式对话、图示生成、一键板书、教学建议
  */
 import { useTranslation } from 'react-i18next'
+import { blobToDataUrl, collectText, detectPenCircles, shapePlainText, smartExcerptInCircle } from '../explore/selectionHelpers'
 import i18n from '../../i18n'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
@@ -17,6 +18,7 @@ import {
   CopyOutlined, BulbOutlined, HighlightOutlined,
   EditOutlined, ApartmentOutlined, TranslationOutlined,
   RiseOutlined, ReloadOutlined, PlusSquareOutlined,
+  ExpandAltOutlined, ShrinkOutlined,
 } from '@ant-design/icons'
 import VoiceInput from '../VoiceInput'
 import KnowledgePointSelect from '../KnowledgePointSelect'
@@ -299,6 +301,47 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   isStreaming?: boolean
+  refs?: { doc_name?: string; title?: string }[]
+}
+
+/** 同一文档多切片命中只展示一次，最多 3 条 */
+function uniqRefs(refs: { doc_name?: string; title?: string }[]): { doc_name?: string; title?: string }[] {
+  const seen = new Set<string>()
+  const out: { doc_name?: string; title?: string }[] = []
+  for (const r of refs) {
+    const k = (r.doc_name || '') + '|' + (r.title || '')
+    if (!seen.has(k)) { seen.add(k); out.push(r) }
+  }
+  return out.slice(0, 3)
+}
+
+// ── 空态示例话题（P1 移植自探索画布）：按「用户名+日期+批次」做种子随机抽 3 条——人人不同、天天不同、同日稳定 ──
+const WB_SAMPLE_POOL: { zh: string; en: string }[] = [
+  { zh: '用生活例子讲讲今天最核心的概念', en: 'Explain today\'s core concept with an everyday example' },
+  { zh: '这个知识点里最容易误解的地方是什么', en: 'What do students usually get wrong here' },
+  { zh: '帮我想 3 个能引发讨论的课堂问题', en: 'Give me 3 discussion questions for class' },
+  { zh: '把刚才的概念和上一章做个对比', en: 'Compare this concept with the last chapter' },
+  { zh: '给我一个 5 分钟的课堂导入创意', en: 'Suggest a 5-minute lesson intro idea' },
+  { zh: '出 2 道基础题和 1 道拓展题', en: 'Create 2 basic and 1 challenge question' },
+  { zh: '用一个比喻讲清楚抽象的定义', en: 'Explain the abstract definition with one metaphor' },
+  { zh: '下课前帮我梳理 3 条板书要点', en: 'Summarize 3 key takeaways before class ends' },
+  { zh: '为什么学这个？给我一个让学生信服的理由', en: 'Why learn this? Give a reason students believe' },
+  { zh: '设计一个不用电脑也能做的理解小活动', en: 'Design an unplugged activity to check understanding' },
+]
+
+function pickWbSamples(username: string, lang: string, nonce: number): string[] {
+  const day = new Date().toISOString().slice(0, 10)
+  const key = 'wb|' + username + '|' + day + '|' + nonce
+  let h = 2166136261
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619) }
+  const rand = () => { h += 0x6D2B79F5; let x = h; x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296 }
+  const idx = WB_SAMPLE_POOL.map((_, i) => i)
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    const tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp
+  }
+  const isEn = !(lang || '').startsWith('zh')
+  return idx.slice(0, 3).map((i) => (isEn ? WB_SAMPLE_POOL[i].en : WB_SAMPLE_POOL[i].zh))
 }
 
 interface Props {
@@ -338,6 +381,35 @@ export const AIPanel: React.FC<Props> = ({
   useEffect(() => { messagesRef.current = messages }, [messages])
   const progressModal = useProgressModal()
 
+  // ── P1 新增：弹出专注窗（探索画布同款三态之一，白板常驻形态仍是侧栏） ──
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null)
+  const [popMode, setPopMode] = useState(() => localStorage.getItem('smartkb_wb_ai_pop') === '1')
+  const [winPos, setWinPos] = useState<{ x: number; y: number } | null>(null)
+  const [wbRoll, setWbRoll] = useState(0)
+  const myName = (() => { try { return String((JSON.parse(localStorage.getItem('smartkb_user') || '{}') as any).username || '') } catch { return '' } })()
+  const wbLang = i18n.language
+  const wbSamples = React.useMemo(() => pickWbSamples(myName, wbLang, wbRoll), [myName, wbRoll, wbLang])
+  const dayKey = () => {
+    const d = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    return 'smartkb_wb_ai_used_' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+  }
+  const [todayUsed, setTodayUsed] = useState(() => Number(localStorage.getItem(dayKey()) || '0') || 0)
+  const bumpUsed = useCallback(() => {
+    const k = dayKey()
+    const n = Number(localStorage.getItem(k) || '0') + 1
+    localStorage.setItem(k, String(n))
+    setTodayUsed(n)
+  }, [])
+  // 弹出=专注对话：tldraw 工具栏/样式面板让位（body 类控制，收回即恢复画图工具）
+  useEffect(() => {
+    const cls = 'wb-ai-pop'
+    if (visible && popMode) document.body.classList.add(cls)
+    else document.body.classList.remove(cls)
+    return () => document.body.classList.remove(cls)
+  }, [visible, popMode])
+
   // 学科口径：默认「自动判断」，由后端按教师任教学科/白板内容收敛；老师也能临时切换某一科。
   // 以前这里由房间页写死传 "通用技术"，其他学科的老师问什么都被当成通用技术作答。
   const [subjectSel, setSubjectSel] = useState<string>(
@@ -359,6 +431,67 @@ export const AIPanel: React.FC<Props> = ({
       return ''
     }
   }, [editorRef])
+
+  // 圈选感知 + 上下文提示条（防抖 250ms，相机移动不重算）
+  const [selCount, setSelCount] = useState(0)
+  const [ctxHint, setCtxHint] = useState('')
+  const lastDrawsRef = useRef<{ id: string; ts: number }[]>([])
+  const prefillTimer = useRef(0)
+  const inputValRef = useRef('')
+  useEffect(() => { inputValRef.current = input }, [input])
+  const refreshHint = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed || !visible) { setSelCount(0); setCtxHint(''); return }
+    let n = 0
+    try { n = ed.getSelectedShapeIds().length } catch { /* ignore */ }
+    setSelCount(n)
+    if (n > 0) setCtxHint(t('aiSelHint', { n }))
+    else if (lastDrawsRef.current.some((r) => Date.now() - r.ts < 90000)) setCtxHint(t('aiCircleHint'))
+    else setCtxHint('')
+  }, [editorRef, visible, t])
+  useEffect(() => {
+    const ed = editorRef.current
+    if (!ed || !visible) { setSelCount(0); setCtxHint(''); return }
+    let tm = 0
+    const off = ed.store.listen(() => { window.clearTimeout(tm); tm = window.setTimeout(refreshHint, 250) }, { source: 'user', scope: 'all' })
+    const t0 = window.setTimeout(refreshHint, 300)
+    return () => { off?.(); window.clearTimeout(tm); window.clearTimeout(t0) }
+  }, [editorRef, visible, refreshHint])
+
+  // 笔画圈（P1 移植自探索画布）：圈住内容 90 秒内自动提取文字填入输入框
+  useEffect(() => {
+    if (!visible) return
+    const onDraw = (ev: Event) => {
+      const id = (ev as CustomEvent).detail?.id
+      if (id) { lastDrawsRef.current.push({ id, ts: Date.now() }); if (lastDrawsRef.current.length > 8) lastDrawsRef.current.shift() }
+      refreshHint()
+      window.clearTimeout(prefillTimer.current)
+      prefillTimer.current = window.setTimeout(() => {
+        const e3 = editorRef.current
+        if (!e3 || inputValRef.current.trim()) return
+        const circ = detectPenCircles(e3, lastDrawsRef.current)
+        if (!circ || !circ.inside.length) return
+        // ① 智能提取：只取落在圈内的文字；② 取不到再退回圈内首行
+        let excerpt = smartExcerptInCircle(e3, circ)
+        if (!excerpt) {
+          const lines = circ.inside
+            .map((sh: any) => shapePlainText({ type: String(sh.type), props: sh.props as Record<string, unknown> }))
+            .join('\n').split('\n').map((l) => l.trim()).filter((l) => l.length > 1)
+          excerpt = (lines[0] || '').replace(/[#*·]/g, '').trim().slice(0, 80)
+        }
+        if (!excerpt) return
+        setInput(excerpt)
+        setCtxHint(t('aiCircleFilled'))
+        window.setTimeout(() => inputRef.current?.focus?.(), 60)
+      }, 700)
+    }
+    window.addEventListener('wb:draw-created', onDraw)
+    return () => {
+      window.removeEventListener('wb:draw-created', onDraw)
+      window.clearTimeout(prefillTimer.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, refreshHint])
 
   // 计算右侧空白区域起始位置：遍历已有形状，取最右侧边界 + 间距
   const getRightSidePosition = useCallback((editor: Editor) => {
@@ -430,6 +563,7 @@ export const AIPanel: React.FC<Props> = ({
   ) => {
     if (sendingRef.current) return
     sendingRef.current = true
+    bumpUsed()
     setLoading(true)
     setStreamingText('')
     if (userText) setMessages((prev) => [...prev, { role: 'user', content: userText }])
@@ -450,10 +584,40 @@ export const AIPanel: React.FC<Props> = ({
       }
     }
 
+    // 圈选优先：有选中内容只带选区截图（整页文字清单反而干扰模型）；
+    // 没选东西时识别 90 秒内的笔画圈（探索画布同款）；都没有才回退整页逻辑
+    let snapshotArg = boardSnapshot()
+    let circleNote = ''
+    const ed0 = editorRef.current
+    if (!pageImage && ed0) {
+      let focus: any[] = ed0.getSelectedShapes() as any[]
+      let circMode = false
+      const onlyDraws = focus.length > 0 && focus.every((sh) => String(sh.type) === 'draw')
+      if (!focus.length || onlyDraws) {
+        const circ = detectPenCircles(ed0, lastDrawsRef.current)
+        if (circ) { focus = [circ.draw, ...circ.inside]; circMode = true }
+      }
+      if (focus.length) {
+        try {
+          const { blob } = await ed0.toImage(focus as never, { format: 'jpeg', quality: 0.88, background: true, padding: 12 })
+          pageImage = await blobToDataUrl(blob, 1400)
+          // snapshot 参数后端按 JSON 解析（解析失败静默丢），圈选说明必须并进 prompt 才进得了模型
+          snapshotArg = '{}'
+          if (circMode) {
+            const insideText = collectText(focus)
+            circleNote = '（用户在白板上用笔圈了一块区域；配图里的笔圈就是圈选范围'
+              + (insideText ? '，圈内文字：' + insideText : '')
+              + '，请聚焦被圈住的部分作答）\n'
+          }
+        } catch { /* 选区导出失败则保持原逻辑 */ }
+      }
+    }
+    let refs: { doc_name?: string; title?: string }[] = []
+
     let fullContent = ''
     try {
       await whiteboardApi.aiChatStream(
-        modelPrompt,
+        circleNote ? circleNote + modelPrompt : modelPrompt,
         roomId,
         (delta) => {
           // 后端返回的是累计文本，直接替换
@@ -464,7 +628,7 @@ export const AIPanel: React.FC<Props> = ({
           if (!fullContent) return
           setMessages((prev) => [
             ...prev,
-            { role: 'assistant', content: fullContent },
+            { role: 'assistant', content: fullContent, refs },
           ])
           setStreamingText('')
           setLoading(false)
@@ -488,16 +652,17 @@ export const AIPanel: React.FC<Props> = ({
           subject,
           signal: abortController.signal,
           useVision,
-          snapshot: boardSnapshot(),
+          snapshot: snapshotArg,
           history,
           pageImage,
+          onReferences: (items) => { refs = items },
         },
       )
     } finally {
       sendingRef.current = false
       setLoading(false)
     }
-  }, [roomId, kpName, subject, useVision, editorRef, boardSnapshot, t])
+  }, [roomId, kpName, subject, useVision, editorRef, boardSnapshot, bumpUsed, t])
 
   // 发送对话消息
   const handleSend = useCallback(async () => {
@@ -1344,7 +1509,19 @@ export const AIPanel: React.FC<Props> = ({
 
   return (
     <div
-      style={{
+      ref={rootRef}
+      style={popMode ? {
+        // 弹出模式：盖在画布上方的可拖动大窗，上下锚定（高度恒等于可视区，输入框不可能被裁掉）
+        position: 'absolute', zIndex: 900,
+        ...(winPos ? { left: winPos.x, top: winPos.y, bottom: 8 } : { left: '50%', top: 8, bottom: 8, transform: 'translateX(-50%)' }),
+        width: 760, maxWidth: 'calc(100% - 24px)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        borderRadius: 14, border: '1px solid var(--border-color, #e5e9f0)',
+        boxShadow: '0 16px 48px rgba(15, 35, 75, 0.28)',
+        background: 'var(--bg-container, #fff)',
+        flexShrink: 0,
+        userSelect: 'text',
+      } : {
         width: panelWidth,
         height: '100%',
         display: 'flex',
@@ -1355,7 +1532,7 @@ export const AIPanel: React.FC<Props> = ({
         userSelect: 'text',
       }}
     >
-      {/* ── 头部 ── */}
+      {/* ── 头部（弹出模式：标题栏即拖动把手） ── */}
       <div
         style={{
           padding: '12px 16px',
@@ -1364,7 +1541,31 @@ export const AIPanel: React.FC<Props> = ({
           justifyContent: 'space-between',
           alignItems: 'center',
           background: 'var(--bg-layout)',
+          cursor: popMode ? 'move' : 'default',
+          touchAction: 'none',
         }}
+        onPointerDown={(e) => {
+          if (!popMode) return
+          if ((e.target as HTMLElement).closest('button')) return
+          const wrap = rootRef.current?.parentElement?.getBoundingClientRect()
+          const r = rootRef.current?.getBoundingClientRect()
+          if (!wrap || !r) return
+          dragRef.current = { dx: e.clientX - r.left, dy: e.clientY - r.top }
+          setWinPos({ x: r.left - wrap.left, y: r.top - wrap.top })
+          ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+        }}
+        onPointerMove={(e) => {
+          if (!dragRef.current) return
+          const wrap = rootRef.current?.parentElement?.getBoundingClientRect()
+          if (!wrap) return
+          const self = rootRef.current?.getBoundingClientRect()
+          const w = self?.width || 400
+          const nx = Math.max(4, Math.min(e.clientX - wrap.left - dragRef.current.dx, wrap.width - w - 4))
+          // 底边锚定在容器底部：往下拖=压扁自己，按最小可用高度(≈268px)钳制，输入区任何位置必可见
+          const ny = Math.max(0, Math.min(e.clientY - wrap.top - dragRef.current.dy, Math.max(0, wrap.height - 268)))
+          setWinPos({ x: nx, y: ny })
+        }}
+        onPointerUp={() => { dragRef.current = null }}
       >
         <Space>
           <RobotOutlined style={{ color: '#1890ff', fontSize: 18 }} />
@@ -1372,11 +1573,25 @@ export const AIPanel: React.FC<Props> = ({
           {kpName && <Tag color="blue" style={{ fontSize: 12 }}>{kpName}</Tag>}
         </Space>
         <Space size={4}>
-          <Tooltip title={expanded ? t('aiShrink') : t('aiExpand')}>
+          <Tooltip title={popMode ? t('aiPopBack') : t('aiPop')}>
             <Button type="text" size="small"
-              icon={expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-              onClick={() => setExpanded(!expanded)} />
+              icon={popMode ? <ShrinkOutlined /> : <ExpandAltOutlined />}
+              onClick={() => {
+                const next = !popMode
+                setPopMode(next)
+                localStorage.setItem('smartkb_wb_ai_pop', next ? '1' : '0')
+                setWinPos(null)
+                // 形态切换后让 tldraw 重算一次视口（与开关面板同一处理）
+                window.setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
+              }} />
           </Tooltip>
+          {!popMode && (
+            <Tooltip title={expanded ? t('aiShrink') : t('aiExpand')}>
+              <Button type="text" size="small"
+                icon={expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                onClick={() => setExpanded(!expanded)} />
+            </Tooltip>
+          )}
           <Tooltip title={t('aiClearChat')}>
             <Button type="text" size="small" icon={<ClearOutlined />} onClick={handleClear} />
           </Tooltip>
@@ -1502,11 +1717,23 @@ export const AIPanel: React.FC<Props> = ({
         }}
       >
         {messages.length === 0 && !loading && (
-          <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', marginTop: 40 }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', marginTop: 40, padding: '0 12px' }}>
             <RobotOutlined style={{ fontSize: 40, display: 'block', marginBottom: 12 }} />
             <Text type="secondary">{t('aiAskPlaceholder')}</Text>
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-tertiary)' }}>
-              {t('aiAskExample')}
+            {/* 空态示例话题：点即填入输入框，换一批重抽（P1 移植自探索画布） */}
+            <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+              {wbSamples.map((x) => (
+                <Tag key={x} style={{ cursor: 'pointer', maxWidth: '100%', whiteSpace: 'normal', textAlign: 'left', fontSize: 12, lineHeight: 1.5, margin: 0 }}
+                  onClick={() => { setInput(x); window.setTimeout(() => inputRef.current?.focus?.(), 40) }}>
+                  {x}
+                </Tag>
+              ))}
+              <Tag icon={<ReloadOutlined />} style={{ cursor: 'pointer', fontSize: 12, margin: 0 }} onClick={() => setWbRoll((v) => v + 1)}>
+                {t('aiSampleMore')}
+              </Tag>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-tertiary)' }}>
+              {t('aiSampleTip')}
             </div>
           </div>
         )}
@@ -1551,6 +1778,24 @@ export const AIPanel: React.FC<Props> = ({
                   >
                     {msg.content}
                   </ReactMarkdown>
+                </div>
+              )}
+              {msg.role === 'assistant' && !!msg.refs?.length && (
+                <div style={{
+                  marginTop: 6, fontSize: 11, color: 'var(--text-tertiary, #999)',
+                  display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'flex-start',
+                }}>
+                  <span style={{ flexShrink: 0, lineHeight: '20px' }}>{t('aiRefsLabel')}</span>
+                  {uniqRefs(msg.refs).map((r, j) => {
+                    const label = (r.doc_name || '') + (r.title ? '·' + r.title : '')
+                    return (
+                      <Tooltip key={j} title={label}>
+                        <Tag style={{ fontSize: 11, margin: 0, maxWidth: '100%', whiteSpace: 'normal', lineHeight: 1.5, textAlign: 'left' }}>
+                          {label.length > 30 ? label.slice(0, 29) + '…' : label}
+                        </Tag>
+                      </Tooltip>
+                    )
+                  })}
                 </div>
               )}
               {msg.isStreaming && <LoadingOutlined style={{ marginLeft: 4 }} />}
@@ -1633,6 +1878,11 @@ export const AIPanel: React.FC<Props> = ({
 
       {/* ── 输入区 ── */}
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color)' }}>
+        {ctxHint && (
+          <div style={{ fontSize: 11, color: selCount > 0 ? '#389e0d' : '#d46b08', marginBottom: 6 }}>
+            {selCount > 0 ? '🟢 ' : '✏️ '}{ctxHint}
+          </div>
+        )}
         {loading ? (
           <Button block danger icon={<StopOutlined />} onClick={handleStop}>
             {t('aiStop')}
@@ -1661,8 +1911,9 @@ export const AIPanel: React.FC<Props> = ({
             />
           </Space.Compact>
         )}
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4, textAlign: 'right' }}>
-          {t('aiSendHint')}
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+          <span>{t('aiSendHint')}</span>
+          <span style={{ whiteSpace: 'nowrap' }}>{isTeacher ? t('aiTodayUsed', { n: todayUsed }) : t('aiTodayUsedStudent', { n: todayUsed })}</span>
         </div>
       </div>
 
@@ -1678,6 +1929,8 @@ export const AIPanel: React.FC<Props> = ({
           0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4); }
           50% { box-shadow: 0 0 0 6px rgba(255, 77, 79, 0); }
         }
+        .wb-ai-pop .tlui-toolbar,
+        .wb-ai-pop .tlui-style-panel__wrapper { display: none !important; }
         .ai-msg-content, .ai-msg-content * {
           user-select: text !important;
           -webkit-user-select: text !important;
