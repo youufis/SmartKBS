@@ -65,6 +65,11 @@ DEFAULT_BADGE_CONFIG = [
     {"id": "discussion_10",   "name": "讨论之星", "icon": "👥", "desc": "参与 10 次分组讨论", "condition_type": "discussion_count", "condition_value": 10},
     {"id": "punctual_3",      "name": "准时达人", "icon": "⏱️", "desc": "3 次考试都在截止时间内提交", "condition_type": "punctual_3", "condition_value": 3},
     {"id": "rollcall_ace",    "name": "点名达人", "icon": "🎯", "desc": "点名正确率≥90%（累计≥10次）", "condition_type": "rollcall_accuracy", "condition_value": 90},
+    {"id": "explore_first_ask", "name": "好奇之星", "icon": "💡", "desc": "在探索画布提出第一个问题", "condition_type": "explore_ask_count", "condition_value": 1},
+    {"id": "explore_ask_100", "name": "好问之星", "icon": "🙋", "desc": "探索画布累计提问 100 次", "condition_type": "explore_ask_count", "condition_value": 100},
+    {"id": "explore_topic_10", "name": "星图漫游者", "icon": "🌌", "desc": "展开 10 张知识星图", "condition_type": "explore_topic_count", "condition_value": 10},
+    {"id": "explore_archive_3", "name": "收集葫芦", "icon": "🧺", "desc": "把 3 页画布作品存入成长档案", "condition_type": "explore_archive_count", "condition_value": 3},
+    {"id": "explore_doodle_10", "name": "涂鸦大师", "icon": "🖌️", "desc": "探索画布累计生成 10 张 AI 图片", "condition_type": "explore_image_count", "condition_value": 10},
     {"id": "perfect_attendance", "name": "月度坚持", "icon": "📅", "desc": "当月登录学习满 20 天", "condition_type": "monthly_full_attendance", "condition_value": 20},
     # ── 一站到底·闯关徽章（由 quest_router 独立管理，此处仅作展示配置） ──
     {"id": "quest_first",    "name": "初出茅庐", "icon": "🥉", "desc": "首次闯关成功", "condition_type": "quest_milestone", "condition_value": 1},
@@ -477,6 +482,7 @@ def _collect_badge_facts(student_username: str) -> dict[str, Any]:
         # 本次补齐：这几枚徽章以前"条件类型根本没实现"，永远判 False → 永远灰
         "news_views": 0, "discovery_views": 0, "discovery_favorites": 0,
         "quest_success_count": 0, "quest_perfect_runs": 0, "quest_runs_10plus": 0,
+        "explore_asks": 0, "explore_topics": 0, "explore_archives": 0, "explore_images": 0,
     }
     try:
         row = _db_query(
@@ -509,6 +515,24 @@ def _collect_badge_facts(student_username: str) -> dict[str, Any]:
         facts["month_login_days"] = len({d for d in dates if d.startswith(month)})
     except Exception as e:
         logger.warning(f"[badge] 登录统计失败({student_username}): {e}")
+
+    try:
+        rows = _db_query(
+            "SELECT kind, COUNT(*) FROM pc_ai_tasks WHERE owner_username=? AND kind IN ('ask','topic','image') AND status IN ('ok','fallback') GROUP BY kind",
+            (student_username,),
+        ) or []
+        for kind, n in rows:
+            if kind == 'ask':
+                facts['explore_asks'] = int(n or 0)
+            elif kind == 'topic':
+                facts['explore_topics'] = int(n or 0)
+            elif kind == 'image':
+                facts['explore_images'] = int(n or 0)
+        row = _db_query("SELECT COUNT(*) FROM pc_archives WHERE owner_username=?", (student_username,))
+        if row:
+            facts['explore_archives'] = int(row[0][0] or 0)
+    except Exception as e:
+        logger.debug(f"[badge] 探索画布统计跳过({student_username}): {e}")
 
     try:
         from backend.question_db import execute_query as q_execute
@@ -704,6 +728,14 @@ def _check_badge_condition(student_username: str, badge: dict[str, Any], facts: 
         return facts["discovery_views"] >= (cvalue or 50)
     if ctype == "discovery_favorites":
         return facts["discovery_favorites"] >= (cvalue or 30)
+    if ctype == "explore_ask_count":
+        return facts["explore_asks"] >= (cvalue or 1)
+    if ctype == "explore_topic_count":
+        return facts["explore_topics"] >= (cvalue or 10)
+    if ctype == "explore_archive_count":
+        return facts["explore_archives"] >= (cvalue or 3)
+    if ctype == "explore_image_count":
+        return facts["explore_images"] >= (cvalue or 10)
     if ctype == "quest_milestone":
         return facts["quest_success_count"] >= (cvalue or 1)
     if ctype == "quest_honor":
@@ -747,6 +779,10 @@ BADGE_PROGRESS_SOURCE = {
     "all_activity_types": "activity_types",
     "punctual_3": "punctual_exams",
     "monthly_full_attendance": "month_login_days",
+    "explore_ask_count": "explore_asks",
+    "explore_topic_count": "explore_topics",
+    "explore_archive_count": "explore_archives",
+    "explore_image_count": "explore_images",
     "news_views": "news_views",
     "discovery_views": "discovery_views",
     "discovery_favorites": "discovery_favorites",
@@ -1073,3 +1109,36 @@ def update_subject_question_counts(student_username: str) -> list[dict[str, Any]
         if up:
             upgrades.append(up)
     return upgrades
+
+
+def ensure_explore_badges() -> bool:
+    """把探索画布四枚徽章补进存量部署的 BADGE_CONFIG（marker 幂等，只走一次）。
+
+    没存过 BADGE_CONFIG 的部署吃 DEFAULT_BADGE_CONFIG，天然包含；这里只处理
+    管理员自定义过清单的老部署——追加缺失项，不覆盖既有顺序与内容。
+    """
+    from backend.api.config_router import CONFIG_FILE, load_config, save_config
+
+    if not CONFIG_FILE.exists():
+        return False
+    from backend.notification_types import marker_path
+    marker = marker_path(".badges_explore_migrated_v2")
+    if marker.exists():
+        return False
+    try:
+        cfg = load_config()
+        current = cfg.get('BADGE_CONFIG')
+        if isinstance(current, list) and current:
+            have = {str(b.get('id')) for b in current if isinstance(b, dict)}
+            additions = [b for b in DEFAULT_BADGE_CONFIG if str(b.get('id')) in {
+                'explore_first_ask', 'explore_ask_100', 'explore_topic_10', 'explore_archive_3', 'explore_doodle_10',
+            } and str(b.get('id')) not in have]
+            if additions:
+                cfg['BADGE_CONFIG'] = list(current) + additions
+                save_config(cfg)
+                logger.info(f'[badge] 探索画布徽章已补入 BADGE_CONFIG（{len(additions)} 枚）')
+        marker.write_text('explore badges added', encoding='utf-8')
+        return True
+    except Exception as e:
+        logger.warning(f"[badge] 探索徽章迁移跳过: {e}")
+        return False

@@ -276,7 +276,7 @@ async def serve_static_file(path: str, request: Request):
             logger.warning(f"记录资源查看日志失败: {log_err}")
     
     # 白板图片按内容哈希命名，永不变化：给一年强缓存，学生只下一次。
-    if rel_path.startswith("question_media/whiteboard_assets/"):
+    if rel_path.startswith(("question_media/whiteboard_assets/", "question_media/explore_canvas_assets/")):
         return FileResponse(
             requested_path,
             headers={"Cache-Control": "public, max-age=31536000, immutable"},

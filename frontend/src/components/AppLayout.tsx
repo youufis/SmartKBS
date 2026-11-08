@@ -76,6 +76,7 @@ function buildStudentMenu(t: (k: string) => string) {
     { icon: <StarOutlined />, label: g('explore'), key: 'explore', children: [
       { key: '/daily-discovery', icon: <StarOutlined />, label: g('dailyDiscovery') },
       { key: '/news-hub', icon: <GlobalOutlined />, label: g('newsHub') },
+      { key: '/explore', icon: <EditOutlined />, label: g('exploreCanvas') },
     ]},
     { icon: <FileAddOutlined />, label: g('examPractice'), key: 'exam-practice', children: [
       { key: '/exam', icon: <FileAddOutlined />, label: g('examCenter') },
@@ -124,6 +125,7 @@ function buildTeacherMenu(t: (k: string) => string) {
       { key: '/question-bank', icon: <DatabaseOutlined />, label: g('questionBank') },
       { key: '/exam', icon: <FileAddOutlined />, label: g('examPublish') },
       { key: '/wrong-book', icon: <BookOutlined />, label: g('wrongBookManage') },
+      { key: '/explore', icon: <EditOutlined />, label: g('exploreCanvas') },
       { key: '/shared-center', icon: <FolderOutlined />, label: g('resourceCenter'), adminOrTeacherOnly: true },
     ]},
     { type: 'group', icon: <FileAddOutlined />, label: g('coding'), key: 'coding', children: [

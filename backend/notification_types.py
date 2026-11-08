@@ -7,6 +7,7 @@
 因此：目录、默认值、勾选项都从这里来；页面通过 /api/config/meta 的
 notification_types 拿目录，不再手抄。
 """
+from pathlib import Path
 from backend.logger import logger
 
 # (type, 中文名, 当前代码里是否真有调用点)
@@ -21,10 +22,19 @@ CATALOG: tuple[tuple[str, str, bool], ...] = (
     ("rollcall", "点名通知", False),
     ("share", "资源分享", False),
     ("system", "系统通知", False),
+    ("care", "关怀提醒", True),
 )
 
-# 迁移标记文件（与 system_config.json 同目录）。存在即表示这条路已经走过一次。
+# 迁移标记文件（放数据目录 question_media/.migration_markers/，git 已忽略、不再污染仓库根）。存在即表示这条路已经走过一次。
 MIGRATION_MARKER = ".notif_types_migrated"
+
+
+def marker_path(name: str) -> Path:
+    """迁移标记的统一落位（title_system 等模块也 import 此函数）。"""
+    from backend.config import MEDIA_ROOT
+    d = MEDIA_ROOT / ".migration_markers"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / name
 
 
 def catalog() -> list[dict]:
@@ -49,7 +59,7 @@ def migrate_enabled_types() -> bool:
     if not CONFIG_FILE.exists():
         # 还没有配置文件 = 全新部署，DEFAULT_CONFIG 已含 success，无需迁移
         return False
-    marker = CONFIG_FILE.with_name(MIGRATION_MARKER)
+    marker = marker_path(MIGRATION_MARKER)
     if marker.exists():
         return False
 
@@ -68,3 +78,25 @@ def migrate_enabled_types() -> bool:
         # 标记写不下来不影响本次生效，最多下次启动再补一遍（幂等）
         logger.warning(f"[通知] 迁移标记写入失败: {e}")
     return changed
+
+
+def ensure_care_enabled() -> bool:
+    """把 care（关怀提醒）补进存量部署的启用列表——安全类通知不能被类型白名单静默吞掉。
+
+    与 migrate_enabled_types 同款 marker：只在首次走过一次；管理员之后手动取消则尊重意图。
+    """
+    from backend.api.config_router import CONFIG_FILE, load_config, save_config
+
+    if not CONFIG_FILE.exists():
+        return False
+    marker = marker_path(".notif_care_migrated")
+    if marker.exists():
+        return False
+    cfg = load_config()
+    current = cfg.get("enabled_notification_types")
+    if isinstance(current, list) and "care" not in current:
+        cfg["enabled_notification_types"] = list(current) + ["care"]
+        save_config(cfg)
+        logger.info("[notif] 关怀提醒(care)已补入启用类型；如手动关闭过请重新勾选")
+    marker.write_text("done", encoding="utf-8")
+    return True

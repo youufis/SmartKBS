@@ -9,10 +9,11 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, BarChartOutlined,
   ExperimentOutlined, ThunderboltOutlined,
   CheckSquareOutlined, QuestionCircleOutlined, CodeOutlined,
-  TeamOutlined, HighlightOutlined, BookOutlined, EyeOutlined, RiseOutlined,
+  TeamOutlined, HighlightOutlined, BookOutlined, EyeOutlined, RiseOutlined, CompassOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as activityMonitorApi from '../api/activityMonitor';
+import UsageStatsPanel from '../components/explore/UsageStatsPanel'
 import type {
   ActivityItem, StudentStatus, ActivityStatusDetail,
 } from '../api/activityMonitor';
@@ -579,6 +580,11 @@ const ActivityMonitorPage: React.FC = () => {
           key: 'resource-views',
           label: <span><EyeOutlined />{t('activityMonitor.tabResourceViews')}</span>,
           children: <ResourceViewStatsPage />,
+        },
+        {
+          key: 'explore-usage',
+          label: <span><CompassOutlined />{t('activityMonitor.tabExplore')}</span>,
+          children: <UsageStatsPanel />,
         },
       ]} />
     </Card>

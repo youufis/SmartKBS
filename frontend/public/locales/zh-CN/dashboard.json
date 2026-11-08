@@ -358,7 +358,8 @@
         "confirm_mismatch": "确认文案与活动名称不一致，已拒绝重置"
       },
       "failed": "请求失败，请稍后重试"
-    }
+    },
+    "tabExplore": "探索画布"
   },
   "analytics": {
     "title": "AI 学情分析",

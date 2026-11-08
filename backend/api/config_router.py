@@ -143,7 +143,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 消息通知类型（默认启用考试/系统/作业/认可通知，管理员可在系统配置中调整）
     # task 必须默认开：文件作业「发布成绩」靠它通知学生，静默丢弃会让教师以为已推送
     # success 必须默认开：教师给学生「认可」加分走的就是这个类型，缺失时通知会被白名单吞掉
-    "enabled_notification_types": ["exam", "system", "task", "success"],
+    "enabled_notification_types": ["exam", "system", "task", "success", "care"],
     # 图片生成（通义万相，与对话模型共享 API Key）
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": DEFAULT_IMAGE_MODEL,
@@ -177,6 +177,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 页面上的「AI 生题」开关是否可用：关掉后课堂抽问只从题库取题，不再调用大模型（零 AI 计费）。
     # 页面开关是当堂临时选择，这里是全校总闸；两者都开才走 AI。
     "CLASS_DRILL_AI_ENABLED": True,
+    # ── 探索画布（backend/api/personal_canvas_router.py；方案 docs/explore-canvas/）──
+    "EXPLORE_CANVAS_ENABLED": True,          # 总开关：关=整组接口 404，前端入口隐藏，数据原样保留
+    "EXPLORE_CHAT_QUOTA": 50,                # 单人单日 AI 问答上限（次）
+    "EXPLORE_IMAGE_QUOTA": 10,               # 单人单日生图上限（张）
+    "EXPLORE_TTS_QUOTA": 30,                 # 单人单日卡片朗读上限（次）
+    "EXPLORE_ASR_ENABLED": False,            # 后端语音转文字兜底通道（M1 上线）
+    "EXPLORE_ASR_MINUTES": 10,               # 后端语音识别每人每日分钟数（近似计量）
+    "EXPLORE_ASR_MODEL": "qwen3-asr-flash",    # 转写模型（OpenAI 兼容通道直传 base64）
+    "EXPLORE_CONTINUOUS_REMIND_MIN": 40,     # 连续使用提醒（分钟，仅前端计时不强退）
+    "EXPLORE_ASSET_ORPHAN_DAYS": 30,         # 素材孤儿判定（天）：超期未引用 → 回收站
+    "EXPLORE_ASSET_TRASH_DAYS": 14,          # 回收站保留（天），到期物理删除
+    "EXPLORE_TMP_HOURS": 24,                 # 临时素材（如 ASR 录音）存活小时数
+    "EXPLORE_SHARE_EXPIRE_DAYS": 7,         # 学生分享给老师的只读快照保留（天），到期自动回收
+    "EXPLORE_ASSET_MAX_MB": 1024,            # 素材目录水位（MB）；全在用则只告警不强删
+    "EXPLORE_SWEEP_HOUR": 3,                 # 每日自动清理时段（凌晨低峰）
+    "EXPLORE_TTS_CACHE_MB": 200,             # TTS 缓存水位（MB）：超限清最久未用，7 天内课堂产物豁免
+    "EXPLORE_SWEEP_DRY": True,               # 上线安全阀：只出清单不删文件；核对后关掉才动真格
     # ── 课堂闯关（backend/api/class_ladder_router.py）──
     # AI 生题总闸（关掉后只从题库取题，零 AI 计费）。
     "CLASS_LADDER_AI_ENABLED": True,
@@ -543,6 +560,12 @@ def _mask_config(config: dict[str, Any]) -> dict[str, Any]:
 # ── C2/C5: 配置写入校验 ──
 
 _NUM_RANGES: dict[str, tuple[float, float]] = {
+    # 探索画布（配额与素材清理，见 personal_canvas_router / explore_asset_sweeper）
+    "EXPLORE_CHAT_QUOTA": (0, 999), "EXPLORE_IMAGE_QUOTA": (0, 999), "EXPLORE_TTS_QUOTA": (0, 999),
+    "EXPLORE_CONTINUOUS_REMIND_MIN": (5, 180), "EXPLORE_ASSET_ORPHAN_DAYS": (1, 365),
+    "EXPLORE_ASSET_TRASH_DAYS": (1, 90), "EXPLORE_TMP_HOURS": (1, 168), "EXPLORE_CANVAS_TRASH_DAYS": (7, 365), "EXPLORE_SHARE_EXPIRE_DAYS": (1, 90),
+    "EXPLORE_ASSET_MAX_MB": (64, 10240), "EXPLORE_SWEEP_HOUR": (0, 23), "EXPLORE_TTS_CACHE_MB": (50, 4000),
+    "EXPLORE_ASR_MINUTES": (1, 120),
     "wrong_practice_threshold": (0, 500),
     "wrong_practice_per_set": (1, 20),
     "wrong_practice_interval_days": (0, 90),
@@ -614,6 +637,7 @@ _FLOAT_RANGES: dict[str, tuple[float, float]] = {
     "TTS_SPEECH_RATE": (0.5, 2.00),
 }
 _BOOL_KEYS = {
+    "EXPLORE_CANVAS_ENABLED", "EXPLORE_ASR_ENABLED", "EXPLORE_SWEEP_DRY",
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
@@ -628,6 +652,7 @@ _BOOL_KEYS = {
     "HOMEWORK_ENABLE_VL",
 }
 _STR_LIMITS: dict[str, int] = {
+    "EXPLORE_ASR_MODEL": 60,
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
     "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80,
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,

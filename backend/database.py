@@ -2558,6 +2558,120 @@ def init_db():
             c.execute("CREATE INDEX IF NOT EXISTS idx_arl_activity ON activity_reset_logs(activity_type, activity_id)")
 
             # ── 通用系统状态表（一次性数据修复 / 后台任务的完成标记）──
+            # ── 探索画布（师生个人无限画布；设计见 docs/explore-canvas/，接口见 personal_canvas_router.py）──
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_canvases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_username TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                preset_key TEXT NOT NULL DEFAULT 'blank',
+                subject_tag TEXT NOT NULL DEFAULT '',
+                cover_asset_id INTEGER,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pcbc_owner ON pc_canvases(owner_username, archived)")
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_pages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                canvas_id INTEGER NOT NULL REFERENCES pc_canvases(id) ON DELETE CASCADE,
+                page_number INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                snapshot_data TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(canvas_id, page_number)
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pcbp_canvas ON pc_pages(canvas_id, page_number)")
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_pages_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                canvas_id INTEGER NOT NULL,
+                page_number INTEGER NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                saved_at TEXT NOT NULL
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pbch_page ON pc_pages_history(canvas_id, page_number, saved_at)")
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL UNIQUE,
+                source TEXT NOT NULL DEFAULT 'upload_photo',
+                owner_username TEXT NOT NULL DEFAULT '',
+                canvas_id INTEGER,
+                bytes INTEGER NOT NULL DEFAULT 0,
+                mime TEXT NOT NULL DEFAULT '',
+                width INTEGER NOT NULL DEFAULT 0,
+                height INTEGER NOT NULL DEFAULT 0,
+                prompt_digest TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active'
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pbst_owner ON pc_assets(owner_username, status)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pbst_seen ON pc_assets(status, last_seen_at)")
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_ai_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_username TEXT NOT NULL DEFAULT '',
+                canvas_id INTEGER,
+                kind TEXT NOT NULL,
+                model TEXT NOT NULL DEFAULT '',
+                prompt_digest TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'running',
+                asset_id INTEGER,
+                err_brief TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL DEFAULT ''
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pbtk_user ON pc_ai_tasks(owner_username, created_at)")
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_usage_daily (
+                username TEXT NOT NULL,
+                day TEXT NOT NULL,
+                chat_n INTEGER NOT NULL DEFAULT 0,
+                image_n INTEGER NOT NULL DEFAULT 0,
+                tts_n INTEGER NOT NULL DEFAULT 0,
+                asr_sec INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (username, day)
+            )""")
+
+            conn.commit()
+
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_archives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_username TEXT NOT NULL,
+                canvas_id INTEGER NOT NULL,
+                canvas_title TEXT NOT NULL DEFAULT '',
+                page_number INTEGER NOT NULL DEFAULT 1,
+                title TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL DEFAULT '',
+                image_src TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pbai_owner ON pc_archives(owner_username, created_at)")
+
+            # ── M2 分享快照与模板库（接口见 personal_canvas_router；素材随引用扫描续命，设计书 §6.3）──
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_shares (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_username TEXT NOT NULL,
+                canvas_id INTEGER NOT NULL,
+                page_number INTEGER NOT NULL DEFAULT 1,
+                title TEXT NOT NULL DEFAULT '',
+                snapshot_json TEXT NOT NULL DEFAULT '',
+                image_src TEXT NOT NULL DEFAULT '',
+                view_count INTEGER NOT NULL DEFAULT 0,
+                expires_at TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pcsh_owner ON pc_shares(owner_username, created_at)")
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                publisher_username TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                snapshot_json TEXT NOT NULL DEFAULT '',
+                image_src TEXT NOT NULL DEFAULT '',
+                use_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pctp_pub ON pc_templates(publisher_username, created_at)")
+
             c.execute("""CREATE TABLE IF NOT EXISTS system_state (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT '',

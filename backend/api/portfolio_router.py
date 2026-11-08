@@ -362,6 +362,25 @@ async def get_timeline(username: str, request: Request):
 
     events = []
 
+    # 探索画布归档事件（作品入档案；表未建/异常时静默跳过，不影响其余时间轴）
+    try:
+        arch_rows = execute_query(
+            """SELECT created_at, title, canvas_title, image_src
+               FROM pc_archives WHERE owner_username = ? ORDER BY created_at ASC""",
+            (username,),
+        ) or []
+        for ev in arch_rows:
+            events.append({
+                "time": ev[0],
+                "type": "explore",
+                "title": f"把画布作品「{ev[1]}」存入成长档案",
+                "detail": f"来自探索画布 · {ev[2]}",
+                "icon": "explore",
+                "image": ev[3] or "",
+            })
+    except Exception:
+        pass
+
     # 考试事件
     exam_events = q_execute_query(
         """SELECT ea.submitted_at, e.title, ea.score, e.total_score, e.pass_score

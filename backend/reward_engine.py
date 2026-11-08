@@ -69,6 +69,7 @@ REWARD_CONFIG: dict[str, dict[str, Any]] = {
     "resource_view":   {"name": "资源浏览", "participation": 1, "weight": None, "pool": POOL_FUN, "points_cap": 5},
     "daily_discovery": {"name": "每日精选", "participation": 1, "weight": None, "pool": POOL_FUN, "points_cap": 5},
     "news_view":       {"name": "热点新闻", "participation": 1, "weight": None, "pool": POOL_FUN, "points_cap": 3},
+    "explore":         {"name": "探索画布", "participation": 1, "weight": None, "pool": POOL_FUN, "points_cap": 8},
 }
 
 #: 不是「活动」的流水种类：只出现在明细里，不参与规则展示，也不算进「全能选手」

@@ -168,6 +168,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] 荣耀殿堂自动建卡巡检启动失败: {e}", file=sys.stderr)
     try:
+        # 探索画布：素材自动清理每日线程（EXPLORE_SWEEP_DRY 默认只出清单不动文件）
+        from backend.explore_asset_sweeper import start as start_explore_sweeper
+        start_explore_sweeper()
+    except Exception as e:
+        print(f"[main] 探索画布清理线程启动失败: {e}", file=sys.stderr)
+    try:
         from backend.config_sync import try_sync_remote_config
         import asyncio
         asyncio.ensure_future(try_sync_remote_config())
@@ -325,6 +331,7 @@ from backend.api.activity_reset_router import router as activity_reset_router
 from backend.api.companion_router import router as companion_router
 from backend.api.skill_router import router as skill_router
 from backend.api.whiteboard_router import router as whiteboard_router
+from backend.api.personal_canvas_router import router as personal_canvas_router
 from backend.api.portrait_router import router as portrait_router
 from backend.api.tracking_router import router as tracking_router
 from backend.api.upgrade_router import router as upgrade_router
@@ -366,6 +373,7 @@ app.include_router(code_router, prefix="/api", tags=["代码练习"])
 app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
 app.include_router(skill_router, prefix="/api/skills", tags=["技能管理"])
 app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
+app.include_router(personal_canvas_router, prefix="/api/explore", tags=["探索画布"])
 app.include_router(portrait_router, prefix="/api/portrait", tags=["我的画像"])
 app.include_router(tracking_router, prefix="/api", tags=["资源追踪"])
 app.include_router(upgrade_router, prefix="/api/system/upgrade", tags=["系统升级"])

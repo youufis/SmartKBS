@@ -93,6 +93,9 @@ import AuthorPanelPage from './pages/AuthorPanelPage'
 import CompanionSettings from './pages/CompanionSettings'
 import WhiteboardPage from './pages/WhiteboardPage'
 import WhiteboardRoomPage from './pages/WhiteboardRoomPage'
+import ExploreCanvasPage from './pages/ExploreCanvasPage'
+import ExploreWorkspacePage from './pages/ExploreWorkspacePage'
+import ExploreShareViewPage from './pages/ExploreShareViewPage'
 import TaskTodoPage from './pages/TaskTodoPage'
 import PortraitPage from './pages/PortraitPage'
 import DailyDiscoveryPage from './pages/DailyDiscoveryPage'
@@ -206,6 +209,9 @@ function App() {
             <Route path="activity-monitor" element={user?.role === 'admin' || user?.role === 'teacher' ? <ActivityMonitorPage /> : <Navigate to="/chat" />} />
             <Route path="companion-settings" element={<CompanionSettings />} />
             <Route path="whiteboard" element={<WhiteboardPage />} />
+            <Route path="explore" element={<ExploreCanvasPage />} />
+            <Route path="explore/:canvasId" element={<ExploreWorkspacePage />} />
+            <Route path="explore-share/:shareId" element={<ExploreShareViewPage />} />
             <Route path="daily-discovery" element={<DailyDiscoveryPage />} />
             <Route path="news-hub" element={<NewsHubPage />} />
             <Route path="daily-discovery-admin" element={<RequireRole roles={TA}><DailyDiscoveryAdminPage /></RequireRole>} />

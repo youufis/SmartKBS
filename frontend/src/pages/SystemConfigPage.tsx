@@ -118,7 +118,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'ai',
     titleKey: 'zone_ai',
     descKey: 'zone_ai_desc',
-    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts'],
+    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'explore'],
   },
   {
     id: 'storage',
@@ -149,6 +149,7 @@ const SECTION_TITLES: Record<string, string> = {
   grading: 'group_grading',
   imagegen: 'group_imagegen',
   tts: 'group_tts',
+  explore: 'group_explore',
   classdrill: 'group_classdrill',
   classladder: 'group_classladder',
   portrait: 'group_portrait',
@@ -381,6 +382,26 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // AI 播客双主播音色：留空 = 按当前合成模型自动各挑一条（A 主讲默认男声、B 互动默认女声）
   { key: 'PODCAST_VOICE_A', labelKey: 'field_PODCAST_VOICE_A', descKey: 'field_PODCAST_VOICE_A_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
   { key: 'PODCAST_VOICE_B', labelKey: 'field_PODCAST_VOICE_B', descKey: 'field_PODCAST_VOICE_B_desc', type: 'tts_voice', group: 'tts', required: false, autoOption: true },
+
+  // 探索画布（backend/api/personal_canvas_router.py；方案 docs/explore-canvas/）
+  // 总闸关掉 = 接口 404 + 导航隐藏，师生数据原样保留，随时可再开
+  { key: 'EXPLORE_CANVAS_ENABLED', labelKey: 'field_EXPLORE_CANVAS_ENABLED', descKey: 'field_EXPLORE_CANVAS_ENABLED_desc', type: 'boolean', group: 'explore', level: 'basic', required: false },
+  { key: 'EXPLORE_CHAT_QUOTA', labelKey: 'field_EXPLORE_CHAT_QUOTA', descKey: 'field_EXPLORE_CHAT_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },
+  { key: 'EXPLORE_IMAGE_QUOTA', labelKey: 'field_EXPLORE_IMAGE_QUOTA', descKey: 'field_EXPLORE_IMAGE_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },
+  { key: 'EXPLORE_TTS_QUOTA', labelKey: 'field_EXPLORE_TTS_QUOTA', descKey: 'field_EXPLORE_TTS_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },
+  { key: 'EXPLORE_CONTINUOUS_REMIND_MIN', labelKey: 'field_EXPLORE_CONTINUOUS_REMIND_MIN', descKey: 'field_EXPLORE_CONTINUOUS_REMIND_MIN_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitTime' },
+  { key: 'EXPLORE_ASR_ENABLED', labelKey: 'field_EXPLORE_ASR_ENABLED', descKey: 'field_EXPLORE_ASR_ENABLED_desc', type: 'boolean', group: 'explore', required: false },
+  { key: 'EXPLORE_ASR_MINUTES', labelKey: 'field_EXPLORE_ASR_MINUTES', descKey: 'field_EXPLORE_ASR_MINUTES_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitTime' },
+  { key: 'EXPLORE_ASR_MODEL', labelKey: 'field_EXPLORE_ASR_MODEL', descKey: 'field_EXPLORE_ASR_MODEL_desc', type: 'text', group: 'explore', required: false },
+  { key: 'EXPLORE_SWEEP_DRY', labelKey: 'field_EXPLORE_SWEEP_DRY', descKey: 'field_EXPLORE_SWEEP_DRY_desc', longDescKey: 'field_EXPLORE_SWEEP_DRY_tip', type: 'boolean', group: 'explore', required: false },
+  { key: 'EXPLORE_ASSET_ORPHAN_DAYS', labelKey: 'field_EXPLORE_ASSET_ORPHAN_DAYS', descKey: 'field_EXPLORE_ASSET_ORPHAN_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitTime' },
+  { key: 'EXPLORE_ASSET_TRASH_DAYS', labelKey: 'field_EXPLORE_ASSET_TRASH_DAYS', descKey: 'field_EXPLORE_ASSET_TRASH_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitTime' },
+  { key: 'EXPLORE_TMP_HOURS', labelKey: 'field_EXPLORE_TMP_HOURS', descKey: 'field_EXPLORE_TMP_HOURS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitTime' },
+  { key: 'EXPLORE_TTS_CACHE_MB', labelKey: 'field_EXPLORE_TTS_CACHE_MB', descKey: 'field_EXPLORE_TTS_CACHE_MB_desc', type: 'number', group: 'explore', required: false },
+  { key: 'EXPLORE_CANVAS_TRASH_DAYS', labelKey: 'field_EXPLORE_CANVAS_TRASH_DAYS', descKey: 'field_EXPLORE_CANVAS_TRASH_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitTime' },
+  { key: 'EXPLORE_SHARE_EXPIRE_DAYS', labelKey: 'field_EXPLORE_SHARE_EXPIRE_DAYS', descKey: 'field_EXPLORE_SHARE_EXPIRE_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitTime' },
+  { key: 'EXPLORE_ASSET_MAX_MB', labelKey: 'field_EXPLORE_ASSET_MAX_MB', descKey: 'field_EXPLORE_ASSET_MAX_MB_desc', type: 'number', group: 'explore', required: false },
+  { key: 'EXPLORE_SWEEP_HOUR', labelKey: 'field_EXPLORE_SWEEP_HOUR', descKey: 'field_EXPLORE_SWEEP_HOUR_desc', type: 'number', group: 'explore', required: false },
   { key: 'PODCAST_DURATION_OPTIONS', labelKey: 'field_PODCAST_DURATION_OPTIONS', descKey: 'field_PODCAST_DURATION_OPTIONS_desc', type: 'duration', group: 'tts', required: false, placeholderKey: 'placeholder_PODCAST_DURATION_OPTIONS' },
   { key: 'PODCAST_MAX_SECONDS', labelKey: 'field_PODCAST_MAX_SECONDS', descKey: 'field_PODCAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
   // AI 讲演：与播客共用语音总闸和音色，档位与上限独立可调（改完即生效，无需重启）
