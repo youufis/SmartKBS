@@ -4,18 +4,18 @@
 >
 > **An AI-powered smart teaching platform for primary, junior secondary and senior secondary schools** — subjects, grades and classes are all configuration-driven, **with no subject hard-coded anywhere**.
 >
-> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 49 feature areas and 50+ capabilities:
+> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 50 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
-> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
+> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, online incremental upgrade, multi-theme appearance
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/version-9.0.0-blue)
+![Version](https://img.shields.io/badge/version-9.1.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -35,39 +35,22 @@
 
 ---
 
-> 📌 **Highlights of V9.0.0**
+> 📌 **Highlights of V9.1.0**
 >
-> **Data safety & backups**
-> - 🛡️ Install-over upgrades no longer lose data: databases, the question bank, images and teacher pages / student portraits / homework attachments all move to the user directory, with a pre-upgrade copy and leftover backends stopped first
-> - 💾 "Backup & restore" is now one list, showing where data lives and a health score; all three deployments can back up, and any backup rolls back in one click
-> - 🔁 Every config save keeps a rolling history, so upgrades can't reset it to defaults; pre-upgrade auto backup is now a switch (off by default)
+> **New: Explore Canvas**
+> - 🧭 A personal infinite canvas for every teacher and student: ask, learn, explore and doodle freely; one brand, role-based preset canvases (students: My Question Pile / Doodle Desk / Exploration Notes; teachers: Lesson Ideas / Asset Workshop / Self-Training)
+> - 💬 Floating AI companion: chat (with textbook citations), image generation (SVG-first), read-aloud, voice input and camera capture; sidebar / draggable pop-out / mobile drawer
+> - 🖍️ Circle-to-ask: pen-circle content and its text drops into the input; questions carry only the circled area; mind maps and star maps land on the canvas; answers become ask-cards
+> - 🤝 Student-granted read-only shares: teachers preview via thumbnails, shares auto-expire and can be revoked anytime; template library — teachers publish starter pages anyone can copy
+> - 🎖️ Soft points + strong honors (never graded); configurable daily quotas; sensitive-intent care notice with zero raw text
 >
-> **Whiteboard AI**
-> - 🧩 Vision path fixed: question images, full-page screenshots and handwriting are all readable; answers can be copied, inserted onto the board or regenerated
-> - 🎯 Generated content is brought into view: mind maps, board drafts, bilingual boards and quizzes are selected and zoomed to after insertion
->
-> **AI lecture & coding practice**
-> - 🎬 One click turns a knowledge point into paged slides with sentence-by-sentence speech, two presenter modes, a second screen, editable outline and per-page re-record
-> - 🧑‍🏫 Coding practice: one form for AI generation / create / edit, rebuilt judge (async, per-question time limit, concurrent cases), plus submission stats and export
->
-> **Classroom & analytics**
-> - 📊 New dashboard with five cards in several forms; the wrong-answer book is card-based with AI-completed explanations; auto reinforcement gains cooldowns, caps and teacher assignment
-> - 🔎 Eight activity lists share one search and filter bar; practice tabs, wrong-answer consolidation and one-click quiz restart
->
-> **Resources, curriculum & system**
-> - 🗂️ Three-column sharing with merged duplicates; 11 content types can be re-tagged and auto-sorted; one-click course tree, full question-bank stats
-> - ⚙️ System settings rebuilt into 4 groups / 24 sections with corrected control types and a new "AI output & parsing" section
-> - 🧑‍💼 User management collapsed into one ledger: stats strip, filters and paging; a row opens editing, password reset and role change; deletion needs confirmation
-> - 🔒 Static path traversal closed, production no longer exposes the API listing; AI concurrency and queue time are capped separately
->
-> **Unified page chrome (refactor)**
-> - 🎛️ 30+ pages now share one header: icon + title + subtitle + actions on the right; page-level actions settle into "1 primary + 2 secondary + More"
-> - 🧹 Gradient banners and card-in-card nesting removed, stat cards become one line of text; toolbars stay visible on scroll in long and split-pane pages
+> **Whiteboard**
+> - 🧑‍🏫 AI assistant upgrade: textbook source tags, selection / pen-circle as priority context, chat can pop out as a draggable window (toolbar steps aside)
+> - 🚪 Self-study mode retired: classroom collaboration stays on the whiteboard, personal creation moves to Explore Canvas
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrading**: desktop — install the new package over the old one (your data stays); source package — replace it once by hand; Git deployment — the in-app incremental upgrade flow is unchanged. This is a formal 8.9.0 → 9.0.0 release; database changes are applied automatically at startup.
-
+> 🔄 **Upgrade notes**: desktop builds can be **installed over the top** (data stays); new Explore Canvas tables are created automatically at startup; Git deployments use the usual in-app incremental upgrade. Formal bump 9.0.0 → 9.1.0.
 ---
 
 <a id="intro"></a>
@@ -142,7 +125,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
 | 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI lesson cast, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 12 |
-| 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 7 |
+| 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 11 |
 | ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, upgrade, about, other services | 8 |
@@ -157,8 +140,8 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 
 | Role | Count | Pages |
 | --- | --- | --- |
-| Student | 27 | dashboard, AI companion, wrong questions, daily picks, hot news, notifications, announcements, classroom questions, quick quiz, to-dos, homework, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction, classroom polls, group discussions and rooms, file centre, growth portfolio, showcase, my resources, resource centre, about |
-| Teacher / admin | 22 | dashboard, AI assistant, notifications, announcements, question management, AI class summary, learning analytics, assignment grading confirmation, classroom points, weekly AI profile, group discussions and monitor, quest records, summary export, file centre, growth portfolio, showcase, my resources, resource centre, resource management, about |
+| Student | 28 | dashboard, AI companion, wrong questions, daily picks, hot news, notifications, announcements, classroom questions, quick quiz, to-dos, homework, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction, classroom polls, group discussions and rooms, file centre, growth portfolio, showcase, my resources, resource centre, explore canvas, about |
+| Teacher / admin | 23 | dashboard, AI assistant, notifications, announcements, question management, AI class summary, learning analytics, assignment grading confirmation, classroom points, weekly AI profile, group discussions and monitor, quest records, summary export, file centre, growth portfolio, showcase, my resources, resource centre, resource management, explore canvas, about |
 
 #### How it behaves on a phone
 
@@ -495,6 +478,24 @@ An intelligent upgrade of AI dialogue, providing personalized learning companion
 - **🎨 Visual Differentiation**: Purple companion-style chat bubbles and avatar
 
 > **Available to students (switch at the top of the Smart Answer page)**
+
+---
+
+### Explore Canvas (AI-Powered Infinite Canvas)
+
+A personal infinite canvas shared by teachers and students: ask, learn, explore and doodle freely. One brand with role-based presets — students open "My Question Pile / Doodle Desk / Exploration Notes", teachers open "Lesson Ideas / Asset Workshop / Self-Training".
+
+- **🧭 Canvas wall, multi-page boards**: autosave, timeline rollback, one-click clear (archived first), tidy layout, search jumps to the hit page
+- **💬 Floating AI companion**: chat with textbook citations, image generation (SVG-first), read-aloud, voice input, camera capture; sidebar / draggable pop-out / mobile drawer
+- **🖍️ Circle-to-ask**: pen-circle anything and its text fills the input; only the circled area is sent as context
+- **🃏 Ask-cards**: answers settle onto the canvas with follow-up / read-aloud / copy / locate; exports keep the text
+- **🤝 Student-granted shares**: read-only snapshots for the student's own teachers, thumbnail previews, auto-expiry, revocable anytime
+- **📐 Template library**: teachers publish starter pages; anyone copies one into a new canvas with one click
+- **🎖️ Soft points + strong honors**: never graded, never ranked; showcase display goes through review
+- **🔒 Guardrails**: configurable daily quotas; sensitive intent triggers care wording and a notice to the homeroom / counseling teacher (zero raw text)
+- **📊 Usage stats** live in Activity Monitor: grade → class filters, behavior counts only, no content visible
+
+> **All users** (canvases are private by default; sharing requires the student's explicit grant)
 
 ---
 
@@ -917,9 +918,8 @@ Supports exporting various data to Excel/CSV:
 
 ### Points Reward System (Auto Reward Engine)
 
-The student "Point rules" dialog and the teacher "Points management" banner are both rendered from `GET /api/rewards/rules`.
-The single source of truth is `REWARD_CONFIG` in `backend/reward_engine.py` — this table
-is only a documentation mirror of it.
+The student "Point rules" dialog and the teacher "Points management" banner are rendered from the same table below,
+delivered live by the backend and tunable in System settings — pages and rules can never drift apart.
 
 - **Two kinds of points**: participation (awarded for taking part, regardless of correctness)
   + grade bonus (only activities with a standard answer)
@@ -943,16 +943,17 @@ is only a documentation mirror of it.
 | Mistake fix | 1 | — | 5/day |
 | Quick-answer competition | 2 | rank bonus: 1st +6 / 2nd +5 / 3rd +4 / 4th-5th +3 / 6th+ correct +1 | 3 scored rounds/day |
 | AI chat (incl. companion) | 2 | — | 10/day |
+| Explore canvas (first ask +1 · follow-up chain +2 · archive +3) | 1 | — | 8/day cap inside the fun pool |
 | Resource / Daily picks / News browsing | 1 | — | 5 / 5 / 3 per day |
 
 - **Three daily quota pools**: academic 80 / class participation 40 / light activities 30
   (all tunable in System settings, 0 = unlimited). Farming buzzers or chat can only fill
   its own pool and no longer swallows the grade bonus earned from a real exam
-- **Deductions vs. spending are separate ledgers**: moderation failures write `penalty`,
-  exchanging points (e.g. an extra AI portrait) writes `spend`; the ledger colour-codes
+- **Deductions vs. spending are separate ledgers**: moderation failures are logged as "penalty",
+  exchanging points (e.g. an extra AI portrait) as "spend"; the ledger colour-codes
   negatives, so "I spent points" no longer reads as "I was punished"
-- **Teacher recognition channel**: `POST /api/rewards/award-quality` grants an Excellent /
-  Good / Pass bonus for one specific question, discussion message or answer
+- **Teacher recognition channel**: teachers grant an Excellent / Good / Pass bonus
+  for one specific question, discussion message or answer
 - **🏅 12-level titles**: Novice → Foundation Apprentice → Diligent Newcomer → Knowledge Hunter
   → Problem-Solving Pro → Logic Rising Star → Academic Pioneer → Class Scholar
   → Innovation Leader → Omnipotent Prodigy → Legendary Master → Supreme Sage
@@ -960,8 +961,9 @@ is only a documentation mirror of it.
 - **📚 Subject titles**: level comes from questions answered per subject, then capped by accuracy
   (<60% tops out at "Apprentice", 60–75% at "Proficient"), levels only go up, stats refresh nightly
 - **🎖️ Achievement badges**: including All-Rounder (8 different activity types), Punctual (3 exams
-  submitted before the deadline), Monthly Persistence (20 study days in a month) and the
-  challenge / reading series — locked badges now show how much is still missing
+  submitted before the deadline), Monthly Persistence (20 study days in a month), the
+  challenge / reading series, and five Explore Canvas badges (curiosity, question streak,
+  star-map explorer, collector, doodle master) — locked badges show how much is still missing
 - **⭐ Weekly stars**: students see their **own class** board with a denominator
   (rank N of M); grade-wide and school-wide boards stay on the teacher side
 - **🏫 Class ranking**: total points (the teacher-side "combined score" also includes manual
@@ -1176,9 +1178,32 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **9.0.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v8.9.0 is merged into one section below.
+Current version **9.1.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v9.0.0 is merged into one section below.
 
-### v9.0.0
+### v9.1.0
+
+**New: Explore Canvas**
+
+- 🧭 A personal infinite canvas for teachers and students: free asking, learning, exploring and doodling; role-based preset canvases under one brand
+- 💬 Floating AI companion: chat, image generation (SVG-first), read-aloud, voice and camera; sidebar / pop-out / mobile drawer
+- 🖍️ Circle-to-ask: pen-circled content is auto-extracted into the input; mind maps and star maps land on the canvas; answers become ask-cards
+- 🤝 Student-granted read-only shares with thumbnail previews, auto-expiry and revocation; template library with one-click copy
+- 🎖️ Soft points and honors (never graded); sensitive-intent care notice; configurable daily quotas, admins exempt but metered
+- 🗂️ Asset ledger with automatic cleanup: reference renewal, expiry recycling, dry-run protection
+- 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only
+
+**Whiteboard**
+
+- 🧑‍🏫 AI assistant: textbook source tags; selection / pen-circle as priority context; chat pops out as a draggable window
+- 🚪 Self-study mode retired; personal creation now lives in Explore Canvas
+- 🩹 Fixed the floating window covering dropdowns and dialogs
+
+**Other**
+
+- 🧭 Randomized empty-state topics: different per student per day, with a shuffle button
+- 📝 Activity Monitor explore tab: shows only students with usage by default, with search and pagination
+
+### v7.x – v9.0.0
 
 **UI & interaction (refactor)**
 
@@ -1233,7 +1258,7 @@ Current version **9.0.0**. Only changes a reader can notice are listed; per-comm
 - 🔒 Static path traversal closed, production no longer exposes the API listing; AI concurrency and queue time capped separately
 - 🩹 Fixed true/false judgement errors, unresponsive coding-question saves and the whiteboard diagram spinner
 
-### v7.x – v8.9.0
+**v8.9.0 and earlier**
 
 - ⚖️ **Points and honour system reworked**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice 9/6/3, classroom answers 6/4/2), buzzers pay by placing, the ladder pays by score rate; anti-farming quotas split into three pools (academic 80 / participation 40 / light 30); every classroom activity awards points; one source of truth served by the backend
 - 🏅 **Titles and badges recalibrated**: twelve thresholds re-cut, six permanently locked badges lit up, subject titles weigh accuracy, locked badges show what is missing; deductions and spending separated, weekly stars scoped to the class, a new teacher recognition channel
@@ -1484,6 +1509,7 @@ SmartKBS/
 | Dashboard | ✅ | ✅ | ✅ |
 | AI Chat (Smart Answer Mode) | ✅ | ✅ | ✅ |
 | AI Companion Mode | ✅ | ❌ | ❌ |
+| Explore Canvas | ✅ | ✅ | ✅ |
 | AI Teaching Assistant Mode | ❌ | ✅ | ✅ |
 | Course Syllabus (Learning) | ✅ View/Practice | ✅ Manage | ✅ Manage |
 | Course Progress Tracking | ❌ | ✅ Own Class | ✅ All |
