@@ -189,6 +189,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "EXPLORE_ASSET_ORPHAN_DAYS": 30,         # 素材孤儿判定（天）：超期未引用 → 回收站
     "EXPLORE_ASSET_TRASH_DAYS": 14,          # 回收站保留（天），到期物理删除
     "EXPLORE_TMP_HOURS": 24,                 # 临时素材（如 ASR 录音）存活小时数
+    "EXPLORE_CANVAS_TRASH_DAYS": 30,       # 回收站画布保留（天），到期连页面/历史一并销毁
     "EXPLORE_SHARE_EXPIRE_DAYS": 7,         # 学生分享给老师的只读快照保留（天），到期自动回收
     "EXPLORE_ASSET_MAX_MB": 1024,            # 素材目录水位（MB）；全在用则只告警不强删
     "EXPLORE_SWEEP_HOUR": 3,                 # 每日自动清理时段（凌晨低峰）
