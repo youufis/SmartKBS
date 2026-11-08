@@ -4,15 +4,16 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Checkbox, Input, Select, Table, Tag, Tooltip, message } from 'antd'
-import { ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SafetyCertificateOutlined, WarningOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { usageStats, type UsageStudentRow, type UsageStatsData } from '../../api/explore'
+import { careEvents, usageStats, type CareEventsData, type CareStudentRow, type UsageStudentRow, type UsageStatsData } from '../../api/explore'
 
 interface Props { readonly?: boolean }
 
 const UsageStatsPanel: React.FC<Props> = () => {
   const { t } = useTranslation('explore')
   const [data, setData] = useState<UsageStatsData | null>(null)
+  const [care, setCare] = useState<CareEventsData | null>(null)
   const [days, setDays] = useState(14)
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
@@ -26,6 +27,9 @@ const UsageStatsPanel: React.FC<Props> = () => {
     try { setData(await usageStats(days)) }
     catch (e: any) { message.error(e?.response?.data?.detail || t('statsLoadFail')) }
     finally { setLoading(false) }
+    // 关怀台账仅管理员可读：教师拿 403 属于正常，静默不显示即可
+    try { setCare(await careEvents(days)) }
+    catch { setCare(null) }
   }, [days, t])
 
   useEffect(() => { void load() }, [load])
@@ -56,6 +60,29 @@ const UsageStatsPanel: React.FC<Props> = () => {
   }, [data, gradeFilter])
 
   const maxAsks = Math.max(1, ...(data?.trend || []).map((x) => x.asks))
+
+  // 关怀台账跟随上面同一套年级/班级/搜索筛选，管理员点通知进来就能直接定位到人
+  const careRows = useMemo(() => {
+    let r = care?.students || []
+    if (gradeFilter) r = r.filter((x) => x.grade === gradeFilter)
+    if (classFilter) r = r.filter((x) => String(x.class) === classFilter)
+    const kw = query.trim()
+    if (kw) r = r.filter((x) => (x.name + x.username + x.class + x.grade).includes(kw))
+    return r
+  }, [care, gradeFilter, classFilter, query])
+
+  const careCols = [
+    { title: t('careColStudent'), dataIndex: 'name', key: 'cn', width: 150,
+      render: (_: string, r: CareStudentRow) => <span>{r.name}<span style={{ color: '#aab', fontSize: 11, marginInlineStart: 4 }}>{r.username}</span></span> },
+    { title: t('careColClass'), key: 'cc', width: 110,
+      render: (_: unknown, r: CareStudentRow) => `${r.grade} ${r.class ? r.class + ' 班' : ''}`.trim() || '—' },
+    { title: t('careColCount'), key: 'cnt', width: 130,
+      render: (_: unknown, r: CareStudentRow) => <>
+        <Tag color="orange">{r.count}</Tag>
+        {r.flag_count > 0 && <Tooltip title={t('careFlagTip')}><Tag color="gold">{t('careFlagTag', { n: r.flag_count })}</Tag></Tooltip>}
+      </> },
+    { title: t('careColLast'), dataIndex: 'last_at', key: 'ca', width: 150, render: (v: string) => v || '—' },
+  ]
 
   const cols = [
     { title: t('stColStudent'), dataIndex: 'name', key: 'name', fixed: 'left' as const, width: 130,
@@ -96,6 +123,24 @@ const UsageStatsPanel: React.FC<Props> = () => {
         <div style={{ color: 'var(--text-secondary, #888)', fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span>{t('statsSummary', { students: s.students, active: s.active_recent, asks: s.asks_total, archives: s.archives_total })}</span>
           <Tag style={{ marginInlineStart: 0 }} color={s.scope === 'all' ? 'purple' : 'blue'}>{s.scope === 'all' ? t('statsScopeAll') : t('statsScopeTeacher')}</Tag>
+        </div>
+      )}
+
+      {careRows.length > 0 && (
+        <div style={{ marginBottom: 12, background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, marginBottom: 4, color: '#874d00' }}>
+            <WarningOutlined />
+            {t('careTitle')}
+            <Tag color="orange" style={{ marginInlineStart: 4 }}>{care?.total ?? 0}</Tag>
+          </div>
+          <div style={{ fontSize: 12, color: '#8c6d1f', marginBottom: 8 }}>{t('careNote')}</div>
+          <Table
+            rowKey="username"
+            size="small"
+            pagination={careRows.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+            dataSource={careRows}
+            columns={careCols as never}
+          />
         </div>
       )}
 

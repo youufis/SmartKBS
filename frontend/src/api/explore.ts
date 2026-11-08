@@ -302,6 +302,19 @@ export async function usageStats(days = 14): Promise<UsageStatsData> {
   return data
 }
 
+// ═══ 关怀提醒台账（管理员；只给"谁/几次/何时"，后端从不返回提问原文）═══
+export interface CareStudentRow {
+  username: string; name: string; grade: string; class: string
+  count: number; flag_count: number; first_at: string; last_at: string
+}
+export interface CareEventsData {
+  since: string; days: number; total: number; students: CareStudentRow[]
+}
+export async function careEvents(days = 14): Promise<CareEventsData> {
+  const { data } = await apiClient.get('/api/explore/care/events', { params: { days } })
+  return data
+}
+
 
 // ═══ M2 分享与模板（后端 personal_canvas_router /shares /templates）═══
 export interface ShareMeta {

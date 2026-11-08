@@ -22,7 +22,7 @@ CATALOG: tuple[tuple[str, str, bool], ...] = (
     ("rollcall", "点名通知", False),
     ("share", "资源分享", False),
     ("system", "系统通知", False),
-    ("care", "关怀提醒", True),
+    ("care", "关怀提醒（安全类·不可关闭）", True),
 )
 
 # 迁移标记文件（放数据目录 question_media/.migration_markers/，git 已忽略、不再污染仓库根）。存在即表示这条路已经走过一次。

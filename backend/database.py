@@ -2621,6 +2621,9 @@ def init_db():
                 finished_at TEXT NOT NULL DEFAULT ''
             )""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_pbtk_user ON pc_ai_tasks(owner_username, created_at)")
+            # 关怀台账按 kind + 时间扫（personal_canvas_router.care_events）：表随每次 AI 调用增长，
+            # 没这个索引会全表扫
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pbtk_kind ON pc_ai_tasks(kind, created_at)")
             c.execute("""CREATE TABLE IF NOT EXISTS pc_usage_daily (
                 username TEXT NOT NULL,
                 day TEXT NOT NULL,

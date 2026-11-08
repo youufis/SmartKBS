@@ -25,6 +25,14 @@ import {
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
 
+// 生图/导图/星图没法像问答那样自然回一段话，后端把关怀话术放在 422 的 detail 里、
+// 以 [CARE] 为前缀。这类文本必须原样显示——危机场景加个 ⚠️ 会让学生以为自己操作错了。
+const CARE_PREFIX = '[CARE] '
+const asAssistantText = (raw: unknown, fallback: string): string => {
+  const s = String(raw ?? '')
+  return s.startsWith(CARE_PREFIX) ? s.slice(CARE_PREFIX.length) : '⚠️ ' + (s || fallback)
+}
+
 interface Msg { role: 'user' | 'assistant'; content: string; refs?: KbRefItem[]; q?: string; cardId?: string }
 
 interface Props {
@@ -495,10 +503,10 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
         await ed.putExternalContent({ type: 'url', url: r.image_url } as never)
         setMessages((prev) => [...prev, { role: 'assistant', content: '图片已落画布：' + (r.title || '') }])
       } else {
-        setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ ' + (r.error || '生成失败') }])
+        setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(r.error, '生成失败') }])
       }
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ ' + (e?.response?.data?.detail || '生成失败') }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(e?.response?.data?.detail, '生成失败') }])
     } finally {
       setGenBusy(false)
       refreshQuota()
@@ -525,10 +533,10 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
         setMessages((prev) => [...prev, { role: 'assistant', content: (r.intro || ('《' + (r.title || topic) + '》已铺到画布，圈住任何一块都能继续问')) }])
         setFollowUps(r.followups || [])
       } else {
-        setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ ' + (r.error || '生成失败') }])
+        setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(r.error, '生成失败') }])
       }
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ ' + (e?.response?.data?.detail || '生成失败') }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(e?.response?.data?.detail, '生成失败') }])
     } finally {
       setStructBusy(null)
       refreshQuota()

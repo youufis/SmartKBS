@@ -190,8 +190,15 @@ def _get_enabled_notification_types() -> set[str]:
     return set(as_str_list(types, ["exam", "system"]))
 
 
+# 安全类通知不允许被关掉：管理员在配置页取消勾选"关怀提醒"，等于把学生危机通道
+# 静默掐断——这类通知失效不会有任何报错，只有某个孩子被漏接。其余类型照旧尊重配置。
+ALWAYS_ON_TYPES = {"care"}
+
+
 def _is_notification_type_enabled(type_: str) -> bool:
-    """判断某通知类型是否被系统启用"""
+    """判断某通知类型是否被系统启用（care 为安全类，强制开启）"""
+    if type_ in ALWAYS_ON_TYPES:
+        return True
     enabled = _get_enabled_notification_types()
     return type_ in enabled
 

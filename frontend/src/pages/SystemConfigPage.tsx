@@ -396,12 +396,14 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'EXPLORE_SWEEP_DRY', labelKey: 'field_EXPLORE_SWEEP_DRY', descKey: 'field_EXPLORE_SWEEP_DRY_desc', longDescKey: 'field_EXPLORE_SWEEP_DRY_tip', type: 'boolean', group: 'explore', required: false },
   { key: 'EXPLORE_ASSET_ORPHAN_DAYS', labelKey: 'field_EXPLORE_ASSET_ORPHAN_DAYS', descKey: 'field_EXPLORE_ASSET_ORPHAN_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
   { key: 'EXPLORE_ASSET_TRASH_DAYS', labelKey: 'field_EXPLORE_ASSET_TRASH_DAYS', descKey: 'field_EXPLORE_ASSET_TRASH_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
-  { key: 'EXPLORE_TMP_HOURS', labelKey: 'field_EXPLORE_TMP_HOURS', descKey: 'field_EXPLORE_TMP_HOURS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitHour' },
+  { key: 'EXPLORE_TMP_HOURS', labelKey: 'field_EXPLORE_TMP_HOURS', descKey: 'field_EXPLORE_TMP_HOURS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitHour' },
   { key: 'EXPLORE_TTS_CACHE_MB', labelKey: 'field_EXPLORE_TTS_CACHE_MB', descKey: 'field_EXPLORE_TTS_CACHE_MB_desc', type: 'number', group: 'explore', required: false },
   { key: 'EXPLORE_CANVAS_TRASH_DAYS', labelKey: 'field_EXPLORE_CANVAS_TRASH_DAYS', descKey: 'field_EXPLORE_CANVAS_TRASH_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
   { key: 'EXPLORE_SHARE_EXPIRE_DAYS', labelKey: 'field_EXPLORE_SHARE_EXPIRE_DAYS', descKey: 'field_EXPLORE_SHARE_EXPIRE_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
   { key: 'EXPLORE_ASSET_MAX_MB', labelKey: 'field_EXPLORE_ASSET_MAX_MB', descKey: 'field_EXPLORE_ASSET_MAX_MB_desc', type: 'number', group: 'explore', required: false },
   { key: 'EXPLORE_SWEEP_HOUR', labelKey: 'field_EXPLORE_SWEEP_HOUR', descKey: 'field_EXPLORE_SWEEP_HOUR_desc', type: 'number', group: 'explore', required: false },
+  // 台账口径开关：默认只存提问哈希；打开会把提问前 200 字写进 pc_ai_tasks（排查用，慎开）
+  { key: 'EXPLORE_LOG_RAW_PROMPT', labelKey: 'field_EXPLORE_LOG_RAW_PROMPT', descKey: 'field_EXPLORE_LOG_RAW_PROMPT_desc', longDescKey: 'field_EXPLORE_LOG_RAW_PROMPT_tip', type: 'boolean', group: 'explore', required: false, danger: true },
   { key: 'PODCAST_DURATION_OPTIONS', labelKey: 'field_PODCAST_DURATION_OPTIONS', descKey: 'field_PODCAST_DURATION_OPTIONS_desc', type: 'duration', group: 'tts', required: false, placeholderKey: 'placeholder_PODCAST_DURATION_OPTIONS' },
   { key: 'PODCAST_MAX_SECONDS', labelKey: 'field_PODCAST_MAX_SECONDS', descKey: 'field_PODCAST_MAX_SECONDS_desc', type: 'number', group: 'tts', required: false, unitKey: 'unitSecond' },
   // AI 讲演：与播客共用语音总闸和音色，档位与上限独立可调（改完即生效，无需重启）
@@ -488,6 +490,7 @@ const NOTIF_LABEL_KEYS: Record<string, string> = {
   rollcall: 'notifRollcall',
   share: 'notifShare',
   system: 'notifSystem',
+  care: 'notifCare',
 }
 
 const NOTIF_TYPE_FALLBACK: { value: string; in_use?: boolean }[] = [
@@ -499,6 +502,7 @@ const NOTIF_TYPE_FALLBACK: { value: string; in_use?: boolean }[] = [
   { value: 'rollcall' },
   { value: 'share' },
   { value: 'system' },
+  { value: 'care', in_use: true },
 ]
 
 // ── 题型列表编辑器 ──
@@ -2714,7 +2718,8 @@ const SystemConfigPage: React.FC = () => {
                       // Tooltip 放在 Checkbox 内部：Checkbox.Group 只读直接子级的 value，
                       // 外面再包一层会让所有勾选项的 value 变成 undefined。
                       <Checkbox key={nt.value} value={nt.value}>
-                        <Tooltip title={nt.in_use === false ? t('notifNoCaller') : undefined}>
+                        <Tooltip title={nt.value === 'care' ? t('notifCareAlwaysOn')
+                          : (nt.in_use === false ? t('notifNoCaller') : undefined)}>
                           <span>{NOTIF_LABEL_KEYS[nt.value] ? t(NOTIF_LABEL_KEYS[nt.value]) : nt.value}</span>
                         </Tooltip>
                       </Checkbox>

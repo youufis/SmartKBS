@@ -97,6 +97,13 @@ const ActivityMonitorPage: React.FC = () => {
   const { t } = useTranslation('dashboard');
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher';
 
+  // 关怀提醒的通知把管理员带到 ?tab=explore-usage：直接落到探索画布那一栏，
+  // 否则点进来还要自己找标签页，紧急场景下多花的时间都是成本。
+  const tabKey = React.useMemo(() => {
+    const q = new URLSearchParams(window.location.search).get('tab') || '';
+    return ['activity', 'resource-views', 'explore-usage'].includes(q) ? q : 'activity';
+  }, []);
+
   // ── 活动列表状态 ──
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -340,7 +347,7 @@ const ActivityMonitorPage: React.FC = () => {
 
   return (
     <Card style={{ borderRadius: 8 }}>
-      <Tabs defaultActiveKey="activity" items={[
+      <Tabs defaultActiveKey={tabKey} items={[
         {
           key: 'activity',
           label: <span><BarChartOutlined />{t('activityMonitor.tabActivity')}</span>,

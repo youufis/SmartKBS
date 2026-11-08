@@ -187,6 +187,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "EXPLORE_ASR_MODEL": "qwen3-asr-flash",    # 转写模型（OpenAI 兼容通道直传 base64）
     "EXPLORE_CONTINUOUS_REMIND_MIN": 40,     # 连续使用提醒（分钟，仅前端计时不强退）
     "EXPLORE_ASSET_ORPHAN_DAYS": 30,         # 素材孤儿判定（天）：超期未引用 → 回收站
+    # 台账口径：pc_ai_tasks.prompt_digest 默认只落不可逆哈希（"只计行为、不看内容"）。
+    # 需要排查模型问题时临时打开，会存提问前 200 字——排查完记得关回去。
+    "EXPLORE_LOG_RAW_PROMPT": False,
     "EXPLORE_ASSET_TRASH_DAYS": 14,          # 回收站保留（天），到期物理删除
     "EXPLORE_TMP_HOURS": 24,                 # 临时素材（如 ASR 录音）存活小时数
     "EXPLORE_CANVAS_TRASH_DAYS": 30,       # 回收站画布保留（天），到期连页面/历史一并销毁
@@ -639,6 +642,7 @@ _FLOAT_RANGES: dict[str, tuple[float, float]] = {
 }
 _BOOL_KEYS = {
     "EXPLORE_CANVAS_ENABLED", "EXPLORE_ASR_ENABLED", "EXPLORE_SWEEP_DRY",
+    "EXPLORE_LOG_RAW_PROMPT",
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
@@ -799,6 +803,10 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                     raise HTTPException(
                         status_code=400,
                         detail="wrong_book_sources 必须包含 " + "、".join(missing) + "（考试是错题本的基本盘，不可关闭）")
+            # 关怀提醒是安全通道：服务端强制开启（notification_router.ALWAYS_ON_TYPES），
+            # 保存时把 care 补回去，避免出现"列表里没有它、页面显示未勾选，但其实一直在发"的口径错乱
+            if key == "enabled_notification_types" and "care" not in value:
+                value = list(value) + ["care"]
             # 作业白名单 HOMEWORK_ALLOWED_EXTS 同样按扩展名校验，防管理员手滑写成 "docx"
             if key.endswith(("EXTENSIONS", "_EXTS")) and any(_bad_ext(x) for x in value):
                 raise HTTPException(status_code=400, detail=f"{key} 每一项需形如 .pdf（点号 + 1~10 位字母数字）")
