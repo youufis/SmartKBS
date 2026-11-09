@@ -9,12 +9,11 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, BarChartOutlined,
   ExperimentOutlined, ThunderboltOutlined,
   CheckSquareOutlined, QuestionCircleOutlined, CodeOutlined,
-  TeamOutlined, HighlightOutlined, BookOutlined, EyeOutlined, RiseOutlined, CompassOutlined, CloudServerOutlined,
+  TeamOutlined, HighlightOutlined, BookOutlined, EyeOutlined, RiseOutlined, CompassOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as activityMonitorApi from '../api/activityMonitor';
 import UsageStatsPanel from '../components/explore/UsageStatsPanel'
-import StoragePanel from '../components/explore/StoragePanel'
 import type {
   ActivityItem, StudentStatus, ActivityStatusDetail,
 } from '../api/activityMonitor';
@@ -102,7 +101,7 @@ const ActivityMonitorPage: React.FC = () => {
   // 否则点进来还要自己找标签页，紧急场景下多花的时间都是成本。
   const tabKey = React.useMemo(() => {
     const q = new URLSearchParams(window.location.search).get('tab') || '';
-    return ['activity', 'resource-views', 'explore-usage', 'explore-storage'].includes(q) ? q : 'activity';
+    return ['activity', 'resource-views', 'explore-usage'].includes(q) ? q : 'activity';
   }, []);
 
   // ── 活动列表状态 ──
@@ -593,11 +592,6 @@ const ActivityMonitorPage: React.FC = () => {
           key: 'explore-usage',
           label: <span><CompassOutlined />{t('activityMonitor.tabExplore')}</span>,
           children: <UsageStatsPanel />,
-        },
-        {
-          key: 'explore-storage',
-          label: <span><CloudServerOutlined />{t('activityMonitor.tabStorage')}</span>,
-          children: <StoragePanel />,
         },
       ]} />
     </Card>

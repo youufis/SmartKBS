@@ -94,19 +94,19 @@ const StoragePanel: React.FC = () => {
       />
 
       <Row gutter={12} style={{ marginBottom: 14 }}>
-        <Col xs={12} md={6}>
+        <Col xs={12} md={12} xl={6}>
           <Card size="small"><Statistic title={t('storageActive')} value={s?.active_count ?? 0}
             suffix={<span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{fmtBytes(s?.active_bytes ?? 0)}</span>} /></Card>
         </Col>
-        <Col xs={12} md={6}>
+        <Col xs={12} md={12} xl={6}>
           <Card size="small"><Statistic title={t('storageTrashFiles')} value={s?.trash_files ?? 0}
             suffix={<span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{fmtBytes(s?.trash_bytes ?? 0)}</span>} /></Card>
         </Col>
-        <Col xs={12} md={6}>
+        <Col xs={12} md={12} xl={6}>
           <Card size="small"><Statistic title={t('storageOrphan')} value={s?.orphan_candidates ?? 0}
             valueStyle={{ color: (s?.orphan_candidates ?? 0) > 0 ? '#d46b08' : undefined }} /></Card>
         </Col>
-        <Col xs={12} md={6}>
+        <Col xs={12} md={12} xl={6}>
           <Card size="small"><Statistic title={t('storageWatermark')} value={s?.watermark_mb ?? 0} suffix="MB"
             valueStyle={{ color: s?.over_watermark ? '#cf1322' : undefined }} /></Card>
         </Col>

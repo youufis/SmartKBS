@@ -19,6 +19,7 @@ import BackupPanel from '../components/BackupPanel'
 import { TagListInput, DurationPicker, SuggestionInput } from '../components/systemConfig/FieldControls'
 import { useAuthStore } from '../stores/authStore'
 import { asrSelfCheck, type AsrCheckResult } from '../api/explore'
+import StoragePanel from '../components/explore/StoragePanel'
 import PageHeader from '../components/PageHeader'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
@@ -2971,6 +2972,13 @@ const SystemConfigPage: React.FC = () => {
               {/* 只藏视觉、不卸载：Form.Item 一旦卸载，提交时这些项的值就没了 */}
               <div style={{ display: advShown ? 'block' : 'none' }}>{advFields.map(renderFieldBox)}</div>
             </>
+          )}
+          {group === 'explore' && (
+            <div style={{ marginTop: 18, padding: '14px 16px', border: '1px solid var(--border-color)', borderRadius: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{t('assetPanelTitle')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10, lineHeight: 1.6 }}>{t('assetPanelDesc')}</div>
+              <StoragePanel />
+            </div>
           )}
           {group === 'models' && (
             <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>

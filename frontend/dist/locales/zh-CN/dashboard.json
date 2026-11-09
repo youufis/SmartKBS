@@ -359,8 +359,7 @@
       },
       "failed": "请求失败，请稍后重试"
     },
-    "tabExplore": "探索画布",
-    "tabStorage": "素材存储"
+    "tabExplore": "探索画布"
   },
   "analytics": {
     "title": "AI 学情分析",

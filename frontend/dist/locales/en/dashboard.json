@@ -359,8 +359,7 @@
       },
       "failed": "Request failed, please try again later"
     },
-    "tabExplore": "Explore Canvas",
-    "tabStorage": "Asset storage"
+    "tabExplore": "Explore Canvas"
   },
   "analytics": {
     "title": "AI Learning Analytics",

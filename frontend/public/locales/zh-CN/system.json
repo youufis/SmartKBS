@@ -1686,7 +1686,7 @@
   "field_EXPLORE_ASR_ENABLED_desc": "探索画布「口述」按钮的后端通道：浏览器自带识别（Chrome/Edge）本来就可用，这里是为 Firefox 等不支持 Web Speech 的浏览器兜底；开启后按分钟计量，会产生少量识别费用",
   "field_EXPLORE_SWEEP_DRY": "清理只演练（dry-run，排查用）",
   "field_EXPLORE_SWEEP_DRY_desc": "关（默认）：每日自动真清理，孤儿素材移入回收站、满保留期才物理删除；开：这一轮只生成清单、不动任何文件",
-  "field_EXPLORE_SWEEP_DRY_tip": "清理没有手动入口，只由每日自动任务执行（时间见「清理执行时刻」）。想看某一轮会处置哪些文件，就临时打开这里跑一天；清单也能在「活动监控 → 素材存储」里按日期查看，文件落在 question_media/explore_canvas_trash/manifest_日期.json。",
+  "field_EXPLORE_SWEEP_DRY_tip": "清理没有手动入口，只由每日自动任务执行（时间见「清理执行时刻」）。想看某一轮会处置哪些文件，就临时打开这里跑一天；清单也能在「系统配置 → 探索画布 → 素材存储」里按日期查看，文件落在 question_media/explore_canvas_trash/manifest_日期.json。",
   "field_EXPLORE_LOG_RAW_PROMPT": "台账记录提问原文（排查用）",
   "field_EXPLORE_LOG_RAW_PROMPT_desc": "关（推荐）：台账只存提问的不可逆哈希，符合“只计行为、不看内容”；开：把提问前 200 字写入 pc_ai_tasks",
   "field_EXPLORE_LOG_RAW_PROMPT_tip": "只在排查模型回答异常时临时打开，问题定位完请关回去。开启期间学生的提问原文会留在数据库里，属于隐私口径变更，建议先在教师群说明。",
@@ -1723,5 +1723,7 @@
   "field_EXPLORE_TTS_CACHE_MB": "朗读缓存水位（MB）",
   "field_EXPLORE_TTS_CACHE_MB_desc": "语音合成缓存超过该体积时，清理线程会清掉最久未命中的旧音频（最近 7 天课堂产物豁免；缓存可再生，最多重合成一次）",
   "field_EXPLORE_SHARE_EXPIRE_DAYS": "分享快照保留（天）",
-  "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "学生分享给老师的只读快照到期后自动回收"
+  "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "学生分享给老师的只读快照到期后自动回收",
+  "assetPanelTitle": "素材存储（只读）",
+  "assetPanelDesc": "清理由每日定时任务自动执行，本页只做查看：容量水位、回收站、每日清理清单；被误清的素材可直接还原，不提供手动清理。"
 }

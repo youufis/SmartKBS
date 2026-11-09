@@ -1686,7 +1686,7 @@
   "field_EXPLORE_ASR_ENABLED_desc": "Server channel behind the canvas \"dictate\" button: Chrome/Edge already do this in-browser; this is the fallback for Firefox and other browsers without Web Speech. Metered by the minute, small cost",
   "field_EXPLORE_SWEEP_DRY": "Dry-run only (debug)",
   "field_EXPLORE_SWEEP_DRY_desc": "Off (default): real cleanup runs daily — orphan assets move to trash and are deleted only after the retention period. On: this run only writes a manifest, no files touched",
-  "field_EXPLORE_SWEEP_DRY_tip": "There is no manual trigger; cleanup runs as a daily job (see Sweep hour). Turn this on for a day to preview what a run would process. Manifests are also browsable in Activity Monitor → Asset storage, stored under question_media/explore_canvas_trash/manifest_YYYYMMDD.json.",
+  "field_EXPLORE_SWEEP_DRY_tip": "There is no manual trigger; cleanup runs as a daily job (see Sweep hour). Turn this on for a day to preview what a run would process. Manifests are browsable in System config → Explore canvas → Asset storage, stored under question_media/explore_canvas_trash/manifest_YYYYMMDD.json.",
   "field_EXPLORE_LOG_RAW_PROMPT": "Log raw questions in task ledger (debug)",
   "field_EXPLORE_LOG_RAW_PROMPT_desc": "Off (recommended): the ledger stores only an irreversible hash, keeping the “count behavior, never content” promise. On: first 200 chars are written to pc_ai_tasks",
   "field_EXPLORE_LOG_RAW_PROMPT_tip": "Turn on only while diagnosing a bad model answer, and switch it back off afterwards. While on, students' question text is retained in the database — a privacy policy change worth telling teachers about first.",
@@ -1723,5 +1723,7 @@
   "field_EXPLORE_TTS_CACHE_MB": "TTS cache watermark (MB)",
   "field_EXPLORE_TTS_CACHE_MB_desc": "When the speech cache exceeds this size the sweeper drops least-recently-used files; classroom outputs from the last 7 days are exempt and cache is regenerable",
   "field_EXPLORE_SHARE_EXPIRE_DAYS": "Share snapshot retention (days)",
-  "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "Read-only snapshots shared to teachers are auto-recycled after expiry"
+  "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "Read-only snapshots shared to teachers are auto-recycled after expiry",
+  "assetPanelTitle": "Asset storage (read-only)",
+  "assetPanelDesc": "Cleanup runs as a daily scheduled job. This page is view-only: capacity, trash and per-day manifests. Accidentally cleaned assets can be restored; there is no manual trigger."
 }
