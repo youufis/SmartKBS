@@ -41,12 +41,17 @@
 > - 🧭 A personal infinite canvas for every teacher and student: ask, learn, explore and doodle freely; one brand, role-based preset canvases (students: My Question Pile / Doodle Desk / Exploration Notes; teachers: Lesson Ideas / Asset Workshop / Self-Training)
 > - 💬 Floating AI companion: chat (with textbook citations), image generation (SVG-first), read-aloud, voice input and camera capture; sidebar / draggable pop-out / mobile drawer
 > - 🖍️ Circle-to-ask: pen-circle content and its text drops into the input; questions carry only the circled area; mind maps and star maps land on the canvas; answers become ask-cards
-> - 🤝 Student-granted read-only shares: teachers preview via thumbnails, shares auto-expire and can be revoked anytime; template library — teachers publish starter pages anyone can copy
-> - 🎖️ Soft points + strong honors (never graded); configurable daily quotas; sensitive-intent care notice with zero raw text
+> - 🤝 Student-granted read-only shares: one click creates a read-only snapshot for the student's own teachers, previewable as thumbnails, auto-expiring and revocable; the template library ships 3 built-in starter pages and teachers can publish their own for anyone to copy
+> - 🎖️ Soft points + strong honors: first question, deep-dive chains and archiving earn points, plus 5 explore badges; never graded, never ranked, badges stay on the student's own profile, and the hall of glory follows its existing rule (cards are created automatically once the points threshold is met — no review step)
+> - 🔒 Configurable daily quotas for chat / image generation / read-aloud; admins are unlimited but still metered. Expressions of self-harm or suicidal thoughts switch to a fixed care script (no model call) plus a zero-raw-text alert to administrators, and the care ledger is queryable in the admin console
 >
 > **Whiteboard**
 > - 🧑‍🏫 AI assistant upgrade: textbook source tags, selection / pen-circle as priority context, chat can pop out as a draggable window (toolbar steps aside)
 > - 🚪 Self-study mode retired: classroom collaboration stays on the whiteboard, personal creation moves to Explore Canvas
+>
+> **Data and analytics**
+> - 🗂️ Asset ledger with automatic cleanup: uploads, generated images and recordings are all registered; references renew lifetime, orphans are recycled (daily, no manual trigger) and a dry-run mode shows what a round would do
+> - 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only, no content visible
 >
 > - ⚠️ **Breaking changes**: none
 >
@@ -485,15 +490,17 @@ An intelligent upgrade of AI dialogue, providing personalized learning companion
 
 A personal infinite canvas shared by teachers and students: ask, learn, explore and doodle freely. One brand with role-based presets — students open "My Question Pile / Doodle Desk / Exploration Notes", teachers open "Lesson Ideas / Asset Workshop / Self-Training".
 
-- **🧭 Canvas wall, multi-page boards**: autosave, timeline rollback, one-click clear (archived first), tidy layout, search jumps to the hit page
-- **💬 Floating AI companion**: chat with textbook citations, image generation (SVG-first), read-aloud, voice input, camera capture; sidebar / draggable pop-out / mobile drawer
-- **🖍️ Circle-to-ask**: pen-circle anything and its text fills the input; only the circled area is sent as context
-- **🃏 Ask-cards**: answers settle onto the canvas with follow-up / read-aloud / copy / locate; exports keep the text
-- **🤝 Student-granted shares**: read-only snapshots for the student's own teachers, thumbnail previews, auto-expiry, revocable anytime
-- **📐 Template library**: teachers publish starter pages; anyone copies one into a new canvas with one click
-- **🎖️ Soft points + strong honors**: never graded, never ranked; showcase display goes through review
-- **🔒 Guardrails**: configurable daily quotas; sensitive intent triggers care wording and a notice to the homeroom / counseling teacher (zero raw text)
-- **📊 Usage stats** live in Activity Monitor: grade → class filters, behavior counts only, no content visible
+- **🧭 Canvas wall, multi-page boards**: autosave, timeline rollback, one-click clear (archived first), tidy layout, search jumps straight to the page that matched
+- **💬 Floating AI companion**: chat with textbook citations, image generation (SVG-first), read-aloud, voice input, camera capture; sidebar / draggable pop-out / mobile drawer, with the toolbar stepping aside when popped out
+- **🖍️ Circle-to-ask**: draw a pen circle around anything and its text fills the input; only the circled area is sent as context — no retyping
+- **🃏 Ask-cards**: answers settle onto the canvas with follow-up / read-aloud / copy / locate, and exports keep every word
+- **🌌 Structured layout**: mind maps and star maps spread out straight onto the canvas; circle any part to keep asking
+- **🤝 Student-granted shares**: one click creates a read-only snapshot for the student's own teachers; teachers preview thumbnails, hover for a larger view, search and page through; shares auto-expire and students can revoke them anytime
+- **📐 Template library**: 3 built-in starter pages (question wall / inquiry notes / lesson board) work out of the box; teachers can also publish their own so anyone copies one into a new canvas with a single click
+- **🎖️ Soft points + strong honors**: first question, deep-dive chains and archiving earn explore points, plus 5 badges; never graded, never ranked, badges stay on the student's own profile, and the hall of glory follows its existing rule (automatic cards once the points threshold is met, no review)
+- **🔒 Safety rails**: daily chat / image / read-aloud quotas are configurable and admins are unlimited but still metered. Expressions of self-harm, suicide, harm to others or deep despair — in the question, the circled material or the last few turns — switch to a fixed care script with the 12355 hotline and raise a zero-raw-text alert to administrators (student identity and counts only); risks the model infers from tone are flagged too. The ledger stores only a hash of the question, never the text, and teaching questions such as "suicide rates" are not blocked.
+- **🗂️ Asset ledger**: uploads, generated images and recordings are all registered; references renew lifetime, orphans move to the trash automatically (daily job, no manual trigger) and can be restored; admins see capacity, trash and daily manifests under System Configuration → Explore Canvas → Asset storage
+- **📊 Usage stats**: folded into Activity Monitor with grade → class filters; behavior counts only, never question or canvas content
 
 > **All users** (canvases are private by default; sharing requires the student's explicit grant)
 
@@ -1144,14 +1151,14 @@ Real-time message notification system:
 
 Git-based online incremental upgrade system:
 
-- **🔍 Check for Updates**: Automatically compares with the latest GitHub version
-- **📥 Incremental Upgrade**: Automatically executes git fetch → git reset → database migration → pip install → restart
-- **📊 Progress Visualization**: Real-time progress bar and log output
-- **⏪ One-Click Rollback**: Automatically rolls back on upgrade failure, also supports manual rollback
-- **📋 Upgrade History**: Complete records of each upgrade (time, version, changed file list)
-- **🔧 Environment Diagnostics**: Automatically checks Git installation, .git directory, remote configuration, network connectivity
-- **🤖 Background Auto-Check**: Polls every 6 hours, notifies admin of new versions
-- **🔒 File Lock**: Prevents concurrent upgrades by multiple IIS Workers
+- **🔍 Check for updates**: compares against the latest GitHub version automatically
+- **📥 Incremental upgrade**: runs git fetch → git reset → database migration → pip install → restart
+- **📊 Progress visualization**: live progress bar and log output
+- **⏪ One-click rollback**: rolls back automatically on failure, manual rollback also available
+- **📋 Upgrade history**: every upgrade recorded (time, version, changed files)
+- **🔧 Environment diagnostics**: checks Git installation, .git directory, remote config and network connectivity
+- **🤖 Background auto-check**: polls every 6 hours and notifies admins of new versions
+- **🔒 File lock**: prevents concurrent upgrades across IIS workers
 
 > **Admin only**
 
@@ -1161,7 +1168,7 @@ Git-based online incremental upgrade system:
 
 | Feature | Description |
 | --- | --- |
-| ❓ **About System** | View documentation |
+| ❓ **About** | Opens the documentation |
 
 ---
 
@@ -1169,12 +1176,12 @@ Git-based online incremental upgrade system:
 
 | Feature | Description |
 | --- | --- |
-| 🔑 **Change Password** | All users can change their own password |
-| 🔐 **Forgot Password** | Self-service password recovery via security questions |
-| 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
- | 🎨 **Multi-theme appearance** | Theme switcher in the top bar: default blue-white, forest green, sunset orange, midnight starry and lavender purple; the choice is stored locally and is available on the sign-in page too |
+| 🔑 **Change password** | Every user can change their own password |
+| 🔐 **Forgot password** | Self-service recovery through security questions |
+| 🗑️ **Temp file cleanup** | Temporary uploads older than 24 hours are removed automatically |
+| 🎨 **Multiple themes** | Top-bar switcher: Classic Blue / Forest Green / Sunset Orange / Starry Night / Lavender; the choice is stored locally and also available on the login page |
 
-<a id="changelog"></a>
+---
 
 ## Changelog
 
@@ -1188,8 +1195,8 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - 💬 Floating AI companion: chat, image generation (SVG-first), read-aloud, voice and camera; sidebar / pop-out / mobile drawer
 - 🖍️ Circle-to-ask: pen-circled content is auto-extracted into the input; mind maps and star maps land on the canvas; answers become ask-cards
 - 🤝 Student-granted read-only shares with thumbnail previews, auto-expiry and revocation; template library with one-click copy
-- 🎖️ Soft points and honors (never graded); sensitive-intent care notice; configurable daily quotas, admins exempt but metered
-- 🗂️ Asset ledger with automatic cleanup: reference renewal, expiry recycling, dry-run protection
+- 🎖️ Soft points and honors (never graded); self-harm expressions switch to a care script with a zero-raw-text admin alert; configurable daily quotas, admins exempt but metered
+- 🗂️ Asset ledger with automatic cleanup: reference renewal, orphan recycling (daily job, no manual trigger), dry-run available for inspection
 - 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only
 
 **Whiteboard**
@@ -1319,6 +1326,8 @@ Don't want to install Python or Node.js? Use the desktop installer — double-cl
    python backend/main.py
    ```
 
+5. **Upgrading**: after signing in, open System Configuration → Version Management and click "Check for updates". When a new version appears, download the source ZIP and replace the folder as above (database, config and uploads stay in place). With Git installed, "convert to Git deployment and upgrade" turns the folder into a Git deployment so later upgrades are one click.
+
 ### Method 3: Git Clone Deployment (Recommended, Supports Online Upgrade)
 
 ```bash
@@ -1328,22 +1337,30 @@ pip install -r requirements.txt
 python backend/main.py
 ```
 
-### Online Upgrade System (Git Deployment Only)
+### Online Upgrade System (all three deployments)
 
-If deployed via `git clone`, system upgrades are fully automated:
+| Deployment | How to upgrade |
+| --- | --- |
+| Desktop edition | In-app "Check for updates" → download the new installer and install it over the old one (data lives in `%APPDATA%\smartkbs-desktop` and is preserved); take a full-site backup under Backups first if you like |
+| Source package | In-app "Check for updates" → download the new ZIP and replace the folder (database, config and uploads stay in place); with Git installed you can "convert to Git deployment" and get in-app incremental upgrades afterwards |
+| Git clone | In-app "Check for updates" + "Incremental upgrade" run the whole pipeline: fetch → reset → database migration → pip incremental install → restart, rolling back automatically on failure |
 
-1. Admin login → System Configuration → **Version Management**
-2. Click "Check for Updates", system automatically compares with the latest GitHub version
-3. Click "Incremental Upgrade", automatically executes:
+The fully automated pipeline below applies to **Git clone deployments only**:
+
+1. Sign in as admin → System Configuration → **Version Management**
+2. Click "Check for updates" — the system compares against the latest GitHub version
+3. Click "Incremental upgrade", which runs:
 
    ```text
-   git fetch (incrementally pull diff code) → git reset (sync files)
-   → database migration → pip incremental install → restart service
+   git fetch (pull only the diff) → git reset (sync files)
+   → database migration → pip incremental install → restart
    ```
 
-4. Automatic rollback on failure, real-time progress display
+4. Failures roll back automatically, with live progress
 
-> **💡** The first time you click "Incremental Upgrade", the system automatically runs `git init` + `git remote add` to initialize the local repository — no manual configuration needed to enjoy online upgrades.
+> **💡** On the first "Incremental upgrade" the system runs `git init` + `git remote add` for you, so no manual setup is needed.
+
+---
 
 ### PIP China Mirror Acceleration
 
