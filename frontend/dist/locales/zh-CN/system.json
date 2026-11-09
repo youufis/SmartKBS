@@ -1724,6 +1724,5 @@
   "field_EXPLORE_TTS_CACHE_MB_desc": "语音合成缓存超过该体积时，清理线程会清掉最久未命中的旧音频（最近 7 天课堂产物豁免；缓存可再生，最多重合成一次）",
   "field_EXPLORE_SHARE_EXPIRE_DAYS": "分享快照保留（天）",
   "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "学生分享给老师的只读快照到期后自动回收",
-  "assetPanelTitle": "素材存储（只读）",
-  "assetPanelDesc": "清理由每日定时任务自动执行，本页只做查看：容量水位、回收站、每日清理清单；被误清的素材可直接还原，不提供手动清理。"
+  "assetPanelTitle": "素材存储（只读）"
 }

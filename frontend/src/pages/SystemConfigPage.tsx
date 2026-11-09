@@ -2974,9 +2974,8 @@ const SystemConfigPage: React.FC = () => {
             </>
           )}
           {group === 'explore' && (
-            <div style={{ marginTop: 18, padding: '14px 16px', border: '1px solid var(--border-color)', borderRadius: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{t('assetPanelTitle')}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10, lineHeight: 1.6 }}>{t('assetPanelDesc')}</div>
+            <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>{t('assetPanelTitle')}</div>
               <StoragePanel />
             </div>
           )}

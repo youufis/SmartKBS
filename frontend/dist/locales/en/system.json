@@ -1724,6 +1724,5 @@
   "field_EXPLORE_TTS_CACHE_MB_desc": "When the speech cache exceeds this size the sweeper drops least-recently-used files; classroom outputs from the last 7 days are exempt and cache is regenerable",
   "field_EXPLORE_SHARE_EXPIRE_DAYS": "Share snapshot retention (days)",
   "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "Read-only snapshots shared to teachers are auto-recycled after expiry",
-  "assetPanelTitle": "Asset storage (read-only)",
-  "assetPanelDesc": "Cleanup runs as a daily scheduled job. This page is view-only: capacity, trash and per-day manifests. Accidentally cleaned assets can be restored; there is no manual trigger."
+  "assetPanelTitle": "Asset storage (read-only)"
 }
