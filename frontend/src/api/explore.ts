@@ -18,11 +18,14 @@ export interface ExplorePageMeta {
   updated_at: string
 }
 
-export type SaveState = 'idle' | 'saving' | 'saved' | 'offline'
+// conflict=别处已改（409）；toolarge=内容超 8MB 上限（413）——两者都不能笼统显示成"离线"
+export type SaveState = 'idle' | 'saving' | 'saved' | 'offline' | 'conflict' | 'toolarge'
 
-export async function listCanvases(q = ''): Promise<ExploreCanvasMeta[]> {
-  const { data } = await apiClient.get('/api/explore/canvases', { params: q ? { q } : {} })
-  return data.canvases as ExploreCanvasMeta[]
+export async function listCanvases(q = '', limit = 12, offset = 0): Promise<{ canvases: ExploreCanvasMeta[]; total: number }> {
+  const params: Record<string, unknown> = { limit, offset }
+  if (q) params.q = q
+  const { data } = await apiClient.get('/api/explore/canvases', { params })
+  return { canvases: (data.canvases || []) as ExploreCanvasMeta[], total: Number(data.total || 0) }
 }
 
 export async function listTrash(): Promise<ExploreCanvasMeta[]> {
@@ -60,15 +63,15 @@ export async function getCanvas(id: number): Promise<{ canvas: { id: number; tit
   return data
 }
 
-export async function getPage(id: number, page: number): Promise<{ snapshot_data: string; title: string; updated_at: string }> {
+export async function getPage(id: number, page: number): Promise<{ snapshot_data: string; title: string; updated_at: string; rev: number }> {
   const { data } = await apiClient.get('/api/explore/canvases/' + id + '/pages/' + page)
   return data
 }
 
-export async function savePage(id: number, page: number, snapshotData: string, title?: string) {
+export async function savePage(id: number, page: number, snapshotData: string, title?: string, rev?: number) {
   const { data } = await apiClient.put('/api/explore/canvases/' + id + '/pages/' + page,
-    { snapshot_data: snapshotData, title: title ?? null })
-  return data as { ok: boolean; updated_at: string }
+    { snapshot_data: snapshotData, title: title ?? null, rev: rev ?? null })
+  return data as { ok: boolean; updated_at: string; rev: number }
 }
 
 export async function addPage(id: number): Promise<{ page_number: number; title: string }> {
@@ -193,7 +196,11 @@ export async function speak(text: string): Promise<{ urls: string[]; partial?: b
 }
 
 export interface QuotaItem { used: number; limit: number }
-export interface QuotaMap { chat: QuotaItem; image: QuotaItem; tts: QuotaItem; points?: { used: number; cap: number } }
+export interface QuotaMap {
+  chat: QuotaItem; image: QuotaItem; tts: QuotaItem; points?: { used: number; cap: number }
+  /** 连续使用提醒（分钟），后端按系统配置下发，前端不再写死 40 */
+  continuous_remind_min?: number
+}
 
 export interface ArchiveResult { ok: boolean; title: string; points: number; badges: { name: string; icon: string }[] }
 

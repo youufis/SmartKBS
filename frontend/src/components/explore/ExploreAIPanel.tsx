@@ -16,6 +16,7 @@ import CameraCapture from '../CameraCapture'
 import VoiceInput from '../VoiceInput'
 import { getFeed, type DiscoveryCard } from '../../api/dailyDiscovery'
 import { blobToDataUrl, collectText, detectPenCircles, shapePlainText, smartExcerptInCircle } from './selectionHelpers'
+import { insertShapesIntoEditor } from './shapeInsert'
 import {
   askExplore, getQuota, pollGenerate, speak, submitGenerate, submitMindmap, submitTopicCard,
   transcribeAudio, uploadAsset, pollStruct,
@@ -48,12 +49,6 @@ interface Props {
   onWide: () => void
 }
 
-const TL_COLOR_SET = new Set([
-  'black', 'grey', 'light-grey', 'brown', 'yellow', 'orange', 'red', 'light-red',
-  'purple', 'violet', 'light-violet', 'blue', 'light-blue', 'green', 'light-green', 'white',
-])
-const TL_FILL_SET = new Set(['none', 'solid', 'semi', 'pattern'])
-
 /** 同一文档多切片命中时只展示一次，最多 3 条 */
 function uniqRefs(refs: KbRefItem[]): KbRefItem[] {
   const seen = new Set<string>()
@@ -65,39 +60,12 @@ function uniqRefs(refs: KbRefItem[]): KbRefItem[] {
   return out.slice(0, 3)
 }
 
-function toRichText(text: string) {
-  if (!text) return { type: 'doc', content: [] }
-  return { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
-}
-
-/** 模型产出的 geo 形状按 TLDraw v5 规范修正（与白板 AIPanel 同款处理，M1 后期可抽公共模块） */
-function fixShape(s: ShapeSpec, id: string, originX: number, originY: number, minX: number, minY: number) {
-  const props: Record<string, any> = { ...(s.props || {}) }
-  const GEO_SET = new Set(['cloud', 'rectangle', 'ellipse', 'triangle', 'diamond', 'pentagon', 'hexagon', 'octagon',
-    'star', 'rhombus', 'rhombus-2', 'oval', 'trapezoid', 'arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'x-box', 'check-box', 'heart'])
-  if (!GEO_SET.has(String(props.geo))) props.geo = 'rectangle'
-  props.w = Math.min(900, Math.max(90, Number(props.w) || 240))
-  props.h = Math.min(400, Math.max(40, Number(props.h) || 56))
-  if (!TL_COLOR_SET.has(String(props.color))) props.color = 'black'
-  if (!TL_FILL_SET.has(String(props.fill))) props.fill = 'none'
-  if (!['xs', 's', 'm', 'l', 'xl', 'xxl'].includes(String(props.size))) props.size = 'm'
-  if (props.text) { props.richText = toRichText(String(props.text)); delete props.text }
-  if (!props.richText) props.richText = toRichText('')
-  delete props.fontSize; delete props.fontWeight; delete props.textAlign; delete props.lineHeight
-  return {
-    id,
-    type: 'geo',
-    x: originX + (Number(s.x) || 0) - minX,
-    y: originY + (Number(s.y) || 0) - minY,
-    props,
-  }
-}
-
 const SPEECH_SUPPORTED = typeof window !== 'undefined'
   && (('SpeechRecognition' in window) || ('webkitSpeechRecognition' in window))
 
 /** 浏览器语音不可用时的兜底：录音上送后端 ASR（系统配置开启后可用） */
 const FallbackMic: React.FC<{ onText: (t: string) => void; disabled?: boolean }> = ({ onText, disabled }) => {
+  const { t } = useTranslation('explore')
   const [rec, setRec] = useState(false)
   const mrRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -115,16 +83,16 @@ const FallbackMic: React.FC<{ onText: (t: string) => void; disabled?: boolean }>
         try {
           const r = await transcribeAudio(blob)
           if (r.text) onText(r.text)
-          else message.info('没听清，再说一次试试')
+          else message.info(t('asrEmpty'))
         } catch (e: any) {
-          message.error(e?.response?.data?.detail || '转写失败')
+          message.error(e?.response?.data?.detail || t('asrFail'))
         }
       }
       mr.start()
       mrRef.current = mr
       setRec(true)
     } catch {
-      message.error('无法访问麦克风，请检查浏览器权限')
+      message.error(t('micDenied'))
     }
   }
   return (
@@ -301,33 +269,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
   /** 把一批形状落到当前视野正中并选中、缩放到刚好看得见（生成即定位） */
   const insertShapes = (shapes: ShapeSpec[]) => {
     const ed = getEditor()
-    if (!ed || !shapes.length) return
-    const xs = shapes.map((s) => Number(s.x) || 0)
-    const ys = shapes.map((s) => Number(s.y) || 0)
-    const minX = Math.min(...xs)
-    const minY = Math.min(...ys)
-    const bounds = ed.getViewportPageBounds()
-    const originX = bounds.center.x - 460
-    const originY = Math.max(bounds.y + 40, bounds.center.y - 240)
-    const stamp = Date.now()
-    const built = shapes.map((s, i) => fixShape(s, 'shape:ex' + stamp + '-' + i, originX, originY, minX, minY))
-    ed.createShapes(built as never)
-    const ids = built.map((b) => b.id)
-    try { ed.setSelectedShapes(ids as never) } catch { /* 选中失败不影响插入 */ }
-    try {
-      const boxes = ids
-        .map((id) => {
-          const b = ed.getShapePageBounds(id as never)
-          return b ? { x: b.x, y: b.y, w: b.w, h: b.h } : null
-        })
-        .filter((b): b is { x: number; y: number; w: number; h: number } => b !== null)
-      if (!boxes.length) return
-      const minX = Math.min(...boxes.map((b) => b.x))
-      const minY = Math.min(...boxes.map((b) => b.y))
-      const maxX = Math.max(...boxes.map((b) => b.x + b.w))
-      const maxY = Math.max(...boxes.map((b) => b.y + b.h))
-      ed.zoomToBounds(new Box(minX, minY, maxX - minX, maxY - minY), { inset: 64, animation: { duration: 220 } })
-    } catch { /* 视口缩放失败也不该让「已插入」变成报错 */ }
+    if (ed) insertShapesIntoEditor(ed, shapes)
   }
 
   const send = async (explicit?: string) => {
@@ -398,7 +340,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
   /** 回答沉淀成提问卡：问题、回答、教材来源、追问/朗读/复制按钮都在卡上 */
   const placeOnCanvas = (m: Msg) => {
     const ed = getEditor()
-    if (!ed) { message.warning('画布还没准备好'); return }
+    if (!ed) { message.warning(t('canvasNotReady')); return }
     const bounds = ed.getViewportPageBounds()
     const cardId = 'shape:card' + Date.now()
     ed.createShapes([{
@@ -420,7 +362,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
       if (idx >= 0) next[idx] = { ...next[idx], cardId }
       return next
     })
-    message.success('已沉淀为提问卡：圈住它继续问，或点卡上的追问/朗读')
+    message.success(t('askCardSaved'))
   }
 
   /** 每日精选：三选一贴画布（把选择权给学生） */
@@ -429,12 +371,12 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
     try {
       const r = await getFeed()
       const all = r.cards || []
-      if (!all.length) { message.info('今天还没有精选内容'); return }
+      if (!all.length) { message.info(t('pickEmpty')); return }
       const idx = all.map((_, i) => i).sort(() => Math.random() - 0.5).slice(0, Math.min(3, all.length))
       setPickCards(idx.map((i) => all[i]))
       setPickOpen(true)
     } catch {
-      message.error('获取每日精选失败，稍后再试')
+      message.error(t('pickFail'))
     } finally {
       setPicking(false)
     }
@@ -459,7 +401,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
           createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
         },
       }] as never)
-      message.success('已贴上一张精选，圈住它可以问「这是真的吗」「多讲讲」')
+      message.success(t('pickPasted'))
     }
   }
 
@@ -477,9 +419,9 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
           void audio.play()
         })
       }
-      if (r.partial) message.warning('部分段落未能合成')
+      if (r.partial) message.warning(t('partialTts'))
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '朗读失败，稍后再试')
+      message.error(e?.response?.data?.detail || t('speakFail'))
     } finally {
       setPlayBusy(false)
       refreshQuota()
@@ -550,10 +492,10 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
       const ed = getEditor()
       if (ed) {
         await ed.putExternalContent({ type: 'url', url: r.src } as never)
-        message.success('照片已贴进画布，可以圈起来问 AI')
+        message.success(t('photoPasted'))
       }
     } catch {
-      message.error('照片上传失败')
+      message.error(t('photoFail'))
     }
   }
 

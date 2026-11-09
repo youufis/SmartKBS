@@ -1724,5 +1724,7 @@
   "field_EXPLORE_TTS_CACHE_MB_desc": "语音合成缓存超过该体积时，清理线程会清掉最久未命中的旧音频（最近 7 天课堂产物豁免；缓存可再生，最多重合成一次）",
   "field_EXPLORE_SHARE_EXPIRE_DAYS": "分享快照保留（天）",
   "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "学生分享给老师的只读快照到期后自动回收",
-  "assetPanelTitle": "素材存储（只读）"
+  "assetPanelTitle": "素材存储（只读）",
+  "field_EXPLORE_CANVAS_MAX": "每人画布上限",
+  "field_EXPLORE_CANVAS_MAX_desc": "未归档画布数量上限（0 = 不限）；满了引导先清理，防止无限建导致数据膨胀"
 }

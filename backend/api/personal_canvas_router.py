@@ -75,6 +75,8 @@ class RenameCanvasRequest(BaseModel):
 class SavePageRequest(BaseModel):
     snapshot_data: str
     title: Optional[str] = Field(default=None, max_length=40)
+    # 乐观锁：前端手上那份快照的版本号；不传 = 老客户端，按"无条件覆盖"处理并自增版本
+    rev: Optional[int] = None
 
 
 def _load_owned_canvas(c, canvas_id: int, user: dict) -> dict:
@@ -113,31 +115,44 @@ def _ensure_presets(c, user: dict) -> None:
 # 画布 CRUD
 # ═══════════════════════════════════════════════════════════
 
-@router.get("/canvases", summary="我的画布列表（首进自动建预置；q 支持标题+内容全文搜索）")
-async def list_canvases(request: Request, q: str = Query(default="", max_length=40)):
+@router.get("/canvases", summary="我的画布列表（分页；q 支持标题+内容搜索）")
+async def list_canvases(request: Request, q: str = Query(default="", max_length=40),
+                        limit: int = Query(default=12, ge=1, le=100),
+                        offset: int = Query(default=0, ge=0)):
     _require_enabled()
     user = get_current_user(request)
+    username = user.get("username", "")
     with get_connection() as conn:
         c = conn.cursor()
         _ensure_presets(c, user)
         kw = (q or "").strip()
         like = "%" + kw.replace("\\", "").replace("%", "").replace("_", "") + "%" if kw else ""
-        cols = ("SELECT id, title, preset_key, subject_tag, cover_asset_id, updated_at,"
-                " (SELECT COUNT(*) FROM pc_pages p WHERE p.canvas_id = a.id) AS page_count")
-        where = " FROM pc_canvases a WHERE owner_username = ? AND archived = 0"
+        base = " FROM pc_canvases a WHERE owner_username = ? AND archived = 0"
+        args: list = [username]
+        hit_col = ", NULL"
         if kw:
-            # 命中页：SELECT 子查询的参数在最前（顺序=子查询like, owner, title like, 内容 like）
-            cols += (", (SELECT MIN(p2.page_number) FROM pc_pages p2"
-                     " WHERE p2.canvas_id = a.id AND p2.snapshot_data LIKE ?)")
-            where += (" AND (title LIKE ? OR EXISTS (SELECT 1 FROM pc_pages p"
-                      " WHERE p.canvas_id = a.id AND p.snapshot_data LIKE ?))")
-            rows = c.execute(cols + where + " ORDER BY updated_at DESC, id DESC",
-                             (like, user.get("username", ""), like, like)).fetchall()
+            # 只搜文本索引表（每页几百字），不再 LIKE 扫 MB 级快照
+            base += (" AND (title LIKE ? OR EXISTS (SELECT 1 FROM pc_page_text t"
+                     " WHERE t.canvas_id = a.id AND t.text LIKE ?))")
+            args += [like, like]
+            # 命中页单独查，避免 COUNT 也背上这个子查询
+            hit_col = (", (SELECT MIN(t2.page_number) FROM pc_page_text t2"
+                       " WHERE t2.canvas_id = a.id AND t2.text LIKE ?)")
+        total = int(c.execute("SELECT COUNT(*)" + base, tuple(args)).fetchone()[0])
+        if kw:
+            # 参数顺序：SELECT 子查询的 like 在前，随后是 WHERE 的 owner / 标题 / 内容
+            rows = c.execute(
+                "SELECT id, title, preset_key, subject_tag, cover_asset_id, updated_at,"
+                " (SELECT COUNT(*) FROM pc_pages p WHERE p.canvas_id = a.id) AS page_count"
+                + hit_col + base + " ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+                (like, *args, limit, offset)).fetchall()
         else:
-            cols += ", NULL"
-            rows = c.execute(cols + where + " ORDER BY updated_at DESC, id DESC",
-                             (user.get("username", ""),)).fetchall()
-    return {"canvases": [
+            rows = c.execute(
+                "SELECT id, title, preset_key, subject_tag, cover_asset_id, updated_at,"
+                " (SELECT COUNT(*) FROM pc_pages p WHERE p.canvas_id = a.id) AS page_count"
+                + hit_col + base + " ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*args, limit, offset)).fetchall()
+    return {"total": total, "canvases": [
         {"id": r[0], "title": r[1], "preset_key": r[2], "subject_tag": r[3],
          "cover": r[4], "updated_at": r[5], "page_count": r[6],
          "hit_page": r[7] if r[7] else None} for r in rows
@@ -164,8 +179,14 @@ async def create_canvas(req: CreateCanvasRequest, request: Request):
     user = get_current_user(request)
     now = _now()
     title = req.title.strip() or "未命名画布"
+    cap = int(get_config_value("EXPLORE_CANVAS_MAX", 50) or 50)
     with get_connection() as conn:
         c = conn.cursor()
+        used = int(c.execute("SELECT COUNT(*) FROM pc_canvases WHERE owner_username = ? AND archived = 0",
+                             (user.get("username", ""),)).fetchone()[0])
+        if cap > 0 and used >= cap:
+            raise HTTPException(status_code=429,
+                                detail="画布数量已达上限（" + str(cap) + " 个），请先把不用的画布移入回收站")
         cur = c.execute(
             "INSERT INTO pc_canvases (owner_username, title, preset_key, subject_tag, archived, created_at, updated_at)"
             " VALUES (?, ?, ?, '', 0, ?, ?)",
@@ -245,12 +266,12 @@ async def get_page(canvas_id: int, page_number: int, request: Request):
         c = conn.cursor()
         _load_owned_canvas(c, canvas_id, user)
         row = c.execute(
-            "SELECT snapshot_data, title, updated_at FROM pc_pages WHERE canvas_id = ? AND page_number = ?",
+            "SELECT snapshot_data, title, updated_at, rev FROM pc_pages WHERE canvas_id = ? AND page_number = ?",
             (canvas_id, page_number),
         ).fetchone()
     if row is None:
-        return {"snapshot_data": "", "title": "第 %s 页" % page_number, "updated_at": ""}
-    return {"snapshot_data": row[0], "title": row[1], "updated_at": row[2]}
+        return {"snapshot_data": "", "title": "第 %s 页" % page_number, "updated_at": "", "rev": 0}
+    return {"snapshot_data": row[0], "title": row[1], "updated_at": row[2], "rev": int(row[3] or 0)}
 
 
 @router.put("/canvases/{canvas_id}/pages/{page_number}", summary="保存页面快照（前端 5s 防抖调用）")
@@ -264,15 +285,22 @@ async def save_page(canvas_id: int, page_number: int, req: SavePageRequest, requ
     with get_connection() as conn:
         c = conn.cursor()
         _load_owned_canvas(c, canvas_id, user)
-        existing = c.execute("SELECT id FROM pc_pages WHERE canvas_id = ? AND page_number = ?",
+        existing = c.execute("SELECT id, rev FROM pc_pages WHERE canvas_id = ? AND page_number = ?",
                              (canvas_id, page_number)).fetchone()
+        new_rev = 1
         if existing:
-            c.execute("UPDATE pc_pages SET snapshot_data = ?, title = COALESCE(?, title), updated_at = ? WHERE id = ?",
-                      (raw, req.title, now, existing[0]))
+            cur_rev = int(existing[1] or 0)
+            new_rev = cur_rev + 1
+            if req.rev is not None and int(req.rev) != cur_rev:
+                # 另一处已经写过：拒绝覆盖，让前端决定"载入最新 / 强制覆盖 / 保留本地"
+                raise HTTPException(status_code=409, detail={
+                    "message": "这一页在别处被修改了", "rev": cur_rev})
+            c.execute("UPDATE pc_pages SET snapshot_data = ?, title = COALESCE(?, title), updated_at = ?, rev = ?"
+                      " WHERE id = ?", (raw, req.title, now, new_rev, existing[0]))
         else:
             c.execute(
-                "INSERT INTO pc_pages (canvas_id, page_number, title, snapshot_data, updated_at, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO pc_pages (canvas_id, page_number, title, snapshot_data, updated_at, created_at, rev)"
+                " VALUES (?, ?, ?, ?, ?, ?, 1)",
                 (canvas_id, page_number, req.title or ("第 %s 页" % page_number), raw, now, now),
             )
         # 滚动时间线存档：每 30 分钟至多一份，每页环形保留 12 份（数据在 M0 就存，回滚 UI 属 M1）
@@ -303,9 +331,12 @@ async def save_page(canvas_id: int, page_number: int, req: SavePageRequest, requ
             st = c.execute("SELECT status FROM pc_assets WHERE filename = ?", (fn,)).fetchone()
             if st and st[0] == "trashed" and _reclaim_trashed(fn):
                 c.execute("UPDATE pc_assets SET status = 'active', last_seen_at = ? WHERE filename = ?", (now, fn))
+        # 文本索引：搜索用（失败不影响保存）
+        from backend.explore_text_index import index_page
+        index_page(c, canvas_id, page_number, raw, now)
         c.execute("UPDATE pc_canvases SET updated_at = ? WHERE id = ?", (now, canvas_id))
         conn.commit()
-    return {"ok": True, "updated_at": now}
+    return {"ok": True, "updated_at": now, "rev": new_rev}
 
 
 @router.post("/canvases/{canvas_id}/pages", summary="新增页面")
@@ -336,6 +367,7 @@ async def delete_page(canvas_id: int, page_number: int, request: Request):
             raise HTTPException(status_code=400, detail="至少保留一页")
         c.execute("DELETE FROM pc_pages WHERE canvas_id = ? AND page_number = ?", (canvas_id, page_number))
         c.execute("DELETE FROM pc_pages_history WHERE canvas_id = ? AND page_number = ?", (canvas_id, page_number))
+        c.execute("DELETE FROM pc_page_text WHERE canvas_id = ? AND page_number = ?", (canvas_id, page_number))
         conn.commit()
     return {"ok": True}
 
@@ -848,6 +880,8 @@ async def my_quota(request: Request):
                           ("tts", "tts_n", "EXPLORE_TTS_QUOTA")):
         lim = int(get_config_value(cfg, 50) or 50)
         out[key] = {"used": _usage_today(username, col), "limit": lim}
+    # 连续使用提醒（分钟）：配置项在这里一次性下发，前端不再写死 40
+    out["continuous_remind_min"] = int(get_config_value("EXPLORE_CONTINUOUS_REMIND_MIN", 40) or 40)
     # 今日探索积分（弱积分进度可见：只展示，不制造刷分动机）
     try:
         from backend.reward_engine import daily_points_cap

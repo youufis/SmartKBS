@@ -1,5 +1,5 @@
 /** 探索画布 · 列表页：卡片墙（悬停菜单 / 真实缩略图 / 搜索直达命中页）+ 新建 + 回收站 */
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Dropdown, Empty, Input, Modal, Pagination, Select, Space, Spin, Tabs, Tag, Tooltip, message } from 'antd'
 import { DeleteOutlined, MoreOutlined, PlusOutlined, PlusSquareOutlined, RestOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import { useAuthStore } from '../stores/authStore'
 import { authedFileUrl } from '../api/client'
+import { BUILTIN_TEMPLATES, type BuiltinTemplate } from '../constants/exploreTemplates'
 import {
   archiveCanvas, createCanvas, deleteTemplate, listArchives, listCanvases, listShares, listTemplates, listTrash, renameCanvas, restoreCanvas, revokeShare, applyTemplate,
   type ExploreCanvasMeta, type ShareMeta, type TemplateMeta,
@@ -35,12 +36,17 @@ const PRESET_GRADIENT: Record<string, string> = {
   blank: 'linear-gradient(135deg, #f5f7fa, #e7ecf3)',
 }
 
+const PAGE_SIZE = 12
+
 const ExploreCanvasPage: React.FC = () => {
   const nav = useNavigate()
   const { t } = useTranslation('explore')
   const IS_STUDENT = useAuthStore((s) => s.user?.role) === 'student'
   const [list, setList] = useState<ExploreCanvasMeta[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const thumbLoadedRef = useRef(false)
   const [query, setQuery] = useState('')
   const [thumbs, setThumbs] = useState<Record<number, string>>({})
   const [createOpen, setCreateOpen] = useState(false)
@@ -59,26 +65,34 @@ const ExploreCanvasPage: React.FC = () => {
   const [sharePage, setSharePage] = useState(1)
   const [sharesLoading, setSharesLoading] = useState(false)
 
-  const refresh = useCallback(async (q = '') => {
+  const refresh = useCallback(async (q = '', p = 1) => {
     try {
-      setList(await listCanvases(q))
-      const arch = await listArchives().catch(() => [])
-      const map: Record<number, string> = {}
-      for (const a of arch) {
-        if (a.image_src && !map[a.canvas_id]) map[a.canvas_id] = a.image_src
+      const r = await listCanvases(q, PAGE_SIZE, (p - 1) * PAGE_SIZE)
+      // 归档/删除最后一页的最后一项后，页码要回退，否则停在一张空白页上
+      if (!r.canvases.length && p > 1 && r.total > 0) { setPage(p - 1); return }
+      setList(r.canvases)
+      setTotal(r.total)
+      // 归档缩略图只拉一次并缓存：搜索/翻页不重复请求
+      if (!thumbLoadedRef.current) {
+        thumbLoadedRef.current = true
+        const arch = await listArchives().catch(() => [])
+        const map: Record<number, string> = {}
+        for (const a of arch) {
+          if (a.image_src && !map[a.canvas_id]) map[a.canvas_id] = a.image_src
+        }
+        setThumbs(map)
       }
-      setThumbs(map)
     } catch {
-      message.error('画布列表加载失败')
+      message.error(t('listLoadFail'))
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    const ms = window.setTimeout(() => { void refresh(query.trim()) }, 350)
-  return () => window.clearTimeout(ms)
-  }, [query, refresh])
+    const ms = window.setTimeout(() => { void refresh(query.trim(), page) }, 350)
+    return () => window.clearTimeout(ms)
+  }, [query, page, refresh])
 
   const openCanvas = (c: ExploreCanvasMeta) => {
     nav('/explore/' + c.id + (c.hit_page ? '?page=' + c.hit_page : ''))
@@ -90,8 +104,8 @@ const ExploreCanvasPage: React.FC = () => {
       setCreateOpen(false)
       setTitleInput('')
       nav('/explore/' + d.id)
-    } catch {
-      message.error('新建失败，请稍后再试')
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('createFail'))
     }
   }
 
@@ -104,8 +118,8 @@ const ExploreCanvasPage: React.FC = () => {
     try {
       await restoreCanvas(id)
       setTrash(await listTrash())
-      await refresh(query.trim())
-    } catch { message.error('还原失败') }
+      await refresh(query.trim(), page)
+    } catch { message.error(t('restoreFail')) }
   }
 
   const doArchive = (c: ExploreCanvasMeta) => {
@@ -115,19 +129,19 @@ const ExploreCanvasPage: React.FC = () => {
       okText: t('moveToTrash'),
       okButtonProps: { danger: true },
       onOk: async () => {
-        try { await archiveCanvas(c.id); await refresh(query.trim()) } catch { message.error('移除失败') }
+        try { await archiveCanvas(c.id); await refresh(query.trim(), page) } catch { message.error(t('archiveFail')) }
       },
     })
   }
 
   const doRename = async () => {
-    const t = renameVal.trim()
-    if (!t || !renameId) return
+    const nextTitle = renameVal.trim()
+    if (!nextTitle || !renameId) return
     try {
-      await renameCanvas(renameId, t)
+      await renameCanvas(renameId, nextTitle)
       setRenameId(0)
-      await refresh(query.trim())
-    } catch { message.error('改名失败') }
+      await refresh(query.trim(), page)
+    } catch { message.error(t('renameFail')) }
   }
 
   const loadTpl = useCallback(async () => {
@@ -158,6 +172,15 @@ const ExploreCanvasPage: React.FC = () => {
     if (k === 'shares') void loadShares()
   }
 
+  const useBuiltin = async (tpl: BuiltinTemplate) => {
+    try {
+      const d = await createCanvas(tpl.defaultTitle, 'from_template')
+      nav('/explore/' + d.id + '?seed=' + tpl.id)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('createFail'))
+    }
+  }
+
   const doUseTpl = async (id: number) => {
     try {
       const d = await applyTemplate(id)
@@ -170,13 +193,13 @@ const ExploreCanvasPage: React.FC = () => {
       title: t('tplDeleteConfirm'),
       okButtonProps: { danger: true },
       onOk: async () => {
-        try { await deleteTemplate(id); void loadTpl() } catch { message.error('下架失败') }
+        try { await deleteTemplate(id); void loadTpl() } catch { message.error(t('tplUnpublishFail')) }
       },
     })
   }
 
   const doRevokeShare = async (id: number) => {
-    try { await revokeShare(id); void loadShares() } catch { message.error('收回失败') }
+    try { await revokeShare(id); void loadShares() } catch { message.error(t('shareRevokeFail')) }
   }
 
   const fmtTime = (s: string) => (s ? s.slice(5, 16) : '')
@@ -236,6 +259,13 @@ const ExploreCanvasPage: React.FC = () => {
                 )
               })}
               {list.length === 0 && <Empty description={query ? t('emptySearch') : t('emptyList')} style={{ gridColumn: '1 / -1' }} />}
+              {/* 分页：画布多起来后不再一次渲染全部卡片 */}
+              {total > PAGE_SIZE && (
+                <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
+                  <Pagination current={page} pageSize={PAGE_SIZE} total={total} size="small"
+                    showSizeChanger={false} hideOnSinglePage onChange={(p) => setPage(p)} />
+                </div>
+              )}
             </div>
           )
   )
@@ -248,6 +278,25 @@ const ExploreCanvasPage: React.FC = () => {
         display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
         gap: 16, padding: '8px 0',
       }}>
+        {BUILTIN_TEMPLATES.map((tp) => (
+          <Card key={tp.id} styles={{ body: { padding: 12 } }}>
+            <div style={{
+              height: 96, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: PRESET_GRADIENT.from_template, position: 'relative', overflow: 'hidden',
+            }}>
+              <span style={{ fontSize: 42 }}>{tp.emoji}</span>
+              <Tag color="blue" style={{ position: 'absolute', top: 6, right: 6 }}>{t('tplOfficial')}</Tag>
+            </div>
+            <div style={{ marginTop: 8, fontWeight: 600 }}>{t(tp.titleKey)}</div>
+            <div style={{
+              fontSize: 12, color: 'var(--text-secondary, #888)', marginTop: 2, minHeight: 32,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>{t(tp.descKey)}</div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <Button size="small" type="primary" icon={<PlusSquareOutlined />} onClick={() => void useBuiltin(tp)}>{t('tplUse')}</Button>
+            </div>
+          </Card>
+        ))}
         {tpls.map((tp) => (
           <Card key={tp.id} styles={{ body: { padding: 12 } }}>
             <div style={{
@@ -272,7 +321,11 @@ const ExploreCanvasPage: React.FC = () => {
             </div>
           </Card>
         ))}
-        {tpls.length === 0 && <Empty description={t('tplEmpty')} style={{ gridColumn: '1 / -1' }} />}
+        {tpls.length === 0 && (
+          <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-tertiary, #999)', padding: '4px 2px' }}>
+            {t('tplEmptyHint')}
+          </div>
+        )}
       </div>
     )
   )
@@ -349,7 +402,8 @@ const ExploreCanvasPage: React.FC = () => {
         subtitle={t('subtitle')}
         extra={
           <Space>
-            <Input.Search allowClear placeholder={t('searchPh')} style={{ width: 200 }} onChange={(e) => setQuery(e.target.value)} />
+            <Input.Search allowClear placeholder={t('searchPh')} style={{ width: 200 }}
+              onChange={(e) => { setQuery(e.target.value); setPage(1) }} />
             <Button icon={<RestOutlined />} onClick={openTrash}>{t('trash')}</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>{t('newCanvas')}</Button>
           </Space>

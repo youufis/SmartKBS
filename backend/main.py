@@ -171,6 +171,8 @@ async def lifespan(app: FastAPI):
         # 探索画布：素材自动清理每日线程（EXPLORE_SWEEP_DRY 默认只出清单不动文件）
         from backend.explore_asset_sweeper import start as start_explore_sweeper
         start_explore_sweeper()
+        from backend.explore_text_index import start_backfill as start_explore_text_index
+        start_explore_text_index()
     except Exception as e:
         print(f"[main] 探索画布清理线程启动失败: {e}", file=sys.stderr)
     try:

@@ -439,6 +439,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 探索画布（backend/api/personal_canvas_router.py；方案 docs/explore-canvas/）
   // 总闸关掉 = 接口 404 + 导航隐藏，师生数据原样保留，随时可再开
   { key: 'EXPLORE_CANVAS_ENABLED', labelKey: 'field_EXPLORE_CANVAS_ENABLED', descKey: 'field_EXPLORE_CANVAS_ENABLED_desc', type: 'boolean', group: 'explore', level: 'basic', required: false },
+  { key: 'EXPLORE_CANVAS_MAX', labelKey: 'field_EXPLORE_CANVAS_MAX', descKey: 'field_EXPLORE_CANVAS_MAX_desc', type: 'number', group: 'explore', level: 'basic', required: false, unitKey: 'unitCount' },
   { key: 'EXPLORE_CHAT_QUOTA', labelKey: 'field_EXPLORE_CHAT_QUOTA', descKey: 'field_EXPLORE_CHAT_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },
   { key: 'EXPLORE_IMAGE_QUOTA', labelKey: 'field_EXPLORE_IMAGE_QUOTA', descKey: 'field_EXPLORE_IMAGE_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },
   { key: 'EXPLORE_TTS_QUOTA', labelKey: 'field_EXPLORE_TTS_QUOTA', descKey: 'field_EXPLORE_TTS_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },

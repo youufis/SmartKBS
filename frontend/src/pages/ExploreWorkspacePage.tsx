@@ -8,13 +8,14 @@ import { useTranslation } from 'react-i18next'
 import ExploreCanvas from '../components/explore/ExploreCanvas'
 import { useAuthStore } from '../stores/authStore'
 import ExploreAIPanel from '../components/explore/ExploreAIPanel'
+import { insertShapesIntoEditor } from '../components/explore/shapeInsert'
+import { BUILTIN_TEMPLATES } from '../constants/exploreTemplates'
 import {
-  addPage, archivePage, archivePortfolio, createShare, deletePage, getCanvas, pageHistory, publishTemplate, renameCanvas, restoreHistory, savePage, speak, uploadAsset,
+  addPage, archivePage, archivePortfolio, createShare, deletePage, getCanvas, getQuota, pageHistory, publishTemplate, renameCanvas, restoreHistory, savePage, speak, uploadAsset,
   type ExplorePageMeta, type HistoryItem, type SaveState,
 } from '../api/explore'
 
-// 与系统配置 EXPLORE_CONTINUOUS_REMIND_MIN 同值（M0 先取默认，接线配置属 T9）
-const CONTINUOUS_REMIND_MIN = 40
+// 连续使用提醒默认 40 分钟，实际值由 /api/explore/quota 按系统配置下发
 
 /** 角色判定走平台统一数据源（authStore 的 role 是字符串 student/teacher/admin） */
 
@@ -26,7 +27,7 @@ const ExploreWorkspacePage: React.FC = () => {
   const myRole = useAuthStore((s) => s.user?.role)
   const [title, setTitle] = useState('')
   const [pages, setPages] = useState<ExplorePageMeta[]>([])
-  const [sp] = useSearchParams()
+  const [sp, setSp] = useSearchParams()
   const [current, setCurrent] = useState(() => { const n = Number(sp.get('page')); return Number.isFinite(n) && n > 0 ? n : 1 })
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [renameOpen, setRenameOpen] = useState(false)
@@ -35,7 +36,12 @@ const ExploreWorkspacePage: React.FC = () => {
   const lastActiveRef = useRef(Date.now())
   const sessionMsRef = useRef(0)
   const editorRef = useRef<Editor | null>(null)
+  const revRef = useRef(0)   // 与画布组件共享的快照版本号
+  const [remindMin, setRemindMin] = useState(40)
   const [mobile, setMobile] = useState(() => window.innerWidth < 768)
+  useEffect(() => {
+    getQuota().then((q) => { if (q?.continuous_remind_min) setRemindMin(q.continuous_remind_min) }).catch(() => { /* 未开放时用默认 */ })
+  }, [])
   useEffect(() => {
     const onResize = () => setMobile(window.innerWidth < 768)
     window.addEventListener('resize', onResize)
@@ -61,6 +67,24 @@ const ExploreWorkspacePage: React.FC = () => {
   const [tplDesc, setTplDesc] = useState('')
   const [publishing, setPublishing] = useState(false)
 
+  // 从模板库「系统范例」进来：把预置卡片落到这一页，落完就把 seed 从地址栏抹掉
+  const seededRef = useRef(false)
+  const onCanvasReady = useCallback(() => {
+    const seed = sp.get('seed')
+    if (!seed || seededRef.current) return
+    const tpl = BUILTIN_TEMPLATES.find((x) => x.id === seed)
+    const ed = editorRef.current
+    if (!tpl || !ed) return
+    seededRef.current = true
+    insertShapesIntoEditor(ed, tpl.shapes)
+    void savePage(cid, current, JSON.stringify(ed.getSnapshot()), undefined, revRef.current)
+      .then((r) => { revRef.current = r.rev ?? revRef.current })
+      .catch(() => { /* 自动保存还会再试一次 */ })
+    const next = new URLSearchParams(sp)
+    next.delete('seed')
+    setSp(next, { replace: true })
+  }, [sp, setSp, cid, current])
+
   const refresh = useCallback(async () => {
     try {
       const d = await getCanvas(cid)
@@ -70,7 +94,7 @@ const ExploreWorkspacePage: React.FC = () => {
         setCurrent(d.pages[0].page_number)
       }
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '画布加载失败')
+      message.error(e?.response?.data?.detail || t('errCanvasLoad'))
       nav('/explore')
     }
   }, [cid, current, nav]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -82,16 +106,16 @@ const ExploreWorkspacePage: React.FC = () => {
     const iv = window.setInterval(() => {
       if (Date.now() - lastActiveRef.current < 120000) sessionMsRef.current += 30000
       else sessionMsRef.current = 0
-      if (sessionMsRef.current >= CONTINUOUS_REMIND_MIN * 60000) {
+      if (sessionMsRef.current >= remindMin * 60000) {
         sessionMsRef.current = 0
         Modal.warning({
-          title: '休息一下吧',
-          content: '已经连续探索 ' + CONTINUOUS_REMIND_MIN + ' 分钟啦，站起来活动活动，画布随时等你回来。',
+          title: t('breakTitle'),
+          content: t('breakBody', { n: remindMin }),
         })
       }
     }, 30000)
     return () => window.clearInterval(iv)
-  }, [])
+  }, [remindMin])
 
   const onActivity = () => { lastActiveRef.current = Date.now() }
 
@@ -109,10 +133,10 @@ const ExploreWorkspacePage: React.FC = () => {
           r.urls.reduce((p, url) => p.then(() => new Promise<void>((resolve) => {
             const a = new Audio(url); cardAudioRef.current = a; a.onended = () => resolve(); a.onerror = () => resolve(); void a.play()
           })), Promise.resolve())
-        }).catch(() => message.warning('朗读失败'))
+        }).catch(() => message.warning(t('speakFail')))
       } else if (d.action === 'copy') {
         void navigator.clipboard.writeText(d.answer || '').then(
-          () => message.success('回答已复制'), () => message.warning('浏览器不允许复制'))
+          () => message.success(t('copied')), () => message.warning(t('copyDenied')))
       }
     }
     window.addEventListener('explore:card-action', onCard)
@@ -127,7 +151,7 @@ const ExploreWorkspacePage: React.FC = () => {
       .filter((s) => ['geo', 'note', 'text', 'ask-card'].includes(String(s.type)))
       .map((s) => ({ s, b: ed.getShapePageBounds(s.id) }))
       .filter((x) => !!x.b)
-    if (movable.length < 3) { message.info('卡片太少，不需要整理'); return }
+    if (movable.length < 3) { message.info(t('tooFewCards')); return }
     Modal.confirm({
       title: t('organizeTitle'),
       content: t('organizeBody'),
@@ -146,7 +170,7 @@ const ExploreWorkspacePage: React.FC = () => {
           y: vp.y + 60 + Math.floor(i / perRow) * (maxH + gap),
         }))
         ed.updateShapes(updates as never)
-        message.success('已重排 ' + updates.length + ' 张卡片')
+        message.success(t('organizeDone', { n: updates.length }))
       },
     })
   }
@@ -154,24 +178,24 @@ const ExploreWorkspacePage: React.FC = () => {
   /** 一键清除本页：先存当前内容并强制归档到时间线，再清空——后悔可回 */
   const doClearPage = () => {
     const ed = editorRef.current
-    if (!ed) { message.warning('画布还没准备好'); return }
-    if (ed.getCurrentPageShapes().length === 0) { message.info('这一页本来就是空的'); return }
+    if (!ed) { message.warning(t('canvasNotReady')); return }
+    if (ed.getCurrentPageShapes().length === 0) { message.info(t('pageEmpty')); return }
     Modal.confirm({
       title: t('clearTitle'),
       content: t('clearBody'),
-      okText: '清除',
+      okText: t('clearOk'),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           const snap = JSON.stringify(ed.getSnapshot())
-          await savePage(cid, current, snap)
+          revRef.current = (await savePage(cid, current, snap, undefined, revRef.current)).rev ?? revRef.current
           await archivePage(cid, current, snap)
           ed.deleteShapes(ed.getCurrentPageShapes().map((s) => s.id) as never)
-          await savePage(cid, current, JSON.stringify(ed.getSnapshot()))
+          revRef.current = (await savePage(cid, current, JSON.stringify(ed.getSnapshot()), undefined, revRef.current)).rev ?? revRef.current
           setSaveState('saved')
-          message.success('已清除；需要找回就点「时间线」')
+          message.success(t('clearDone'))
         } catch (e: any) {
-          message.error(e?.response?.data?.detail || '清除失败')
+          message.error(e?.response?.data?.detail || t('clearFail'))
         }
       },
     })
@@ -193,17 +217,17 @@ const ExploreWorkspacePage: React.FC = () => {
   const doShareSubmit = async () => {
     const ed = editorRef.current
     if (!ed || sharing) return
-    if (!ed.getCurrentPageShapes().length) { message.info('这一页还是空的，先画点东西再分享吧'); return }
+    if (!ed.getCurrentPageShapes().length) { message.info(t('shareEmpty')); return }
     setSharing(true)
     try {
       // 先把服务端快照存到最新，再生成分享副本——老师看到的就是这一刻的最新状态
-      await savePage(cid, current, JSON.stringify(ed.getSnapshot()))
+      revRef.current = (await savePage(cid, current, JSON.stringify(ed.getSnapshot()), undefined, revRef.current)).rev ?? revRef.current
       const src = await buildCover()
       const r = await createShare({ canvas_id: cid, page_number: current, title: shareTitle.trim(), image_src: src })
-      message.success('已生成只读快照，' + (r.expires_at || '').slice(5, 10) + ' 前有效，可随时收回')
+      message.success(t('shareDone', { date: (r.expires_at || '').slice(5, 10) }))
       setShareOpen(false)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '分享失败，稍后再试')
+      message.error(e?.response?.status === 409 ? t('saveConflict') : (e?.response?.data?.detail || t('shareFail')))
     } finally { setSharing(false) }
   }
 
@@ -211,17 +235,17 @@ const ExploreWorkspacePage: React.FC = () => {
     const ed = editorRef.current
     const tt = tplTitle.trim()
     if (!ed || publishing) return
-    if (!tt) { message.info('请给模板起个名字'); return }
-    if (!ed.getCurrentPageShapes().length) { message.info('这一页还是空的，先做点内容再发布吧'); return }
+    if (!tt) { message.info(t('tplNeedName')); return }
+    if (!ed.getCurrentPageShapes().length) { message.info(t('tplEmpty')); return }
     setPublishing(true)
     try {
-      await savePage(cid, current, JSON.stringify(ed.getSnapshot()))
+      revRef.current = (await savePage(cid, current, JSON.stringify(ed.getSnapshot()), undefined, revRef.current)).rev ?? revRef.current
       const src = await buildCover()
       const r = await publishTemplate({ canvas_id: cid, page_number: current, title: tt, description: tplDesc.trim(), image_src: src })
-      message.success('已发布到模板库：《' + r.title + '》')
+      message.success(t('tplDone', { title: r.title }))
       setTplOpen(false)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '发布失败，稍后再试')
+      message.error(e?.response?.status === 409 ? t('saveConflict') : (e?.response?.data?.detail || t('tplFail')))
     } finally { setPublishing(false) }
   }
 
@@ -230,7 +254,7 @@ const ExploreWorkspacePage: React.FC = () => {
     const ed = editorRef.current
     if (!ed || archiving) return
     const shapes = ed.getCurrentPageShapes()
-    if (!shapes.length) { message.info('这一页还是空的，先画点东西再存档吧'); return }
+    if (!shapes.length) { message.info(t('archEmpty')); return }
     setArchiving(true)
     try {
       const { blob } = await ed.toImage(shapes as never, { format: 'png', background: true, padding: 24 })
@@ -238,11 +262,11 @@ const ExploreWorkspacePage: React.FC = () => {
       const up = await uploadAsset(cid, png)
       const r = await archivePortfolio(cid, current, { image_src: up.src, title: title ? title + ' · 第 ' + current + ' 页' : '' })
       const badgeText = (r.badges || []).map((b) => b.icon + ' ' + b.name).join('、')
-      message.success('已存入成长档案'
-        + (r.points ? ' · 探索+' + r.points + ' 分' : '')
-        + (badgeText ? ' · 解锁徽章 ' + badgeText : ''))
+      message.success(t('archDone')
+        + (r.points ? t('archPoints', { n: r.points }) : '')
+        + (badgeText ? t('archBadges', { names: badgeText }) : ''))
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '存档失败，稍后再试')
+      message.error(e?.response?.status === 409 ? t('saveConflict') : (e?.response?.data?.detail || t('archFail')))
     } finally {
       setArchiving(false)
     }
@@ -256,18 +280,18 @@ const ExploreWorkspacePage: React.FC = () => {
 
   const doRestore = async (hid: number) => {
     const ed = editorRef.current
-    if (!ed) { message.warning('画布还没准备好'); return }
+    if (!ed) { message.warning(t('canvasNotReady')); return }
     try {
       // 服务端先把当前内容存档，再取目标快照；前端载入后立即显式写回（双向可回）
       const snapText = await restoreHistory(cid, current, hid)
-      if (!snapText) { message.info('这份存档是空的'); return }
+      if (!snapText) { message.info(t('histEmptySnap')); return }
       ed.store.mergeRemoteChanges(() => { ed.loadSnapshot(JSON.parse(snapText)) })
-      await savePage(cid, current, JSON.stringify(ed.getSnapshot()))
+      revRef.current = (await savePage(cid, current, JSON.stringify(ed.getSnapshot()), undefined, revRef.current)).rev ?? revRef.current
       setSaveState('saved')
       setHistOpen(false)
-      message.success('已回到 ' + hid + ' 号存档；刚才的内容也存进了时间线，可再回来')
+      message.success(t('histDone', { id: hid }))
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '回滚失败')
+      message.error(e?.response?.data?.detail || t('histFail'))
     }
   }
 
@@ -276,33 +300,33 @@ const ExploreWorkspacePage: React.FC = () => {
       const d = await addPage(cid)
       setCurrent(d.page_number)
       await refresh()
-    } catch { message.error('新增页面失败') }
+    } catch { message.error(t('addPageFail')) }
   }
 
   const doDeletePage = (pn: number) => {
     Modal.confirm({
-      title: '删除这一页？',
-      content: '这一页上的全部内容会被移除。',
+      title: t('delPageTitle'),
+      content: t('delPageBody'),
       okButtonProps: { danger: true },
-      okText: '删除',
+      okText: t('delBtn'),
       onOk: async () => {
         try {
           await deletePage(cid, pn)
           if (pn === current) setCurrent(1)
           await refresh()
-        } catch (e: any) { message.error(e?.response?.data?.detail || '删除失败') }
+        } catch (e: any) { message.error(e?.response?.data?.detail || t('delPageFail')) }
       },
     })
   }
 
   const doRename = async () => {
-    const t = nameInput.trim()
-    if (!t) return
+    const nextTitle = nameInput.trim()
+    if (!nextTitle) return
     try {
-      await renameCanvas(cid, t)
-      setTitle(t)
+      await renameCanvas(cid, nextTitle)
+      setTitle(nextTitle)
       setRenameOpen(false)
-    } catch { message.error('改名失败') }
+    } catch { message.error(t('renameFail')) }
   }
 
   const displayPages: ExplorePageMeta[] = pages.length
@@ -320,6 +344,8 @@ const ExploreWorkspacePage: React.FC = () => {
     saving: { text: '保存中', color: 'processing' },
     saved: { text: '已保存', color: 'success' },
     offline: { text: '离线·本地已暂存', color: 'warning' },
+    conflict: { text: '别处已修改·本地已暂存', color: 'error' },
+    toolarge: { text: '内容过大·未能存云端', color: 'error' },
   }
   const tag = saveTagMap[saveState]
 
@@ -333,7 +359,7 @@ const ExploreWorkspacePage: React.FC = () => {
         <span style={{
           fontWeight: 600, fontSize: 15, maxWidth: mobile ? 130 : 320,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{title || '探索画布'}</span>
+        }}>{title || t('untitledCanvas')}</span>
         <Button size="small" type="text" icon={<EditOutlined />}
           onClick={() => { setNameInput(title); setRenameOpen(true) }} />
         <div style={{ flex: 1 }} />
@@ -409,6 +435,8 @@ const ExploreWorkspacePage: React.FC = () => {
           onSaveState={setSaveState}
           onActivity={onActivity}
           externalEditorRef={editorRef}
+          externalRevRef={revRef}
+          onReady={onCanvasReady}
         />
         {panelOpen ? (
           <ExploreAIPanel

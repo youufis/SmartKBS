@@ -179,6 +179,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "CLASS_DRILL_AI_ENABLED": True,
     # ── 探索画布（backend/api/personal_canvas_router.py；方案 docs/explore-canvas/）──
     "EXPLORE_CANVAS_ENABLED": True,          # 总开关：关=整组接口 404，前端入口隐藏，数据原样保留
+    "EXPLORE_CANVAS_MAX": 50,                # 每人未归档画布上限（0=不限），防无限建导致数据膨胀
     "EXPLORE_CHAT_QUOTA": 50,                # 单人单日 AI 问答上限（次）
     "EXPLORE_IMAGE_QUOTA": 10,               # 单人单日生图上限（张）
     "EXPLORE_TTS_QUOTA": 30,                 # 单人单日卡片朗读上限（次）
@@ -566,6 +567,7 @@ def _mask_config(config: dict[str, Any]) -> dict[str, Any]:
 _NUM_RANGES: dict[str, tuple[float, float]] = {
     # 探索画布（配额与素材清理，见 personal_canvas_router / explore_asset_sweeper）
     "EXPLORE_CHAT_QUOTA": (0, 999), "EXPLORE_IMAGE_QUOTA": (0, 999), "EXPLORE_TTS_QUOTA": (0, 999),
+    "EXPLORE_CANVAS_MAX": (0, 500),
     "EXPLORE_CONTINUOUS_REMIND_MIN": (5, 180), "EXPLORE_ASSET_ORPHAN_DAYS": (1, 365),
     "EXPLORE_ASSET_TRASH_DAYS": (1, 90), "EXPLORE_TMP_HOURS": (1, 168), "EXPLORE_CANVAS_TRASH_DAYS": (7, 365), "EXPLORE_SHARE_EXPIRE_DAYS": (1, 90),
     "EXPLORE_ASSET_MAX_MB": (64, 10240), "EXPLORE_SWEEP_HOUR": (0, 23), "EXPLORE_TTS_CACHE_MB": (50, 4000),

@@ -7,7 +7,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Tldraw, type Editor, type TLAssetStore, type TLComponents, type TLStoreSnapshot } from 'tldraw'
 import 'tldraw/tldraw.css'
-import { message } from 'antd'
+import { Modal, message } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { getPage, savePage, uploadAsset, type SaveState } from '../../api/explore'
 import { AskCardUtil } from './AskCardShape'
 import { saveDraft, loadDraft, clearDraft } from '../../utils/exploreDraft'
@@ -29,9 +30,14 @@ interface Props {
   onSaveState?: (s: SaveState) => void
   onActivity?: () => void
   externalEditorRef?: React.MutableRefObject<Editor | null>
+  /** 版本号引用：父组件在"强制保存"（回滚/清空/分享前落盘）后也要同步它，否则下次自动保存会误判 409 */
+  externalRevRef?: React.MutableRefObject<number>
+  /** 画布就绪（服务端/草稿已载入）：父组件用它做"内置模板落卡"这类一次性动作 */
+  onReady?: () => void
 }
 
-const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onActivity, externalEditorRef }) => {
+const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onActivity, externalEditorRef, externalRevRef, onReady }) => {
+  const { t } = useTranslation('explore')
   const internalRef = useRef<Editor | null>(null)
   const editorRef = externalEditorRef || internalRef
   const [ready, setReady] = useState(false)
@@ -41,26 +47,49 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
   stateCb.current = onSaveState
   const actCb = useRef(onActivity)
   actCb.current = onActivity
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
   const draftKey = canvasId + ':' + pageNumber
   const bigWarnedRef = useRef(false)
+  const localRevRef = useRef(0)   // 服务端快照版本号（乐观锁）
+  const revRef = externalRevRef || localRevRef
 
   const flushSave = useCallback(async () => {
     const editor = editorRef.current
     if (!editor || !dirtyRef.current) return
-    dirtyRef.current = false
     const snap = JSON.stringify(editor.getSnapshot())
-    // 接近 8MB 硬上限时提醒一次（大图直接进快照会让保存越来越慢直到 413）
-    if (snap.length > 6 * 1024 * 1024 && !bigWarnedRef.current) {
-      bigWarnedRef.current = true
-      message.warning('画布内容快接近大小上限：建议删掉大图，或另开一页继续')
+    const bytes = new Blob([snap]).size
+    // 已超上限就别再反复撞 413：保留 dirty，等用户删大图或分页
+    if (bytes > 8 * 1024 * 1024) {
+      if (stateCb.current) stateCb.current('toolarge')
+      return
     }
+    if (bytes > 6 * 1024 * 1024 && !bigWarnedRef.current) {
+      bigWarnedRef.current = true
+      message.warning(t('nearLimit'))
+    }
+    dirtyRef.current = false
     if (stateCb.current) stateCb.current('saving')
     try {
-      await savePage(canvasId, pageNumber, snap)
+      const r = await savePage(canvasId, pageNumber, snap, undefined, revRef.current)
+      if (r && typeof r.rev === 'number') revRef.current = r.rev
       await clearDraft(draftKey)
       if (stateCb.current) stateCb.current('saved')
-    } catch {
+    } catch (e: any) {
+      const status = e?.response?.status
       dirtyRef.current = true
+      if (status === 409) {
+        // 别处已经写过：本地这份留成草稿，绝不直接覆盖别人的内容
+        try { await saveDraft(draftKey, snap) } catch { /* ignore */ }
+        if (stateCb.current) stateCb.current('conflict')
+        return
+      }
+      if (status === 413) {
+        // 超上限：草稿进 IndexedDB（能存 MB 级），云端存不下
+        try { await saveDraft(draftKey, snap) } catch { /* ignore */ }
+        if (stateCb.current) stateCb.current('toolarge')
+        return
+      }
       try { await saveDraft(draftKey, snap) } catch { /* 连草稿都写不进就算了 */ }
       if (stateCb.current) stateCb.current('offline')
     }
@@ -70,25 +99,47 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
     editorRef.current = editor
     ;(async () => {
       let serverSnap = ''
+      let serverRev = 0
       let ok = true
       try {
-        serverSnap = (await getPage(canvasId, pageNumber)).snapshot_data || ''
+        const d = await getPage(canvasId, pageNumber)
+        serverSnap = d.snapshot_data || ''
+        serverRev = Number(d.rev || 0)
       } catch {
         ok = false
       }
+      revRef.current = serverRev
       const draft = await loadDraft(draftKey).catch(() => null)
       if (ok && serverSnap) {
+        // 云端有内容、本地还有草稿：让用户选，别默默丢弃任何一份
+        let useDraft = false
+        if (draft) {
+          useDraft = await new Promise<boolean>((resolve) => {
+            Modal.confirm({
+              title: t('draftFound'),
+              content: t('draftFoundBody'),
+              okText: t('draftUse'),
+              cancelText: t('draftCloud'),
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            })
+          })
+        }
         try {
-          editor.store.mergeRemoteChanges(() => { editor.loadSnapshot(JSON.parse(serverSnap) as TLStoreSnapshot) })
+          const src = useDraft ? draft!.snapshot : serverSnap
+          editor.store.mergeRemoteChanges(() => { editor.loadSnapshot(JSON.parse(src) as TLStoreSnapshot) })
+          if (useDraft) dirtyRef.current = true
+          else void clearDraft(draftKey)
         } catch { /* 快照损坏则保持空白，不阻塞使用 */ }
-        if (draft) void clearDraft(draftKey) // 服务端是新的，本地草稿作废
       } else if (draft) {
         try {
           editor.store.mergeRemoteChanges(() => { editor.loadSnapshot(JSON.parse(draft.snapshot) as TLStoreSnapshot) })
-          message.info('网络不通，已恢复本地草稿')
+          dirtyRef.current = true
+          message.info(t('offlineRestored'))
         } catch { /* ignore */ }
       }
       setReady(true)
+      try { onReadyRef.current && onReadyRef.current() } catch { /* 落卡失败不影响打开 */ }
     })()
   }, [canvasId, pageNumber, draftKey])
 
@@ -122,6 +173,17 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
       void flushSave()
     }
   }, [ready, flushSave, draftKey])
+
+  // 有未保存内容时拦一下关页/刷新（5s 防抖窗口里关掉会丢内容）
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
 
   // 图片先传成 URL 再进快照（同协作白板：一张 dataURL 大图会让后续每份快照都背上它）
   const assetStore = useMemo<TLAssetStore>(() => ({
@@ -166,7 +228,7 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'var(--bg-layout)', zIndex: 1000,
         }}>
-          打开画布…
+          {t('openingCanvas')}
         </div>
       )}
     </div>

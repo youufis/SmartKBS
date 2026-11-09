@@ -170,6 +170,7 @@ def sweep_once(dry=None):
             if not dry:
                 c.execute("DELETE FROM pc_pages WHERE canvas_id = ?", (cid,))
                 c.execute("DELETE FROM pc_pages_history WHERE canvas_id = ?", (cid,))
+                c.execute("DELETE FROM pc_page_text WHERE canvas_id = ?", (cid,))
                 c.execute("DELETE FROM pc_canvases WHERE id = ?", (cid,))
                 moved += 1
 

@@ -2581,6 +2581,8 @@ def init_db():
                 created_at TEXT NOT NULL,
                 UNIQUE(canvas_id, page_number)
             )""")
+            # 乐观锁版本号：多端同时编辑时用 rev 做条件更新，防止后写覆盖前写
+            _ensure_column(c, "pc_pages", "rev", "INTEGER NOT NULL DEFAULT 0")
             c.execute("CREATE INDEX IF NOT EXISTS idx_pcbp_canvas ON pc_pages(canvas_id, page_number)")
             c.execute("""CREATE TABLE IF NOT EXISTS pc_pages_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2590,6 +2592,14 @@ def init_db():
                 saved_at TEXT NOT NULL
             )""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_pbch_page ON pc_pages_history(canvas_id, page_number, saved_at)")
+            # 页面纯文本索引：搜索只扫这张小表，不碰 MB 级快照（backend/explore_text_index.py）
+            c.execute("""CREATE TABLE IF NOT EXISTS pc_page_text (
+                canvas_id INTEGER NOT NULL,
+                page_number INTEGER NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (canvas_id, page_number)
+            )""")
             c.execute("""CREATE TABLE IF NOT EXISTS pc_assets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL UNIQUE,
