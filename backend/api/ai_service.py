@@ -1001,12 +1001,12 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
 
 
 def is_multimodal_model(model_name: str) -> bool:
-    """判断是否为多模态模式（由用户在系统配置中手动勾选决定）"""
-    try:
-        from backend.api.config_router import get_config_value
-        return bool(get_config_value("ENABLE_MULTIMODAL", False))
-    except Exception:
-        return False
+    """多模态恒为开。
+
+    对话模型按约定必须支持图片输入（打不了图的模型由 image_model_router 自动回落视觉模型），
+    所以不再提供"是否多模态"的开关——少一个能配错的地方。
+    """
+    return True
 
 
 def _build_multimodal_content(

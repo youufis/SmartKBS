@@ -242,6 +242,9 @@ class FileSummaryCache:
         return ""
 
     async def _async_image_summary(self, file_path: str, prompt: str, api_key: str) -> str:
+        from backend.image_model_router import fallback_model, pick_image_model
+        # 摘要只是"看图说清楚"，不会有解题意图，所以不传 prompt 去猜（避免误判走贵模型）
+        model_name, _route = pick_image_model("", "")
         try:
             encoded = encode_image_to_base64(file_path)
             async with httpx.AsyncClient() as client:
@@ -249,7 +252,7 @@ class FileSummaryCache:
                     f'{ai_api_base()}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": resolve_vl_model(get_config_value("MODEL_VL_NAME", "")),
+                        "model": model_name,
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -260,6 +263,25 @@ class FileSummaryCache:
                         "stream": False,
                     },
                 )
+                if resp.status_code != 200:
+                    alt = fallback_model(model_name, resp.status_code, resp.text)
+                    if alt:
+                        logger.info("[聊天] 对话模型不吃图(HTTP %s)，摘要回落 %s", resp.status_code, alt)
+                        resp = await client.post(
+                            f'{ai_api_base()}/chat/completions',
+                            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                            json={
+                                "model": alt,
+                                "messages": [{
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "image_url", "image_url": {"url": f"data:{get_image_mime_type(file_path)};base64,{encoded}"}},
+                                        {"type": "text", "text": prompt},
+                                    ]
+                                }],
+                                "stream": False,
+                            },
+                        )
                 if resp.status_code == 200:
                     data = resp.json()
                     return data["choices"][0]["message"]["content"]
@@ -295,7 +317,7 @@ async def get_usage(request: Request):
     chat_mode = {"kb_direct": "kb", "agent": "agent"}.get(get_ai_config()["mode"], "llm")
 
     if role_val == 0:
-        multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
+        multimodal_enabled = True   # 对话模型按约定必须支持图片（不支持时由路由回落视觉模型）
         model_name = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
         return {
             "enabled": enabled, "used": 0, "max": 0, "remaining": -1,
@@ -305,7 +327,7 @@ async def get_usage(request: Request):
             "kb_ready": kb_ready_flag, "kb_reason": kb_reason, "chat_mode": chat_mode,
         }
 
-    multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
+    multimodal_enabled = True   # 同上：不再提供开关
     model_name = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
 
     return {
@@ -495,7 +517,7 @@ def _chat_event_generator(
                 logger.warning(f"RAG 检索失败: {e}")
 
         # ── 判断是否启用多模态 ──
-        multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
+        multimodal_enabled = True   # 对话模型按约定必须支持图片，不再提供开关
         image_files = [fp for fp in valid_file_paths if is_image_file(fp)]
         _summaries_generated = False
 
@@ -825,9 +847,11 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
 def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     """图像理解流式（同步）"""
     import requests as sync_requests
+    from backend.image_model_router import fallback_model, pick_image_model
     try:
         encoded_image = encode_image_to_base64(file_path)
-        model_name = resolve_vl_model(get_config_value("MODEL_VL_NAME", ""))
+        # 普通看图用对话模型，解题类（题干/公式）才走视觉模型；模型名全部来自配置
+        model_name, route = pick_image_model(prompt, "")
         payload = {
             "model": model_name,
             "messages": [{
@@ -839,17 +863,27 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             }],
             "stream": True,
         }
-        resp = sync_requests.post(
-            f'{ai_api_base()}/chat/completions',
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            stream=True,
-            timeout=300,
-        )
+
+        def _post(p):
+            return sync_requests.post(
+                f'{ai_api_base()}/chat/completions',
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=p, stream=True, timeout=300,
+            )
+
+        resp = _post(payload)
+        if resp.status_code != 200:
+            alt = fallback_model(model_name, resp.status_code, resp.text)
+            if alt:
+                logger.info("[聊天] 对话模型不吃图(HTTP %s)，图像理解回落 %s", resp.status_code, alt)
+                model_name, route = alt, "fallback"
+                payload["model"] = alt
+                resp = _post(payload)
         if resp.status_code != 200:
             logger.warning(f"图像API返回非200状态: {resp.status_code} - {resp.text[:300]}")
             yield {"text": "图像处理失败"}
             return
+        logger.info("[聊天] 图像理解 model=%s route=%s", model_name, route)
 
         full_text = ""
         for line in resp.iter_lines():

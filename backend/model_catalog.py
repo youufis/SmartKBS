@@ -59,6 +59,12 @@ VL_MODELS: list[dict[str, str]] = [
 RETIRED_VL_MODELS: set[str] = {"qwen3-vl-flash"}
 
 
+def resolve_chat_model(name: str | None = None) -> str:
+    """对话模型名归一：配置留空就回落到默认（默认值只在本文件维护）"""
+    n = (name or "").strip()
+    return n or DEFAULT_CHAT_MODEL
+
+
 def resolve_vl_model(name: str | None) -> str:
     """把配置里的视觉模型名归一到可用值；留空或已下线就回到默认"""
     n = (name or "").strip()

@@ -107,14 +107,13 @@ def file_kind(ext: str) -> str:
 
 
 def vl_enabled() -> bool:
-    """图片作业的 VL 预解读开关。
+    """图片作业的 VL 预解读开关（默认开）。
 
-    与聊天用的 ENABLE_MULTIMODAL 分开的理由：教师布置图片作业不该被一个聊天开关
-    连带影响；两处默认都为开，任一开着就能跑图。
+    聊天侧已没有"多模态开关"（对话模型按约定必须支持图片），这里独立保留一个开关，
+    方便学校在成本敏感时单独关掉作业识图。
     """
     try:
-        return bool(get_config_value("HOMEWORK_ENABLE_VL", True)) or bool(
-            get_config_value("ENABLE_MULTIMODAL", False))
+        return bool(get_config_value("HOMEWORK_ENABLE_VL", True))
     except Exception:
         return False
 

@@ -63,7 +63,7 @@ interface ConfigField {
   descKey?: string
   /** 完整说明（原理、注意事项、取值范围）。说明行只放一句话，长文进 label 旁的 ⓘ */
   longDescKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate' | 'tags_select' | 'duration' | 'combobox'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate' | 'tags_select' | 'duration' | 'combobox'
   /** 字段旁的附加动作按钮（目前只有语音识别自检） */
   action?: 'asr_check'
   group: string
@@ -122,7 +122,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'ai',
     titleKey: 'zone_ai',
     descKey: 'zone_ai_desc',
-    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'asr', 'explore'],
+    sections: ['credentials', 'models', 'vision', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'asr', 'explore'],
   },
   {
     id: 'storage',
@@ -145,6 +145,7 @@ const SECTION_TITLES: Record<string, string> = {
   showcase: 'group_showcase',
   credentials: 'group_credentials',
   models: 'group_models',
+  vision: 'group_vision',
   knowledgebase: 'group_knowledgebase',
   chat: 'group_chat',
   quality: 'group_quality',
@@ -378,7 +379,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', level: 'basic', required: false },
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models', level: 'basic' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models', level: 'basic' },
-  { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models', level: 'basic' },
+  // ── 图像理解：默认用对话模型看图（快、省），解题类交视觉模型 ──
+  { key: 'MODEL_IMAGE_VIA_CHAT', labelKey: 'field_MODEL_IMAGE_VIA_CHAT', descKey: 'field_MODEL_IMAGE_VIA_CHAT_desc', longDescKey: 'field_MODEL_IMAGE_VIA_CHAT_tip', type: 'boolean', group: 'vision', level: 'basic', required: false },
+  { key: 'MODEL_IMAGE_SOLVE_VL', labelKey: 'field_MODEL_IMAGE_SOLVE_VL', descKey: 'field_MODEL_IMAGE_SOLVE_VL_desc', type: 'boolean', group: 'vision', level: 'basic', required: false },
   // 接入地址：专属域名优先（非必填），普通域名备用（默认已填）；两者通用，连不上自动回落
   { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', longDescKey: 'field_KB_API_BASE_tip', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
   { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', longDescKey: 'field_QWEN_OPENAI_API_BASE_tip', type: 'combobox', group: 'models', presets: QWEN_ENDPOINT_PRESETS },
@@ -2896,17 +2899,6 @@ const SystemConfigPage: React.FC = () => {
                     }))}
                     placeholder={t('placeholder_ttsModel')}
                   />
-                </Form.Item>
-              ) : field.type === 'multimodal_toggle' ? (
-                <Form.Item
-                  name={field.key}
-                  label={getLabelNode(field)}
-                  valuePropName="checked"
-                  extra={descNode(field)}
-                >
-                  <Checkbox>
-                    {t('multimodalCheckbox')}
-                  </Checkbox>
                 </Form.Item>
               ) : (
                 <Form.Item

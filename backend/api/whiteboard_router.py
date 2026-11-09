@@ -2064,10 +2064,13 @@ def _vl_read_page(image_path: str, prompt: str, api_key: str) -> str:
     from backend.api.chat_router import get_config_value as get_cfg
     from backend.utils import encode_image_to_base64, get_image_mime_type
 
+    from backend.image_model_router import fallback_model, pick_image_model
     b64 = encode_image_to_base64(image_path)
     mime = get_image_mime_type(image_path)
+    # 这一步是"看整页再给建议"，不存在解题意图 → 按普通理解选模型
+    model_name, _route = pick_image_model("", "")
     payload = {
-        "model": resolve_vl_model(get_cfg("MODEL_VL_NAME", "")),
+        "model": model_name,
         "messages": [{"role": "user", "content": [
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
             {"type": "text", "text": "【先看附图】附图是白板当前整页画面（可能有手写、图片、文本框），"
@@ -2075,12 +2078,20 @@ def _vl_read_page(image_path: str, prompt: str, api_key: str) -> str:
         ]}],
         "stream": False,
     }
-    resp = sync_requests.post(
-        f"{ai_api_base()}/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=90,
-    )
+
+    def _post(p):
+        return sync_requests.post(
+            f"{ai_api_base()}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=p, timeout=90,
+        )
+
+    resp = _post(payload)
+    if resp.status_code != 200:
+        alt = fallback_model(model_name, resp.status_code, resp.text)
+        if alt:
+            payload["model"] = model_name = alt
+            resp = _post(payload)
     if resp.status_code != 200:
         raise RuntimeError(f"视觉模型调用失败: HTTP {resp.status_code}")
     return resp.json()["choices"][0]["message"]["content"]
@@ -2149,7 +2160,9 @@ def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_pat
     from backend.api.chat_router import get_config_value as get_cfg
     from backend.utils import encode_image_to_base64, get_image_mime_type
 
-    model_name = resolve_vl_model(get_cfg("MODEL_VL_NAME", ""))
+    # 默认用对话模型看图（快、省），解题类才交视觉模型；模型名全部来自配置
+    from backend.image_model_router import fallback_model, pick_image_model
+    model_name, route = pick_image_model(user_prompt, system_prompt)
     api_base = ai_api_base()
 
     # 构建多模态 content 数组
@@ -2180,17 +2193,29 @@ def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_pat
         "stream": True,
     }
 
-    try:
-        resp = sync_requests.post(
+    def _post(p: dict):
+        return sync_requests.post(
             f"{api_base}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
+            json=p,
             stream=True,
             timeout=120,
         )
+
+    try:
+        resp = _post(payload)
+        if resp.status_code != 200:
+            # 对话模型明确不吃图（400/415/422）：换视觉模型重来一次，用户无感
+            alt = fallback_model(model_name, resp.status_code, resp.text)
+            if alt:
+                logger.info("[白板AI] 对话模型不吃图(HTTP %s)，回落视觉模型 %s", resp.status_code, alt)
+                model_name, route = alt, "fallback"
+                payload["model"] = alt
+                resp = _post(payload)
         if resp.status_code != 200:
             yield f"data: {json.dumps({'type': 'error', 'content': f'视觉模型调用失败: HTTP {resp.status_code}'})}\n\n"
             return
+        logger.info("[白板AI] 视觉链路 model=%s route=%s imgs=%s", model_name, route, len(image_paths))
 
         full_text = ""
         for line in resp.iter_lines():

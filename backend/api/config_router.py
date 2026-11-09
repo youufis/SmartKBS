@@ -62,7 +62,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # ── 文件提交类作业（上传 + AI 批改）──
     "HOMEWORK_MAX_FILE_MB": 10,        # 单文件上限，同时是教师可设值的天花板
     "HOMEWORK_MAX_FILES": 3,           # 一次提交最多几个文件（教师未按作业设时）
-    "HOMEWORK_ENABLE_VL": True,        # 图片作业的多模态预解读（与聊天的 ENABLE_MULTIMODAL 解耦）
+    "HOMEWORK_ENABLE_VL": True,        # 图片作业的多模态预解读（聊天侧已无多模态开关，这里保持独立）
     "HOMEWORK_ALLOWED_EXTS": [".docx", ".pdf", ".txt", ".md", ".xlsx", ".pptx",
                               ".jpg", ".jpeg", ".png", ".webp", ".bmp"],
     # ── 错题本：自动错题巩固练习（判定逻辑见 wrong_book_router.wrong_practice_policy）──
@@ -74,9 +74,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "MODEL_LONG_NAME": DEFAULT_LONG_MODEL,
     "MODEL_VL_NAME": DEFAULT_VL_MODEL,
     "MODEL_NAME": DEFAULT_CHAT_MODEL,
-    # 多模态模型开关（当默认对话模型是支持图片输入的模型时开启，
-    # 开启后对话支持图片+文本同时输入，走多模态 API 格式）
-    "ENABLE_MULTIMODAL": False,
+    # 图像理解走哪个模型：默认用对话模型看图（快、省），解题类仍交视觉模型
+    "MODEL_IMAGE_VIA_CHAT": True,
+    "MODEL_IMAGE_SOLVE_VL": True,
     # 文件大小限制
     "MAX_DOC_SIZE_MB": 10,
     "MAX_IMAGE_SIZE_MB": 5,
@@ -298,6 +298,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+# 已下线的配置键：旧文件里可能还留着，读取时直接丢弃，免得出现在「未收录配置键」里误导管理员
+_RETIRED_KEYS = {"ENABLE_MULTIMODAL", "MODEL_NO_IMAGE_LIST"}
+
 _config_lock = threading.Lock()
 _cache_lock = threading.RLock()
 _cfg_cache: dict[str, Any] | None = None
@@ -383,6 +386,8 @@ def load_config() -> dict[str, Any]:
 
         merged = dict(DEFAULT_CONFIG)
         merged.update(data)
+        for _k in _RETIRED_KEYS:
+            merged.pop(_k, None)
         _cfg_cache = merged
         _cfg_cache_key = key
         result = dict(merged)
@@ -645,7 +650,8 @@ _FLOAT_RANGES: dict[str, tuple[float, float]] = {
 _BOOL_KEYS = {
     "EXPLORE_CANVAS_ENABLED", "EXPLORE_ASR_ENABLED", "EXPLORE_SWEEP_DRY",
     "EXPLORE_LOG_RAW_PROMPT",
-    "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
+    "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
+    "MODEL_IMAGE_VIA_CHAT", "MODEL_IMAGE_SOLVE_VL",
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
@@ -1327,7 +1333,8 @@ async def get_multimodal_status(request: Request):
     """获取多模态模型启用状态（需登录，无需管理员权限）"""
     get_current_user(request)
     cfg = load_config()
-    return {"multimodal_enabled": cfg.get("ENABLE_MULTIMODAL", False)}
+    # 多模态不再可关：对话模型按约定必须支持图片，读不到键也按 True 返回
+    return {"multimodal_enabled": True}
 
 
 # 自检接口的等待上限：必须短于前端按钮的超时（120 秒），否则浏览器先掐断，
