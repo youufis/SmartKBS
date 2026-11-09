@@ -197,7 +197,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "EXPLORE_ASSET_MAX_MB": 1024,            # 素材目录水位（MB）；全在用则只告警不强删
     "EXPLORE_SWEEP_HOUR": 3,                 # 每日自动清理时段（凌晨低峰）
     "EXPLORE_TTS_CACHE_MB": 200,             # TTS 缓存水位（MB）：超限清最久未用，7 天内课堂产物豁免
-    "EXPLORE_SWEEP_DRY": True,               # 上线安全阀：只出清单不删文件；核对后关掉才动真格
+    "EXPLORE_SWEEP_DRY": False,              # 打开=只出清单不删文件（排查用）；默认走真清理，孤儿进回收站保留 14 天可还原
     # ── 课堂闯关（backend/api/class_ladder_router.py）──
     # AI 生题总闸（关掉后只从题库取题，零 AI 计费）。
     "CLASS_LADDER_AI_ENABLED": True,

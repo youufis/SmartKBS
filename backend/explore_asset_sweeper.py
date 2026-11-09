@@ -4,8 +4,9 @@
 main.py lifespan 调 start()，重复调用只起一个 daemon 线程；每日 EXPLORE_SWEEP_HOUR
 低峰跑一轮，启动 60 秒后先跑一轮轻量。
 
-上线安全阀：EXPLORE_SWEEP_DRY 默认 True——只算清单、写 manifest，不碰文件；
-管理员核对几天清单后再到系统配置关掉 dry-run 才真正动手。
+自动清理是唯一清理方式（不提供手动触发入口）：每日 EXPLORE_SWEEP_HOUR 低峰跑一轮，
+启动 60 秒后先跑一轮轻量。EXPLORE_SWEEP_DRY 默认 False（真清理）；
+想看"这一轮会处置什么"再临时打开——打开后只算清单、写 manifest，不碰文件。
 删除=移入回收站（explore_canvas_trash/YYYYMMDD/），满 EXPLORE_ASSET_TRASH_DAYS 天才物理删。
 只处置 explore_canvas_assets / explore_canvas_trash 两个目录——路径写死，
 物理上不可能误伤白板素材、题库配图等其它地盘。
@@ -89,7 +90,7 @@ def _to_trash(c, fn, rule, dry, entries):
 def sweep_once(dry=None):
     """跑一轮清理；dry=None 时按配置 EXPLORE_SWEEP_DRY。返回汇总 dict。"""
     if dry is None:
-        dry = _bool("EXPLORE_SWEEP_DRY", True)
+        dry = _bool("EXPLORE_SWEEP_DRY", False)
     now = datetime.now()
     orphan_days = _num("EXPLORE_ASSET_ORPHAN_DAYS", 30)
     trash_days = _num("EXPLORE_ASSET_TRASH_DAYS", 14)
@@ -289,4 +290,5 @@ def start():
             return
         _STARTED = True
     threading.Thread(target=_loop, name="explore-sweeper", daemon=True).start()
-    logger.info("[explore-sweep] 素材清理线程已启动（dry-run 由系统配置控制，默认开）")
+    logger.info("[explore-sweep] 素材清理线程已启动（每日 %s 点自动执行，dry-run 默认关）",
+                int(_num("EXPLORE_SWEEP_HOUR", 3)))

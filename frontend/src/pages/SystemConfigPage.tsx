@@ -18,6 +18,7 @@ import apiClient from '../api/client'
 import BackupPanel from '../components/BackupPanel'
 import { TagListInput, DurationPicker, SuggestionInput } from '../components/systemConfig/FieldControls'
 import { useAuthStore } from '../stores/authStore'
+import { asrSelfCheck, type AsrCheckResult } from '../api/explore'
 import PageHeader from '../components/PageHeader'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
@@ -62,6 +63,8 @@ interface ConfigField {
   /** 完整说明（原理、注意事项、取值范围）。说明行只放一句话，长文进 label 旁的 ⓘ */
   longDescKey?: string
   type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'multimodal_toggle' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate' | 'tags_select' | 'duration' | 'combobox'
+  /** 字段旁的附加动作按钮（目前只有语音识别自检） */
+  action?: 'asr_check'
   group: string
   /** 面向管理员的常用项，默认可见；未标注 = advanced */
   level?: 'basic' | 'advanced'
@@ -118,7 +121,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'ai',
     titleKey: 'zone_ai',
     descKey: 'zone_ai_desc',
-    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'explore'],
+    sections: ['credentials', 'models', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'asr', 'explore'],
   },
   {
     id: 'storage',
@@ -149,6 +152,7 @@ const SECTION_TITLES: Record<string, string> = {
   grading: 'group_grading',
   imagegen: 'group_imagegen',
   tts: 'group_tts',
+  asr: 'group_asr',
   explore: 'group_explore',
   classdrill: 'group_classdrill',
   classladder: 'group_classladder',
@@ -162,6 +166,54 @@ const SECTION_TITLES: Record<string, string> = {
 
 // 锚点导航与小节 DOM id 的前缀
 const SECTION_DOM_ID = 'cfg-sec-'
+
+/** 语音识别自检：后端用 1 秒静音样本探活（不烧 token），结果逐项列明 */
+const AsrCheckButton: React.FC = () => {
+  const { t } = useTranslation('system')
+  const [busy, setBusy] = useState(false)
+  const [res, setRes] = useState<AsrCheckResult | null>(null)
+  const run = async () => {
+    setBusy(true)
+    try {
+      setRes(await asrSelfCheck())
+    } catch (e: any) {
+      setRes({
+        ok: false, model: '', enabled: false, api_base: '', latency_ms: 0, http_status: 0, text: '',
+        error: e?.response?.data?.detail || t('asrCheckReqFail'),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const row = (k: string, v: React.ReactNode) => (
+    <div style={{ display: 'flex', gap: 10, padding: '4px 0', fontSize: 13 }}>
+      <span style={{ width: 104, flex: '0 0 auto', color: 'var(--text-tertiary)' }}>{k}</span>
+      <span style={{ flex: 1, wordBreak: 'break-all' }}>{v}</span>
+    </div>
+  )
+  return (
+    <>
+      <Button size="small" type="link" style={{ padding: '0 4px', height: 20 }} loading={busy}
+        onClick={(e) => { e.preventDefault(); void run() }}>{t('asrCheckBtn')}</Button>
+      <Modal open={!!res} title={t('asrCheckTitle')} onCancel={() => setRes(null)} footer={null} width={560}>
+        {res && (
+          <div>
+            <div style={{ marginBottom: 10, fontWeight: 600, color: res.ok ? '#389e0d' : '#cf1322' }}>
+              {res.ok ? t('asrCheckOk') : t('asrCheckFail')}
+            </div>
+            {row(t('asrCheckModel'), res.model || '—')}
+            {row(t('asrCheckEnabled'), res.enabled ? t('switchOn') : t('asrCheckOff'))}
+            {row(t('asrCheckLatency'), res.latency_ms ? res.latency_ms + ' ms' : '—')}
+            {row(t('asrCheckHttp'), res.http_status || '—')}
+            {row(t('asrCheckApiBase'), res.api_base || '—')}
+            {row(t('asrCheckText'), res.text || '—')}
+            {res.error ? row(t('asrCheckError'), <span style={{ color: '#cf1322' }}>{res.error}</span>) : null}
+          </div>
+        )}
+      </Modal>
+    </>
+  )
+}
 
 // 生效方式 -> 徽标文案（未标注 scope 的项保存后立即生效，不加徽标）
 const SCOPE_TAG_KEYS: Record<NonNullable<ConfigField['scope']>, string> = {
@@ -390,9 +442,11 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'EXPLORE_IMAGE_QUOTA', labelKey: 'field_EXPLORE_IMAGE_QUOTA', descKey: 'field_EXPLORE_IMAGE_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },
   { key: 'EXPLORE_TTS_QUOTA', labelKey: 'field_EXPLORE_TTS_QUOTA', descKey: 'field_EXPLORE_TTS_QUOTA_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitCount' },
   { key: 'EXPLORE_CONTINUOUS_REMIND_MIN', labelKey: 'field_EXPLORE_CONTINUOUS_REMIND_MIN', descKey: 'field_EXPLORE_CONTINUOUS_REMIND_MIN_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitMinute' },
-  { key: 'EXPLORE_ASR_ENABLED', labelKey: 'field_EXPLORE_ASR_ENABLED', descKey: 'field_EXPLORE_ASR_ENABLED_desc', type: 'boolean', group: 'explore', required: false },
-  { key: 'EXPLORE_ASR_MINUTES', labelKey: 'field_EXPLORE_ASR_MINUTES', descKey: 'field_EXPLORE_ASR_MINUTES_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitMinute' },
-  { key: 'EXPLORE_ASR_MODEL', labelKey: 'field_EXPLORE_ASR_MODEL', descKey: 'field_EXPLORE_ASR_MODEL_desc', type: 'text', group: 'explore', required: false },
+  // ── 语音识别（ASR）：独立小节，方便以后接第二家/更多模型 ──
+  // 后端：backend/api/personal_canvas_router.py /ai/transcribe（学生口述）与 /ai/asr-check（本节自检）
+  { key: 'EXPLORE_ASR_ENABLED', labelKey: 'field_EXPLORE_ASR_ENABLED', descKey: 'field_EXPLORE_ASR_ENABLED_desc', type: 'boolean', group: 'asr', level: 'basic', required: false },
+  { key: 'EXPLORE_ASR_MODEL', labelKey: 'field_EXPLORE_ASR_MODEL', descKey: 'field_EXPLORE_ASR_MODEL_desc', longDescKey: 'field_EXPLORE_ASR_MODEL_tip', type: 'combobox', group: 'asr', required: false, presets: ['qwen3-asr-flash'], action: 'asr_check' },
+  { key: 'EXPLORE_ASR_MINUTES', labelKey: 'field_EXPLORE_ASR_MINUTES', descKey: 'field_EXPLORE_ASR_MINUTES_desc', type: 'number', group: 'asr', required: false, unitKey: 'unitMinute' },
   { key: 'EXPLORE_SWEEP_DRY', labelKey: 'field_EXPLORE_SWEEP_DRY', descKey: 'field_EXPLORE_SWEEP_DRY_desc', longDescKey: 'field_EXPLORE_SWEEP_DRY_tip', type: 'boolean', group: 'explore', required: false },
   { key: 'EXPLORE_ASSET_ORPHAN_DAYS', labelKey: 'field_EXPLORE_ASSET_ORPHAN_DAYS', descKey: 'field_EXPLORE_ASSET_ORPHAN_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
   { key: 'EXPLORE_ASSET_TRASH_DAYS', labelKey: 'field_EXPLORE_ASSET_TRASH_DAYS', descKey: 'field_EXPLORE_ASSET_TRASH_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
@@ -2571,6 +2625,7 @@ const SystemConfigPage: React.FC = () => {
             <InfoCircleOutlined style={{ fontSize: 12, color: 'var(--text-tertiary)', cursor: 'help' }} />
           </Tooltip>
         ) : null}
+        {field.action === 'asr_check' ? <AsrCheckButton /> : null}
       </span>
     )
     const getRule = (field: ConfigField) =>

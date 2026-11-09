@@ -587,10 +587,6 @@ class SpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=3000)
 
 
-class SweepRequest(BaseModel):
-    dry_run: Optional[bool] = None
-
-
 class RestoreRequest(BaseModel):
     filename: str = Field(min_length=10, max_length=64)
 
@@ -910,21 +906,48 @@ async def storage_stats(request: Request):
         "orphan_candidates": orphan_candidates,
         "watermark_mb": limit_mb,
         "over_watermark": active_bytes > limit_mb * 1024 * 1024,
-        "dry_run": bool(get_config_value("EXPLORE_SWEEP_DRY", True)),
+        "dry_run": bool(get_config_value("EXPLORE_SWEEP_DRY", False)),
+        "sweep_hour": int(get_config_value("EXPLORE_SWEEP_HOUR", 3) or 3),
+        "orphan_days": int(get_config_value("EXPLORE_ASSET_ORPHAN_DAYS", 30) or 30),
+        "trash_days": int(get_config_value("EXPLORE_ASSET_TRASH_DAYS", 14) or 14),
     }
+
+
+@router.get("/storage/trash", summary="回收站素材列表（管理员，自动清理的产物）")
+async def storage_trash(request: Request, limit: int = Query(default=300, ge=1, le=1000)):
+    """清理只有自动一条路（每日 EXPLORE_SWEEP_HOUR），这里只做查看与还原。
+
+    回收站按日期分目录（YYYYMMDD = 被清理那天），满 EXPLORE_ASSET_TRASH_DAYS 天后
+    由同一轮清理物理删除；在此之前可以还原。
+    """
+    _require_admin(request)
+    from backend.explore_asset_sweeper import TRASH_DIR
+    items = []
+    if TRASH_DIR.exists():
+        for sub in TRASH_DIR.iterdir():
+            if not sub.is_dir() or not re.fullmatch(r"\d{8}", sub.name):
+                continue
+            for p in sub.iterdir():
+                if not p.is_file() or p.name.startswith("manifest_"):
+                    continue
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                items.append({
+                    "filename": p.name,
+                    "batch": sub.name,
+                    "bytes": st.st_size,
+                    "trashed_at": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                })
+    items.sort(key=lambda x: x["trashed_at"], reverse=True)
+    return {"total": len(items), "items": items[:limit],
+            "keep_days": int(get_config_value("EXPLORE_ASSET_TRASH_DAYS", 14) or 14)}
 
 
 def _fmt_days_ago(days: int) -> str:
     from datetime import timedelta
     return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-
-
-@router.post("/storage/sweep", summary="手动触发一轮清理（默认按配置的 dry-run）")
-async def storage_sweep(req: SweepRequest, request: Request):
-    _require_admin(request)
-    from backend.explore_asset_sweeper import sweep_once
-    dry = req.dry_run if req.dry_run is not None else None
-    return await asyncio.to_thread(sweep_once, dry)
 
 
 @router.post("/storage/restore", summary="从回收站还原素材（管理员）")
@@ -1262,6 +1285,76 @@ async def ai_transcribe(request: Request, file: UploadFile = File(...)):
     _bump_usage_asr(username, est_sec)
     _log_task(username, None, "asr", model, text[:120], "ok")
     return {"text": text.strip()}
+
+
+@router.post("/ai/asr-check", summary="语音识别自检（管理员）：用 1 秒静音样本探活并回报耗时")
+async def ai_asr_check(request: Request):
+    """配置页「自检」按钮的后端：不发真实语音，只验证 Key / 端点 / 模型名 / 出参能否解析。
+
+    选静音样本的原因：不烧 token、不依赖 TTS 是否可用；模型对静音通常返回空文本，
+    HTTP 200 + 能解析出 content 字段就算链路通。真实识别效果由学生口述时的结果检验。
+    """
+    user = _require_admin(request)
+    model = str(get_config_value("EXPLORE_ASR_MODEL", "qwen3-asr-flash") or "qwen3-asr-flash")
+    out = {
+        "ok": False, "model": model, "enabled": bool(get_config_value("EXPLORE_ASR_ENABLED", False)),
+        "api_base": ai_api_base(), "latency_ms": 0, "http_status": 0, "text": "", "error": "",
+    }
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(user.get("username", ""))
+    if not api_key:
+        out["error"] = "当前账号还没有配置 DashScope API Key"
+        return out
+
+    import base64 as _b64
+    import io as _io
+    import time as _time
+    import wave as _wave
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 16000)      # 1 秒静音
+    data_uri = "data:audio/wav;base64," + _b64.b64encode(buf.getvalue()).decode()
+
+    def _call():
+        import requests as _rq
+        return _rq.post(
+            ai_api_base() + "/chat/completions",
+            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+            json={"model": model,
+                  "messages": [{"role": "user", "content": [
+                      {"type": "input_audio", "input_audio": {"data": data_uri}}]}],
+                  "asr_options": {"enable_itn": True}, "stream": False},
+            timeout=45,
+        )
+
+    t0 = _time.time()
+    try:
+        resp = await asyncio.to_thread(_call)
+    except Exception as e:
+        out["error"] = "连不上语音识别服务：" + str(e)[:160]
+        out["latency_ms"] = int((_time.time() - t0) * 1000)
+        return out
+    out["latency_ms"] = int((_time.time() - t0) * 1000)
+    out["http_status"] = resp.status_code
+    if resp.status_code != 200:
+        out["error"] = "HTTP " + str(resp.status_code) + "：" + (resp.text or "")[:200]
+        return out
+    try:
+        content = resp.json()["choices"][0]["message"]["content"]
+    except Exception:
+        out["error"] = "返回结构异常：" + (resp.text or "")[:200]
+        return out
+    if isinstance(content, list):
+        text = "".join(str(p.get("text", "") if isinstance(p, dict) else p) for p in content)
+    else:
+        text = str(content or "")
+    out["text"] = text.strip()
+    out["ok"] = True
+    logger.info("[explore] ASR 自检成功 model=%s %sms", model, out["latency_ms"])
+    return out
 
 
 def _bump_usage_asr(username: str, seconds: int) -> None:

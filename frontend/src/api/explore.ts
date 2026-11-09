@@ -315,6 +315,42 @@ export async function careEvents(days = 14): Promise<CareEventsData> {
   return data
 }
 
+// ═══ 语音识别（ASR）：转写 + 配置页自检 ═══
+export interface AsrCheckResult {
+  ok: boolean; model: string; enabled: boolean; api_base: string
+  latency_ms: number; http_status: number; text: string; error: string
+}
+export async function asrSelfCheck(): Promise<AsrCheckResult> {
+  const { data } = await apiClient.post('/api/explore/ai/asr-check')
+  return data
+}
+
+// ═══ 素材存储（管理员；清理只由后端每日自动执行，前端只读 + 还原）═══
+export interface StorageStats {
+  assets_dir_exists: boolean; active_count: number; trashed_count: number; missing_count: number
+  active_bytes: number; trash_bytes: number; trash_files: number; orphan_candidates: number
+  watermark_mb: number; over_watermark: boolean; dry_run: boolean
+  sweep_hour: number; orphan_days: number; trash_days: number
+}
+export interface TrashItem { filename: string; batch: string; bytes: number; trashed_at: string }
+export interface TrashData { total: number; items: TrashItem[]; keep_days: number }
+export async function storageStats(): Promise<StorageStats> {
+  const { data } = await apiClient.get('/api/explore/storage')
+  return data
+}
+export async function storageTrash(limit = 300): Promise<TrashData> {
+  const { data } = await apiClient.get('/api/explore/storage/trash', { params: { limit } })
+  return data
+}
+export async function restoreTrash(filename: string): Promise<{ ok: boolean; src: string }> {
+  const { data } = await apiClient.post('/api/explore/storage/restore', { filename })
+  return data
+}
+export async function storageManifest(date: string): Promise<{ entries?: unknown[] } & Record<string, unknown>> {
+  const { data } = await apiClient.get('/api/explore/storage/manifest', { params: { date } })
+  return data
+}
+
 
 // ═══ M2 分享与模板（后端 personal_canvas_router /shares /templates）═══
 export interface ShareMeta {
