@@ -8,7 +8,7 @@ import FormulaRenderer from '../components/FormulaRenderer'
 import {
   Card, Button, Space, Typography, Tag, Modal,
   Form, Input, Select, message, Empty, Spin, Popconfirm,
-  Checkbox,
+  Checkbox, Pagination, Tooltip,
 } from 'antd'
 import {
   QuestionCircleOutlined, PlusOutlined,
@@ -24,8 +24,10 @@ import { startPoller, stopPoller } from '../utils/poller'
 import { RowList } from '../components/RowList'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
 import KnowledgePointSelect from '../components/KnowledgePointSelect'
+import PageHeader from '../components/PageHeader'
+import { relativeTime, fullTime } from '../utils/relativeTime'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 interface QuestionQuota {
@@ -108,7 +110,9 @@ const QuestionItem: React.FC<QuestionItemProps> = ({
             )}
             {q.status === 'answered' && <Tag color="green">{t('answeredQuestions')}</Tag>}
             {q.status === 'pending' && <Tag color="orange">{t('pendingQuestions')}</Tag>}
-            <Text type="secondary" style={{ fontSize: 12 }}>{q.created_at?.slice(0, 16)}</Text>
+            <Tooltip title={fullTime(q.created_at)}>
+              <Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(q.created_at)}</Text>
+            </Tooltip>
             {q.answered_by && q.status === 'answered' && (
               <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
                 {t('answeredBy', { name: q.answered_by })}
@@ -269,9 +273,11 @@ const QuestionItem: React.FC<QuestionItemProps> = ({
                   </Button>
                 )}
                 <div style={{ marginTop: 2 }}>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    {sa.created_at?.slice(0, 16)}
-                  </Text>
+                  <Tooltip title={fullTime(sa.created_at)}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {relativeTime(sa.created_at)}
+                    </Text>
+                  </Tooltip>
                 </div>
               </div>
             ))
@@ -826,17 +832,11 @@ const StudentQuestionsPage: React.FC = () => {
 
   return (
     <Card style={{ borderRadius: 8 }}>
-      <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div className="page-header-flex" style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Space>
-            <QuestionCircleOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('studentQuestions')}</Title>
-            <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              {isStudent ? t('subtitle') : t('teacherSubtitle')}
-            </Text>
-          </Space>
-        </div>
-      </Card>
+      <PageHeader
+        icon={<QuestionCircleOutlined />}
+        title={t('studentQuestions')}
+        subtitle={isStudent ? t('subtitle') : t('teacherSubtitle')}
+      />
 
       {isStudent && (
         <Card size="small" style={{ marginBottom: 16 }}>
@@ -1024,28 +1024,20 @@ const StudentQuestionsPage: React.FC = () => {
           )}
           <div style={{ marginTop: 12, textAlign: 'center' }}>
             {questions.length > 0 && (
-              <div style={{ marginTop: 12, textAlign: 'center' }}>
-                <span style={{ color: 'var(--text-tertiary)', fontSize: 13, marginRight: 12 }}>{t('totalQuestions', { count: questionTotal })}</span>
-                <button
-                  style={{ border: '1px solid var(--border-color-secondary)', background: 'var(--bg-container)', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', margin: '0 4px', fontSize: 13, color: questionPage <= 1 ? '#d9d9d9' : '#333' }}
-                  disabled={questionPage <= 1}
-                  onClick={() => {
-                    const newPage = questionPage - 1
-                    setQuestionPage(newPage)
-                    loadQuestions(newPage, questionPageSize, questionFilter, mineOnly)
-                  }}
-                >{t('prevPage')}</button>
-                <span style={{ margin: '0 8px', fontSize: 13 }}>{questionPage}</span>
-                <button
-                  style={{ border: '1px solid var(--border-color-secondary)', background: 'var(--bg-container)', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', margin: '0 4px', fontSize: 13, color: questionPage * questionPageSize >= questionTotal ? '#d9d9d9' : '#333' }}
-                  disabled={questionPage * questionPageSize >= questionTotal}
-                  onClick={() => {
-                    const newPage = questionPage + 1
-                    setQuestionPage(newPage)
-                    loadQuestions(newPage, questionPageSize, questionFilter, mineOnly)
-                  }}
-                >{t('nextPage')}</button>
-              </div>
+              <Pagination
+                current={questionPage}
+                pageSize={questionPageSize}
+                total={questionTotal}
+                showSizeChanger
+                showQuickJumper
+                pageSizeOptions={['10', '20', '50']}
+                showTotal={(total) => t('totalQuestions', { count: total })}
+                onChange={(p, ps) => {
+                  setQuestionPage(p)
+                  setQuestionPageSize(ps)
+                  loadQuestions(p, ps, questionFilter, mineOnly)
+                }}
+              />
             )}
           </div>
         </Spin>

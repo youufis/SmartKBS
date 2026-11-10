@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import {
   Card, Tag, Typography, Button, Space, Empty, Spin, Pagination,
-  message, Popconfirm, Segmented, Tabs, Checkbox, theme,
+  message, Popconfirm, Segmented, Tabs, Checkbox, theme, Tooltip,
 } from 'antd'
 import {
   CheckOutlined, DeleteOutlined, ReloadOutlined,
@@ -19,6 +19,7 @@ import type { NotificationItem } from '../api/notifications'
 import type { PushMessage } from '../api/companion'
 import { useNoticeText } from '../utils/notificationText'
 import { RowList, RowItem, RowMeta } from '../components/RowList'
+import { relativeTime, fullTime } from '../utils/relativeTime'
 
 const { Text } = Typography
 
@@ -72,7 +73,7 @@ const NotificationsPage: React.FC = () => {
   const fetchNotifications = async () => {
     setLoading(true)
     try {
-      const data = await notificationsApi.getNotifications(filter === 'unread', page, 20)
+      const data = await notificationsApi.getNotifications(filter === 'unread', page, pageSize)
       setNotifications(data.notifications)
       setTotal(data.total)
       setSelectedNotifIds(new Set())
@@ -119,7 +120,7 @@ const NotificationsPage: React.FC = () => {
   const fetchPushes = async () => {
     setPushLoading(true)
     try {
-      const data = await companionApi.getPushList(pushPage, 20, pushFilter === 'unread')
+      const data = await companionApi.getPushList(pushPage, pushPageSize, pushFilter === 'unread')
       setPushes(Array.isArray(data.pushes) ? data.pushes : [])
       setPushTotal(typeof data.total === 'number' ? data.total : 0)
       setSelectedPushIds(new Set())
@@ -167,7 +168,7 @@ const NotificationsPage: React.FC = () => {
       ].filter(Boolean)}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1 }}>
           <Checkbox checked={isSelected} onChange={(e) => toggleNotifSelect(item.id, e.target.checked)} style={{ marginTop: 4 }} />
-          <RowMeta avatar={<span style={{ fontSize: 20, color: cfg.color }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{nt.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div>{item.content && <Text type="secondary">{nt.content}</Text>}<br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text>{item.related_link && <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>{t('viewDetails')}</Button>}</div>} />
+          <RowMeta avatar={<span style={{ fontSize: 20, color: cfg.color }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{nt.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div>{item.content && <Text type="secondary">{nt.content}</Text>}<br /><Tooltip title={fullTime(item.created_at)}><Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(item.created_at)}</Text></Tooltip>{item.related_link && <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>{t('viewDetails')}</Button>}</div>} />
         </div>
       </RowItem>
     )
@@ -183,7 +184,7 @@ const NotificationsPage: React.FC = () => {
       ].filter(Boolean)}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1 }}>
           <Checkbox checked={isSelected} onChange={(e) => togglePushSelect(item.id, e.target.checked)} style={{ marginTop: 4 }} />
-          <RowMeta avatar={<span style={{ fontSize: 20 }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{item.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div><Text type="secondary">{item.content}</Text><br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text></div>} />
+          <RowMeta avatar={<span style={{ fontSize: 20 }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{item.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div><Text type="secondary">{item.content}</Text><br /><Tooltip title={fullTime(item.created_at)}><Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(item.created_at)}</Text></Tooltip></div>} />
         </div>
       </RowItem>
     )

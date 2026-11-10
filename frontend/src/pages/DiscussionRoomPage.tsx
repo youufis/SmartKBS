@@ -1,8 +1,7 @@
-import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Card, Button, Space, Typography, Input, Tag, message,
-  Spin, Empty, Tooltip, Modal, Rate, Collapse,
+  Spin, Empty, Tooltip, Modal, Rate, Collapse, Drawer, List, Avatar,
 } from 'antd'
 import {
   SendOutlined, RobotOutlined, ArrowLeftOutlined,
@@ -25,6 +24,9 @@ interface Message {
   msg_type: string
   created_at: string
   pending?: boolean
+  name?: string
+  grade?: string
+  class_name?: string
 }
 
 async function downloadWord(url: string, filename: string) {
@@ -62,6 +64,7 @@ const DiscussionRoomPage: React.FC = () => {
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [broadcastText, setBroadcastText] = useState('')
   const [broadcasting, setBroadcasting] = useState(false)
+  const [membersOpen, setMembersOpen] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -169,6 +172,9 @@ const DiscussionRoomPage: React.FC = () => {
                 content: data.content,
                 msg_type: data.msg_type || 'text',
                 created_at: data.created_at || new Date().toISOString(),
+                name: data.name,
+                grade: data.grade,
+                class_name: data.class_name,
               }
               updatePollId(msgId)
               setMessages(prev => {
@@ -401,7 +407,7 @@ const DiscussionRoomPage: React.FC = () => {
   }, [groupId])
 
   return (
-    <div className="chat-layout" style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-container)' }}>
+    <div className="chat-layout" style={{ height: '100%', display: 'flex', flexDirection: 'column', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-container)' }}>
       {/* 顶部栏 */}
       <Card
         style={{ marginBottom: 0, borderRadius: 0 }}
@@ -422,13 +428,13 @@ const DiscussionRoomPage: React.FC = () => {
             </div>
           </Space>
           <Space>
-            {/* 成员列表 */}
-            <Tooltip title={
-              members.length > 0
-                ? `${t('members')}: ${members.map((m: any) => studentLabel(m)).join('、')}`
-                : t('noMembers')
-            }>
-              <Tag icon={<UserOutlined />}>
+            {/* 成员列表（点击查看明细） */}
+            <Tooltip title={t('viewMembers')}>
+              <Tag
+                icon={<UserOutlined />}
+                style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                onClick={() => setMembersOpen(true)}
+              >
                 {members.length}{t('people')}
               </Tag>
             </Tooltip>
@@ -441,7 +447,7 @@ const DiscussionRoomPage: React.FC = () => {
                 loading={aiLoading}
                 onClick={handleAiSuggest}
               >
-                AI {t('teacher')}
+                {t('aiAssistant')}
               </Button>
             )}
 
@@ -517,7 +523,14 @@ const DiscussionRoomPage: React.FC = () => {
               const isMe = msg.username === user?.username
               const isBroadcast = msg.msg_type === 'broadcast'
               const isSystem = msg.msg_type === 'system'
-              const displayName = memberNameMap[msg.username] || msg.username
+              // 学生身份展示：优先消息自带字段（后端已附 name/grade/class_name），再降级成员映射
+              const _msgName = msg.name || memberNameMap[msg.username] || msg.username
+              const _msgGrade = msg.grade || ''
+              const _msgCls = msg.class_name || ''
+              const _where = _msgGrade && _msgCls
+                ? (_msgCls.startsWith(_msgGrade) ? _msgCls : `${_msgGrade}·${_msgCls}`)
+                : (_msgGrade || _msgCls)
+              const displayName = _where ? `${_msgName}（${_where}）` : _msgName
 
               if (isBroadcast) {
                 return (
@@ -801,6 +814,31 @@ const DiscussionRoomPage: React.FC = () => {
           placeholder={t('broadcastPlaceholder')}
         />
       </Modal>
+
+      {/* 成员明细抽屉 */}
+      <Drawer
+        title={t('members')}
+        open={membersOpen}
+        onClose={() => setMembersOpen(false)}
+        width={360}
+      >
+        {members.length === 0 ? (
+          <Empty description={t('noMembers')} />
+        ) : (
+          <List
+            dataSource={members}
+            renderItem={(m: any) => (
+              <List.Item>
+                <List.Item.Meta
+                  avatar={<Avatar icon={<UserOutlined />} />}
+                  title={m.name || m.username}
+                  description={m.grade || m.class_name ? `${m.grade || ''}${m.grade && m.class_name ? '·' : ''}${m.class_name || ''}` : m.username}
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </Drawer>
     </div>
   )
 }

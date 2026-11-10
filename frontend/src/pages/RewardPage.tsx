@@ -20,6 +20,7 @@ import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 import { reportLoadError } from '../utils/loadError'
 import { PointsCell } from '../components/PointsCell'
 import NarrowTable from '../components/NarrowTable'
+import { relativeTime, fullTime } from '../utils/relativeTime'
 
 const { Text } = Typography
 
@@ -390,7 +391,10 @@ const TeacherMyPoints: React.FC = () => {
         cardTitleKey="activity_title"
         cardPageSize={15}
         columns={[
-          { title: t('time'), dataIndex: 'created_at', render: (val: string) => val?.slice(0, 16) || '', width: 140 },
+          { title: t('time'), dataIndex: 'created_at', width: 140,
+            render: (val: string) => val ? (
+              <Tooltip title={fullTime(val)}><Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(val)}</Text></Tooltip>
+            ) : '' },
           { title: t('activity'), dataIndex: 'activity_type', width: 96,
             render: (type: string, record: any) => (
               <Tag icon={ACTIVITY_ICONS[type]}>{actLabel(type, record.activity_type_name)}</Tag>
@@ -885,7 +889,10 @@ const RewardPage: React.FC = () => {
             cardTitleKey="activity_title"
             cardPageSize={15}
             columns={[
-              { title: t('time'), dataIndex: 'created_at', width: 140, render: (val: string) => val ? val.slice(0, 16) : '' },
+              { title: t('time'), dataIndex: 'created_at', width: 140,
+                render: (val: string) => val ? (
+                  <Tooltip title={fullTime(val)}><Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(val)}</Text></Tooltip>
+                ) : '' },
               // 活动名走词典：原来把 activity_type 首字母大写，中英文界面显示的都是裸键名
               { title: t('activity'), dataIndex: 'activity_type', width: 96,
                 render: (type: string, record: any) => (

@@ -30,6 +30,7 @@ import ResetActivityButton from '../components/ResetActivityButton'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { reportLoadError } from '../utils/loadError'
+import { relativeTime } from '../utils/relativeTime'
 import AnswerNav from '../components/AnswerNav'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import PageHeader from '../components/PageHeader'
@@ -665,7 +666,7 @@ const StudentView: React.FC = () => {
                           {s.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}
                         </Text></div>
                         <div><Text type="secondary" style={{ fontSize: 12 }}>
-                          {t('createdAt')} {String(s.created_at || '').slice(0, 16) || '-'}
+                          {t('createdAt')} {relativeTime(s.created_at)}
                         </Text></div>
                         {/* 明确给一个入口：原先整卡可点，但没有任何按钮，学生看不出能点 */}
                         <div style={{ marginTop: 8 }}>
@@ -1160,7 +1161,7 @@ const TeacherView: React.FC = () => {
                 {t('questionCountTitle')} {r.question_count} · {t('totalScoreTitle')} {r.total_score}
                 {' · '}{t('submitted')} {r.submitted_count}/{r.student_count}
                 {/* 创建时间：与抢答/白板/测验的卡片同口径，方便按时间找最近布置的那份 */}
-                {' · '}{t('createdAt')} {String(r.created_at || '').slice(0, 16) || '-'}
+                {' · '}{t('createdAt')} {relativeTime(r.created_at)}
               </Text>
             </div>
           </div>

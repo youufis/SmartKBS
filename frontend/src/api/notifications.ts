@@ -33,6 +33,7 @@ export interface AnnouncementItem {
   is_pinned: boolean
   created_at: string
   updated_at: string
+  read_count?: number
 }
 
 /** 获取通知列表 */
@@ -73,9 +74,9 @@ export async function batchDeleteNotifications(ids: number[]): Promise<void> {
 }
 
 
-export async function getAnnouncements(page = 1, pageSize = 20): Promise<{ announcements: AnnouncementItem[]; total: number }> {
+export async function getAnnouncements(page = 1, pageSize = 20, keyword = '', priority = ''): Promise<{ announcements: AnnouncementItem[]; total: number }> {
   const { data } = await apiClient.get('/api/notifications/announcements', {
-    params: { page, page_size: pageSize },
+    params: { page, page_size: pageSize, keyword, priority },
   })
   return data
 }
@@ -99,6 +100,23 @@ export async function createAnnouncement(announcement: {
 /** 删除公告 */
 export async function deleteAnnouncement(id: number): Promise<void> {
   await apiClient.delete(`/api/notifications/announcements/${id}`)
+}
+
+/** 批量删除公告 */
+export async function batchDeleteAnnouncements(ids: number[]): Promise<{ message: string; deleted: number }> {
+  const { data } = await apiClient.post('/api/notifications/announcements/batch-delete', { ids })
+  return data
+}
+
+/** 标记公告已读 */
+export async function markAnnouncementRead(id: number): Promise<void> {
+  await apiClient.post(`/api/notifications/announcements/${id}/read`)
+}
+
+/** 获取公告已读名单 */
+export async function getAnnouncementReadUsers(id: number): Promise<{ read_count: number; read_users: Array<{ username: string; name: string; read_at: string }> }> {
+  const { data } = await apiClient.get(`/api/notifications/announcements/${id}/read-users`)
+  return data
 }
 
 export async function updateAnnouncement(id: number, data: Record<string, unknown>): Promise<void> {

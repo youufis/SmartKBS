@@ -2,10 +2,10 @@
  * QuestPage — 知识闯关 主页
  * 学生入口：开始闯关 + 历史记录 + 统计
  */
-import React, { useState, useEffect, startTransition } from 'react'
+import React, { useState, useEffect, startTransition, useRef } from 'react'
 import {
   Card, Button, Typography, Space, Statistic,
-  Table, Tag, message, Spin, Modal,
+  Table, Tag, message, Spin, Modal, Tooltip,
 } from 'antd'
 import {
   ThunderboltOutlined, HistoryOutlined,
@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation, Trans } from 'react-i18next'
+import { relativeTime, fullTime } from '../utils/relativeTime'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -50,6 +51,7 @@ const QuestPage: React.FC = () => {
   const [stats, setStats] = useState<QuestStats | null>(null)
   const [records, setRecords] = useState<QuestRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [tableLoading, setTableLoading] = useState(false)
   const [starting, setStarting] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [questConfig, setQuestConfig] = useState<{ use_bank: boolean; bank_full?: boolean } | null>(null)
@@ -58,9 +60,11 @@ const QuestPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [expandedQuestions, setExpandedQuestions] = useState<Record<number, any[]>>({})
+  const recordsLoadedRef = useRef(false)
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (opts?: { tableOnly?: boolean }) => {
+    if (opts?.tableOnly) setTableLoading(true)
+    else setLoading(true)
     try {
       const [statsRes, historyRes, bankRes, configRes] = await Promise.all([
         apiClient.get('/api/quest/stats'),
@@ -73,17 +77,21 @@ const QuestPage: React.FC = () => {
       setTotal(historyRes.data.total || 0)
       setBankStats(bankRes.data)
       setQuestConfig(configRes.data)
+      recordsLoadedRef.current = true
     } catch (e: any) {
       if (e?.response?.status !== 403) {
         message.error(t('loadQuestDataFailed'))
       }
     } finally {
-      setLoading(false)
+      if (opts?.tableOnly) setTableLoading(false)
+      else setLoading(false)
     }
   }
 
   useEffect(() => {
-    startTransition(() => loadData())
+    // 首次进入整页 loading；之后翻页/改每页条数只刷新表格（保留骨架，避免整页闪白）
+    const firstLoad = !recordsLoadedRef.current
+    startTransition(() => loadData(firstLoad ? undefined : { tableOnly: true }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize])
 
@@ -217,7 +225,9 @@ const QuestPage: React.FC = () => {
     },
     {
       title: t('quest.timeLabel'), dataIndex: 'created_at', key: 'time', width: 130,
-      render: (timeVal: string) => timeVal?.slice(0, 16) || '-',
+      render: (timeVal: string) => timeVal ? (
+        <Tooltip title={fullTime(timeVal)}><Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(timeVal)}</Text></Tooltip>
+      ) : '-',
     },
   ]
 
@@ -361,7 +371,7 @@ const QuestPage: React.FC = () => {
           columns={columns}
           rowKey="id"
           size="small"
-          loading={loading}
+          loading={tableLoading}
           locale={{ emptyText: t('quest.emptyText') }}
           pagination={{
             current: page,

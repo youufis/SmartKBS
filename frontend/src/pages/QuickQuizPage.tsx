@@ -29,12 +29,10 @@ import ScopeTag from '../components/ScopeTag'
 import ResetActivityButton from '../components/ResetActivityButton'
 import ListFilterBar from '../components/ListFilterBar'
 import { reportLoadError } from '../utils/loadError'
+import { relativeTime } from '../utils/relativeTime'
 
 const { Text } = Typography
 const { TextArea } = Input
-
-/** 房间创建时间: 列表双行显示用 */
-const fmtRoomTime = (v?: string) => v?.split('.')[0]?.replace('T', ' ').slice(0, 16) || '-'
 
 const QuickQuizPage: React.FC = () => {
   const { t } = useTranslation('interaction')
@@ -90,6 +88,7 @@ const QuickQuizPage: React.FC = () => {
       setRooms(data.rooms || [])
     } catch (e: any) {
       if (e?.response?.status !== 403) {
+        reportLoadError(e, { key: 'QuickQuizPage.loadRooms', retry: () => { void loadRooms() } })
       }
     } finally {
       setLoading(false)
@@ -262,7 +261,7 @@ const QuickQuizPage: React.FC = () => {
               {record.question_count ?? 0} {t('questions')} · {record.time_limit ?? 0}s
               {isTeacherOrAdmin && <>{' · '}<TeamOutlined /> {record.player_count || 0}</>}
               {' · '}{isTeacherOrAdmin ? '' : `${t('teacher')}：`}{record.creator_username || '-'}
-              {' · '}{fmtRoomTime(record.created_at)}
+              {' · '}{relativeTime(record.created_at)}
             </Text>
           </div>
         </div>

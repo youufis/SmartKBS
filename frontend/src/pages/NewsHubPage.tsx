@@ -6,16 +6,18 @@ import {
 } from 'antd';
 import {
   GlobalOutlined, ReloadOutlined, HeartOutlined, HeartFilled,
-  EyeOutlined, ArrowLeftOutlined, BookOutlined,
+  EyeOutlined, BookOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useNewsStore } from '../stores/newsStore';
 import { apiErrorDetail, getDailyBriefing } from '../api/news';
 import type { NewsBriefing } from '../api/news';
 import { useAuthStore } from '../stores/authStore';
 import { useTranslation } from 'react-i18next'
 import { RowList, RowItem } from '../components/RowList'
+import { relativeTime, fullTime } from '../utils/relativeTime'
+import PageHeader from '../components/PageHeader'
 
 const { Text, Paragraph } = Typography;
 
@@ -29,7 +31,6 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const NewsHubPage: React.FC = () => {
   const { t } = useTranslation('common')
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const user = useAuthStore((s) => s.user);
   const isTeacherOrAdmin = user?.role === 'teacher' || user?.role === 'admin';
@@ -208,17 +209,10 @@ const NewsHubPage: React.FC = () => {
   return (
     <Card style={{ borderRadius: 8 }}>
       {/* 顶部栏 */}
-      <Card
-        size="small"
-        style={{ marginBottom: 16, borderRadius: 8 }}
-        styles={{ body: { padding: '8px 16px' } }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Space>
-            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} />
-            <GlobalOutlined style={{ color: '#1677ff', fontSize: 18 }} />
-            <Text strong style={{ fontSize: 16 }}>{t('hotNews')}</Text>
-          </Space>
+      <PageHeader
+        icon={<GlobalOutlined />}
+        title={t('hotNews')}
+        extra={
           <Space>
             {isTeacherOrAdmin && (
               <Button size="small" onClick={handleOpenBriefing}>
@@ -255,8 +249,8 @@ const NewsHubPage: React.FC = () => {
               {t('refresh')}
             </Button>
           </Space>
-        </div>
-      </Card>
+        }
+      />
 
       {/* 分类标签 */}
       <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}
@@ -372,9 +366,11 @@ const NewsHubPage: React.FC = () => {
                         {item.source_name}
                       </Text>
                       {item.published_at && (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {item.published_at.slice(0, 16).replace('T', ' ')}
-                        </Text>
+                        <Tooltip title={fullTime(item.published_at)}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {relativeTime(item.published_at)}
+                          </Text>
+                        </Tooltip>
                       )}
                       {item.summary && (
                         <Text type="secondary" style={{ fontSize: 12 }} ellipsis>
@@ -424,9 +420,11 @@ const NewsHubPage: React.FC = () => {
                 {detailModal.source_name}
               </Text>
               {detailModal.published_at && (
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {detailModal.published_at.slice(0, 16).replace('T', ' ')}
-                </Text>
+                <Tooltip title={fullTime(detailModal.published_at)}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {relativeTime(detailModal.published_at)}
+                  </Text>
+                </Tooltip>
               )}
             </Space>
 

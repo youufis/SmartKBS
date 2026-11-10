@@ -23,6 +23,7 @@ import { useAuthStore } from '../stores/authStore'
 import { reportLoadError } from '../utils/loadError'
 import NarrowTable from '../components/NarrowTable'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { relativeTime, fullTime } from '../utils/relativeTime'
 
 interface DownloadFile {
   name: string
@@ -385,6 +386,9 @@ const DownloadsPage: React.FC = () => {
       dataIndex: 'mtime',
       key: 'mtime',
       width: 150,
+      render: (mtime: string) => mtime ? (
+        <Tooltip title={fullTime(mtime)}><Typography.Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(mtime)}</Typography.Text></Tooltip>
+      ) : '-',
     },
     {
       title: t('actions'),

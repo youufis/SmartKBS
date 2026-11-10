@@ -832,6 +832,19 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass
 
+            # ── 公告阅读追踪表（谁读过了哪条公告）──
+            c.execute("""CREATE TABLE IF NOT EXISTS announcement_reads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                announcement_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                read_at TEXT NOT NULL,
+                UNIQUE(announcement_id, username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ann_read ON announcement_reads(announcement_id)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 课堂互动：随堂测验表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS interaction_quizzes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1143,6 +1156,15 @@ def init_db():
                     c.execute(f"ALTER TABLE discussions ADD COLUMN {col_def[0]} {col_def[1]}")
                 except sqlite3.OperationalError:
                     pass  # 字段已存在
+            # ── 字段迁移：AI 助教自动引导开关 + 灵敏度 ──
+            for col_def in [
+                ("auto_guide", "INTEGER DEFAULT 1"),
+                ("auto_guide_level", "TEXT DEFAULT 'standard'"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE discussions ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_disc_target ON discussions(target_scope, target_grade, target_class)")
             except sqlite3.OperationalError:
@@ -1171,6 +1193,17 @@ def init_db():
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_dm_group ON discussion_members(group_id)")
                 c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_user_disc ON discussion_members(group_id, username)")
+            except sqlite3.OperationalError:
+                pass
+            # 预分配花名册 vs 实到：开始讨论时按范围一次性写入 joined=0，
+            # 学生真正进入讨论室时置 1；「参与人数」只统计实到，
+            # 否则按「任教班级」=全校范围开始讨论会把 1400+ 名单当参与数。
+            try:
+                c.execute("ALTER TABLE discussion_members ADD COLUMN joined INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dm_group_joined ON discussion_members(group_id, joined)")
             except sqlite3.OperationalError:
                 pass
 

@@ -3,11 +3,11 @@ import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import {
   Card, Table, Typography, Button, Space, Modal, Form, Input,
-  Select, message, Empty, Tag, Switch, Popconfirm, Pagination,
+  Select, message, Empty, Tag, Switch, Popconfirm, Pagination, Tooltip,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, PushpinOutlined,
-  ReloadOutlined, BulbOutlined, EyeOutlined,
+  ReloadOutlined, BulbOutlined, EyeOutlined, SearchOutlined, TeamOutlined,
 } from '@ant-design/icons'
 import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
@@ -27,6 +27,21 @@ const PRIORITY_COLORS: Record<string, string> = {
   important: 'orange',
   normal: 'blue',
   low: 'default',
+}
+
+/** 相对时间展示：刚刚 / N 分钟前 / N 小时前 / N 天前，超过 7 天回退日期 */
+function relativeTime(v: string): string {
+  const t = new Date(v).getTime()
+  if (Number.isNaN(t)) return v
+  const diff = Date.now() - t
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const day = Math.floor(hr / 24)
+  if (day <= 7) return `${day} 天前`
+  return new Date(v).toLocaleDateString('zh-CN')
 }
 
 const AnnouncementsPage: React.FC = () => {
@@ -60,11 +75,18 @@ const AnnouncementsPage: React.FC = () => {
     target_class: '',
     target_users: '',
   })
+  const [keyword, setKeyword] = useState('')
+  const [priorityFilter, setPriorityFilter] = useState('')
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
+  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [readUsersModal, setReadUsersModal] = useState<AnnouncementItem | null>(null)
+  const [readUsers, setReadUsers] = useState<Array<{ username: string; name: string; read_at: string }>>([])
+  const [readUsersLoading, setReadUsersLoading] = useState(false)
 
-  const fetchAnnouncements = async (p = page, ps = pageSize) => {
+  const fetchAnnouncements = async (p = page, ps = pageSize, kw = keyword, pri = priorityFilter) => {
     setLoading(true)
     try {
-      const data = await notificationsApi.getAnnouncements(p, ps)
+      const data = await notificationsApi.getAnnouncements(p, ps, kw, pri)
       setAnnouncements(data.announcements || [])
       setTotal(data.total || 0)
     } catch {
@@ -188,6 +210,47 @@ const AnnouncementsPage: React.FC = () => {
     }
   }
 
+  const handleBatchDelete = async () => {
+    if (selectedRowKeys.length === 0) return
+    setBatchDeleting(true)
+    try {
+      const { deleted } = await notificationsApi.batchDeleteAnnouncements(selectedRowKeys.map(Number))
+      message.success(deleted > 0 ? t('batchDeleteAnnSuccess', { count: deleted }) : t('noDeleteTarget'))
+      setSelectedRowKeys([])
+      fetchAnnouncements(1, pageSize)
+      setPage(1)
+    } catch {
+      message.error(t('deleteFailed'))
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
+
+  // 查看公告详情：同时标记当前用户已读（幂等）
+  const openDetail = async (record: AnnouncementItem) => {
+    setDetailModal(record)
+    try {
+      await notificationsApi.markAnnouncementRead(record.id)
+    } catch {
+      // 标记已读失败不阻断查看
+    }
+  }
+
+  // 查看已读名单
+  const openReadUsers = async (record: AnnouncementItem) => {
+    setReadUsersModal(record)
+    setReadUsers([])
+    setReadUsersLoading(true)
+    try {
+      const data = await notificationsApi.getAnnouncementReadUsers(record.id)
+      setReadUsers(data.read_users || [])
+    } catch {
+      setReadUsers([])
+    } finally {
+      setReadUsersLoading(false)
+    }
+  }
+
   const handleTableChange = (pagination: any) => {
     setPage(pagination.current)
     setPageSize(pagination.pageSize)
@@ -213,7 +276,7 @@ const AnnouncementsPage: React.FC = () => {
       ellipsis: true,
       render: (title: string, record: AnnouncementItem) => (
         <Space>
-          <Text strong style={{ cursor: 'pointer' }} onClick={() => setDetailModal(record)}>{title}</Text>
+          <Text strong style={{ cursor: 'pointer' }} onClick={() => openDetail(record)}>{title}</Text>
           <Tag color={PRIORITY_COLORS[record.priority] || 'default'}>
             {PRIORITY_LABELS[record.priority] || record.priority}
           </Tag>
@@ -225,43 +288,68 @@ const AnnouncementsPage: React.FC = () => {
       dataIndex: 'creator_username',
       key: 'creator_username',
       width: 100,
-      render: (name: string) => name || '-',
+      render: (name: string, record: AnnouncementItem) => record.creator_name || name || '-',
     },
     {
       title: t('scope'),
       key: 'target',
-      width: 120,
-      render: (_: any, record: AnnouncementItem) => (
-        <Space size={4}>
-          {record.target_role !== 'all' && (
-            <Tag>{record.target_role === 'teacher' ? t('anRoleTeacher') : record.target_role === 'student' ? t('anRoleStudent') : record.target_role}</Tag>
-          )}
-          {(record.target_grade || record.target_class) && (
-            <ScopeTag variant="text" grade={record.target_grade} classes={record.target_class} />
-          )}
-        </Space>
-      ),
+      width: 140,
+      render: (_: any, record: AnnouncementItem) => {
+        const hasSpecific = record.target_role !== 'all' || record.target_grade || record.target_class
+        if (!hasSpecific) return <Tag color="blue">{t('anEveryone')}</Tag>
+        return (
+          <Space size={4}>
+            {record.target_role !== 'all' && (
+              <Tag>{record.target_role === 'teacher' ? t('anRoleTeacher') : record.target_role === 'student' ? t('anRoleStudent') : record.target_role}</Tag>
+            )}
+            {(record.target_grade || record.target_class) && (
+              <ScopeTag variant="text" grade={record.target_grade} classes={record.target_class} />
+            )}
+          </Space>
+        )
+      },
     },
     {
       title: t('publishTime'),
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 160,
-      render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-',
+      width: 140,
+      render: (v: string) => v ? (
+        <Tooltip title={new Date(v).toLocaleString('zh-CN')}>
+          <Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(v)}</Text>
+        </Tooltip>
+      ) : '-',
     },
+    ...(isAdminOrTeacher ? [{
+      title: t('readCount'),
+      key: 'read_count',
+      width: 80,
+      render: (_: any, record: AnnouncementItem) => (
+        <Button type="link" size="small" style={{ padding: 0 }}
+          onClick={() => openReadUsers(record)}>
+          <TeamOutlined /> {record.read_count ?? 0}
+        </Button>
+      ),
+    }] : []),
     {
       title: t('actions'),
       key: 'actions',
-      width: 120,
+      width: 140,
       render: (_: any, record: AnnouncementItem) => (
         <Space>
-          <Button type="text" icon={<EyeOutlined />} size="small" onClick={() => setDetailModal(record)} />
+          <Tooltip title={t('view')}>
+            <Button type="text" icon={<EyeOutlined />} size="small" onClick={() => openDetail(record)} />
+          </Tooltip>
           {isAdminOrTeacher && (
             <>
-              <Button type="text" icon={<EditOutlined />} size="small"
-                onClick={() => { setEditModal(record); editForm.setFieldsValue(record) }} />
+              <Tooltip title={t('edit')}>
+                <Button type="text" icon={<EditOutlined />} size="small"
+                  onClick={() => { setEditModal(record); editForm.setFieldsValue(record) }} />
+              </Tooltip>
               <Popconfirm title={t('confirmDeleteAnnouncement')} onConfirm={() => handleDelete(record.id)}>
-                <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+                <Tooltip title={t('delete')}>
+                  <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+                </Tooltip>
               </Popconfirm>
             </>
           )}
@@ -295,12 +383,48 @@ const AnnouncementsPage: React.FC = () => {
       />
 
       <Card>
+        {/* 搜索筛选 + 批量删除栏 */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder={t('searchAnnouncementPh')}
+            style={{ width: 240 }}
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onPressEnter={() => { setPage(1); fetchAnnouncements(1, pageSize) }}
+          />
+          <Select
+            allowClear
+            placeholder={t('priorityFilterPh')}
+            style={{ width: 140 }}
+            value={priorityFilter || undefined}
+            onChange={(v) => { setPriorityFilter(v || ''); setPage(1); fetchAnnouncements(1, pageSize, keyword, v || '') }}
+            options={[
+              { value: 'urgent', label: t('urgent') },
+              { value: 'important', label: t('important') },
+              { value: 'normal', label: t('normal') },
+              { value: 'low', label: t('lowPriority') },
+            ]}
+          />
+          <Button onClick={() => { setPage(1); fetchAnnouncements(1, pageSize) }}>{t('search')}</Button>
+          {(keyword || priorityFilter) && (
+            <Button type="text" onClick={() => { setKeyword(''); setPriorityFilter(''); setPage(1); fetchAnnouncements(1, pageSize, '', '') }}>
+              {t('clearFilter')}
+            </Button>
+          )}
+          {isAdminOrTeacher && selectedRowKeys.length > 0 && (
+            <Button danger icon={<DeleteOutlined />} loading={batchDeleting} onClick={handleBatchDelete}>
+              {t('batchDelete')} ({selectedRowKeys.length})
+            </Button>
+          )}
+        </div>
         {isMobile ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {announcements.length === 0 && !loading && <Empty description={t('noAnnouncements')} />}
             {announcements.map((record: AnnouncementItem) => (
               <Card key={record.id} size="small" styles={{ body: { padding: '10px 12px' } }}>
-                <Text strong style={{ cursor: 'pointer', display: 'block' }} onClick={() => setDetailModal(record)}>
+                <Text strong style={{ cursor: 'pointer', display: 'block' }} onClick={() => openDetail(record)}>
                   {record.is_pinned && <PushpinOutlined style={{ color: '#fa8c16', marginRight: 4 }} />}
                   {record.title}
                 </Text>
@@ -320,7 +444,7 @@ const AnnouncementsPage: React.FC = () => {
                     {record.creator_username || record.creator_name || '-'} · {record.created_at ? new Date(record.created_at).toLocaleString('zh-CN') : '-'}
                   </Text>
                   <Space size={4}>
-                    <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => setDetailModal(record)} />
+                    <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openDetail(record)} />
                     {isAdminOrTeacher && (
                       <>
                         <Button type="text" size="small" icon={<EditOutlined />}
@@ -349,6 +473,10 @@ const AnnouncementsPage: React.FC = () => {
           rowKey="id"
           loading={loading}
           size="small"
+          rowSelection={isAdminOrTeacher ? {
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys),
+          } : undefined}
           pagination={{
             current: page,
             pageSize,
@@ -393,6 +521,33 @@ const AnnouncementsPage: React.FC = () => {
             <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>
               {detailModal.content}
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── 已读名单弹窗 ── */}
+      <Modal
+        title={<Space><TeamOutlined />{t('readUsers')} - {readUsersModal?.title}</Space>}
+        open={!!readUsersModal}
+        onCancel={() => setReadUsersModal(null)}
+        footer={<Button onClick={() => setReadUsersModal(null)}>{t('close')}</Button>}
+        width={480}
+      >
+        <div style={{ marginBottom: 12, color: 'var(--text-secondary)' }}>
+          {t('readCount')}: {readUsers.length}
+        </div>
+        {readUsersLoading ? (
+          <div style={{ textAlign: 'center', padding: 20 }}>{t('loading')}</div>
+        ) : readUsers.length === 0 ? (
+          <Empty description={t('noReadUsers')} />
+        ) : (
+          <div style={{ maxHeight: 360, overflow: 'auto' }}>
+            {readUsers.map((u) => (
+              <div key={u.username} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
+                <Text>{u.name || u.username}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{u.read_at ? new Date(u.read_at).toLocaleString('zh-CN') : ''}</Text>
+              </div>
+            ))}
           </div>
         )}
       </Modal>

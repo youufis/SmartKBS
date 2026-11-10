@@ -65,6 +65,8 @@ const DiscussionPage: React.FC = () => {
   const [aiModal, setAiModal] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [detailModal, setDetailModal] = useState<any>(null)
+  // 正在执行开始/结束/重新开始的讨论 id：用于按钮 loading，防止重复点击
+  const [actingId, setActingId] = useState<number | null>(null)
   const isMobile = useIsMobile()
   const MOBILE_CARD_PAGE = 8            // 窄屏卡片列表每页条数
   const [mPage, setMPage] = useState(1)
@@ -162,6 +164,8 @@ const DiscussionPage: React.FC = () => {
         ai_role: data.ai_role || 'mixed',
         duration_minutes: data.duration_minutes || 30,
         require_summary: !!data.require_summary,
+        auto_guide: data.auto_guide !== false,
+        auto_guide_level: data.auto_guide_level || 'standard',
       })
       setEditOpen(true)
     } catch (err: any) {
@@ -181,6 +185,8 @@ const DiscussionPage: React.FC = () => {
         ai_role: values.ai_role,
         duration_minutes: values.duration_minutes,
         require_summary: !!values.require_summary,
+        auto_guide: values.auto_guide !== false,
+        auto_guide_level: values.auto_guide_level || 'standard',
       }
       if (editing.status === 'pending') {
         Object.assign(payload, {
@@ -240,35 +246,46 @@ const DiscussionPage: React.FC = () => {
   }
 
   // 开始讨论
+  // 开始讨论会按目标范围一次性建组+分配成员，学生多时耗时略长：
+  // 按钮必须进入 loading，避免用户以为没反应而重复点击。
   const handleStart = async (id: number) => {
+    setActingId(id)
     try {
-      const { data } = await apiClient.post(`/api/interaction/discussions/${id}/start`)
+      const { data } = await apiClient.post(`/api/interaction/discussions/${id}/start`, null, { timeout: 120000 })
       message.success(data.message || t('startSuccess'))
-      loadDiscussions()
+      await loadDiscussions()
     } catch (err: any) {
       message.error(t('startFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
+    } finally {
+      setActingId(null)
     }
   }
 
   // 结束讨论
   const handleEnd = async (id: number) => {
+    setActingId(id)
     try {
       await apiClient.post(`/api/interaction/discussions/${id}/end`)
       message.success(t('endSuccess'))
-      loadDiscussions()
+      await loadDiscussions()
     } catch (err: any) {
       message.error(t('operationFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
+    } finally {
+      setActingId(null)
     }
   }
 
   // 重新开始讨论
   const handleRestart = async (id: number) => {
+    setActingId(id)
     try {
       await apiClient.post(`/api/interaction/discussions/${id}/restart`)
       message.success(t('restartSuccess'))
-      loadDiscussions()
+      await loadDiscussions()
     } catch (err: any) {
       message.error(t('operationFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
+    } finally {
+      setActingId(null)
     }
   }
 
@@ -414,6 +431,24 @@ const DiscussionPage: React.FC = () => {
           <Select.Option value={true}>{t('groupSubmit')}</Select.Option>
         </Select>
       </Form.Item>
+      <Form.Item name="auto_guide" label={t('autoGuide')} initialValue={true}
+        extra={t('autoGuideHint')}>
+        <Select>
+          <Select.Option value={true}>{t('autoGuideOn')}</Select.Option>
+          <Select.Option value={false}>{t('autoGuideOff')}</Select.Option>
+        </Select>
+      </Form.Item>
+      <Form.Item noStyle shouldUpdate={(prev, cur) => prev.auto_guide !== cur.auto_guide}>
+        {({ getFieldValue }) => getFieldValue('auto_guide') === false ? null : (
+          <Form.Item name="auto_guide_level" label={t('autoGuideLevel')} initialValue="standard">
+            <Select>
+              <Select.Option value="conservative">{t('autoGuideConservative')}</Select.Option>
+              <Select.Option value="standard">{t('autoGuideStandard')}</Select.Option>
+              <Select.Option value="proactive">{t('autoGuideProactive')}</Select.Option>
+            </Select>
+          </Form.Item>
+        )}
+      </Form.Item>
     </Form>
   )
 
@@ -437,9 +472,11 @@ const DiscussionPage: React.FC = () => {
     {
       title: t('participation'), key: 'members', width: 110,
       render: (_: any, disc: any) => (
-        <Text type="secondary">
-          <TeamOutlined /> {disc.total_members || 0}{t('people')} | <MessageOutlined /> {disc.total_messages || 0}
-        </Text>
+        <Tooltip title={`${t('actualMembers')} ${disc.total_joined || 0} / ${t('expectedMembers')} ${disc.total_members || 0}`}>
+          <Text type="secondary">
+            <TeamOutlined /> {disc.total_joined || 0}{t('people')} | <MessageOutlined /> {disc.total_messages || 0}
+          </Text>
+        </Tooltip>
       ),
     },
     ...(isTeacherOrAdmin ? [{
@@ -466,16 +503,19 @@ const DiscussionPage: React.FC = () => {
                 iconOnly stopPropagation onSuccess={loadDiscussions} />
               {disc.status === 'pending' && (
                 <Button type="link" size="small" icon={<PlayCircleOutlined />}
+                  loading={actingId === disc.id} disabled={actingId !== null && actingId !== disc.id}
                   onClick={() => handleStart(disc.id)} style={{ color: '#52c41a' }}>{t('start')}</Button>
               )}
               {disc.status === 'active' && (
                 <Popconfirm title={t('confirmEnd')} onConfirm={() => handleEnd(disc.id)}>
-                  <Button type="link" size="small" icon={<StopOutlined />} danger>{t('end')}</Button>
+                  <Button type="link" size="small" icon={<StopOutlined />} danger
+                    loading={actingId === disc.id} disabled={actingId !== null && actingId !== disc.id}>{t('end')}</Button>
                 </Popconfirm>
               )}
               {disc.status === 'ended' && (
                 <>
                   <Button type="link" size="small" icon={<ReloadOutlined />}
+                    loading={actingId === disc.id} disabled={actingId !== null && actingId !== disc.id}
                     onClick={() => handleRestart(disc.id)} style={{ color: '#52c41a' }}>{t('restart')}</Button>
                   <Popconfirm title={t('confirmDeleteDiscussion')} onConfirm={() => handleDelete(disc.id)}>
                     <Button type="link" size="small" icon={<DeleteOutlined />} danger>{t('delete')}</Button>
@@ -593,7 +633,7 @@ const DiscussionPage: React.FC = () => {
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 24, fontSize: 13, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
-                      <span><TeamOutlined /> {t('participants')}：{disc.total_members || 0}</span>
+                      <span><TeamOutlined /> {t('participants')}：{disc.total_joined || 0}（{t('expectedMembers')} {disc.total_members || 0}）</span>
                       <span><MessageOutlined /> {t('messageCount')}：{disc.total_messages || 0}</span>
                       <span><RobotOutlined /> {t('aiRole_')}：{getAiRoleLabel(disc.ai_role) || '-'}</span>
                       {disc.duration_minutes > 0 && (
@@ -723,6 +763,23 @@ const DiscussionPage: React.FC = () => {
                 <Select.Option value={true}>{t('groupSubmit')}</Select.Option>
               </Select>
             </Form.Item>
+            <Form.Item name="auto_guide" label={t('autoGuide')} extra={t('autoGuideHint')}>
+              <Select>
+                <Select.Option value={true}>{t('autoGuideOn')}</Select.Option>
+                <Select.Option value={false}>{t('autoGuideOff')}</Select.Option>
+              </Select>
+            </Form.Item>
+            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.auto_guide !== cur.auto_guide}>
+              {({ getFieldValue }) => getFieldValue('auto_guide') === false ? null : (
+                <Form.Item name="auto_guide_level" label={t('autoGuideLevel')}>
+                  <Select>
+                    <Select.Option value="conservative">{t('autoGuideConservative')}</Select.Option>
+                    <Select.Option value="standard">{t('autoGuideStandard')}</Select.Option>
+                    <Select.Option value="proactive">{t('autoGuideProactive')}</Select.Option>
+                  </Select>
+                </Form.Item>
+              )}
+            </Form.Item>
           </Form>
         )}
       </Modal>
@@ -805,6 +862,7 @@ const DiscussionPage: React.FC = () => {
         onOk={handleAiGenerate}
         confirmLoading={aiLoading}
         okText={t('generatePlan')}
+        forceRender
       >
         <Form form={aiForm} layout="vertical">
           <Form.Item name="topic" label={t('discussionTopic')} rules={[{ required: true, message: t('discussionTopicRequired') }]}>

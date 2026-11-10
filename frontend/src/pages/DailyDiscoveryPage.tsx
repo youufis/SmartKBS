@@ -6,11 +6,11 @@ import {
 } from 'antd';
 import {
   ReloadOutlined, HeartOutlined, HeartFilled,
-  EyeOutlined, StarOutlined, ArrowLeftOutlined,
+  EyeOutlined, StarOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
 import { useDiscoveryStore } from '../stores/discoveryStore';
 import { useTranslation } from 'react-i18next'
+import PageHeader from '../components/PageHeader'
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -22,7 +22,6 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const DailyDiscoveryPage: React.FC = () => {
   const { t } = useTranslation('common')
-  const navigate = useNavigate();
   const {
     cards, favorites, loading, stats, poolSize,
     loadFeed, refreshCards, toggleFavorite, recordView, loadFavorites,
@@ -116,18 +115,15 @@ const DailyDiscoveryPage: React.FC = () => {
   return (
     <Card style={{ borderRadius: 8 }}>
       {/* 顶部栏 */}
-      <Card
-        size="small"
-        style={{ marginBottom: 16, borderRadius: 8 }}
-        styles={{ body: { padding: '8px 16px' } }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Space>
-            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} />
-            <StarOutlined style={{ color: '#faad14', fontSize: 18 }} />
-            <Text strong style={{ fontSize: 16 }}>{t('dailyDiscovery')}</Text>
+      <PageHeader
+        icon={<StarOutlined />}
+        title={
+          <Space size={8}>
+            <span>{t('dailyDiscovery')}</span>
             <Tag>{t('knowledgePool', { count: poolSize })}</Tag>
           </Space>
+        }
+        extra={
           <Space>
             <Button
               type={activeTab === 'feed' ? 'primary' : 'default'}
@@ -154,8 +150,8 @@ const DailyDiscoveryPage: React.FC = () => {
               {t('refreshBatch', { count: stats.refreshRemaining })}
             </Button>
           </Space>
-        </div>
-      </Card>
+        }
+      />
 
       {/* 积分进度条 */}
       <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}>

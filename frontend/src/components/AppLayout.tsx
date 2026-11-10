@@ -49,8 +49,8 @@ import DesktopOnlyGuide from './DesktopOnlyGuide'
 
 const { Header, Sider, Content } = Layout
 
-/** 自管滚动、需要铺满内容高的页面：聊天工作区 */
-const FULL_HEIGHT_PREFIXES = ['/chat']
+/** 自管滚动、需要铺满内容高的页面：聊天工作区、分组讨论房间 */
+const FULL_HEIGHT_PREFIXES = ['/chat', '/discussion-room']
 
 // 教师/管理员菜单项类型：分组（有子项）或平级条目
 type TeacherMenuItem = {

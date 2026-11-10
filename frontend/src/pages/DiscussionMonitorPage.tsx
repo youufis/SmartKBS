@@ -20,6 +20,7 @@ interface GroupStatus {
   group_index: number
   name: string
   member_count: number
+  joined_count: number
   message_count: number
   last_active: string
   last_preview: string
@@ -32,6 +33,7 @@ interface MonitorData {
   status: string
   total_groups: number
   total_members: number
+  total_joined: number
   total_messages: number
   cold_groups: number
   online_count: number
@@ -174,7 +176,7 @@ const DiscussionMonitorPage: React.FC = () => {
           </Col>
           <Col span={5} xs={12}>
             <Card size="small">
-              <Statistic title={t('totalMembers')} value={data.total_members} prefix={<TeamOutlined />} />
+              <Statistic title={t('totalMembers')} value={data.total_joined} suffix={`/ ${data.total_members}`} prefix={<TeamOutlined />} />
             </Card>
           </Col>
           <Col span={5} xs={12}>
@@ -244,7 +246,7 @@ const DiscussionMonitorPage: React.FC = () => {
               >
                 <div style={{ fontSize: 13 }}>
                   <div style={{ marginBottom: 4 }}>
-                    <TeamOutlined /> {g.member_count}{t('people')} &nbsp;
+                    <TeamOutlined /> {g.joined_count}/{g.member_count}{t('people')} &nbsp;
                     <MessageOutlined /> {g.message_count}{t('messages_')}
                   </div>
                   {g.last_preview && (

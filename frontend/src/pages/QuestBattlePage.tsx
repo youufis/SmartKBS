@@ -2,7 +2,7 @@
  * QuestBattlePage — 知识闯关·答题对战页面
  * 倒计时、锦囊、答题、即时反馈（纯 div 布局，避免 antd Col 类型问题）
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Card, Button, Typography, Space, Tag, Progress, Modal,
   Spin, message,
@@ -55,12 +55,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   '生活常识': '#2f54eb', '传统文化': '#a0d911', '时事百科': '#08979c',
 }
 
-const LIFELINE_NAMES: Record<string, string> = {
-  remove_one: '🎯去伪存真',
-  phone_friend: '📞远程连线',
-  audience_vote: '👥群策群力',
-}
-
 const LIFELINE_ICONS: Record<string, React.ReactNode> = {
   remove_one: <DeleteOutlined />,
   phone_friend: <PhoneOutlined />,
@@ -73,6 +67,13 @@ const QuestBattlePage: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const initialData = (location.state as any)?.initialData
+
+  // 锦囊名称走 i18n（原来硬编码中文+emoji）
+  const lifelineNames = useMemo<Record<string, string>>(() => ({
+    remove_one: t('lifelineRemoveOne'),
+    phone_friend: t('lifelinePhoneFriend'),
+    audience_vote: t('lifelineAudienceVote'),
+  }), [t])
 
   const [question, setQuestion] = useState<QuestionData | null>(null)
   const [questInfo, setQuestInfo] = useState<QuestInfo | null>(null)
@@ -214,7 +215,7 @@ const QuestBattlePage: React.FC = () => {
   const handleLifeline = useCallback(async (type: string) => {
     if (answeringRef.current || showResult || terminatedRef.current) return
     if (usedLifelines.includes(type)) {
-      message.warning(t('quest.lifelineUsed', { name: LIFELINE_NAMES[type] }))
+      message.warning(t('quest.lifelineUsed', { name: lifelineNames[type] }))
       return
     }
     setAnswering(true)
@@ -238,7 +239,7 @@ const QuestBattlePage: React.FC = () => {
     } finally {
       setAnswering(false)
     }
-  }, [questId, question, usedLifelines, showResult, terminated])
+  }, [questId, question, usedLifelines, showResult, terminated, lifelineNames])
 
   useEffect(() => {
     isMountedRef.current = true
@@ -324,7 +325,7 @@ const QuestBattlePage: React.FC = () => {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {Object.entries(LIFELINE_NAMES).map(([key, name]) => (
+            {Object.entries(lifelineNames).map(([key, name]) => (
               <Button
                 key={key}
                 type={usedLifelines.includes(key) ? 'default' : 'primary'}

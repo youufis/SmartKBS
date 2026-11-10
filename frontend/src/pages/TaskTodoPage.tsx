@@ -3,10 +3,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  Button, Card, Col, Empty, Input, Progress, Row, Segmented, Select, Space, Spin, Tabs, Tag, Tooltip, Typography,
+  Button, Card, Col, Empty, Input, Progress, Row, Segmented, Select, Space, Spin, Tabs, Tag, Tooltip, Typography, Collapse,
 } from 'antd'
 import {
-  AlertOutlined, BarChartOutlined, BellOutlined, BookOutlined, CalendarOutlined, CheckCircleOutlined,
+  AlertOutlined, AppstoreOutlined, BarChartOutlined, BellOutlined, BookOutlined, CalendarOutlined, CheckCircleOutlined,
   ClockCircleOutlined, CodeOutlined, CustomerServiceOutlined, EditOutlined, ExperimentOutlined,
   FileAddOutlined, FireOutlined, FolderOutlined, MessageOutlined, ReloadOutlined, RightOutlined,
   SearchOutlined, TeamOutlined, ThunderboltOutlined, TrophyOutlined,
@@ -14,6 +14,7 @@ import {
 import { getTaskTodo, type DoneRecord, type TaskTodoItem, type TaskTodoResponse } from '../api/taskTodo'
 import { deadlineInfo, friendlyTime } from './dashboard/fmt'
 import { useChartTheme } from './dashboard/chartTheme'
+import PageHeader from '../components/PageHeader'
 
 const { Text, Paragraph } = Typography
 
@@ -390,11 +391,12 @@ const TaskTodoPage: React.FC = () => {
 
   return (
     <Card style={{ borderRadius: 8 }}>
-      {/* ─── 页头 ─── */}
-      <Row justify="space-between" align="middle" gutter={[8, 8]} style={{ marginBottom: 14 }}>
-        <Col>
+      {/* ─── 页头（全站统一 PageHeader 风格） ─── */}
+      <PageHeader
+        icon={<CheckCircleOutlined />}
+        title={
           <Space size={8} wrap>
-            <span style={{ fontSize: 20, fontWeight: 600 }}>{t('todo.title')}</span>
+            <span>{t('todo.title')}</span>
             <Tag color="blue" style={{ fontSize: 13, padding: '0 12px', borderRadius: 8 }}>
               {t('todo.itemCount', { count: todoCount })}
             </Tag>
@@ -402,8 +404,9 @@ const TaskTodoPage: React.FC = () => {
               <Text type="secondary" style={{ fontSize: 12 }}>+ {suggestCount} {t('todo.quick.suggest')}</Text>
             )}
           </Space>
-        </Col>
-        <Col>
+        }
+        subtitle={t('todo.subtitle')}
+        extra={
           <Space size={8} wrap>
             <Input
               allowClear
@@ -429,16 +432,40 @@ const TaskTodoPage: React.FC = () => {
               <Button icon={<ReloadOutlined />} onClick={fetchManual} size="small" loading={loading} />
             </Tooltip>
           </Space>
-        </Col>
-      </Row>
+        }
+      />
 
-      {/* ─── 分类统计条：一行五格，点击即筛选 ─── */}
+      {/* ─── 分类统计条：一行六格（全部 + 五类），点击即筛选 ─── */}
       <Card
         size="small"
         style={{ marginBottom: 14, borderRadius: 8 }}
         styles={{ body: { padding: '2px 6px' } }}
       >
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch' }}>
+          {/* 全部总览格 */}
+          <div
+            role="button"
+            tabIndex={0}
+            title={t('todo.filter.allCount', { count: todoCount + suggestCount })}
+            onClick={() => setCat('all')}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCat('all') } }}
+            style={{
+              flex: '1 1 118px', minWidth: 112, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 10px',
+              background: cat === 'all' ? (ct.isDark ? 'rgba(22,119,255,0.12)' : 'rgba(22,119,255,0.06)') : 'transparent',
+              boxShadow: cat === 'all' ? 'inset 0 0 0 1px #1677ff' : 'none',
+              transition: 'background .2s',
+            }}
+          >
+            <span style={{ fontSize: 16, color: cat === 'all' ? '#1677ff' : ct.tick, flexShrink: 0 }}><AppstoreOutlined /></span>
+            <span style={{ minWidth: 0 }}>
+              <Text type="secondary" style={{ fontSize: 11.5, display: 'block', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {t('todo.filter.all')}
+              </Text>
+              <span style={{ fontSize: 17, fontWeight: 600, color: cat === 'all' ? '#1677ff' : ct.tick }}>{todoCount + suggestCount}</span>
+            </span>
+          </div>
           {Object.entries(CATEGORY_LABELS).map(([key, cfg], idx) => {
             const count = catCounts[key] || 0
             const active = cat === key
@@ -478,7 +505,8 @@ const TaskTodoPage: React.FC = () => {
       </Card>
 
       {/* ─── 今日必须完成 ─── */}
-      {tab === 'todo' && focus.length > 0 && (
+      {/* ─── 今日必须完成（常驻，两个 tab 都显示） ─── */}
+      {focus.length > 0 && (
         <Card
           size="small"
           style={{
@@ -533,7 +561,16 @@ const TaskTodoPage: React.FC = () => {
                 )}
                 {todoCount + suggestCount === 0 ? (
                   <Card style={{ borderRadius: 8 }}>
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<Text type="secondary">{t('todo.empty')}</Text>} />
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<Text type="secondary">{t('todo.empty')}</Text>}>
+                      <Space direction="vertical" size={8}>
+                        <Button type="primary" size="small" onClick={() => navigate('/curriculum')}>
+                          <BookOutlined /> {t('todo.emptyGuide.curriculum')}
+                        </Button>
+                        <Button size="small" onClick={() => navigate('/discussion')}>
+                          <TeamOutlined /> {t('todo.emptyGuide.discussion')}
+                        </Button>
+                      </Space>
+                    </Empty>
                   </Card>
                 ) : (
                   GROUP_ORDER.map((k) => renderGroup(k))
@@ -543,52 +580,70 @@ const TaskTodoPage: React.FC = () => {
           },
           {
             key: 'done',
-            label: <span><TrophyOutlined /> {t('todo.tabs.done')}</span>,
+            label: <span><TrophyOutlined /> {t('todo.tabs.done')} ({data?.recent_done?.length ?? 0})</span>,
             children: renderDone(),
           },
         ]}
       />
 
-      {/* ─── 学习进度概览 ─── */}
+      {/* ─── 学习进度概览（可折叠，默认收起，避免冲淡待办焦点） ─── */}
       {data.stats && (
-        <Card
+        <Collapse
+          ghost
           size="small"
-          style={{ borderRadius: 8, marginTop: 8 }}
-          title={<Space><TrophyOutlined style={{ color: '#faad14' }} /><Text strong>{t('todo.stats.title')}</Text></Space>}
-        >
-          <Row gutter={[16, 16]}>
-            <Col xs={12} sm={6}>
-              <div style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.courseProgress')}</Text>
-                <Progress type="dashboard" percent={data.stats.course_progress || 0} size={80} strokeColor="#1677ff" />
-              </div>
-            </Col>
-            <Col xs={12} sm={6}>
-              <div style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.completionRate')}</Text>
-                <Progress type="dashboard" percent={data.stats.completion_rate || 0} size={80} strokeColor="#52c41a" />
-              </div>
-            </Col>
-            <Col xs={12} sm={6}>
-              <div style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.accuracyRate')}</Text>
-                <Progress type="dashboard" percent={data.stats.accuracy_rate || 0} size={80} strokeColor="#722ed1" format={(p) => `${p}%`} />
-              </div>
-            </Col>
-            <Col xs={12} sm={6}>
-              <div style={{ textAlign: 'center', paddingTop: 8 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.streakDays')}</Text>
-                <div style={{ fontSize: 28, fontWeight: 700, color: '#fa8c16' }}>
-                  {data.stats.streak_days || 0}
-                  <Text style={{ fontSize: 14, color: '#fa8c16', marginLeft: 4 }}>{t('todo.stats.streakDaysUnit')}</Text>
-                </div>
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {data.stats.streak_days > 0 ? t('todo.stats.streakActive') : t('todo.stats.streakInactive')}
-                </Text>
-              </div>
-            </Col>
-          </Row>
-        </Card>
+          style={{ marginTop: 8, borderRadius: 8, background: 'var(--bg-container)' }}
+          items={[
+            {
+              key: 'stats',
+              label: (
+                <Space>
+                  <TrophyOutlined style={{ color: '#faad14' }} />
+                  <Text strong>{t('todo.stats.title')}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('todo.stats.brief', {
+                      completion: data.stats.completion_rate || 0,
+                      streak: data.stats.streak_days || 0,
+                    })}
+                  </Text>
+                </Space>
+              ),
+              children: (
+                <Row gutter={[16, 16]}>
+                  <Col xs={12} sm={6}>
+                    <div style={{ textAlign: 'center' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.courseProgress')}</Text>
+                      <Progress type="dashboard" percent={data.stats.course_progress || 0} size={80} strokeColor="#1677ff" />
+                    </div>
+                  </Col>
+                  <Col xs={12} sm={6}>
+                    <div style={{ textAlign: 'center' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.completionRate')}</Text>
+                      <Progress type="dashboard" percent={data.stats.completion_rate || 0} size={80} strokeColor="#52c41a" />
+                    </div>
+                  </Col>
+                  <Col xs={12} sm={6}>
+                    <div style={{ textAlign: 'center' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.accuracyRate')}</Text>
+                      <Progress type="dashboard" percent={data.stats.accuracy_rate || 0} size={80} strokeColor="#722ed1" format={(p) => `${p}%`} />
+                    </div>
+                  </Col>
+                  <Col xs={12} sm={6}>
+                    <div style={{ textAlign: 'center', paddingTop: 8 }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.streakDays')}</Text>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: '#fa8c16' }}>
+                        {data.stats.streak_days || 0}
+                        <Text style={{ fontSize: 14, color: '#fa8c16', marginLeft: 4 }}>{t('todo.stats.streakDaysUnit')}</Text>
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        {data.stats.streak_days > 0 ? t('todo.stats.streakActive') : t('todo.stats.streakInactive')}
+                      </Text>
+                    </div>
+                  </Col>
+                </Row>
+              ),
+            },
+          ]}
+        />
       )}
     </Card>
   )

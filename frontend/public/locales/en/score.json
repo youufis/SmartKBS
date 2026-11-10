@@ -446,6 +446,7 @@
   "ptOfPortrait": "'s portrait",
   "ptPickScope": "Choose scope:",
   "ptScopeCenter": "Share hub — visible school-wide",
+  "ptScopeClass": "Class only — classmates can view",
   "ptScopePrivate": "Only me — not public",
   "ptAutoTheme": "Auto match",
   "ptThemeHint": "Theme colors for card and detail window",

@@ -68,16 +68,17 @@ const fmtDateTime = (d: Date) =>
   `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} `
   + `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
 
-/** 剩余时间的人话表述；已截止返回空串 */
-const remaining = (endsAt: string): string => {
+/** 剩余时间的人话表述（走 i18n）；已截止返回空串 */
+const remaining = (endsAt: string, t: (k: string, o?: Record<string, unknown>) => string): string => {
   if (!endsAt) return ''
   const end = new Date(endsAt.replace(' ', 'T'))
   const diff = end.getTime() - Date.now()
   if (Number.isNaN(diff) || diff <= 0) return ''
   const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins} 分钟`
+  if (mins < 60) return t('pollMinRemain', { n: mins })
   const hours = Math.floor(mins / 60)
-  return hours < 24 ? `${hours} 小时 ${mins % 60} 分` : `${Math.floor(hours / 24)} 天`
+  if (hours < 24) return t('pollHourMinRemain', { h: hours, m: mins % 60 })
+  return t('pollDayRemain', { d: Math.floor(hours / 24) })
 }
 
 /** 删除按钮：需要翻译与确认框，抽成组件避免在 renderItem 里堆 UI */
@@ -441,8 +442,8 @@ const QuickPollPage: React.FC = () => {
                               {poll.ends_at && (
                                 <> {' · '}
                                   {t('pollDeadline')} {poll.ends_at.slice(5, 16)}
-                                  {!poll.ended && remaining(poll.ends_at)
-                                    && `（${t('pollRemaining', { time: remaining(poll.ends_at) })}）`}
+                                  {!poll.ended && remaining(poll.ends_at, t)
+                                    && `（${t('pollRemaining', { time: remaining(poll.ends_at, t) })}）`}
                                 </>
                               )}
                             </div>

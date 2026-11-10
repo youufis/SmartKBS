@@ -13,7 +13,9 @@ from fastapi import APIRouter, HTTPException, Request, Query, WebSocket, WebSock
 from pydantic import BaseModel, Field
 
 from backend.api.dependencies import get_current_user
-from backend.database import execute_query, execute_insert_update, execute_query_dict
+from backend.database import (
+    execute_query, execute_insert_update, execute_query_dict, get_transaction,
+)
 from backend.permission_service import (
     filter_activities_by_scope,
     check_activity_visibility,
@@ -21,6 +23,7 @@ from backend.permission_service import (
     parse_legacy_teacher_grade_class,
     get_students_in_scope,
     get_grade_by_name,
+    get_student_identity,
     _resolve_class_id_flexible,
 )
 from backend.logger import logger
@@ -63,6 +66,29 @@ def _disc_brief(disc_id: int) -> dict | None:
 def _group_discussion_id(group_id: int) -> int | None:
     rows = execute_query("SELECT discussion_id FROM discussion_groups WHERE id=?", (group_id,))
     return rows[0][0] if rows else None
+
+
+def _student_display_labels(usernames: list) -> dict[str, str]:
+    """批量把学号映射成「姓名（年级·班级）」可读标识，供 AI 上下文/报告拼接。
+
+    讨论消息落库只存 username（学号），直接拼给 LLM 会让 AI 在回复里引用
+    裸学号（如 s11009），教师端对不上人。这里统一转成学生真实身份。
+    """
+    names = [str(u or "").strip() for u in usernames if str(u or "").strip()]
+    ident = get_student_identity(names) if names else {}
+
+    def _label(u):
+        info = ident.get(str(u or "")) or {}
+        name = str(info.get("name") or "").strip() or u
+        grade = str(info.get("grade") or "").strip()
+        cls = str(info.get("class") or "").strip()
+        if grade and cls:
+            where = f"{cls}" if cls.startswith(grade) else f"{grade}·{cls}"
+        else:
+            where = grade or cls
+        return f"{name}（{where}）" if where else str(name)
+
+    return {u: _label(u) for u in usernames}
 
 
 def _is_disc_member(username: str, disc_id: int) -> bool:
@@ -300,6 +326,8 @@ class DiscussionCreate(BaseModel):
     target_grade: str = Field("", max_length=100)
     target_class: str = Field("", max_length=200)
     target_users: str = Field("", max_length=5000)
+    auto_guide: bool = True                       # 是否开启 AI 助教自动引导
+    auto_guide_level: str = Field("standard", max_length=20)  # conservative / standard / proactive
 
 
 class DiscussionUpdate(BaseModel):
@@ -316,6 +344,8 @@ class DiscussionUpdate(BaseModel):
     target_grade: str | None = Field(None, max_length=100)
     target_class: str | None = Field(None, max_length=200)
     target_users: str | None = Field(None, max_length=5000)
+    auto_guide: bool | None = None
+    auto_guide_level: str | None = Field(None, max_length=20)
 
 
 class MessageSend(BaseModel):
@@ -366,14 +396,16 @@ async def create_discussion(req: DiscussionCreate, request: Request):
             group_count, members_per_group, ai_role, duration_minutes,
             status, grade, classes, require_summary,
             target_scope, target_grade, target_class, target_users,
+            auto_guide, auto_guide_level,
             created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?)""",
+                   ?, ?, ?, ?, ?, ?, ?, ?)""",
         (user["username"], title, req.description, req.subject,
          req.group_mode, req.group_count, req.members_per_group,
          req.ai_role, req.duration_minutes,
          req.grade, req.classes, 1 if req.require_summary else 0,
          req.target_scope, req.target_grade, req.target_class, req.target_users,
+         1 if req.auto_guide else 0, req.auto_guide_level,
          now, now),
     )
     logger.info(f"教师 {user['username']} 创建讨论: {title}")
@@ -449,6 +481,32 @@ def _group_col_counts(table: str, ids: list[int]) -> dict[int, int]:
     return {r[0]: r[1] for r in rows}
 
 
+def _group_joined_counts(ids: list[int]) -> dict[int, int]:
+    """各组实到人数：只算真正进入过讨论室的成员（joined=1），
+    开始讨论时预分配的花名册（joined=0）不计入「参与」。"""
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    rows = execute_query(
+        f"SELECT group_id, COUNT(*) FROM discussion_members "
+        f"WHERE group_id IN ({ph}) AND IFNULL(joined, 1)=1 GROUP BY group_id",
+        tuple(ids),
+    )
+    return {r[0]: r[1] for r in rows}
+
+
+_MAX_REPORT_MEMBERS = 40
+
+
+def _member_line(display: list[str]) -> str:
+    """成员名单拼成一行；超过 40 人截断，避免全校范围把 LLM 上下文撑爆。"""
+    if not display:
+        return "（空）"
+    if len(display) <= _MAX_REPORT_MEMBERS:
+        return ", ".join(display)
+    return ", ".join(display[:_MAX_REPORT_MEMBERS]) + f" 等共 {len(display)} 人"
+
+
 def _enrich_discussions(rows: list[dict], username: str, role: int) -> list[dict]:
     """批量富化讨论列表: 分组/消息数/成员数/创建者姓名/报告标记/我的小组"""
     if not rows:
@@ -464,11 +522,13 @@ def _enrich_discussions(rows: list[dict], username: str, role: int) -> list[dict
     group_ids = [g[0] for g in g_rows]
     msg_counts = _group_col_counts("discussion_messages", group_ids)
     mem_counts = _group_col_counts("discussion_members", group_ids)
+    joined_counts = _group_joined_counts(group_ids)
     groups_by_disc: dict[int, list] = {}
     for gid, did, gidx, gname in g_rows:
         groups_by_disc.setdefault(did, []).append({
             "id": gid, "group_index": gidx, "name": gname,
             "member_count": mem_counts.get(gid, 0),
+            "joined_count": joined_counts.get(gid, 0),
             "message_count": msg_counts.get(gid, 0),
         })
 
@@ -506,6 +566,7 @@ def _enrich_discussions(rows: list[dict], username: str, role: int) -> list[dict
         item["groups"] = gl
         item["total_messages"] = sum(g["message_count"] for g in gl)
         item["total_members"] = sum(g["member_count"] for g in gl)
+        item["total_joined"] = sum(g["joined_count"] for g in gl)
         item["require_summary"] = bool(item.get("require_summary"))
         creator = item.get("creator_username") or ""
         item["creator_name"] = creator_names.get(creator) or creator
@@ -584,7 +645,7 @@ async def get_discussion(disc_id: int, request: Request):
     group_list = []
     for g in groups:
         members = execute_query(
-            "SELECT username, role, joined_at FROM discussion_members WHERE group_id=?",
+            "SELECT username, role, joined_at, IFNULL(joined, 1) FROM discussion_members WHERE group_id=?",
             (g[0],),
         )
         msg_count = execute_query(
@@ -593,7 +654,12 @@ async def get_discussion(disc_id: int, request: Request):
         )[0][0]
         group_list.append({
             "id": g[0], "group_index": g[1], "name": g[2],
-            "members": [{"username": m[0], "role": m[1], "joined_at": m[2]} for m in members],
+            "members": [
+                {"username": m[0], "role": m[1], "joined_at": m[2], "joined": bool(m[3])}
+                for m in members
+            ],
+            "member_count": len(members),
+            "joined_count": sum(1 for m in members if m[3]),
             "message_count": msg_count,
         })
 
@@ -602,6 +668,8 @@ async def get_discussion(disc_id: int, request: Request):
     for _g in group_list:
         attach_student_info(_g.get("members") or [], key="username", prefix="")
     disc["groups"] = group_list
+    disc["total_members"] = sum(g["member_count"] for g in group_list)
+    disc["total_joined"] = sum(g["joined_count"] for g in group_list)
     disc["require_summary"] = bool(disc["require_summary"])
     # 查询创建者姓名
     creator_info = execute_query(
@@ -643,6 +711,14 @@ async def update_discussion(disc_id: int, req: DiscussionUpdate, request: Reques
     if req.require_summary is not None:
         updates.append("require_summary=?")
         params.append(1 if req.require_summary else 0)
+    if req.auto_guide is not None:
+        updates.append("auto_guide=?")
+        params.append(1 if req.auto_guide else 0)
+    if req.auto_guide_level is not None:
+        if req.auto_guide_level not in ("conservative", "standard", "proactive"):
+            raise HTTPException(status_code=400, detail="自动引导灵敏度无效")
+        updates.append("auto_guide_level=?")
+        params.append(req.auto_guide_level)
 
     structural_fields = {
         "group_mode": req.group_mode,
@@ -777,7 +853,9 @@ async def start_discussion(disc_id: int, request: Request):
     if group_mode == "none":
         group_count = 1
     elif group_mode == "auto":
+        # 按每组人数定组数，并打散名单（否则按学号顺序分，相邻学号同组，失去分组意义）
         group_count = max(1, (len(usernames) + members_per_group - 1) // members_per_group)
+        random.shuffle(usernames)
     else:  # random：优先使用教师指定组数，未指定则按每组人数估算
         if group_count <= 0:
             group_count = max(1, (len(usernames) + members_per_group - 1) // members_per_group)
@@ -785,28 +863,34 @@ async def start_discussion(disc_id: int, request: Request):
         random.shuffle(usernames)
     group_count = min(max(1, group_count), max(1, len(usernames)))
 
-    # 删除旧的临时分组（如果有）
-    old_groups = execute_query("SELECT id FROM discussion_groups WHERE discussion_id=?", (disc_id,))
-    for og in old_groups:
-        execute_insert_update("DELETE FROM discussion_members WHERE group_id=?", (og[0],))
-    execute_insert_update("DELETE FROM discussion_groups WHERE discussion_id=?", (disc_id,))
-
     # 创建分组并一次性分配成员：避免空组、抢组和学生漏加入
+    # joined=0 表示「预分配花名册」，学生真正进入讨论室后才置 1，
+    # 「参与人数」按实到统计，不会把全校名单当成参与数。
+    # 全程一个事务 + executemany：原来逐条 INSERT 提交在 1400 人规模下要 40 秒，
+    # 前端等到超时还看不到反馈（后端其实已成功）。
     now = _now()
-    group_ids: list[int] = []
-    for idx in range(group_count):
-        group_name = "自由讨论区" if group_mode == "none" else f"第{idx + 1}组"
-        gid = execute_insert_update(
-            "INSERT INTO discussion_groups (discussion_id, group_index, name) VALUES (?, ?, ?)",
-            (disc_id, idx + 1, group_name),
-        )
-        group_ids.append(gid)
-    for idx, uname in enumerate(usernames):
-        gid = group_ids[0] if group_mode == "none" else group_ids[idx % group_count]
-        execute_insert_update(
-            "INSERT OR IGNORE INTO discussion_members (group_id, username, role, joined_at) "
-            "VALUES (?, ?, 'member', ?)",
-            (gid, uname, now),
+    with get_transaction() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM discussion_members WHERE group_id IN "
+            "(SELECT id FROM discussion_groups WHERE discussion_id=?)", (disc_id,))
+        cur.execute("DELETE FROM discussion_groups WHERE discussion_id=?", (disc_id,))
+
+        group_ids: list[int] = []
+        for idx in range(group_count):
+            group_name = "自由讨论区" if group_mode == "none" else f"第{idx + 1}组"
+            cur.execute(
+                "INSERT INTO discussion_groups (discussion_id, group_index, name) VALUES (?, ?, ?)",
+                (disc_id, idx + 1, group_name),
+            )
+            group_ids.append(cur.lastrowid)
+        cur.executemany(
+            "INSERT OR IGNORE INTO discussion_members (group_id, username, role, joined_at, joined) "
+            "VALUES (?, ?, 'member', ?, 0)",
+            [
+                (group_ids[0] if group_mode == "none" else group_ids[idx % group_count], uname, now)
+                for idx, uname in enumerate(usernames)
+            ],
         )
 
     # 更新状态
@@ -927,7 +1011,7 @@ async def _auto_generate_report(disc_id: int):
         )
         member_names = [m[0] for m in members]
         overall_parts.append(f"\n## {g[2] or f'第{g[1]}组'}")
-        overall_parts.append(f"- 成员：{', '.join(member_names) if member_names else '（空）'}")
+        overall_parts.append(f"- 成员：{_member_line(member_names)}")
         overall_parts.append(f"- 消息数：{len(msgs)}")
 
         ai_texts = [m[1] for m in msgs if m[2] == 'ai_suggest']
@@ -1089,6 +1173,13 @@ async def join_discussion(disc_id: int, request: Request):
         )
         if not group_row:
             raise HTTPException(status_code=500, detail="内部错误：无法获取分组信息")
+        # 预分配花名册 joined=0 → 学生真正进来后置 1，才算「参与」
+        if status in ("active", "ended"):
+            execute_insert_update(
+                "UPDATE discussion_members SET joined=1 "
+                "WHERE group_id=? AND username=? AND IFNULL(joined, 0)=0",
+                (group_row[0][0], username),
+            )
         return {
             "status": "already_joined",
             "group_id": group_row[0][0],
@@ -1124,7 +1215,8 @@ async def join_discussion(disc_id: int, request: Request):
 
     now = _now()
     execute_insert_update(
-        "INSERT OR IGNORE INTO discussion_members (group_id, username, role, joined_at) VALUES (?, ?, 'member', ?)",
+        "INSERT OR IGNORE INTO discussion_members (group_id, username, role, joined_at, joined) "
+        "VALUES (?, ?, 'member', ?, 1)",
         (group_id, username, now),
     )
 
@@ -1266,6 +1358,8 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
             logger.debug(f"[讨论] 发言积分发放失败 {username}: {e}")
 
     # 广播新消息到 WebSocket（带上真实 ID，供前端去重）
+    _ident = get_student_identity([username]) if username else {}
+    _info = _ident.get(str(username or "")) or {}
     msg_data = {
         "type": "new_message",
         "id": msg_id,
@@ -1273,8 +1367,23 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
         "content": content,
         "msg_type": "text",
         "created_at": now,
+        "name": _info.get("name", ""),
+        "grade": _info.get("grade", ""),
+        "class_name": _info.get("class", ""),
     }
     asyncio.create_task(ws_manager.broadcast(group_id, msg_data))
+
+    # 事件驱动：学生发消息后，延迟 30 秒评估是否需要 AI 介入。
+    # 延迟是为了不打断正在进行的讨论；评估内部会再判断冷场/在线/冷却等信号。
+    if role == 2 and disc_id:
+        async def _deferred_nudge():
+            try:
+                await asyncio.sleep(30)
+                await _auto_nudge_discussion(disc_id, (disc or {}).get("creator_username") or "")
+            except Exception:
+                pass
+        asyncio.create_task(_deferred_nudge())
+
     return {"status": "ok", "id": msg_id}
 
 
@@ -1309,16 +1418,24 @@ async def get_messages(
            ORDER BY id ASC LIMIT ?""",
         (group_id, after_id, limit),
     )
-    return [
-        {
+    # 附带学生身份（姓名/年级/班级），前端气泡直接展示，避免二次查库
+    ident = get_student_identity([r[1] for r in rows if r[1]])
+    result = []
+    for r in rows:
+        info = ident.get(str(r[1] or "")) or {}
+        item = {
             "id": r[0],
             "username": r[1] or "AI助教",
             "content": r[2],
             "msg_type": r[3],
             "created_at": r[4],
         }
-        for r in rows
-    ]
+        if r[1]:
+            item["name"] = info.get("name", "")
+            item["grade"] = info.get("grade", "")
+            item["class_name"] = info.get("class", "")
+        result.append(item)
+    return result
 
 
 # ── 获取我的讨论（学生视角）──
@@ -1409,8 +1526,9 @@ async def ai_suggest(group_id: int, request: Request):
            WHERE group_id=? AND msg_type != 'ai_suggest' ORDER BY id DESC LIMIT 10""",
         (group_id,),
     )
+    labels = _student_display_labels([m[0] for m in msgs])
     messages_text = "\n".join(
-        [f"{m[0] or 'AI助教'}: {m[1]}" for m in reversed(msgs)]
+        [f"{labels.get(m[0], m[0] or 'AI助教')}: {m[1]}" for m in reversed(msgs)]
     )
 
     role_desc = {
@@ -1518,8 +1636,9 @@ async def generate_group_ai_summary(group_id: int, request: Request):
         return {"status": "error", "content": "该小组暂无讨论消息，无法生成总结"}
 
     # 组装消息文本
+    labels = _student_display_labels([m[0] for m in msgs])
     messages_text = "\n".join(
-        [f"{m[0] or 'AI助教'} ({m[3] if m[3] else ''}): {m[1]}"
+        [f"{labels.get(m[0], m[0] or 'AI助教')} ({m[3] if m[3] else ''}): {m[1]}"
          for m in msgs]
     )
 
@@ -1803,21 +1922,25 @@ async def generate_report(disc_id: int, request: Request):
             (g[0],),
         )
         member_names = [m[0] for m in members]
+        member_labels = _student_display_labels(member_names)
+        member_display = [member_labels.get(u, u) for u in member_names]
         msg_count = len(msgs)
         group_summaries.append(f"\n### {g[2] or f'第{g[1]}组'}")
-        group_summaries.append(f"- 成员：{', '.join(member_names)}")
+        group_summaries.append(f"- 成员：{_member_line(member_display)}")
         group_summaries.append(f"- 消息数：{msg_count}")
         # 取最后 5 条消息作为摘要
         recent = msgs[-5:] if msgs else []
+        labels = _student_display_labels([rm[0] for rm in recent])
         for rm in recent:
-            sender = rm[0] or "AI助教"
+            sender = labels.get(rm[0], rm[0] or "AI助教")
             content = rm[1][:100]
             group_summaries.append(f"  - {sender}: {content}")
 
         # 为该小组生成 AI 分析摘要
         if msgs:
+            msg_labels = _student_display_labels([m[0] for m in msgs])
             messages_text = "\n".join(
-                [f"{m[0] or 'AI助教'}: {m[1][:200]}" for m in msgs[-20:]]
+                [f"{msg_labels.get(m[0], m[0] or 'AI助教')}: {m[1][:200]}" for m in msgs[-20:]]
             )
             prompt = f"""请对以下讨论内容进行简要分析（50字以内），总结该小组的关键观点和讨论质量：
 
@@ -1843,7 +1966,7 @@ async def generate_report(disc_id: int, request: Request):
 
             # 保存小组报告
             report_content = f"# 小组报告：{g[2] or f'第{g[1]}组'}\n\n"
-            report_content += f"## 基本信息\n- 成员：{', '.join(member_names)}\n- 消息数：{msg_count}\n\n"
+            report_content += f"## 基本信息\n- 成员：{_member_line(member_display)}\n- 消息数：{msg_count}\n\n"
             report_content += f"## AI 分析\n{ai_summary}\n\n" if ai_summary else ""
             report_content += f"## 讨论内容\n```\n{messages_text}\n```"
 
@@ -1970,13 +2093,16 @@ async def monitor_discussion(disc_id: int, request: Request):
     group_list = []
     total_messages = 0
     total_members = 0
+    total_joined = 0
     cold_groups = 0
 
     for g in groups:
         members = execute_query(
-            "SELECT COUNT(*) FROM discussion_members WHERE group_id=?",
+            "SELECT COUNT(*), COUNT(CASE WHEN IFNULL(joined, 1)=1 THEN 1 END) "
+            "FROM discussion_members WHERE group_id=?",
             (g[0],),
-        )[0][0]
+        )[0]
+        member_total, joined_total = members[0], members[1]
 
         msg_count = execute_query(
             "SELECT COUNT(*) FROM discussion_messages WHERE group_id=?",
@@ -2007,13 +2133,15 @@ async def monitor_discussion(disc_id: int, request: Request):
         if is_cold:
             cold_groups += 1
         total_messages += msg_count
-        total_members += members
+        total_members += member_total
+        total_joined += joined_total
 
         group_list.append({
             "id": g[0],
             "group_index": g[1],
             "name": g[2] or f"第{g[1]}组",
-            "member_count": members,
+            "member_count": member_total,
+            "joined_count": joined_total,
             "message_count": msg_count,
             "last_active": last_active,
             "last_preview": last_preview,
@@ -2026,6 +2154,7 @@ async def monitor_discussion(disc_id: int, request: Request):
         "status": status,
         "total_groups": len(groups),
         "total_members": total_members,
+        "total_joined": total_joined,
         "total_messages": total_messages,
         "cold_groups": cold_groups,
         "online_count": sum(ws_manager.get_group_connections(g["id"]) for g in group_list),
@@ -2037,6 +2166,146 @@ async def monitor_discussion(disc_id: int, request: Request):
 
 _auto_nudge_last: dict[int, float] = {}
 
+async def _auto_nudge_discussion(disc_id: int, key_owner: str) -> int:
+    """智能判断讨论的小组是否需要 AI 介入，按需自动发送引导。
+
+    与「定时冷场触发」不同，这里综合多个信号做决策，避免机械追问：
+    1. 房间在线连接数为 0 → 不触发（发了没人看）；
+    2. 上一条消息是 AI 且学生尚未回应 → 不继续追问（避免连环轰炸）；
+    3. 学生最后一次发言距今 < 冷场阈值 → 讨论活跃，不打扰；
+    4. 同组距上次 AI 发言 < 冷却阈值 → 节流；
+    5. AI 已连续追问同一学生多次 → 提示 AI 换人/不点名。
+
+    返回本次实际触发的小组数。key_owner 用于取 API key（教师手动=当前用户；
+    后台自动=讨论创建者）。
+    """
+    rows = execute_query(
+        "SELECT status, title, description, ai_role, auto_guide, auto_guide_level FROM discussions WHERE id=?",
+        (disc_id,),
+    )
+    if not rows or rows[0][0] != "active":
+        return 0
+    disc_title, disc_desc = rows[0][1] or "", rows[0][2] or ""
+    # 教师关闭了自动引导，或 AI 角色为旁观者 → 不自动发言
+    if not rows[0][4]:
+        return 0
+    if (rows[0][3] or "") == "observer":
+        return 0
+    # 灵敏度：conservative=更保守（更长冷场阈值），proactive=更积极（更短阈值）
+    level = rows[0][5] or "standard"
+    cold_seconds = {"conservative": 120, "standard": 60, "proactive": 30}.get(level, 60)
+    cooldown_seconds = {"conservative": 300, "standard": 120, "proactive": 60}.get(level, 120)
+
+    groups = execute_query(
+        "SELECT id, group_index FROM discussion_groups WHERE discussion_id=?",
+        (disc_id,),
+    )
+    now = datetime.now()
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(key_owner) if key_owner else get_api_keys("")
+    if not api_key:
+        return 0
+
+    from backend.api.ai_service import call_ai_async
+
+    triggered = 0
+    for g in groups:
+        gid = g[0]
+        # ── 信号 1：房间无人则不触发 ──
+        online = ws_manager.get_group_connections(gid)
+        if online <= 0:
+            continue
+
+        # ── 信号 4：冷却节流 ──
+        if now.timestamp() - _auto_nudge_last.get(gid, 0) < cooldown_seconds:
+            continue
+
+        # 最近消息（含 AI 消息类型），用于判断「AI 是否已追问未获回应」
+        recent_all = execute_query(
+            "SELECT username, content, msg_type, created_at FROM discussion_messages "
+            "WHERE group_id=? ORDER BY id DESC LIMIT 8",
+            (gid,),
+        )
+        if not recent_all:
+            continue
+
+        # ── 信号 2：上一条是 AI 且学生未回应 → 不继续追问 ──
+        last_username = recent_all[0][0]
+        last_type = recent_all[0][2]
+        if last_type == 'ai_suggest':
+            # 上一条是 AI 发言，且其后没有学生消息 → 已经在等学生回应，不再追加
+            continue
+
+        # ── 信号 3：学生最后发言时间 → 冷场判断 ──
+        # 找到最近一条学生消息
+        last_student = next((m for m in recent_all if m[2] == 'text' and m[0]), None)
+        if last_student:
+            try:
+                last_time = datetime.strptime(last_student[3], "%Y-%m-%d %H:%M:%S")
+                idle_seconds = (now - last_time).total_seconds()
+                if idle_seconds < cold_seconds:
+                    continue  # 讨论仍活跃，不打扰
+            except (ValueError, TypeError):
+                pass
+
+        # ── 信号 5：统计最近 AI 是否已连续 @ 同一学生 ──
+        # 从最近消息里抽取学生姓名/学号，供提示词判断是否要换人引导
+        recent_text = execute_query(
+            "SELECT username, content FROM discussion_messages "
+            "WHERE group_id=? AND msg_type != 'ai_suggest' ORDER BY id DESC LIMIT 5",
+            (gid,),
+        )
+        labels = _student_display_labels([m[0] for m in recent_text])
+        messages_text = "\n".join(
+            [f"{labels.get(m[0], m[0] or 'AI助教')}: {m[1][:200]}" for m in reversed(recent_text)]
+        ) or "（小组尚未发言）"
+
+        ai_role_text = build_ai_role()
+        prompt = f"""{ai_role_text}你是一位课堂讨论的AI助教。
+
+讨论主题：{disc_title}
+讨论说明：{disc_desc}
+
+当前讨论内容（按时间从早到晚）：
+{messages_text}
+
+请你根据讨论进展，判断是否需要发言推进讨论，并遵守以下规则：
+- 若讨论已有实质进展、学生仍在积极交流，可保持沉默（输出「暂不发言」）；
+- 避免连续点名同一位学生，若之前已多次追问某位学生，请换一位学生或提出面向全组的开放问题；
+- 发言要简短（30-50字），起到抛砖引玉的作用，不要长篇总结。
+
+请只输出你要说的话；若无需发言，请只输出「暂不发言」："""
+        prompt = apply_skills(prompt, "discussion")
+
+        try:
+            content = await call_ai_async(prompt, api_key, use_kb=False)
+            if not content:
+                continue
+            content = str(content).strip()
+            # AI 判断无需发言
+            if content in ("暂不发言", "无需发言", "保持沉默"):
+                continue
+            now_str = _now()
+            execute_insert_update(
+                "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, NULL, ?, 'ai_suggest', ?)",
+                (gid, content, now_str),
+            )
+            # WebSocket 广播
+            asyncio.create_task(ws_manager.broadcast(gid, {
+                "type": "new_message",
+                "username": None,
+                "content": content,
+                "msg_type": "ai_suggest",
+                "created_at": now_str,
+            }))
+            _auto_nudge_last[gid] = now.timestamp()
+            triggered += 1
+        except Exception as e:
+            logger.warning(f"AI 自动触发失败 小组#{gid}: {e}")
+
+    return triggered
+
+
 @router.post("/discussions/{disc_id}/auto-trigger", summary="触发 AI 自动引导（冷场检测）")
 async def auto_trigger_ai(disc_id: int, request: Request):
     """检测所有小组是否需要 AI 介入（冷场超过 60 秒），自动发送引导"""
@@ -2046,87 +2315,45 @@ async def auto_trigger_ai(disc_id: int, request: Request):
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
 
     rows = execute_query(
-        "SELECT status, title, description, ai_role FROM discussions WHERE id=?", (disc_id,)
+        "SELECT status FROM discussions WHERE id=?", (disc_id,)
     )
     if not rows or rows[0][0] != "active":
         return {"status": "ok", "triggered": 0, "message": "讨论未激活"}
-    disc_title, disc_desc = rows[0][1] or "", rows[0][2] or ""
 
-    groups = execute_query(
-        "SELECT id, group_index FROM discussion_groups WHERE discussion_id=?",
-        (disc_id,),
-    )
-    now = datetime.now()
-    triggered = 0
-    from backend.api.chat_router import get_api_keys
-    api_key, _ = get_api_keys(user["username"])
-    if not api_key:
-        return {"status": "error", "triggered": 0, "message": "API Key 未配置"}
-
-    from backend.api.ai_service import call_ai_async
-
-    for g in groups:
-        last_msg = execute_query(
-            "SELECT content, created_at FROM discussion_messages "
-            "WHERE group_id=? AND username IS NOT NULL AND msg_type='text' "
-            "ORDER BY id DESC LIMIT 1",
-            (g[0],),
-        )
-        if last_msg:
-            try:
-                last_time = datetime.strptime(last_msg[0][1], "%Y-%m-%d %H:%M:%S")
-            except (ValueError, TypeError):
-                continue
-            idle_seconds = (now - last_time).total_seconds()
-            if idle_seconds < 60:
-                continue
-        if now.timestamp() - _auto_nudge_last.get(g[0], 0) < 120:
-            continue
-
-        # 获取最近 5 条消息
-        recent = execute_query(
-            "SELECT username, content FROM discussion_messages "
-            "WHERE group_id=? AND msg_type != 'ai_suggest' ORDER BY id DESC LIMIT 5",
-            (g[0],),
-        )
-        messages_text = "\n".join(
-            [f"{m[0] or 'AI助教'}: {m[1][:200]}" for m in reversed(recent)]
-        ) or "（小组尚未发言）"
-
-        ai_role_text = build_ai_role()
-        prompt = f"""{ai_role_text}你是一位课堂讨论的AI助教。
-讨论主题：{disc_title}
-讨论说明：{disc_desc}
-请根据以下讨论内容给出一个简短的引导问题或总结（30-50字），目的是推动讨论继续深入：
-
-讨论内容：
-{messages_text}
-
-简短引导："""
-        prompt = apply_skills(prompt, "discussion")
-
-        try:
-            content = await call_ai_async(prompt, api_key, use_kb=False)
-            if content:
-                now_str = _now()
-                execute_insert_update(
-                    "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, NULL, ?, 'ai_suggest', ?)",
-                    (g[0], content, now_str),
-                )
-                # WebSocket 广播
-                asyncio.create_task(ws_manager.broadcast(g[0], {
-                    "type": "new_message",
-                    "username": None,
-                    "content": content,
-                    "msg_type": "ai_suggest",
-                    "created_at": now_str,
-                }))
-                _auto_nudge_last[g[0]] = now.timestamp()
-                triggered += 1
-        except Exception as e:
-            logger.warning(f"AI 自动触发失败 小组#{g[0]}: {e}")
-
+    triggered = await _auto_nudge_discussion(disc_id, user["username"])
     return {"status": "ok", "triggered": triggered}
+
+
+# ── AI 助教自动触发后台任务 ──
+
+_AUTO_NUDGE_INTERVAL = 60  # 扫描间隔（秒）
+
+async def discussion_auto_trigger_loop():
+    """后台定时任务：周期扫描所有「进行中」讨论，对冷场小组自动触发 AI 助教引导。
+
+    使用讨论创建者的 API key（教师建讨论时已配置），无需请求上下文。
+    通过讨论表的 ai_role 判断是否启用自动引导：observer（旁观者）不自动发言。
+    """
+    while True:
+        try:
+            await asyncio.sleep(_AUTO_NUDGE_INTERVAL)
+            # 只扫进行中、开启自动引导、且 AI 角色非「旁观者」的讨论
+            rows = execute_query(
+                "SELECT id, creator_username FROM discussions WHERE status='active' "
+                "AND (auto_guide IS NULL OR auto_guide=1) "
+                "AND (ai_role IS NULL OR ai_role != 'observer')"
+            )
+            for disc_id, creator in rows:
+                try:
+                    await _auto_nudge_discussion(disc_id, creator or "")
+                except Exception as e:
+                    logger.warning(f"讨论#{disc_id} 自动引导扫描失败: {e}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"AI 助教自动触发循环异常: {e}")
+            # 异常后短暂退避，避免空转打爆日志
+            await asyncio.sleep(_AUTO_NUDGE_INTERVAL)
 
 
 # ═══════════════════════════════════════════════════════════

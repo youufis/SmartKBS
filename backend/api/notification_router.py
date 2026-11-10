@@ -176,6 +176,25 @@ def _creator_name_map(creators: list[str]) -> dict[str, str]:
     )
     return {r[0]: r[1] for r in rows}
 
+
+def _attach_read_counts(items: list[dict]) -> list[dict]:
+    """批量给公告列表附加已读人数(一次查询, 避免 N+1)。"""
+    if not items:
+        return items
+    ids = [int(it["id"]) for it in items if it.get("id")]
+    if not ids:
+        return items
+    ph = ",".join("?" for _ in ids)
+    rows = execute_query(
+        f"SELECT announcement_id, COUNT(*) FROM announcement_reads "
+        f"WHERE announcement_id IN ({ph}) GROUP BY announcement_id",
+        tuple(ids),
+    )
+    counts = {r[0]: r[1] for r in rows}
+    for it in items:
+        it["read_count"] = counts.get(int(it["id"]), 0)
+    return items
+
 # ── 通知类型黑白名单 ──
 
 def _get_enabled_notification_types() -> set[str]:
@@ -596,8 +615,10 @@ async def list_announcements(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    keyword: str = Query("", max_length=100),
+    priority: str = Query("", max_length=20),
 ):
-    """获取对当前用户可见的公告列表"""
+    """获取对当前用户可见的公告列表（支持关键词 + 优先级筛选）"""
     user = get_current_user(request)
     role = user.get("role", 2)
     user_info = execute_query(
@@ -612,17 +633,44 @@ async def list_announcements(
     total = 0
 
     cols = "id, creator_username, title, content, target_role, target_grade, target_class, priority, is_pinned, created_at, updated_at, target_scope, target_users"
+
+    # 搜索/筛选条件（关键词命中标题或内容，优先级精确匹配）
+    kw = (keyword or "").strip()
+    pri = (priority or "").strip()
+    filter_conds: list[str] = []
+    filter_params: list = []
+    if kw:
+        filter_conds.append("(title LIKE ? OR content LIKE ?)")
+        like = f"%{kw}%"
+        filter_params.extend([like, like])
+    if pri:
+        filter_conds.append("priority = ?")
+        filter_params.append(pri)
+
     if role == 0:
         # 管理员: 全部可见, SQL 侧分页
-        total_row = execute_query("SELECT COUNT(*) FROM announcements")
-        total = total_row[0][0] if total_row else 0
-        rows = execute_query(
-            f"""SELECT {cols} FROM announcements
-                ORDER BY is_pinned DESC, created_at DESC
-                LIMIT ? OFFSET ?""",
-            (page_size, (page - 1) * page_size),
-        )
+        if filter_conds:
+            where = " AND ".join(filter_conds)
+            total_row = execute_query(
+                f"SELECT COUNT(*) FROM announcements WHERE {where}", tuple(filter_params))
+            total = total_row[0][0] if total_row else 0
+            rows = execute_query(
+                f"""SELECT {cols} FROM announcements WHERE {where}
+                    ORDER BY is_pinned DESC, created_at DESC
+                    LIMIT ? OFFSET ?""",
+                tuple(filter_params) + (page_size, (page - 1) * page_size),
+            )
+        else:
+            total_row = execute_query("SELECT COUNT(*) FROM announcements")
+            total = total_row[0][0] if total_row else 0
+            rows = execute_query(
+                f"""SELECT {cols} FROM announcements
+                    ORDER BY is_pinned DESC, created_at DESC
+                    LIMIT ? OFFSET ?""",
+                (page_size, (page - 1) * page_size),
+            )
         items = [_announcement_item(r, _creator_name_map([r[1] for r in rows])) for r in rows]
+        _attach_read_counts(items)
         return {"announcements": items, "total": total, "page": page, "page_size": page_size}
 
     if role == 1:
@@ -634,7 +682,13 @@ async def list_announcements(
             ph = ",".join("?" for _ in admin_names)
             conds.append(f"(creator_username IN ({ph}) AND target_role IN ('all', 'teacher'))")
             params.extend(admin_names)
-        where = " OR ".join(conds)
+        where = "(" + " OR ".join(conds) + ")"
+        # 叠加关键词/优先级筛选
+        extra_conds = list(filter_conds)
+        extra_params = list(filter_params)
+        if extra_conds:
+            where += " AND " + " AND ".join(extra_conds)
+            params.extend(extra_params)
         total_row = execute_query(f"SELECT COUNT(*) FROM announcements WHERE {where}", tuple(params))
         total = total_row[0][0] if total_row else 0
         rows = execute_query(
@@ -644,6 +698,7 @@ async def list_announcements(
             tuple(params) + (page_size, (page - 1) * page_size),
         )
         items = [_announcement_item(r, _creator_name_map([r[1] for r in rows])) for r in rows]
+        _attach_read_counts(items)
         return {"announcements": items, "total": total, "page": page, "page_size": page_size}
 
     # 学生(A1): 先把可见条件下推到 SQL, 再用统一的 target_scope 过滤器复核,
@@ -673,9 +728,16 @@ async def list_announcements(
     # A1b: 只保留面向学生/全体的公告, 并按目标范围过滤(与全站共享的可见性判定一致)
     items = [x for x in items if x["target_role"] in ("all", "student")]
     items = filter_activities_by_scope(items, user["username"])
+    # 关键词/优先级筛选（学生侧在内存过滤后套用）
+    if kw:
+        items = [x for x in items if kw in (x.get("title") or "") or kw in (x.get("content") or "")]
+    if pri:
+        items = [x for x in items if (x.get("priority") or "") == pri]
     total = len(items)
     offset = (page - 1) * page_size
-    return {"announcements": items[offset:offset + page_size], "total": total,
+    paged = items[offset:offset + page_size]
+    _attach_read_counts(paged)
+    return {"announcements": paged, "total": total,
             "page": page, "page_size": page_size}
 
 
@@ -748,5 +810,91 @@ async def delete_announcement(announcement_id: int, request: Request):
         raise HTTPException(status_code=403, detail="仅公告创建者和管理员可删除")
 
     execute_insert_update("DELETE FROM announcements WHERE id = ?", (announcement_id,))
+    execute_insert_update("DELETE FROM announcement_reads WHERE announcement_id = ?", (announcement_id,))
     logger.info(f"用户 {username} 删除公告 id={announcement_id}")
     return {"message": "公告已删除"}
+
+
+@router.post("/announcements/batch-delete", summary="批量删除公告")
+async def batch_delete_announcements(req: BatchDeleteRequest, request: Request):
+    """批量删除公告（管理员删除任意，教师仅删除自己创建的）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    ids = [int(i) for i in req.ids if i]
+    if not ids:
+        return {"message": "未选择公告", "deleted": 0}
+
+    ph = ",".join("?" for _ in ids)
+    if role == 0:
+        rows = execute_query(
+            f"SELECT id FROM announcements WHERE id IN ({ph})", tuple(ids))
+    else:
+        # 教师只能删自己创建的
+        rows = execute_query(
+            f"SELECT id FROM announcements WHERE id IN ({ph}) AND creator_username=?",
+            tuple(ids) + (username,))
+    allowed = [r[0] for r in rows]
+    if not allowed:
+        return {"message": "没有可删除的公告", "deleted": 0}
+
+    aph = ",".join("?" for _ in allowed)
+    execute_insert_update(
+        f"DELETE FROM announcements WHERE id IN ({aph})", tuple(allowed))
+    execute_insert_update(
+        f"DELETE FROM announcement_reads WHERE announcement_id IN ({aph})", tuple(allowed))
+    logger.info(f"用户 {username} 批量删除公告 {len(allowed)} 条")
+    return {"message": "删除成功", "deleted": len(allowed)}
+
+
+@router.post("/announcements/{announcement_id}/read", summary="标记公告已读")
+async def mark_announcement_read(announcement_id: int, request: Request):
+    """当前用户标记某条公告为已读（幂等，重复标记不报错）"""
+    user = get_current_user(request)
+    username = user["username"]
+    ann = execute_query("SELECT id FROM announcements WHERE id=?", (announcement_id,))
+    if not ann:
+        raise HTTPException(status_code=404, detail="公告不存在")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        """INSERT OR IGNORE INTO announcement_reads (announcement_id, username, read_at)
+           VALUES (?, ?, ?)""",
+        (announcement_id, username, now),
+    )
+    return {"message": "已标记为已读"}
+
+
+@router.get("/announcements/{announcement_id}/read-users", summary="查看公告已读名单")
+async def announcement_read_users(announcement_id: int, request: Request):
+    """查看某条公告的已读用户名单（管理员/创建者）"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    username = user["username"]
+
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    ann = execute_query("SELECT creator_username FROM announcements WHERE id=?", (announcement_id,))
+    if not ann:
+        raise HTTPException(status_code=404, detail="公告不存在")
+    if role == 1 and ann[0][0] != username:
+        raise HTTPException(status_code=403, detail="无权查看")
+
+    rows = execute_query(
+        """SELECT ar.username, u.name, ar.read_at
+           FROM announcement_reads ar
+           LEFT JOIN users u ON u.username = ar.username
+           WHERE ar.announcement_id=? ORDER BY ar.read_at DESC""",
+        (announcement_id,),
+    )
+    return {
+        "announcement_id": announcement_id,
+        "read_count": len(rows),
+        "read_users": [
+            {"username": r[0], "name": r[1] or r[0], "read_at": r[2]}
+            for r in rows
+        ],
+    }

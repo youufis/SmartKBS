@@ -29,6 +29,7 @@ import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
+import { relativeTime } from '../utils/relativeTime'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import AnswerNav from '../components/AnswerNav'
 import { draftKey, loadDraft, clearDraft, useDebouncedDraft, countAnswered } from '../utils/answerDraft'
@@ -530,7 +531,7 @@ const InteractionPage: React.FC = () => {
               )}
             </div>
             {quizzes.length === 0
-              ? <Empty description={isStudent ? t('ipNoListTitle') : t('noPolls')}>
+              ? <Empty description={isStudent ? t('ipNoListTitle') : t('ipNoListTeacher')}>
                   {isStudent && <div><Text type="secondary" style={{ fontSize: 12 }}>{t('ipNoListHint')}</Text></div>}
                 </Empty>
               : visibleQuizzes.length === 0
@@ -578,7 +579,7 @@ const InteractionPage: React.FC = () => {
                               classes={quiz.target_class} users={quiz.target_users} />
                           )}
                           <Text type="secondary" style={{ fontSize: 12 }}>
-                            {t('createdAt')}：{String(quiz.created_at || '').slice(0, 10)} · {t('peopleCount', { count: quiz.answer_count || 0 })}
+                            {t('createdAt')}：{relativeTime(quiz.created_at)} · {t('peopleCount', { count: quiz.answer_count || 0 })}
                           </Text>
                         </div>
                       </div>

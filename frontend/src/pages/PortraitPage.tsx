@@ -984,9 +984,6 @@ const PortraitPage: React.FC = () => {
                     {STYLE_EMOJI[detailPortrait.style] || '🎨'}{' '}
                     {styles.find(s => s.key === detailPortrait.style)?.name || detailPortrait.style}
                   </Tag>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    📅 {detailPortrait.created_date}
-                  </Text>
                 </div>
                 <Space split={<Text type="secondary">|</Text>}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1143,7 +1140,7 @@ const PortraitPage: React.FC = () => {
                 <GlobalOutlined /> {t('ptScopeCenter')}
               </Radio.Button>
               <Radio.Button value="class" style={{ display: 'block', height: 44, lineHeight: '44px', marginBottom: 8 }}>
-                <TeamOutlined /> 本班可见 — 仅同班同学可看
+                <TeamOutlined /> {t('ptScopeClass')}
               </Radio.Button>
               <Radio.Button value="private" style={{ display: 'block', height: 44, lineHeight: '44px' }}>
                 <LockOutlined /> {t('ptScopePrivate')}

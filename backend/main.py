@@ -220,8 +220,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         import sys
         print(f"[main] 启动后台版本检测失败: {e}", file=sys.stderr)
+    try:
+        # 分组讨论：AI 助教自动引导后台循环（扫描进行中的讨论，冷场自动触发）
+        from backend.api.discussion_router import discussion_auto_trigger_loop
+        import asyncio as _asyncio
+        _auto_trigger_task = _asyncio.create_task(discussion_auto_trigger_loop())
+        _auto_trigger_task.set_name("discussion-auto-trigger")
+        app.state.discussion_auto_trigger_task = _auto_trigger_task
+    except Exception as e:
+        import sys
+        print(f"[main] 启动讨论 AI 自动引导失败: {e}", file=sys.stderr)
     yield
     # ── shutdown ──
+    _task = getattr(app.state, "discussion_auto_trigger_task", None)
+    if _task is not None:
+        _task.cancel()
     pass
 
 
