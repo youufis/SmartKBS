@@ -448,11 +448,16 @@
   },
   "todo": {
     "title": "📋 我的任务清单",
+    "subtitle": "按截止时间与紧急程度自动整理，帮你优先完成最该做的事",
     "itemCount": "{{count}} 项待办",
     "refresh": "刷新",
     "loading": "加载中...",
     "loadFailed": "无法加载任务清单",
     "empty": "暂无待办事项，太棒了！🎉",
+    "emptyGuide": {
+      "curriculum": "去完成课程练习",
+      "discussion": "看看课堂讨论"
+    },
     "paginationTotal": "共 {{count}} 条",
     "type": {
       "exam": "考试",
@@ -505,6 +510,7 @@
     },
     "stats": {
       "title": "学习进度概览",
+      "brief": "完成率 {{completion}}% · 连续 {{streak}} 天",
       "courseProgress": "课程进度",
       "completionRate": "总体完成率",
       "accuracyRate": "总体正确率",

@@ -58,6 +58,13 @@
 > - 🗂️ Asset ledger with automatic cleanup: uploads, generated images and recordings are all registered; references renew lifetime, orphans are recycled (daily, no manual trigger) and a dry-run mode shows what a round would do
 > - 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only, no content visible
 >
+> **Group discussion & announcements**
+> - 🧑‍🏫 AI auto-guide for discussions: steps in on silence, teacher-controlled with three sensitivity levels, no more mechanical repeated nudges
+> - 👤 Students are cited as "Name (Grade · Class)" across bubbles, reports and monitoring
+> - 👥 "Participation" counts actual attendance: the roster only counts as expected, students count once they enter; monitoring shows attended / expected
+> - 📢 Announcements: search & priority filters, batch delete, read counts and reader lists
+> - 🎨 Student pages share one header style and relative timestamps; quest / poll / quiz copy fully localized
+>
 > - ⚠️ **Breaking changes**: none
 >
 > 🔄 **Upgrade notes**: desktop builds can be **installed over the top** (data stays); new Explore Canvas tables are created automatically at startup; Git deployments use the usual in-app incremental upgrade. Formal bump 9.0.0 → 9.1.0.
@@ -1224,6 +1231,21 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 
 - 🧭 Randomized empty-state topics: different per student per day, with a shuffle button
 - 📝 Activity Monitor explore tab: shows only students with usage by default, with search and pagination
+
+**Group discussion**
+
+- 🧑‍🏫 AI auto-guide: event-driven with an idle fallback; teachers can turn it off or pick conservative / standard / proactive sensitivity; never fires when the room is empty, students haven't replied, or during cooldown
+- 👤 Students are cited as "Name (Grade · Class)" across message bubbles, AI suggestions, reports and monitoring
+- 👥 "Participation" counts actual attendance: the start-time roster counts as expected, only students who enter count as attended; monitoring shows attended / expected
+- 🔀 Grouping semantics clarified: members-per-group (auto, shuffled) vs group count (random, shuffled)
+- ⚡ Bulk writes when starting a discussion: large rosters drop from ~40s to sub-second; start / end / restart buttons show loading to prevent double clicks
+- 🩹 Discussion room layout fixes; the AI plan dialog no longer shows a grey placeholder for group mode
+
+**Announcements & student-side polish**
+
+- 📢 Announcements: keyword + priority filters, batch delete, read counts and reader lists; opening details marks them read
+- 🎨 Student pages share one page header and relative timestamps (to-do, questions, points, portraits, notifications, files, daily discovery, news, quest, classroom interactions)
+- 🩹 Fixed notification pagination and quest list page-flash; localized empty-state and remaining-time copy for quiz / poll / interaction
 
 ### v7.x – v9.0.0
 

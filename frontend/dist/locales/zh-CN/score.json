@@ -446,6 +446,7 @@
   "ptOfPortrait": "的画像",
   "ptPickScope": "选择分享范围：",
   "ptScopeCenter": "分享中心 — 全校可见",
+  "ptScopeClass": "本班可见 — 仅同班同学可看",
   "ptScopePrivate": "仅自己可见 — 不公开",
   "ptAutoTheme": "自动匹配",
   "ptThemeHint": "选择卡片和详情窗口的主题配色",

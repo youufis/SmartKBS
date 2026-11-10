@@ -448,11 +448,16 @@
   },
   "todo": {
     "title": "📋 My Task List",
+    "subtitle": "Auto-organized by deadline and urgency, so you tackle the most important things first",
     "itemCount": "{{count}} items",
     "refresh": "Refresh",
     "loading": "Loading...",
     "loadFailed": "Failed to load task list",
     "empty": "No pending items, awesome! 🎉",
+    "emptyGuide": {
+      "curriculum": "Do course exercises",
+      "discussion": "Join class discussions"
+    },
     "paginationTotal": "Total {{count}} items",
     "type": {
       "exam": "Exam",
@@ -505,6 +510,7 @@
     },
     "stats": {
       "title": "Learning Progress Overview",
+      "brief": "Completion {{completion}}% · Streak {{streak}} days",
       "courseProgress": "Course Progress",
       "completionRate": "Completion Rate",
       "accuracyRate": "Accuracy Rate",
