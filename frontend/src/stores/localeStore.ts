@@ -34,6 +34,8 @@ export const useLocaleStore = create<LocaleState>()((set) => ({
 
   setLocale: (locale: LocaleKey) => {
     i18n.changeLanguage(locale)
+    // 同步 <html lang>：读屏与浏览器排版按它走，也方便原生能力（翻译提示、字体）识别
+    if (typeof document !== 'undefined') document.documentElement.lang = locale
     set({ current: locale })
   },
 }))

@@ -28,6 +28,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import ScopeTag from '../components/ScopeTag'
+import NarrowTable from '../components/NarrowTable'
 import MediaDisplay from '../components/MediaDisplay'
 import { TYPE_OPTIONS } from '../constants/questionTypes'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
@@ -1273,7 +1274,9 @@ const ExamPage: React.FC = () => {
               key: 'results',
               label: <Space><BarChartOutlined />{t('result')}</Space>,
               children: (
-                <Table className="nowrap-cells-table" dataSource={myResults} rowKey="id" loading={myResultsLoading} size="small"
+                <NarrowTable
+                  dataSource={myResults} rowKey="id" loading={myResultsLoading} size="small"
+                  cardTitleKey="exam_title" cardPageSize={8}
                   columns={[
                     { title: t('examTitle'), dataIndex: 'exam_title', key: 'exam_title', ellipsis: true },
                     { title: t('subject'), dataIndex: 'exam_subject', key: 'exam_subject', width: 80 },

@@ -116,7 +116,9 @@
 
 /* 窄屏：横幅里"称号进度条 + AI 学伴"与底部 TabBar、称号徽章重复，
    留着只会把首屏高度顶到 190px。任务清单保留（底部没有对应入口）。 */
-@media (max-width: 575px) {
+/* 断点与 useIsMobile / mobile.css 一致（767）：576–767px 区间手机 TabBar 已生效，
+   再按 575 判断就会把横幅里重复的称号进度条/AI 学伴又放出来。 */
+@media (max-width: 767px) {
   .dash-mobile-hide {
     display: none !important;
   }

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import {
   Card, Table, Typography, Button, Space, Modal, Form, Input,
@@ -99,6 +100,7 @@ const AnnouncementsPage: React.FC = () => {
     fetchAnnouncements(1, pageSize)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
 
       // AI 生成公告
   const handleAiGenerate = async () => {
@@ -235,6 +237,25 @@ const AnnouncementsPage: React.FC = () => {
       // 标记已读失败不阻断查看
     }
   }
+  // 首页公告卡是「点哪条开哪条」（/announcements?id=N）。以前统一只跳列表，
+  // 学生点第一条却落到列表页，还得自己再找一遍。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const deepLinkDone = useRef(false)
+  useEffect(() => {
+    const wanted = Number(searchParams.get('id'))
+    if (!wanted || deepLinkDone.current) return
+    deepLinkDone.current = true
+    void (async () => {
+      const inList = announcements.find((a) => a.id === wanted)
+      const hit = inList ?? (await notificationsApi.getAnnouncements(1, 50)
+        .then((r) => r.announcements.find((a) => a.id === wanted))
+        .catch(() => undefined))
+      if (hit) void openDetail(hit)
+      searchParams.delete('id')
+      setSearchParams(searchParams, { replace: true })
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [announcements, searchParams])
 
   // 查看已读名单
   const openReadUsers = async (record: AnnouncementItem) => {

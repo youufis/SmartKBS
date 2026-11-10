@@ -294,7 +294,7 @@ const NotificationBell: React.FC = () => {
       placement="bottomRight"
     >
       <Tooltip title={t('nbTitle')}>
-        <Badge count={unreadCount + pushUnreadCount} size="small" offset={[-2, 2]}>
+        <Badge className="header-bell-badge" count={unreadCount + pushUnreadCount} size="small" offset={[-2, 2]}>
           <BellOutlined style={{ fontSize: 18, cursor: 'pointer', color: 'var(--text-secondary)' }} />
         </Badge>
       </Tooltip>

@@ -331,7 +331,11 @@ const ResourceBrowser: React.FC<{
     const names = it.targetUserNames || []
     if (it.shareScope === 'class') {
       const full = fullScope(it)
-      return { short: full || t('rb.scopeClass'), tip: full + t('rb.scopeClassTipSuffix') }
+      // 标签里放压缩式（高一1-8班 / 高一 等 10 个班），整串名单留给悬停详情。
+      // 以前直接把整串塞进 maxWidth:150 的 Tag：实测容器 148px / 内容 385px，
+      // 手机上只剩「高一 · 1班、2班、…」半行，而触屏没有 hover，全文永远读不到。
+      const short = compactClassScope((it.targetGrade || '').trim(), it.targetClass || '') || full
+      return { short: short || t('rb.scopeClass'), tip: full + t('rb.scopeClassTipSuffix') }
     }
     if (it.shareScope === 'teacher') {
       const short = names.length === 0

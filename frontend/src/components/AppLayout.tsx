@@ -51,6 +51,11 @@ const { Header, Sider, Content } = Layout
 
 /** 自管滚动、需要铺满内容高的页面：聊天工作区、分组讨论房间 */
 const FULL_HEIGHT_PREFIXES = ['/chat', '/discussion-room']
+/**
+ * 窄屏专注模式：画布工作台（/explore/:canvasId，注意带斜杠——列表页 /explore 不在此列）。
+ * 这里要的是「一屏都是画布」：底部 TabBar 与预留的 72px 让位，返回走页面自己的左上角箭头。
+ */
+const FOCUS_PREFIXES = ['/explore/']
 
 // 教师/管理员菜单项类型：分组（有子项）或平级条目
 type TeacherMenuItem = {
@@ -179,6 +184,8 @@ const AppLayout: React.FC = () => {
   const [collapsed, setCollapsed] = React.useState(false)
   // 移动端地基：仅 <768px 生效，桌面/Electron(>=1024px) 恒走原分支
   const isMobile = useIsMobile()
+  // 专注模式只在窄屏生效：桌面 /explore/23 的版式一点不动
+  const focusMode = isMobile && FOCUS_PREFIXES.some((p) => location.pathname.startsWith(p))
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const [openKeys, setOpenKeys] = useState<string[]>(() => {
     try {
@@ -386,7 +393,11 @@ const AppLayout: React.FC = () => {
       <Layout
         style={
           isMobile
-            ? { height: 'calc(100dvh - 48px)', padding: '8px 8px 72px', background: 'var(--bg-layout)' }
+            // 窄屏两侧各留 8（内容区再给 8，合计 16），比原来 8+12=20 多回 8px 正文宽；
+            // 底部 72 = TabBar 56 + 8 呼吸；专注模式（画布）不留底部，整块给画布。
+            ? focusMode
+              ? { height: 'calc(100dvh - 48px)', padding: 0, background: 'var(--bg-layout)' }
+              : { height: 'calc(100dvh - 48px)', padding: '8px 8px 72px', background: 'var(--bg-layout)' }
             : { height: 'calc(100vh - 64px)', padding: 12, gap: 12, background: 'var(--bg-layout)' }
         }
       >
@@ -439,16 +450,16 @@ const AppLayout: React.FC = () => {
         )}
 
         <Content style={{
-          padding: isMobile ? 12 : 24, background: 'var(--bg-layout)', height: '100%', borderRadius: 8, flex: 1,
+          padding: isMobile ? (focusMode ? 0 : 8) : 24, background: 'var(--bg-layout)', height: '100%', borderRadius: 8, flex: 1,
           // 聊天工作区自己管滚动：内容区若还能滚，刷新时浏览器恢复上次滚动位置，顶栏会被顶出视野
-          overflow: fullHeightPage ? 'hidden' : 'auto',
+          overflow: (fullHeightPage || focusMode) ? 'hidden' : 'auto',
         }}>
           {isMobile && !isMobileAllowedPath(user?.role, location.pathname) ? (
             <DesktopOnlyGuide />
           ) : (
           <>
             <Outlet />
-            {!fullHeightPage && (
+            {!fullHeightPage && !focusMode && (
               <div style={{ textAlign: 'center', padding: '16px 0 0', color: 'var(--footer-text)', fontSize: 12 }}>
                 © 2026 UNET. All rights reserved.
               </div>
@@ -458,8 +469,8 @@ const AppLayout: React.FC = () => {
         </Content>
       </Layout>
 
-      {/* ── 移动端地基：底部 TabBar + 白名单抽屉菜单（仅窄屏渲染） ── */}
-      {isMobile && (
+      {/* ── 移动端地基：底部 TabBar + 白名单抽屉菜单（仅窄屏渲染；画布专注模式让位） ── */}
+      {isMobile && !focusMode && (
         <>
           <MobileTabBar
             role={user?.role || 'student'}

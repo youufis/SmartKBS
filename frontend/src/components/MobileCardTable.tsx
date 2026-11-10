@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
-import { Card, Empty, Pagination, Spin } from 'antd'
+import { Button, Card, Empty, Pagination, Spin } from 'antd'
+import { useTranslation } from 'react-i18next'
 
 /**
  * 通用「表格 → 卡片」窄屏渲染器。
@@ -38,6 +39,17 @@ export interface MobileCardTableProps {
   /** 前端分页：数据全在内存时由组件切片，窄屏不至于一次画上百张卡 */
   clientPageSize?: number
   emptyText?: React.ReactNode
+  /**
+   * 桌面表格的 expandable 在窄屏没有「列」可以点，但展开内容往往是明细本身
+   * （闯关的每题作答、练习的题目统计）。这里接成卡片底部一枚「展开/收起」，
+   * 明细一条不丢，调用点也不必为手机再写一份 —— 裸表改卡片时不会因此丢功能。
+   */
+  expandable?: {
+    expandedRowRender?: (record: any, index: number) => React.ReactNode
+    rowExpandable?: (record: any) => boolean
+    /** 首次展开时回调（原表用它按记录 id 懒加载明细） */
+    onExpand?: (expanded: boolean, record: any) => void
+  }
 }
 
 const readValue = (record: any, dataIndex?: string | string[]) => {
@@ -51,9 +63,12 @@ const isEmptyNode = (node: React.ReactNode) =>
 
 const MobileCardTable: React.FC<MobileCardTableProps> = ({
   dataSource = [], columns = [], rowKey, loading,
-  pagination, emptyText, titleKey, clientPageSize,
+  pagination, emptyText, titleKey, clientPageSize, expandable,
 }) => {
+  const { t } = useTranslation('common')
   const visible = columns.filter((c) => !c.hidden)
+  // 展开态按 rowKey 记，翻页与父组件重渲染都不丢
+  const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({})
 
   // 标题列可指定；找不到就退回第一个可见列，其余列保持原顺序跟在后面
   const [headCol, ...restCols] = useMemo(() => {
@@ -113,6 +128,31 @@ const MobileCardTable: React.FC<MobileCardTableProps> = ({
                 </div>
               )
             })}
+            {(() => {
+              const rk = String(keyOf(record, index))
+              if (!expandable?.expandedRowRender) return null
+              if (expandable.rowExpandable && !expandable.rowExpandable(record)) return null
+              const open = !!openKeys[rk]
+              return (
+                <>
+                  <Button
+                    type="link" size="small"
+                    style={{ padding: '6px 0 0', height: 'auto', minHeight: 32 }}
+                    onClick={() => {
+                      expandable.onExpand?.(!open, record)
+                      setOpenKeys((prev) => ({ ...prev, [rk]: !open }))
+                    }}
+                  >
+                    {open ? t('collapse') : t('expand')}
+                  </Button>
+                  {open && (
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--border-color)' }}>
+                      {expandable.expandedRowRender(record, (current - 1) * size + index)}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
           </Card>
         ))}
         {size > 0 && total > size && (

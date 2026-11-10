@@ -208,7 +208,7 @@ const ExploreCanvasPage: React.FC = () => {
     loading ? (
             <div style={{ textAlign: 'center', padding: 48 }}><Spin /></div>
           ) : (
-            <div style={{
+            <div className="explore-wall" style={{
               display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
               gap: 16, padding: '8px 0',
             }}>
@@ -216,7 +216,7 @@ const ExploreCanvasPage: React.FC = () => {
                 const thumb = thumbs[c.id]
                 return (
                   <Card key={c.id} hoverable styles={{ body: { padding: 12 } }} onClick={() => openCanvas(c)}>
-                    <div style={{
+                    <div className="explore-thumb" style={{
                       height: 96, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: PRESET_GRADIENT[c.preset_key] || PRESET_GRADIENT.blank, position: 'relative', overflow: 'hidden',
                     }}>
@@ -244,15 +244,15 @@ const ExploreCanvasPage: React.FC = () => {
                         />
                       </Dropdown>
                     </div>
-                    <div style={{ marginTop: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div className="explore-meta" style={{ marginTop: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
                       {!!c.hit_page && <Tag color="blue" style={{ marginInlineEnd: 0 }}>{t('hitTag', { page: c.hit_page })}</Tag>}
                     </div>
-                    <div style={{
+                    <div className="explore-submeta" style={{
                       fontSize: 12, color: 'var(--text-secondary, #888)',
                       display: 'flex', justifyContent: 'space-between', marginTop: 4,
                     }}>
-                      <span>{c.page_count || 0} 页</span>
+                      <span>{t('pagesCount', { n: c.page_count || 0 })}</span>
                       <span>{fmtTime(c.updated_at)}</span>
                     </div>
                   </Card>
@@ -401,8 +401,11 @@ const ExploreCanvasPage: React.FC = () => {
         title={t('title')}
         subtitle={t('subtitle')}
         extra={
-          <Space>
-            <Input.Search allowClear placeholder={t('searchPh')} style={{ width: 200 }}
+          /* 内层 Space 必须 wrap：外层 PageHeader 把 extra 当一个整体，
+             「搜索200 + 回收站 + 新建画布」不换行实测排到 459px（视口 390），
+             手机上「新建画布」整颗按钮掉到屏外，只剩一个「+」。 */
+          <Space wrap size={8}>
+            <Input.Search allowClear placeholder={t('searchPh')} style={{ width: 200, maxWidth: '100%' }}
               onChange={(e) => { setQuery(e.target.value); setPage(1) }} />
             <Button icon={<RestOutlined />} onClick={openTrash}>{t('trash')}</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>{t('newCanvas')}</Button>

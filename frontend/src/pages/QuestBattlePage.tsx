@@ -274,7 +274,7 @@ const QuestBattlePage: React.FC = () => {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70dvh' }}>
         <Spin size="large" description={t('loading')} />
       </div>
     )
@@ -294,7 +294,10 @@ const QuestBattlePage: React.FC = () => {
   const timerPercent = (timer / TIMER_SECONDS) * 100
 
   return (
-    <div>
+    // 本页挂在 AppLayout 之外：没有内容区那层 padding，窄屏必须自己给，
+    // 否则卡片直接贴屏幕边（实测 390px 下左右各 0px）。
+    // 收窄与居中只写在 mobile.css 里，桌面的整屏版式一点不动（红线）。
+    <div className="battle-page">
       {/* ── 顶部状态栏 ── */}
       <Card
         style={{ borderRadius: 12, marginBottom: 16, background: 'var(--bg-layout)' }}

@@ -64,6 +64,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, color, icon, parts, e
           </span>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div
+              className="dash-stat-title"
               style={{
                 fontSize: 12, lineHeight: 1.4, color: 'rgba(128,128,128,0.95)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',

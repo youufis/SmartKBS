@@ -409,7 +409,7 @@ const ResourceMgmtPage: React.FC = () => {
   }
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
+    <Layout className="resource-shell" style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <PageHeader
         icon={<FolderOutlined />}
         title={t('resource.title')}
@@ -485,7 +485,7 @@ const ResourceMgmtPage: React.FC = () => {
                           {node.isLeaf ? getFileIcon(node.title) : <FolderOutlined />}
                           <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{node.title}</span>
                           {node.isLeaf && node.size && (
-                            <Tag style={{ marginLeft: 4, lineHeight: '18px', fontSize: 11, border: 'none' }}>
+                            <Tag className="resource-tree-size" style={{ marginLeft: 4, lineHeight: '18px', fontSize: 11, border: 'none' }}>
                               {node.size < 1024 ? `${node.size}B` : node.size < 1048576 ? `${(node.size / 1024).toFixed(1)}KB` : `${(node.size / 1048576).toFixed(1)}MB`}
                             </Tag>
                           )}
@@ -521,7 +521,7 @@ const ResourceMgmtPage: React.FC = () => {
               {viewMode === 'grid' && (
                 allFiles.length > 0 ? (
                   <>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+                    <div className="resource-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
                       {allFiles.slice((gridPage - 1) * GRID_PAGE_SIZE, gridPage * GRID_PAGE_SIZE).map((file) => (
                         <Card
                           key={file.path}
@@ -542,7 +542,7 @@ const ResourceMgmtPage: React.FC = () => {
                             {getFileIcon(file.name)}
                           </div>
                           <Tooltip title={file.name}>
-                            <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div className="resource-file-name" style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {file.name}
                             </div>
                           </Tooltip>

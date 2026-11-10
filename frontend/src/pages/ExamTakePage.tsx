@@ -412,7 +412,7 @@ const ExamTakePage: React.FC = () => {
     const gradedDetails = allDetails.filter((d: any) => !isPendingItem(d))
     const correctCount = gradedDetails.filter((d: any) => d.is_correct).length
     return (
-      <Layout style={{ minHeight: '100vh', background: token.colorBgLayout, padding: 24 }}>
+      <Layout className="exam-shell" style={{ minHeight: '100dvh', background: token.colorBgLayout, padding: 24 }}>
         <Card style={{ maxWidth: 700, margin: '40px auto' }}>
           <Result
             status={pendingCount > 0 ? 'info' : (result.passed ? 'success' : 'error')}
@@ -553,7 +553,7 @@ const ExamTakePage: React.FC = () => {
   // ── 加载中 ──
   if (loading) {
     return (
-      <Layout style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: token.colorBgLayout }}>
+      <Layout style={{ minHeight: '100dvh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: token.colorBgLayout }}>
         <Spin size="large" description={t('loadingExam')} />
       </Layout>
     )
@@ -561,7 +561,7 @@ const ExamTakePage: React.FC = () => {
 
   if (!exam || questions.length === 0) {
     return (
-      <Layout style={{ minHeight: '100vh', background: token.colorBgLayout, padding: 24 }}>
+      <Layout className="exam-shell" style={{ minHeight: '100dvh', background: token.colorBgLayout, padding: 24 }}>
         <Result status="warning" title={t('examNoQ')}
           subTitle={t('contactTeacherAddQ')}
           extra={<Button onClick={handleBack}>{t('backBtn')}</Button>} />
@@ -574,7 +574,7 @@ const ExamTakePage: React.FC = () => {
   const progressPercent = Math.round((answeredCount / questions.length) * 100)
 
   return (
-    <Layout style={{ minHeight: '100vh', background: token.colorBgLayout }}>
+    <Layout style={{ minHeight: '100dvh', background: token.colorBgLayout }}>
       {/* ── 顶栏 ── */}
       <div
         className="exam-topbar"

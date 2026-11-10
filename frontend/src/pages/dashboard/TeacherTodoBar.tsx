@@ -46,6 +46,7 @@ const Metric: React.FC<{ label: string; value: number; color: string; onClick?: 
   label, value, color, onClick,
 }) => (
   <span
+    className="dash-metric"
     onClick={onClick}
     role={onClick ? 'button' : undefined}
     tabIndex={onClick ? 0 : undefined}

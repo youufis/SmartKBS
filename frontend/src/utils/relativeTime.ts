@@ -14,8 +14,17 @@ export function parseServerDate(s: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
+import i18n from '../i18n'
+
+/**
+ * 默认跟随界面语言。以前写死 'zh-CN'：22 个调用点没有一个传 locale，
+ * 英文界面里就出现「Created 3天前」「前天」这种中英混排。
+ * 必须每次调用时取（i18n.language 会随切换变），不能在模块加载时快照。
+ */
+const uiLocale = () => i18n.language || 'zh-CN'
+
 /** 完整时间（用于 Tooltip / 无障碍） */
-export function fullTime(s: string | null | undefined, locale = 'zh-CN'): string {
+export function fullTime(s: string | null | undefined, locale = uiLocale()): string {
   const d = parseServerDate(s)
   if (!d) return ''
   const hasTime = /\d{2}:\d{2}/.test(String(s ?? ''))
@@ -28,7 +37,7 @@ export function fullTime(s: string | null | undefined, locale = 'zh-CN'): string
  * 相对时间：刚刚 / N 分钟前 / N 小时前 / 昨天 / N 天前 / 日期。
  * 用 Intl.RelativeTimeFormat 原生适配中英文，不硬编码文案。
  */
-export function relativeTime(s: string | null | undefined, now = new Date(), locale = 'zh-CN'): string {
+export function relativeTime(s: string | null | undefined, now = new Date(), locale = uiLocale()): string {
   const d = parseServerDate(s)
   if (!d) return ''
   const diffMs = now.getTime() - d.getTime()

@@ -125,6 +125,7 @@
   "shareClean": "Clean up",
   "shareExpiredTag": "Expired",
   "shareViews": "{{n}} views",
+  "pagesCount": "{{n}} pages",
   "classSuffix": "",
   "shareLoading": "Loading the shared canvas…",
   "shareReadonlyTag": "Read-only snapshot",

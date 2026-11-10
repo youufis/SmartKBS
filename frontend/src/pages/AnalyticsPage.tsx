@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Alert, Card, Row, Col, Typography, Spin, Select, Button, Space, message,
-  Empty, Tabs, Statistic, Table, Tag, Tooltip,
+  Empty, Tabs, Statistic, Tag, Tooltip,
 } from 'antd'
 import {
   RobotOutlined, BarChartOutlined,
@@ -17,6 +17,7 @@ import { pollAiTaskWithProgress } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
 import LearningProgress from '../components/LearningProgress'
 import { reportLoadError } from '../utils/loadError'
+import NarrowTable from '../components/NarrowTable'
 
 const { Text } = Typography
 
@@ -614,16 +615,18 @@ const AnalyticsPage: React.FC = () => {
                   {examAnalytics && (
                     <>
                       <Row gutter={16} style={{ marginBottom: 16 }}>
-                        <Col span={4}><Statistic title={t('analytics.stats.examParticipants')} value={examAnalytics.statistics.total_students} /></Col>
-                        <Col span={4}><Statistic title={t('analytics.stats.examAvgScore')} value={examAnalytics.statistics.avg_score} precision={1} /></Col>
-                        <Col span={4}><Statistic title={t('analytics.stats.examMaxScore')} value={examAnalytics.statistics.max_score} /></Col>
-                        <Col span={4}><Statistic title={t('analytics.stats.examMinScore')} value={examAnalytics.statistics.min_score} /></Col>
-                        <Col span={4}><Statistic title={t('analytics.stats.examPassRate')} value={examAnalytics.statistics.pass_rate} suffix="%" precision={1} /></Col>
+                        {/* xs 只在 <576 生效（antd 的 xs 是 max-width 查询），不会像 sm 那样向上覆盖桌面的 span=4 */}
+                        <Col span={4} xs={12}><Statistic title={t('analytics.stats.examParticipants')} value={examAnalytics.statistics.total_students} /></Col>
+                        <Col span={4} xs={12}><Statistic title={t('analytics.stats.examAvgScore')} value={examAnalytics.statistics.avg_score} precision={1} /></Col>
+                        <Col span={4} xs={12}><Statistic title={t('analytics.stats.examMaxScore')} value={examAnalytics.statistics.max_score} /></Col>
+                        <Col span={4} xs={12}><Statistic title={t('analytics.stats.examMinScore')} value={examAnalytics.statistics.min_score} /></Col>
+                        <Col span={4} xs={12}><Statistic title={t('analytics.stats.examPassRate')} value={examAnalytics.statistics.pass_rate} suffix="%" precision={1} /></Col>
                       </Row>
 
-                      <Table
+                      <NarrowTable
                         dataSource={examAnalytics.question_accuracy}
                         rowKey="id"
+                        cardTitleKey="text" cardPageSize={10}
                         size="small"
                         pagination={false}
                         style={{ marginBottom: 16 }}
@@ -717,9 +720,10 @@ const AnalyticsPage: React.FC = () => {
                   {!progressLoading && progressStudents.length === 0 ? (
                     <Empty description={t('analytics.emptyProgress')} />
                   ) : (
-                  <Table
+                  <NarrowTable
                     dataSource={progressStudents}
                     rowKey="username"
+                    cardTitleKey="name"
                     loading={progressLoading}
                     pagination={{
                       current: progressPage,
@@ -736,7 +740,7 @@ const AnalyticsPage: React.FC = () => {
                         const details = (detail?.details || []) as { kp_id: number; kp_name: string; status: string }[]
                         if (!details.length) return <Text type="secondary">{t('analytics.noKnowledgePoints')}</Text>
                         return (
-                          <Space wrap>
+                          <Space wrap className="kp-tag-wrap">
                             {details.map((d) => (
                               <Tooltip key={d.kp_id} title={d.kp_name}>
                                 <Tag color={d.status === 'completed' ? 'success' : d.status === 'in_progress' ? 'processing' : 'default'}

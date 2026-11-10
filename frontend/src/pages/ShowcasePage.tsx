@@ -292,7 +292,7 @@ const ShowcasePage: React.FC = () => {
           </Title>
           <Text type="secondary">{t('showcaseSubtitle')}</Text>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Button icon={<FullscreenOutlined />} onClick={() => setWallMode(true)} disabled={!cards.length}>
             {t('scWallMode')}
           </Button>
@@ -306,7 +306,7 @@ const ShowcasePage: React.FC = () => {
           </Button>
           {/* 「生成展示卡」已被自动建卡取代（有积分即上墙）；教师保留的是明确的上/下架 */}
           {isTeacherOrAdmin && (
-            <Space size={6}>
+            <Space size={6} className="wrap-space">
               <Switch size="small" checked={showInactive} onChange={setShowInactive} />
               <Text style={{ fontSize: 12 }}>{t('scShowInactive')}</Text>
             </Space>

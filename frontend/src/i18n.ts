@@ -46,4 +46,9 @@ i18n
     returnObjects: false,
   })
 
+// 检测完就把 <html lang> 对齐（index.html 里写死 zh-CN，英文用户刷新后仍是 zh-CN，
+// 读屏、字体回退、浏览器翻译提示都会认错语言）
+if (typeof document !== 'undefined') document.documentElement.lang = i18n.language || 'zh-CN'
+i18n.on('languageChanged', (lng) => { if (typeof document !== 'undefined') document.documentElement.lang = lng })
+
 export default i18n

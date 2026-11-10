@@ -40,6 +40,22 @@ export interface NarrowTableProps {
   [key: string]: unknown
 }
 
+/**
+ * 服务端分页：原表的 pagination 带 total（数据不在内存里、翻页要回后端）时，
+ * 窄屏卡片必须保留同一个翻页器，否则手机上只看得到第一页却没有翻页入口。
+ * 只有 pageSize 的那种是 antd 客户端分页，交给 cardPageSize，这里返回 undefined。
+ */
+function serverPager(pagination: unknown) {
+  const p = pagination as any
+  if (!p || typeof p !== 'object' || typeof p.total !== 'number') return undefined
+  return {
+    current: Number(p.current ?? 1),
+    pageSize: Number(p.pageSize ?? 10),
+    total: p.total,
+    onChange: (page: number) => p.onChange?.(page, Number(p.pageSize ?? 10)),
+  }
+}
+
 const NarrowTable: React.FC<NarrowTableProps> = ({
   cardTitleKey, cardPageSize, cardHiddenKeys, columns, dataSource, rowKey, ...rest
 }) => {
@@ -58,6 +74,8 @@ const NarrowTable: React.FC<NarrowTableProps> = ({
         loading={!!rest.loading}
         titleKey={cardTitleKey}
         clientPageSize={cardPageSize}
+        pagination={serverPager(rest.pagination)}
+        expandable={rest.expandable as any}
       />
     )
   }

@@ -276,7 +276,7 @@ const PortfolioPage: React.FC = () => {
     <Card style={{ borderRadius: 8 }}>
       {/* ─── 页面标题 + 学生信息合并行 ─── */}
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#fff' }}>
+        <div className="pf-banner-row" style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#fff' }}>
           <div style={{
             width: 56, height: 56, borderRadius: 28,
             background: `linear-gradient(135deg, ${avatarColor} 0%, ${avatarColor}cc 100%)`,
@@ -285,8 +285,8 @@ const PortfolioPage: React.FC = () => {
           }}>
             {avatarEmoji}
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div className="pf-banner-main" style={{ flex: 1, minWidth: 0 }}>
+            <div className="pf-banner-titles" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <Title level={4} style={{ color: '#fff', margin: 0 }}>📋 {t('portfolio')}</Title>
               <Title level={3} style={{ color: '#fff', margin: 0 }}>{student.name}</Title>
             </div>

@@ -125,6 +125,7 @@
   "shareClean": "清理",
   "shareExpiredTag": "已到期",
   "shareViews": "{{n}} 次浏览",
+  "pagesCount": "{{n}} 页",
   "classSuffix": "班",
   "shareLoading": "读取分享内容…",
   "shareReadonlyTag": "只读快照",

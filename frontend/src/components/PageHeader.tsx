@@ -21,6 +21,7 @@ interface PageHeaderProps {
 
 const PageHeader: React.FC<PageHeaderProps> = ({ icon, title, subtitle, extra, children, style }) => (
   <div
+    className="page-header"
     style={{
       border: '1px solid var(--border-color)',
       borderRadius: 10,

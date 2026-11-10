@@ -149,7 +149,172 @@
   .se-tabs .ant-tabs-tab { font-size: 13px; }
   .se-tabs .ant-tabs-tab + .ant-tabs-tab { margin-inline-start: 14px; }
 
+  /* ── 批次 2：触控目标 ──────────────────────────────────────────────
+     实测：/chat 工具条图标按钮 24×24、勾选框 16×16；/task-todo、/practice、/exam
+     的动作按钮高 24；分页项高 22。iOS HIG 44pt / Material 48dp 是建议下限，
+     这里取「小控件 ≥32、主操作 ≥40」两档：既按得准，又不至于把列表撑到每屏少一半。
+     巡检新增 touchFail（最小边 <28）与 touchWarn（<40）两个指标盯它。 */
+  /* 为什么全部要 !important：antd v6 是 CSS-in-JS，样式在运行时注入到 <head>，排在
+     main.tsx 里静态引入的 mobile.css 之后——同特异度它赢。实测不加 !important 时
+     .ant-btn-sm.ant-btn-icon-only 仍是 24×32（高度吃了 min-height，宽度被 antd 的 width 顶掉）。 */
+  .ant-btn-sm { min-height: 32px !important; }
+  .ant-btn-icon-only { min-width: 32px !important; min-height: 32px !important; }
+  .ant-btn-link { min-height: 32px !important; }
+  .ant-btn:not(.ant-btn-sm):not(.ant-btn-link):not(.ant-btn-text):not(.ant-btn-icon-only) { min-height: 40px !important; }
+  .ant-segmented-item { min-height: 34px !important; }
+  .ant-segmented-item-label { min-height: 34px !important; line-height: 34px !important; }
+  .ant-radio-button-wrapper { min-height: 34px !important; line-height: 32px !important; }
+  /* 分页：只给内层 .ant-pagination-item-link 设高度压不住（antd 的 li 自己就是 24px 盒子，
+     实测 li.ant-pagination-item 24×24）。直接给 li 兜底，并让链接撑满。 */
+  .ant-pagination { display: flex; flex-wrap: wrap; row-gap: 6px; }
+  .ant-pagination-item, .ant-pagination-prev, .ant-pagination-next { min-width: 34px !important; min-height: 34px !important; }
+  .ant-pagination-item a { display: flex !important; align-items: center; justify-content: center; min-width: 34px !important; min-height: 32px !important; }
+  .ant-pagination-prev .ant-pagination-item-link,
+  .ant-pagination-next .ant-pagination-item-link { display: flex !important; align-items: center; justify-content: center; min-width: 34px !important; min-height: 32px !important; }
+  /* 标签常兼作信息点（范围、状态），18px 高的行盒按不准，也给到 20 行高 + 上下 3px */
+  .ant-tag { line-height: 20px !important; padding: 3px 8px !important; }
+  .ant-checkbox-inner { width: 20px !important; height: 20px !important; }
+  /* 勾选框：整块 label 才是接受点击的元素，实测只有 16×30（方块本身 20px + 无内边距）。
+     给到 32×32 的最小盒子，纯方块的行也能按准；带文字的 label 本就更宽，不受影响。 */
+  .ant-checkbox-wrapper { display: inline-flex !important; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
+  .ant-tabs-tab { min-height: 40px; }
+  /* 行内可点控件的热区：首页待办指标芯片（span[role=button]，实测行盒 21px）、
+     行内文字链接（.dash-inline-link）、卡片标题里的编辑图标（.ant-typography-edit 13×15）、
+     风采点赞按钮（.like-btn 52×24）——都按不准，窄屏统一抬到 ≥32。 */
+  .dash-metric { padding-block: 6px; }
+  .dash-inline-link { display: inline-flex; align-items: center; min-height: 32px; }
+  .ant-typography-edit, .ant-typography-expand { display: inline-flex !important; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
+  .like-btn { display: inline-flex; align-items: center; min-height: 32px; }
+  /* 英文界面的标签最容易被 nowrap + 窄盒子吃掉：实测 "Course accuracy" 86px 文本 /
+     60px 盒子、"Mistakes Mastered" 95px / 60px。窄屏允许换两行，标签必须读得完。 */
+  .dash-mastery-label, .dash-stat-title {
+    width: auto !important; min-width: 60px; max-width: 46%;
+    white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
+  }
+  /* 档案横幅的两个标题（📋 档案 + 学生姓名）在 320 被挤成 20–27px 宽、一字一行：
+     窄屏各占一行，姓名允许换行 */
+  .pf-banner-titles > * { flex: 0 0 100%; }
+  .pf-banner-titles { row-gap: 2px; }
+  /* 320 实测：横幅那一行（头像 + 标题列 + 右侧「取消」按钮）把中间列压到 20px，
+     标题被挤成一字一行。窄屏允许整行换行，按钮掉到第二行。 */
+  .pf-banner-row { flex-wrap: wrap; row-gap: 8px; }
+  /* 光换行不够：中间列 flex-basis 是 0%，永远能和头像挤在同一行，于是被压到 27px。
+     窄屏让它独占一行（实测 320 下标题「📋 档案」与姓名各占一行才读得出来）。 */
+  .pf-banner-main { flex: 1 1 100% !important; }
+
+  /* 页签：320px 下第三个会被折叠成「…」甚至裁掉（分组讨论实测 hardClip=1）。
+     收紧内边距让三～四个页签能同屏；配合上面的 34px 行高，页签也好按了。 */
+  .ant-tabs-tab { padding: 10px 10px; }
+  .ant-tabs-nav { margin-bottom: 12px; }
+
+  /* ── 批次 2：首屏还给列表 ─────────────────────────────────────────
+     PageHeader（全站统一页头）在窄屏占 ~78px：图标块 34 + 上下 12 + 两行文字，
+     再叠 16 的下边距；下面往往还有一整张「英雄卡」。压到 ~56px 并把外边距收掉。
+     行内 style 优先级更高，这里必须 !important。 */
+  .page-header { margin-bottom: 10px !important; }
+  .page-header > div:first-child { padding: 8px 10px !important; gap: 8px !important; }
+  .page-header > div:first-child > div:first-child { gap: 8px !important; }
+  .page-header > div:last-child { padding: 8px 10px !important; }
+  .page-header .ant-space { width: 100%; justify-content: flex-end; }
+  /* 卡片标题里的长课名（练习「常见电子元器件识别与功能（含…实物外观图）」实测右缘 548）
+     被 .ant-card-head-title 的 nowrap 裁掉；窄屏允许换行，标题必须读得完。 */
+  /* 卡头「标题 + 右侧操作」在窄屏互相挤压：共享中心实测标题被压到 14px 宽（四字竖排）。
+     让标题区可缩、右侧区换到第二行。 */
+  .ant-card-head-wrapper { flex-wrap: wrap; row-gap: 2px; }
+  .ant-card-head .ant-card-head-title { flex: 1 1 auto; min-width: 0; overflow: visible; }
+  /* 卡头标题里是 Space（图标 + 文字）时，文字项会被右侧 extra 挤到 14px 宽（共享中心
+     实测「我的文件」竖排）。窄屏让标题区的 Space 可换行、每项可缩。 */
+  .ant-card-head-title .ant-space { flex-wrap: wrap; row-gap: 2px; }
+  .ant-card-head-title .ant-space-item { min-width: 0; }
+  .ant-card-head .ant-card-extra { flex: 0 0 auto; max-width: 100%; margin-block: 4px; }
+  .ant-card-head-title { white-space: normal !important; word-break: break-word; }
+  .ant-card-head-title .ant-typography { white-space: normal !important; }
+
+  /* ── 批次 1：资源管理（教师窄屏）──────────────────────────────────
+     目录树节点上的 maxWidth:100% 其实不生效——.ant-tree-title 是 inline span，
+     百分比约束对 inline 元素无效，于是「名称+大小+类型标签+操作」整行按内容排，
+     实测右缘 420–459px 被 overflow:hidden 裁死；而操作按钮只在 :hover 显形
+     （触屏没有 hover），手机上既看不见也点不到重命名/删除。 */
+  .ant-tree-title { display: block; min-width: 0; }
+  .resource-tree-node { max-width: 100%; flex-wrap: wrap; row-gap: 2px; }
+  /* 真正的元凶在最后两条：.ant-tree-treenode 与 .ant-tree-node-content-wrapper 的 min-width
+     是 auto（flex 项默认不许缩到内容以下），于是整条链按 max-content 排到 359–365px，
+     节点上的 maxWidth:100% 永远不生效，类型标签被节点自己的 overflow:hidden 裁死。
+     窄屏把 min-width 归零并让节点行占满宽度，名称自己省略、标签换到第二行。 */
+  .ant-tree-treenode { max-width: 100%; }
+  .ant-tree-node-content-wrapper { min-width: 0 !important; flex: 1 1 auto !important; }
+  .resource-tree-node { width: 100%; }
+  .resource-tree-node .resource-tree-actions { opacity: 1 !important; width: 100%; justify-content: flex-end; }
+  /* 每级缩进 24px，3～4 级后节点只剩 ~150px：类型标签（75px）+ 大小（49px）压不进第二行，
+     就被节点自己的 overflow:hidden 裁死（共享中心实测右缘 400–459）。窄屏缩进减半、
+     文件大小让位（详情里有），再给树本身一个横滑兜底。 */
+  .ant-tree-indent-unit { width: 12px !important; }
+  .resource-tree-size { display: none !important; }
+  .ant-tree { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* 页面外壳写死 height:calc(100vh - 112px) + padding:24：窄屏撑不满还吃掉 48px 宽 */
+  .resource-shell.ant-layout { height: auto !important; padding: 4px !important; }
+  /* 网格视图的文件名同样是一行 ellipsis（实测容器 316px / 内容 359px）+ 只有 hover 才有的 Tooltip。
+     窄屏给两行截断，并把图标收到 26px，一屏能多看两条。 */
+  .resource-grid .ant-card-body { padding: 10px !important; }
+  .resource-grid .ant-card-body > div:first-child { font-size: 26px !important; margin-bottom: 4px !important; }
+  .resource-file-name {
+    white-space: normal !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical !important;
+    word-break: break-all;
+  }
+
+  /* ── 批次 1：探索画布墙 ──────────────────────────────────────────
+     桌面是 minmax(230px,1fr) 的大卡（缩略图 96 + 标题 + 元信息 ≈ 200px 高），
+     窄屏一屏只放得下 2 张。改成「缩略图在左、标题/页码在右」的两列网格，一屏 5–6 条。
+     缩略图与元信息都带行内尺寸，必须 !important 才压得住。 */
+  .explore-wall { grid-template-columns: 1fr !important; gap: 8px !important; }
+  .explore-wall > .ant-card > .ant-card-body {
+    display: grid !important;
+    grid-template-columns: 92px minmax(0, 1fr);
+    column-gap: 10px; align-items: center;
+  }
+  .explore-wall .explore-thumb { grid-row: 1 / span 2; width: 92px !important; height: 62px !important; }
+  .explore-wall .explore-thumb > span { font-size: 26px !important; }
+  .explore-wall .explore-meta,
+  .explore-wall .explore-submeta { margin-top: 0 !important; }
+
+  /* ── 批次 1：说明类 markdown 表格（关于页等）──────────────────────
+     列多时 table{width:100%} 会把每列压到 14–49px（关于页实测 squeeze=10，
+     「首页与待办」这种列只剩 14px，完全读不出）。窄屏让表格自己横向滚动、
+     每列给 88px 下限：内容一字不减，宁可左右滚也要能读。 */
+  .markdown-content table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .markdown-content th, .markdown-content td { min-width: 88px; }
+
+  /* 学情「进度详情」展开区：知识点标签 maxWidth 160 + 内层 Text ellipsis 120，
+     全文只挂在 hover Tooltip 上，触屏点不出来。展开区本就一行一个标签，放开截断。 */
+  .kp-tag-wrap .ant-tag,
+  .kp-tag-wrap .ant-tag .ant-typography { max-width: 100% !important; }
+  .kp-tag-wrap .ant-typography { white-space: normal !important; display: inline !important; }
+
+  /* 页签条溢出：4 个页签（班级学情/考试分析/学情进度/进度详情）在 390px 排到 432px，
+     antd 的 nav-wrap 是 overflow:hidden —— 第 4 个既看不见也滑不出来（只能点那枚 24px 的「…」）。
+     窄屏改成原生可横滑，四个页签都摸得到；巡检里这类不再算 hardClip。 */
+  .ant-tabs-nav-wrap { overflow-x: auto !important; overflow-y: hidden !important; -webkit-overflow-scrolling: touch; }
+  .ant-tabs-nav-list { flex-shrink: 0; }
+
+  /* 顶栏：铃铛的可点区实测只有 18×18，角标（右缘 348）压在头像（左缘 346）上。
+     给到 40×40 热区并留 4px，角标不再叠在头像上。 */
+  .header-bell-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 40px; min-height: 40px; margin-inline-end: 4px;
+  }
+
+  /* 闯关答题 / 考试作答这类挂在 AppLayout 之外的沉浸路由：没有内容区那层 padding，
+     窄屏必须自己补（实测答题页左右各 0px，卡片直接贴屏幕边），并给 iOS 底部安全区留位。 */
+  .battle-page { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto; min-height: 100dvh; }
+  /* 考试作答/结果页的壳写死 padding:24 —— 390px 下 48px 全是浪费 */
+  .exam-shell.ant-layout { padding: 8px !important; }
+
 }
+
 
 
 

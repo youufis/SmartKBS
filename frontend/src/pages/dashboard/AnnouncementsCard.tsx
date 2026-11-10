@@ -8,6 +8,18 @@ import type { AnnouncementItem } from '../../api/notifications'
 
 const { Text, Paragraph } = Typography
 
+/** 把 Markdown 压成一行可读纯文本（首页预览用，详情里仍是原样） */
+function plainPreview(md: string): string {
+  return String(md || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_#>~]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 const AnnouncementsCard: React.FC<{ announcements: AnnouncementItem[] }> = ({ announcements }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
@@ -25,7 +37,7 @@ const AnnouncementsCard: React.FC<{ announcements: AnnouncementItem[] }> = ({ an
       {rows.map((item, idx) => (
         <div
           key={item.id}
-          onClick={() => navigate('/announcements')}
+          onClick={() => navigate(`/announcements?id=${item.id}`)}
           className="dash-row"
           style={{
             cursor: 'pointer', padding: '8px 6px', margin: '0 -6px',
@@ -42,8 +54,10 @@ const AnnouncementsCard: React.FC<{ announcements: AnnouncementItem[] }> = ({ an
               {item.priority === 'urgent' ? t('urgent') : item.priority === 'important' ? t('important') : t('normal')}
             </Tag>
           </Space>
+          {/* 公告正文是 Markdown，直接截一行会把「**2025…**」这种星号露出来（实测首页两条公告都是）。
+              这里先剥成纯文本再截断；全文点进详情看。 */}
           <Paragraph ellipsis={{ rows: 1 }} type="secondary" style={{ fontSize: 12, margin: '2px 0 0' }}>
-            {item.content}
+            {plainPreview(item.content)}
           </Paragraph>
         </div>
       ))}

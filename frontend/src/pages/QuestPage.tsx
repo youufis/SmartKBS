@@ -5,7 +5,7 @@
 import React, { useState, useEffect, startTransition, useRef } from 'react'
 import {
   Card, Button, Typography, Space, Statistic,
-  Table, Tag, message, Spin, Modal, Tooltip,
+  Tag, message, Spin, Modal, Tooltip,
 } from 'antd'
 import {
   ThunderboltOutlined, HistoryOutlined,
@@ -18,6 +18,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation, Trans } from 'react-i18next'
 import { relativeTime, fullTime } from '../utils/relativeTime'
+import NarrowTable from '../components/NarrowTable'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -148,12 +149,14 @@ const QuestPage: React.FC = () => {
       return <Text type="secondary" style={{ padding: 12 }}>{t('noQuestionDetails')}</Text>
     }
     return (
-      <Table
+      <NarrowTable
         dataSource={questions}
         rowKey="sort_order"
         pagination={false}
         size="small"
         bordered
+        cardTitleKey="q"
+        cardHiddenKeys={['s']}
         columns={[
           { title: '#', dataIndex: 'sort_order', key: 's', width: 36 },
           {
@@ -366,7 +369,10 @@ const QuestPage: React.FC = () => {
 
       {/* ── 历史记录（分页 + 展开） ── */}
       <Card title={<Space><HistoryOutlined /> {t('questRecords')}</Space>}>
-        <Table className="nowrap-cells-table"
+        {/* 明细类表格：窄屏自动摊卡片（含「展开」看每题作答），不再靠 550px 宽的表横滑 */}
+        <NarrowTable
+          className="nowrap-cells-table"
+          cardTitleKey="id"
           dataSource={records}
           columns={columns}
           rowKey="id"

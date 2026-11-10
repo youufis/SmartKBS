@@ -93,7 +93,7 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
           <div className="dash-stagger" style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {mastery.map((m) => (
               <div key={m.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                <span style={{ width: 60, flexShrink: 0, color: ct.tick, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
+                <span className="dash-mastery-label" style={{ width: 60, flexShrink: 0, color: ct.tick, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
                 <span
                   style={{
                     flex: 1, height: 6, borderRadius: 3, overflow: 'hidden',

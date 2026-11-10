@@ -7,9 +7,10 @@
  * 文案与颜色集中在这里，避免各页面各写一份、口径漂移。
  */
 import React from 'react'
-import { Tag, Tooltip } from 'antd'
+import { Popover, Tag, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { classText } from '../utils/studentLabel'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 export interface ScopeTagProps {
   /** 目标范围: teacher_classes(默认) / all / grade / class / individual */
@@ -64,14 +65,7 @@ const ScopeTag: React.FC<ScopeTagProps> = ({
   if (variant === 'text') {
     const onlyText = formatScopeText(grade, classes)
     if (!onlyText) return placeholder ? <Tag color="geekblue">-</Tag> : null
-    return (
-      <Tooltip title={onlyText} placement="topLeft">
-        <Tag color="geekblue" style={{
-          maxWidth, marginInlineEnd: 0,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle',
-        }}>{onlyText}</Tag>
-      </Tooltip>
-    )
+    return <TruncatedScopeText txt={onlyText} maxWidth={maxWidth} grade={grade} classes={classes} />
   }
 
   if (scope === 'individual') {
@@ -85,7 +79,31 @@ const ScopeTag: React.FC<ScopeTagProps> = ({
   const txt = formatScopeText(grade, classes)
   if (!txt) return placeholder ? <Tag color="geekblue">-</Tag> : null
 
-  // 多班级时文本会很长, 一律限宽截断, 悬停看全文
+  return <TruncatedScopeText txt={txt} maxWidth={maxWidth} grade={grade} classes={classes} />
+}
+
+/**
+ * 长范围文本的呈现：桌面限宽截断 + 悬停看全文；
+ * 触屏没有 hover，被截掉的部分就永远读不到（实测任教范围标签容器 148px、内容 383px，
+ * 手机上只剩「高一 · 1班、2班…」半行）。窄屏改成「计数摘要 + 点按弹明细」。
+ */
+const TruncatedScopeText: React.FC<{ txt: string; maxWidth: number; grade?: string; classes?: string }> = ({ txt, maxWidth, grade, classes }) => {
+  const { t } = useTranslation('common')
+  const isMobile = useIsMobile()
+  const classCount = splitMulti(classes).length
+  const grades = splitMulti(grade)
+
+  if (isMobile && classCount > 3) {
+    const summary = grades.length
+      ? `${grades.join('·')} · ${t('scopeClassCount', { n: classCount })}`
+      : t('scopeClassCount', { n: classCount })
+    return (
+      <Popover trigger="click" placement="top" content={<div style={{ maxWidth: '72vw', whiteSpace: 'normal' }}>{txt}</div>}>
+        <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>{summary}</Tag>
+      </Popover>
+    )
+  }
+
   return (
     <Tooltip title={txt} placement="topLeft">
       <Tag

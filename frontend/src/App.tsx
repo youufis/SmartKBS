@@ -39,6 +39,7 @@ function RequireRole({ roles, children }: { roles: string[]; children: ReactNode
 const TA = ['admin', 'teacher']
 
 import AppLayout from './components/AppLayout'
+import MobileGate from './components/MobileGate'
 import DashboardPage from './pages/DashboardPage'
 import ChatPage from './pages/ChatPage'
 import HtmlFilesPage from './pages/HtmlFilesPage'
@@ -156,10 +157,11 @@ function App() {
         <Routes>
           <Route path="/login" element={isLoggedIn ? <Navigate to="/dashboard" /> : <LoginPage />} />
           <Route path="/exam-take/:examId" element={isLoggedIn && user?.role === 'student' ? <ExamTakePage /> : <Navigate to={isLoggedIn ? '/chat' : '/login'} />} />
-          {/* AI 讲演播放页：与考试作答页同级，脱离主布局做沉浸式（舞台 + 右栏目录 + 字幕） */}
-          <Route path="/learn/:kpId" element={isLoggedIn ? <LessonCastPage /> : <Navigate to="/login" />} />
+          {/* AI 讲演播放页：与考试作答页同级，脱离主布局做沉浸式（舞台 + 右栏目录 + 字幕）。
+              这些路由在 AppLayout 之外，白名单门控管不到，故显式加 MobileGate：窄屏给「请用电脑端」。 */}
+          <Route path="/learn/:kpId" element={isLoggedIn ? <MobileGate><LessonCastPage /></MobileGate> : <Navigate to="/login" />} />
           {/* 演讲者视图：投屏时放在老师自己屏幕上，显示下一页与逐字稿 */}
-          <Route path="/learn/:kpId/presenter" element={isLoggedIn ? <PresenterPage /> : <Navigate to="/login" />} />
+          <Route path="/learn/:kpId/presenter" element={isLoggedIn ? <MobileGate><PresenterPage /></MobileGate> : <Navigate to="/login" />} />
           <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
             <Route index element={<DashboardPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
