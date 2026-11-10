@@ -5,9 +5,12 @@ import type { CompanionConfig, CompanionProfile, PushMessage } from '../api/comp
 import * as companionApi from '../api/companion';
 import * as historyApi from '../api/history';
 import { fileUploadCache } from './chatStore';
+import { promoteChatAssets } from '../api/files';
+import { buildAttachmentsComment } from '../utils/chatAttachments';
+import type { ChatAttachment } from '../types';
 
-async function uploadFiles(filePaths: string[]): Promise<string[]> {
-  const results: string[] = [];
+async function uploadFiles(filePaths: string[]): Promise<{ path: string; name: string }[]> {
+  const results: { path: string; name: string }[] = [];
   for (const fp of filePaths) {
     try {
       const formData = new FormData();
@@ -20,7 +23,7 @@ async function uploadFiles(filePaths: string[]): Promise<string[]> {
       const { data } = await apiClient.post('/api/files/upload-temp', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      if (data.path) results.push(data.path);
+      if (data.path) results.push({ path: data.path, name: fileObj.name || fp });
     } catch (e) {
       console.error('文件上传失败:', fp, e);
     }
@@ -62,7 +65,7 @@ interface CompanionStore {
   pushLoading: boolean;
 
   // 对话
-  companionMessages: { role: 'user' | 'assistant'; content: string }[];
+  companionMessages: { role: 'user' | 'assistant'; content: string; attachments?: ChatAttachment[] }[];
   isStreaming: boolean;
   currentText: string;
 
@@ -95,11 +98,18 @@ let _companionLoadingHistory = false  // 加载历史标记，阻止自动保存
 function _generateCompanionFilename(): string {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`
-  return `companion_${ts}.md`
+  // 教师/管理员的「教学助手」用 assistant_ 前缀，历史列表里能和学生的「学伴」区分开。
+  // 从 localStorage 读角色，避免 authStore ↔ companionStore 的循环 import。
+  let role = ''
+  try {
+    role = JSON.parse(localStorage.getItem('smartkb_user') || '{}')?.role || ''
+  } catch { /* 读不到就按学伴处理 */ }
+  const prefix = role === 'teacher' || role === 'admin' ? 'assistant' : 'companion'
+  return `${prefix}_${ts}.md`
 }
 
 /** 加载学伴历史对话（不触发自动保存） */
-export function loadCompanionHistory(msgs: { role: 'user' | 'assistant'; content: string }[]) {
+export function loadCompanionHistory(msgs: { role: 'user' | 'assistant'; content: string; attachments?: ChatAttachment[] }[]) {
   _companionLoadingHistory = true
   _companionSaveFilename = null
   _companionLastSavedCount = msgs.length
@@ -225,13 +235,25 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
     const { companionMessages } = get();
     if (!prompt.trim() && (!file_paths || file_paths.length === 0)) return;
 
-    // 上传文件到服务器（与智答模式一致），获取真实路径
+    // 上传到暂存区后立即入档（与智答模式同一套逻辑）
     let serverFilePaths: string[] = [];
+    let attachments: ChatAttachment[] = [];
     if (file_paths && file_paths.length > 0) {
-      serverFilePaths = await uploadFiles(file_paths);
+      const uploaded = await uploadFiles(file_paths);
+      if (uploaded.length) {
+        try {
+          const promoted = await promoteChatAssets(uploaded.map((u) => ({ path: u.path, name: u.name })));
+          const ok = promoted.filter((p) => p.f && p.path);
+          attachments = ok.map((p) => ({ name: p.name, f: p.f, kind: p.kind || 'file', size: p.size }));
+          serverFilePaths = ok.length ? ok.map((p) => p.path as string) : uploaded.map((u) => u.path);
+        } catch (e) {
+          console.error('附件入档失败', e);
+          serverFilePaths = uploaded.map((u) => u.path);
+        }
+      }
     }
 
-    const userMsg = { role: 'user' as const, content: prompt };
+    const userMsg = { role: 'user' as const, content: prompt, attachments: attachments.length ? attachments : undefined };
     const aiMsg = { role: 'assistant' as const, content: '' };
 
     set({
@@ -328,11 +350,15 @@ useCompanionStore.subscribe((state) => {
       _companionSaveFilename = _generateCompanionFilename()
     }
 
-    const content = state.companionMessages.map(m =>
-      `**${m.role === 'user' ? '用户' : '助手'}**: ${m.content}`
-    ).join('\n\n---\n\n')
+    const content = state.companionMessages.map((m) => {
+      const head = `**${m.role === 'user' ? '用户' : '助手'}**: ${m.content}`
+      const meta = buildAttachmentsComment(m.attachments)
+      return meta ? `${head}\n\n${meta}` : head
+    }).join('\n\n---\n\n')
 
     // 在文件名前添加 🧠 标记，方便前端识别
-    historyApi.saveConversation(content, 'companion', _companionSaveFilename).catch(() => {})
+    historyApi.saveConversation(content, 'companion', _companionSaveFilename)
+      .then(() => { window.dispatchEvent(new Event('chat:history-saved')) })
+      .catch(() => {})
   }
 })

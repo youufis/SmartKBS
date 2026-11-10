@@ -5,16 +5,18 @@
 import os
 import uuid
 import shutil
+import json
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
 from fastapi.responses import FileResponse
 
 from backend.api.auth_guard import unauthorized
 from backend.api.dependencies import get_current_user
 from backend.utils import path_within
 from backend.auth import is_admin
-from backend.config import BASE_DIR, STORAGE_DIR, TEMP_UPLOAD_ROOT
+from backend.config import BASE_DIR, STORAGE_DIR, TEMP_UPLOAD_ROOT, CHAT_ASSET_ROOT
 from backend.api.config_router import get_config_value
 from backend.config import ROOT_DIR, STU_DIR
 from backend.api.sharing_router import is_file_bound_to_course, is_file_shared_with_user
@@ -34,6 +36,33 @@ _PUBLIC_ROOT_FILES = {"USER_MANUAL.md", "README.md", "README.en.md"}
 
 TEMP_UPLOAD_DIR = TEMP_UPLOAD_ROOT
 TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# 已入档附件：长期保留，与历史记录同寿命
+CHAT_ASSET_DIR = CHAT_ASSET_ROOT
+CHAT_ASSET_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _user_chat_asset_dir(username: str) -> Path:
+    d = CHAT_ASSET_DIR / str(username or "_")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _dir_bytes(d: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(d):
+        for fn in files:
+            try:
+                total += os.path.getsize(os.path.join(root, fn))
+            except OSError:
+                pass
+    return total
+
+
+def _image_exts() -> set[str]:
+    from backend.config_lists import as_str_list
+    default = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
+    return set(as_str_list(get_config_value("IMAGE_EXTENSIONS", default), default))
 
 def _get_allowed_extensions() -> set[str]:
     """获取允许的文件扩展名集合（运行时读取，支持热更新）"""
@@ -115,6 +144,88 @@ async def upload_temp_file(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"文件上传失败: {e}")
         raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
+
+
+@router.post("/promote")
+async def promote_chat_assets(request: Request):
+    """把已发送的附件从 temp_uploads 转入长期目录。
+
+    temp_uploads 只服务"选了但还没发"的草稿（24h 清理）；一旦发送成功，
+    文件必须搬进 chat_assets，否则第二天历史里的图就全成死链。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    body = await request.json()
+    items = body.get("items") or []
+    if not isinstance(items, list) or not items:
+        return {"attachments": []}
+
+    temp_root = os.path.realpath(str(TEMP_UPLOAD_DIR / username))
+    asset_dir = _user_chat_asset_dir(username)
+    quota_mb = int(get_config_value("CHAT_ASSET_QUOTA_MB", 1024) or 1024)
+    used = _dir_bytes(asset_dir)
+    month = datetime.now().strftime("%Y-%m")
+    img_exts = _image_exts()
+    out: list[dict] = []
+
+    for it in items[:20]:
+        if not isinstance(it, dict):
+            continue                       # 脏请求直接跳过，别让 500 冒出来
+        raw = str(it.get("path") or "")
+        name = str(it.get("name") or os.path.basename(raw) or "附件")[:120]
+        src = os.path.realpath(raw)
+        if not path_within(temp_root, src) or not os.path.isfile(src):
+            out.append({"name": name, "f": "", "error": "文件已失效"})
+            continue
+        size = os.path.getsize(src)
+        if quota_mb > 0 and used + size > quota_mb * 1024 * 1024:
+            raise HTTPException(status_code=413,
+                                detail=f"附件空间已满（每人上限 {quota_mb} MB），删除一些旧对话后可继续")
+        dest_dir = asset_dir / month
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / os.path.basename(src)
+        deduped = dest.exists()
+        if deduped:
+            try:
+                os.unlink(src)          # 同内容已入档：去重，只留一份
+            except OSError:
+                pass
+        else:
+            try:
+                os.replace(src, dest)
+            except OSError:
+                shutil.copy2(src, dest)
+                try:
+                    os.unlink(src)
+                except OSError:
+                    pass
+        if not deduped:
+            used += size                # 去重命中时不占新空间，别把配额算虚
+        ext = os.path.splitext(dest.name)[1].lower()
+        out.append({
+            "name": name,
+            "f": f"{month}/{dest.name}",
+            "path": str(dest),
+            "size": size,
+            "kind": "image" if ext in img_exts else "file",
+        })
+    logger.info("附件入档: user=%s n=%s used=%sKB", username, len(out), used // 1024)
+    return {"attachments": out}
+
+
+@router.get("/chat-asset")
+async def get_chat_asset(request: Request, f: str = Query(...), dl: int = 0):
+    """读取已入档附件：只允许访问本人目录，路径必须落在目录内"""
+    user = get_current_user(request)
+    base = os.path.realpath(str(_user_chat_asset_dir(user["username"])))
+    target = os.path.realpath(os.path.join(base, f))
+    if not path_within(base, target) or not os.path.isfile(target):
+        raise HTTPException(status_code=404, detail="附件不存在或已过期")
+    return FileResponse(
+        target,
+        filename=os.path.basename(target) if dl else None,
+        content_disposition_type="attachment" if dl else "inline",
+    )
 
 
 @router.delete("/cleanup-temp")

@@ -31,12 +31,23 @@ export interface KbReference {
 }
 
 // 聊天消息
+/** 对话附件：已入档，与历史记录同寿命 */
+export interface ChatAttachment {
+  /** 原始文件名（展示用） */
+  name: string;
+  /** 相对 chat_assets/<用户>/ 的路径，如 2026-11/ab12.png */
+  f: string;
+  kind: 'image' | 'file';
+  size?: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   references?: KbReference[];
+  attachments?: ChatAttachment[];
 }
 
 // SSE 流式数据块

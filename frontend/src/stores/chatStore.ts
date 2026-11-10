@@ -1,14 +1,16 @@
 /** 对话状态管理 (Zustand) */
 import i18n from '../i18n'
 import { create } from 'zustand';
-import type { KbReference, Message, TreeNode } from '../types';
+import type { ChatAttachment, KbReference, Message, TreeNode } from '../types';
 import { chatStream, checkApiKeyStatus } from '../api/chat';
 import * as historyApi from '../api/history';
 import apiClient from '../api/client';
+import { promoteChatAssets } from '../api/files';
+import { buildAttachmentsComment } from '../utils/chatAttachments';
 
 /** 上传文件列表到服务器，返回服务器端路径数组 */
-async function uploadFiles(filePaths: string[]): Promise<string[]> {
-  const results: string[] = [];
+async function uploadFiles(filePaths: string[]): Promise<{ path: string; name: string }[]> {
+  const results: { path: string; name: string }[] = [];
   for (const fp of filePaths) {
     // filePaths 可能是浏览器 File 对象的 name 或临时路径
     // 尝试通过已保存的 fileMap 获取 File 对象
@@ -25,7 +27,7 @@ async function uploadFiles(filePaths: string[]): Promise<string[]> {
       const { data } = await apiClient.post('/api/files/upload-temp', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      if (data.path) results.push(data.path);
+      if (data.path) results.push({ path: data.path, name: fileObj.name || fp });
     } catch (e) {
       console.error('文件上传失败:', fp, e);
     }
@@ -56,7 +58,7 @@ interface ChatStore {
   setFilePaths: (paths: string[]) => void;
   setContextEnhance: (v: boolean) => void;
   addSystemMessage: (content: string) => void;
-  loadHistoryTree: () => Promise<void>;
+  loadHistoryTree: (silent?: boolean) => Promise<void>;
   loadHistoryFile: (path: string) => Promise<void>;
   deleteHistoryFile: (path: string) => Promise<void>;
 }
@@ -111,10 +113,29 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       // 检查失败时继续尝试发送，由后端兜底
     }
 
-    // 上传文件到服务器，获取真实路径
+    // 上传到暂存区，再立刻「入档」到长期目录（temp_uploads 只留未发送的草稿）
     let serverFilePaths: string[] = [];
+    let attachments: ChatAttachment[] = [];
     if (filePaths.length > 0) {
-      serverFilePaths = await uploadFiles(filePaths);
+      const uploaded = await uploadFiles(filePaths);
+      if (uploaded.length) {
+        try {
+          const promoted = await promoteChatAssets(uploaded.map((u) => ({ path: u.path, name: u.name })));
+          const ok = promoted.filter((p) => p.f && p.path);
+          attachments = ok.map((p) => ({ name: p.name, f: p.f, kind: p.kind || 'file', size: p.size }));
+          serverFilePaths = ok.length ? ok.map((p) => p.path as string) : uploaded.map((u) => u.path);
+        } catch (e) {
+          // 入档失败（比如超出配额）：退回暂存路径，这次问答照常，但附件不入档
+          console.error('附件入档失败', e);
+          serverFilePaths = uploaded.map((u) => u.path);
+        }
+      }
+      if (attachments.length) {
+        set({
+          messages: get().messages.map((m) =>
+            m.id === userMsg.id ? { ...m, attachments } : m),
+        });
+      }
     }
 
     abortController = new AbortController();
@@ -193,15 +214,16 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     set((state) => ({ messages: [...state.messages, msg] }));
   },
 
-  loadHistoryTree: async () => {
-    set({ historyLoading: true });
+  loadHistoryTree: async (silent?: boolean) => {
+    // silent：对话刚存完的后台刷新，不闪骨架屏也不转圈
+    if (!silent) set({ historyLoading: true });
     try {
       const { tree } = await historyApi.getHistoryTree();
       set({ historyTree: tree });
     } catch {
       // 忽略错误
     } finally {
-      set({ historyLoading: false });
+      if (!silent) set({ historyLoading: false });
     }
   },
 
@@ -255,10 +277,17 @@ useChatStore.subscribe((state) => {
       currentSaveFilename = generateTopicFilename();
     }
     lastSavedMessageCount = state.messages.length;
-    const content = state.messages.map(m =>
-      `**${m.role === 'user' ? '用户' : '助手'}**: ${m.content}`
-    ).join('\n\n---\n\n');
-    historyApi.saveConversation(content, state.sessionId || undefined, currentSaveFilename || undefined);
+    const content = state.messages.map((m) => {
+      const head = `**${m.role === 'user' ? '用户' : '助手'}**: ${m.content}`;
+      const meta = buildAttachmentsComment(m.attachments);
+      return meta ? `${head}\n\n${meta}` : head;
+    }).join('\n\n---\n\n');
+    historyApi.saveConversation(content, state.sessionId || undefined, currentSaveFilename || undefined)
+      .then(() => {
+        // 通知历史面板：新对话已落盘，立即刷新列表（否则要手动点刷新才看得到）
+        window.dispatchEvent(new Event('chat:history-saved'));
+      })
+      .catch(() => { /* 保存失败不打扰用户，下一条消息会再存一次 */ });
   }
 });
 

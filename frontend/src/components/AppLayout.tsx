@@ -49,6 +49,9 @@ import DesktopOnlyGuide from './DesktopOnlyGuide'
 
 const { Header, Sider, Content } = Layout
 
+/** 自管滚动、需要铺满内容高的页面：聊天工作区 */
+const FULL_HEIGHT_PREFIXES = ['/chat']
+
 // 教师/管理员菜单项类型：分组（有子项）或平级条目
 type TeacherMenuItem = {
   type: 'group';
@@ -170,6 +173,8 @@ const AppLayout: React.FC = () => {
   const { t } = useTranslation('menu')
   const navigate = useNavigate()
   const location = useLocation()
+  // 聊天工作区：自己管滚动、铺满内容高（内容区不能再滚，否则刷新后顶栏被顶出视野）
+  const fullHeightPage = FULL_HEIGHT_PREFIXES.some((p) => location.pathname.startsWith(p))
   const { user, onlineCount, logout, fetchOnlineCount, isLoggedIn } = useAuthStore()
   const [collapsed, setCollapsed] = React.useState(false)
   // 移动端地基：仅 <768px 生效，桌面/Electron(>=1024px) 恒走原分支
@@ -433,15 +438,21 @@ const AppLayout: React.FC = () => {
         </Sider>
         )}
 
-        <Content style={{ padding: isMobile ? 12 : 24, background: 'var(--bg-layout)', overflow: 'auto', height: '100%', borderRadius: 8, flex: 1 }}>
+        <Content style={{
+          padding: isMobile ? 12 : 24, background: 'var(--bg-layout)', height: '100%', borderRadius: 8, flex: 1,
+          // 聊天工作区自己管滚动：内容区若还能滚，刷新时浏览器恢复上次滚动位置，顶栏会被顶出视野
+          overflow: fullHeightPage ? 'hidden' : 'auto',
+        }}>
           {isMobile && !isMobileAllowedPath(user?.role, location.pathname) ? (
             <DesktopOnlyGuide />
           ) : (
           <>
             <Outlet />
-            <div style={{ textAlign: 'center', padding: '16px 0 0', color: 'var(--footer-text)', fontSize: 12 }}>
-              © 2026 UNET. All rights reserved.
-            </div>
+            {!fullHeightPage && (
+              <div style={{ textAlign: 'center', padding: '16px 0 0', color: 'var(--footer-text)', fontSize: 12 }}>
+                © 2026 UNET. All rights reserved.
+              </div>
+            )}
           </>
           )}
         </Content>

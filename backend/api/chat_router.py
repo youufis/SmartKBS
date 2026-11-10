@@ -69,6 +69,11 @@ def _allowed_file_roots(username: str) -> list[str]:
         roots.append(get_account_chat_history_dir(username))
     except Exception:
         pass
+    try:
+        from backend.api.files_router import CHAT_ASSET_DIR
+        roots.append(str(CHAT_ASSET_DIR / username))   # 入档后的附件
+    except Exception as e:
+        logger.warning(f"聊天附件目录不可用: {e}")
     return [os.path.realpath(r) for r in roots if r]
 
 

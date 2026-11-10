@@ -536,7 +536,7 @@
   "group_grading": "主观题批改",
   "group_imagegen": "图片生成",
   "group_upload": "上传限制",
-  "group_quota": "下载配额",
+  "group_quota": "文件中心空间",
   "group_session": "登录与会话",
   "group_guard": "访问防护",
   "group_upgrade": "版本与自动同步",
@@ -618,8 +618,8 @@
   "field_TRUST_PROXY_HEADERS_desc": "仅在 Nginx/IIS 已覆写 X-Forwarded-For 时开启",
   "field_IP_DENYLIST": "IP 黑名单",
   "field_IP_DENYLIST_desc": "逐条添加要拒绝的来源：精确 IP、前缀（如 14.112.）或网段（如 14.112.131.0/24），保存即时生效",
-  "field_TEACHER_DOWNLOAD_QUOTA_GB": "教师下载空间配额",
-  "field_TEACHER_DOWNLOAD_QUOTA_GB_desc": "每位教师下载中心的最大存储空间",
+  "field_TEACHER_DOWNLOAD_QUOTA_GB": "每人文件空间",
+  "field_TEACHER_DOWNLOAD_QUOTA_GB_desc": "非管理员账号在「文件中心」可占用的存储上限（管理员不受限）。空间满了要先删掉中心里的文件，才能继续保存新的下载",
   "field_SUBJECTS": "课程名称列表",
   "field_SUBJECTS_desc": "系统中使用的课程名称：点选候选或输入后回车添加。课程名同时是题库、课程资源的归属依据，改名会让旧数据留在原名称下",
   "field_QUESTION_TYPES": "试题题型列表",
@@ -1729,5 +1729,9 @@
   "field_MODEL_IMAGE_VIA_CHAT_desc": "白板 / 画布 / 聊天的「看图理解」改用对话模型（更快更省）；解题类仍走视觉模型。关掉则全部走视觉模型",
   "field_MODEL_IMAGE_VIA_CHAT_tip": "对话模型能不能吃图由系统自己判定：返回 400/415/422 时自动回落视觉模型，并记住 1 小时不再尝试；换模型后会自动重试，不需要回来改这里。两个开关都关 = 完全回到「全部用视觉模型」。",
   "field_MODEL_IMAGE_SOLVE_VL": "解题类自动切视觉模型",
-  "field_MODEL_IMAGE_SOLVE_VL_desc": "提问或圈选内容里出现求解、证明、计算、选项、公式符号等特征时，改由视觉模型作答（识别更准）"
+  "field_MODEL_IMAGE_SOLVE_VL_desc": "提问或圈选内容里出现求解、证明、计算、选项、公式符号等特征时，改由视觉模型作答（识别更准）",
+  "field_CHAT_ASSET_QUOTA_MB": "每人附件空间",
+  "field_CHAT_ASSET_QUOTA_MB_desc": "对话附件的每人容量上限（0 = 不限）。附件与历史记录同寿命，删对话不会立刻腾空间，回收任务清理后才释放",
+  "field_CHAT_ASSET_GC_DAYS": "无引用附件回收",
+  "field_CHAT_ASSET_GC_DAYS_desc": "附件不再被任何历史记录引用、且闲置超过这么多天后才删除（0 = 不回收）。设为 0 时空间只增不减"
 }

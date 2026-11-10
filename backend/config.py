@@ -26,6 +26,8 @@ DB_DIR = Path(os.environ.get("SMARTKB_DB_DIR", str(STORAGE_DIR / "backend")))
 # 上传/媒体/临时文件根目录（曾硬编码在 BASE_DIR 下，桌面版会随安装目录被删）
 MEDIA_ROOT = STORAGE_DIR / "question_media"
 TEMP_UPLOAD_ROOT = STORAGE_DIR / "temp_uploads"
+# 已入档的聊天附件（与历史记录同寿命；temp_uploads 只是发送前的暂存）
+CHAT_ASSET_ROOT = STORAGE_DIR / "chat_assets"
 
 # ── 应用版本 ──
 # 优先读取前端 package.json，桌面版回退到 version.json

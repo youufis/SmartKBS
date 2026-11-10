@@ -45,6 +45,11 @@
 > - 🎖️ Soft points + strong honors: first question, deep-dive chains and archiving earn points, plus 5 explore badges; never graded, never ranked, badges stay on the student's own profile, and the hall of glory follows its existing rule (cards are created automatically once the points threshold is met — no review step)
 > - 🔒 Configurable daily quotas for chat / image generation / read-aloud; admins are unlimited but still metered. Expressions of self-harm or suicidal thoughts switch to a fixed care script (no model call) plus a zero-raw-text alert to administrators, and the care ledger is queryable in the admin console
 >
+> **Conversations and attachments**
+> - 🗂️ History as a docked sidebar: pushes content aside on desktop instead of covering it; a single click previews without replacing the running conversation; new chats appear as soon as they are saved, today / yesterday expand by default and each year gets its own divider
+> - 📎 Attachments live with the conversation: images and documents are archived together with it, so reopening a history entry still shows the original image and lets you download the file; a recycled file reads "Attachment expired"
+> - 🔒 Attachments belong to their owner: downloads require auth and reject cross-user access and path traversal; per-user capacity and idle-recycle days are managed in System Configuration
+>
 > **Whiteboard**
 > - 🧑‍🏫 AI assistant upgrade: textbook source tags, selection / pen-circle as priority context, chat can pop out as a draggable window (toolbar steps aside)
 > - 🚪 Self-study mode retired: classroom collaboration stays on the whiteboard, personal creation moves to Explore Canvas
@@ -73,6 +78,8 @@ AI capabilities go through a single invocation service offering three modes, tak
 1. **Retrieval-augmented generation** — once a knowledge base is ready it takes over the whole AI chain: retrieve first (Bailian knowledge base, or the local question bank and syllabus), generate from what was matched, show the cited sources in the UI, and fall back to the next level when retrieval fails
 2. **Bailian agent application** — call a pre-configured agent app directly
 3. **Direct model invocation** — the fallback path, compatible with DashScope and DeepSeek
+
+Conversations and their attachments share one lifetime: images and documents uploaded with a question are archived together with it, so reopening a history entry still shows the original image and the file stays downloadable. Attachments are visible to their owner only, and both capacity and idle recycling are managed from System Configuration.
 
 > 📦 **Three ways to deploy**: one-click Windows desktop installer (no environment, no Python / Node.js) · source package · Git clone (with online incremental upgrades). See the [Deployment Guide](#deployment).
 
@@ -430,7 +437,7 @@ Upload/delete/rename teaching resource files:
 Download directory file management:
 
 - 📤 Upload / 📥 Download / 🗑️ Delete
-- 📊 Quota management (independent quota per teacher)
+- 📊 Storage quota (per-user cap, admins unlimited; adjust it in System Configuration → File center storage)
 - 📁 Subdirectory support
 - 🔗 Directory sharing (the whole directory inherits permissions; recipients see it as a folder entry showing how many files it holds and its total size)
 - 🗂️ Unified resource browser: shares the category sidebar / stats strip / grid & list views / search, sort, pagination and remembered preferences with Shared Resources
@@ -451,12 +458,12 @@ The student side: watching AI lesson casts, knowledge Q&A, the AI companion, syl
 Core intelligent Q&A interface based on SSE streaming, providing a smooth AI conversation experience:
 
 - **⚡ Streaming Dialogue**: AI outputs responses word by word in real time for instant feedback
-- **📎 File Upload**: Supports images (JPG/PNG/GIF) and documents (PDF/Word/Excel/PPT/TXT/MD, etc.)
-- **👁️ Image Understanding**: Upload images to invoke vision model for recognition and analysis
-- **🖼️ Multimodal Dialogue**: When multimodal is enabled, supports simultaneous image + text input, directly understood by the multimodal model without file summarization
+- **📎 File Upload**: Images (JPG/PNG/GIF) and documents (PDF/Word/Excel/PPT/TXT/MD, etc.); after sending they are archived with the conversation, so history still shows the original image and keeps the file downloadable
+- **👁️ Image Understanding**: The chat model reads images first (faster and cheaper); solving-type content (question text / formulas / handwriting) switches to the vision model automatically
+- **🖼️ Multimodal Dialogue**: The chat model must accept image input, so images and text can be sent together without a summary pass first
 - **📄 File Summary Enhancement**: Automatically summarizes uploaded documents to enhance AI dialogue context
 - **🔍 RAG Knowledge Enhancement**: Retrieves relevant knowledge from question bank and course syllabus to improve answer accuracy
-- **📜 Chat History**: Auto-saved and shown by conversation title, grouped by today/yesterday/month, with title and full-text search, hover preview, rename and download
+- **📜 Chat History**: A docked sidebar on desktop (pushes content aside); new chats show up right after saving, today / yesterday expand by default and years are separated; a single click only previews, never replaces the running chat; title and full-text search, rename and download included
 - **👁️ HTML Preview**: One-click preview of HTML code blocks in conversations
 - **📋 Example Prompts**: Built-in multiple teaching scenario examples, one-click fill
 - **🎭 Three Modes**: Smart Answer Mode / Companion Mode (Student) / Assistant Mode (Teacher/Admin)
@@ -1198,6 +1205,14 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - 🎖️ Soft points and honors (never graded); self-harm expressions switch to a care script with a zero-raw-text admin alert; configurable daily quotas, admins exempt but metered
 - 🗂️ Asset ledger with automatic cleanup: reference renewal, orphan recycling (daily job, no manual trigger), dry-run available for inspection
 - 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only
+
+**Conversations and attachments**
+
+- 🗂️ History rebuilt as a docked sidebar: pushes content aside on desktop, a click only previews instead of replacing the running chat, and new chats appear as soon as they are saved
+- 📎 Images and documents are archived with the conversation — reopening history still shows the original image and keeps the file downloadable; recycled files read "Attachment expired"
+- 🔒 Attachments are owner-only with authenticated downloads; per-user capacity and idle-recycle days live in System Configuration
+- 🧾 Copy fix: "Download quota" is now "File center storage"
+- 🧭 Header stays put: the mode bar no longer scrolls out of view after a refresh
 
 **Whiteboard**
 

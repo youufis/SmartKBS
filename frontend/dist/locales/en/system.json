@@ -528,7 +528,7 @@
   "group_grading": "Subjective-Question Grading",
   "group_imagegen": "Image Generation",
   "group_upload": "Upload Limits",
-  "group_quota": "Download Quota",
+  "group_quota": "File center storage",
   "group_session": "Login & Session",
   "group_guard": "Access Protection",
   "group_upgrade": "Version & Auto Sync",
@@ -610,8 +610,8 @@
   "field_TRUST_PROXY_HEADERS_desc": "Only when Nginx/IIS overwrites X-Forwarded-For",
   "field_IP_DENYLIST": "IP denylist",
   "field_IP_DENYLIST_desc": "Add blocked sources one by one: exact IP, prefix (e.g. 14.112.) or CIDR (e.g. 14.112.131.0/24). Applies immediately",
-  "field_TEACHER_DOWNLOAD_QUOTA_GB": "Teacher download quota",
-  "field_TEACHER_DOWNLOAD_QUOTA_GB_desc": "Max storage per teacher in download center",
+  "field_TEACHER_DOWNLOAD_QUOTA_GB": "Storage per user",
+  "field_TEACHER_DOWNLOAD_QUOTA_GB_desc": "Storage cap for non-admin accounts in the File Center (admins are unlimited). When it is full, files must be deleted there before new downloads can be saved",
   "field_SUBJECTS": "Subject Names",
   "field_SUBJECTS_desc": "Subjects used by the system: pick a suggestion or type and press Enter. The name is what questions and resources belong to, so renaming leaves old data under the old name",
   "field_QUESTION_TYPES": "Question Types",
@@ -1729,5 +1729,9 @@
   "field_MODEL_IMAGE_VIA_CHAT_desc": "Whiteboard / canvas / chat image questions go to the chat model (faster and cheaper); solving tasks still use the vision model. Turn off to send everything to the vision model",
   "field_MODEL_IMAGE_VIA_CHAT_tip": "Whether the chat model accepts images is detected automatically: on HTTP 400/415/422 the request falls back to the vision model and the model is skipped for an hour. After changing models it is retried automatically. Turning both switches off restores the old all-vision behaviour.",
   "field_MODEL_IMAGE_SOLVE_VL": "Use the vision model for solving tasks",
-  "field_MODEL_IMAGE_SOLVE_VL_desc": "When the question or circled content looks like a solving task (prove, calculate, options, formulas), the vision model answers instead — it reads handwriting and formulas more reliably"
+  "field_MODEL_IMAGE_SOLVE_VL_desc": "When the question or circled content looks like a solving task (prove, calculate, options, formulas), the vision model answers instead — it reads handwriting and formulas more reliably",
+  "field_CHAT_ASSET_QUOTA_MB": "Attachment space per user",
+  "field_CHAT_ASSET_QUOTA_MB_desc": "Per-user cap for chat attachments (0 = unlimited). Attachments live as long as the conversation history; deleting a chat frees space only after the cleanup job runs",
+  "field_CHAT_ASSET_GC_DAYS": "Recycle unreferenced attachments",
+  "field_CHAT_ASSET_GC_DAYS_desc": "Delete attachments that no longer appear in any saved conversation and have been idle for this many days (0 = never)"
 }

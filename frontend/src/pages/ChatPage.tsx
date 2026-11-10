@@ -10,9 +10,9 @@ import {
   EyeOutlined, UploadOutlined,
   DeleteOutlined, CheckOutlined, RightOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
   CopyOutlined, CameraOutlined, ReloadOutlined, SearchOutlined, DownOutlined, UpOutlined,
-  MoreOutlined, EditOutlined, DownloadOutlined, MessageOutlined,
+  MoreOutlined, EditOutlined, DownloadOutlined, MessageOutlined, LeftOutlined,
 } from '@ant-design/icons'
-import type { Message, TreeNode, TaskInfo } from '../types'
+import type { ChatAttachment, Message, TreeNode, TaskInfo } from '../types'
 import FormulaRenderer from '../components/FormulaRenderer'
 import { useChatStore, fileUploadCache, loadHistoryAsNewTopic, setTaskFilename } from '../stores/chatStore'
 import { useAuthStore } from '../stores/authStore'
@@ -24,6 +24,8 @@ import { useTranslation } from 'react-i18next'
 import CameraCapture from '../components/CameraCapture'
 import VoiceInput from '../components/VoiceInput'
 import { RowList, RowItem } from '../components/RowList'
+import { authedFileUrl } from '../api/client'
+import { chatAssetUrl, formatSize, parseAttachments, stripAttachmentsComment } from '../utils/chatAttachments'
 
 const { TextArea } = Input
 
@@ -147,6 +149,7 @@ const MessageBubble: React.FC<{
                 </span>
               ))}
             </div>
+            <AttachmentStrip items={msg.attachments} />
             {!isUser && showRefs && <KbRefSources refs={msg.references} />}
           </div>
         </div>
@@ -166,7 +169,10 @@ const MessageBubble: React.FC<{
         boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
       }}>
         {isUser ? (
-          <Typography.Text>{msg.content}</Typography.Text>
+          <>
+            <Typography.Text>{msg.content}</Typography.Text>
+            <AttachmentStrip items={msg.attachments} />
+          </>
         ) : (
           <div className="markdown-content">
             <FormulaRenderer content={msg.content || ''} components={{ code: renderCode }} />
@@ -183,11 +189,67 @@ const MessageBubble: React.FC<{
   )
 }
 
+/** 附件区：图片缩略图（点击看大图）+ 文件卡片；文件已回收时显示占位 */
+const AttachmentStrip: React.FC<{ items?: ChatAttachment[]; thumbSize?: number }> = ({ items, thumbSize = 120 }) => {
+  const { t } = useTranslation('chat')
+  const [broken, setBroken] = useState<Record<string, boolean>>({})
+  const [viewer, setViewer] = useState('')
+  if (!items || items.length === 0) return null
+  const imgs = items.filter((a) => a.kind === 'image')
+  const files = items.filter((a) => a.kind !== 'image')
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+      {imgs.map((a) => {
+        const url = authedFileUrl(chatAssetUrl(a.f))
+        if (broken[a.f]) {
+          return (
+            <span key={a.f} style={{
+              display: 'inline-flex', alignItems: 'center', height: 32, padding: '0 10px', borderRadius: 6,
+              border: '1px dashed var(--border-color)', color: 'var(--text-tertiary)', fontSize: 12,
+            }}>{t('attachmentExpired')}</span>
+          )
+        }
+        return (
+          <img key={a.f} src={url} alt={a.name} title={a.name}
+            onClick={() => setViewer(url)}
+            onError={() => setBroken((p) => ({ ...p, [a.f]: true }))}
+            style={{
+              width: thumbSize, height: Math.round(thumbSize * 0.72), objectFit: 'cover',
+              borderRadius: 8, border: '1px solid var(--border-color)',
+              background: 'var(--bg-layout)', cursor: 'zoom-in',
+            }} />
+        )
+      })}
+      {files.map((a) => (
+        <a key={a.f} href={authedFileUrl(chatAssetUrl(a.f, true))} target="_blank" rel="noreferrer"
+          title={a.name}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 240,
+            padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-color)',
+            fontSize: 12, color: 'var(--text-secondary)', textDecoration: 'none', background: 'var(--bg-container, #fff)',
+          }}>
+          <FileOutlined />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+          {a.size ? <span style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>{formatSize(a.size)}</span> : null}
+        </a>
+      ))}
+      {viewer && (
+        <div onClick={() => setViewer('')} style={{
+          position: 'fixed', inset: 0, zIndex: 2100, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out',
+        }}>
+          <img src={viewer} alt="" style={{ maxWidth: '88vw', maxHeight: '86vh', borderRadius: 8 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // 字节数换算成一位小数的 MB（历史文件截断提示用）
 const toMB = (bytes: number) => (bytes / 1048576).toFixed(1)
 
 const ChatPage: React.FC = () => {
-  const { t } = useTranslation('chat')
+  const { t, i18n } = useTranslation('chat')
   const { token } = theme.useToken()
   // 智能教育助手 - SmartKB
   const {
@@ -275,6 +337,7 @@ const ChatPage: React.FC = () => {
   const [hoverPreview, setHoverPreview] = useState<{ key: string; text: string } | null>(null)
   const [previewNode, setPreviewNode] = useState<TreeNode | null>(null)
   const [previewText, setPreviewText] = useState('')
+  const [previewAttachments, setPreviewAttachments] = useState<ChatAttachment[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [renameNode, setRenameNode] = useState<TreeNode | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -285,6 +348,13 @@ const ChatPage: React.FC = () => {
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false)
   const [batchDeleting, setBatchDeleting] = useState(false)
   // 历史抽屉宽度：可拖拽并记住；窄屏直接铺满
+  // 桌面端把历史做成常驻侧栏（推挤布局），窄屏仍用抽屉
+  const [isWide, setIsWide] = useState(() => window.innerWidth >= 1200)
+  const [historySideOpen, setHistorySideOpen] = useState(() => localStorage.getItem('chat:history:side') !== '0')
+  const [sideW, setSideW] = useState(() => {
+    const saved = Number(localStorage.getItem('chat:history:width'))
+    return saved >= 176 && saved <= 300 ? saved : 200
+  })
   const [historyWidth, setHistoryWidth] = useState(() => {
     if (window.innerWidth < 768) return window.innerWidth
     const saved = Number(window.localStorage.getItem('smartkb_history_drawer_width'))
@@ -325,7 +395,12 @@ const ChatPage: React.FC = () => {
       const userMatch = block.match(/^\*\*用户\*\*:\s*(.*)/s);
       const assistantMatch = block.match(/^\*\*助手\*\*:\s*(.*)/s);
       if (userMatch) {
-        return { id: `hist-${i}`, role: 'user' as const, content: userMatch[1].trim(), timestamp: Date.now() };
+        return {
+          id: `hist-${i}`, role: 'user' as const,
+          content: stripAttachmentsComment(userMatch[1]),
+          attachments: parseAttachments(block),
+          timestamp: Date.now(),
+        };
       } else if (assistantMatch) {
         return { id: `hist-${i}`, role: 'assistant' as const, content: assistantMatch[1].trim(), timestamp: Date.now() };
       }
@@ -353,7 +428,7 @@ const ChatPage: React.FC = () => {
     if (diff === 0) return t('historyToday')
     if (diff === 1) return t('historyYesterday')
     if (diff > 1 && diff <= 6) return t('historyMonthDay', { month: Number(m[2]), day: Number(m[3]) })
-    return `${m[1]}-${m[2]}`
+    return `${Number(m[2])}月`
   }, [t])
 
   const leafDate = useCallback((node: TreeNode) => {
@@ -378,7 +453,7 @@ const ChatPage: React.FC = () => {
         const label = historyGroupLabel(date)
         let group = index.get(label)
         if (!group) {
-          group = { title: label, key: `group:${label}`, isLeaf: false, children: [], count: 0, isGroup: true }
+          group = { title: label, key: `group:${date}`, isLeaf: false, children: [], count: 0, isGroup: true }
           index.set(label, group)
           groups.push(group)
         }
@@ -386,6 +461,13 @@ const ChatPage: React.FC = () => {
         group.count = (group.count || 0) + 1
       }
     }
+    // 分组按日期倒序（新→旧）：历史树来自 DB 时已是倒序，落盘扫描兜底时是正序，
+    // 这里统一一次，保证「默认展开前两组」永远是今天/昨天，而不是最老的两个月
+    groups.sort((a, b) => {
+      const da = String((a.children && a.children[0] && a.children[0].date) || '')
+      const db = String((b.children && b.children[0] && b.children[0].date) || '')
+      return db.localeCompare(da)
+    })
     if (historyHits.length > 0) {
       groups.push({
         title: t('historyContentHits', { count: historyHits.length }),
@@ -500,14 +582,16 @@ const ChatPage: React.FC = () => {
     }
   }, [historyQuery])
 
-  // 刚打开时默认展开第一组，别只给一排文件夹；用户手动收起后不再抢展开权
+  // 刚打开时默认展开今天 + 昨天两组：打开就能看到最新两条记录，而不是一排空文件夹。
+  // 只抢一次展开权，用户手动收起后不再干预。
   useEffect(() => {
-    if (!historyOpen) { historyInitExpandRef.current = true; return }
+    const visible = historyOpen || (isWide && historySideOpen)
+    if (!visible) { historyInitExpandRef.current = true; return }
     if (historyInitExpandRef.current && historyView.length > 0) {
-      setHistoryExpanded([historyView[0].key])
+      setHistoryExpanded(historyView.slice(0, 2).map((g) => g.key!))
       historyInitExpandRef.current = false
     }
-  }, [historyOpen, historyView])
+  }, [historyOpen, isWide, historySideOpen, historyView])
 
   // 打开一条历史记录（会替换当前面板，调用前先经过 handleHistorySelect 的确认）
   const openHistoryNode = useCallback(async (node: TreeNode) => {
@@ -521,15 +605,17 @@ const ChatPage: React.FC = () => {
           return;
         }
         const msgs = parseHistoryContent(result.content);
-        // 文件名带前缀（companion_/task_/conversation_），标题改成中文后不能再拿 title 判类型
+        // 文件名带前缀（assistant_/companion_/task_/conversation_），标题改成中文后不能再拿 title 判类型
         const fname = node.filename || result.filename || (node.title as string) || '';
-        const isCompanionFile = fname.startsWith('companion_');
+        // 教师的「教学助手」用 assistant_ 前缀，和学生的「学伴」走同一个 store
+        const isCompanionFile = fname.startsWith('companion_') || fname.startsWith('assistant_');
 
         if (isCompanionFile) {
           // 学伴/助手模式的对话 → 载入 companionStore（通过 loadCompanionHistory 避免重复保存）
           const companionMsgs = msgs.map(m => ({
             role: m.role === 'user' ? 'user' as const : 'assistant' as const,
             content: m.content,
+            attachments: m.attachments,
           }));
           loadCompanionHistory(companionMsgs);
           // 切换到智答模式时自动清理学伴消息，反之亦然
@@ -573,21 +659,28 @@ const ChatPage: React.FC = () => {
   }, [parseHistoryContent, companionMode, t]);
 
   // 点击历史文件：面板里还有对话时先确认，再替换
-  const handleHistorySelect = useCallback(async (selectedKeys: React.Key[], info: { node: TreeNode }) => {
-    if (historyBatchMode) return;   // 批量模式下点行不载入对话，只由复选框接管
-    const node = info.node as TreeNode;
-    const key = node.key || (selectedKeys.length > 0 ? String(selectedKeys[0]) : '');
-    if (!node.isLeaf || !key) return;
-    const target: TreeNode = { ...node, key };
+  const showBigPreviewRef = useRef<(n: TreeNode) => void>(() => {})
+
+  /** 真正载入某条历史（会替换当前对话）：只有「⋯ → 打开」和预览里的「打开」走这里 */
+  const loadHistoryNode = useCallback(async (node: TreeNode) => {
     const hasCurrent = useChatStore.getState().messages.length > 0
       || useCompanionStore.getState().companionMessages.length > 0;
     if (hasCurrent && !historyDontAsk) {
       setAskAgain(false);
-      setPendingHistoryNode(target);
+      setPendingHistoryNode(node);
       return;
     }
-    await openHistoryNode(target);
-  }, [openHistoryNode, historyDontAsk, historyBatchMode]);
+    await openHistoryNode(node);
+  }, [openHistoryNode, historyDontAsk]);
+
+  // 单击只预览：先看清内容再决定要不要替换当前对话
+  const handleHistorySelect = useCallback((selectedKeys: React.Key[], info: { node: TreeNode }) => {
+    if (historyBatchMode) return;   // 批量模式下点行不载入也不预览，只由复选框接管
+    const node = info.node as TreeNode;
+    const key = node.key || (selectedKeys.length > 0 ? String(selectedKeys[0]) : '');
+    if (!node.isLeaf || !key) return;
+    showBigPreviewRef.current({ ...node, key });
+  }, [historyBatchMode]);
 
   // 删除历史文件或目录
   const handleHistoryDelete = useCallback(async (path: string) => {
@@ -634,6 +727,7 @@ const ChatPage: React.FC = () => {
   // 窗口尺寸变化时重新夹取：窄屏铺满，宽屏不低于 280 且留出可视区
   useEffect(() => {
     const onResize = () => {
+      setIsWide(window.innerWidth >= 1200)
       if (window.innerWidth < 768) { setHistoryWidth(window.innerWidth); return }
       setHistoryWidth(prev => Math.min(Math.max(prev, 280), Math.max(280, window.innerWidth - 80)))
     }
@@ -642,6 +736,12 @@ const ChatPage: React.FC = () => {
   }, [])
 
   const handleOpenHistory = useCallback(() => {
+    if (window.innerWidth >= 1200) {
+      // 宽屏：侧栏是常驻的，按钮变成"显示/收起"
+      setHistorySideOpen((v) => { localStorage.setItem('chat:history:side', v ? '0' : '1'); return !v });
+      loadHistoryTree();
+      return;
+    }
     setHistoryOpen(true);
     setHistoryQuery('');
     setHistoryHits([]);
@@ -649,6 +749,32 @@ const ChatPage: React.FC = () => {
     exitHistoryBatch();
     loadHistoryTree();
   }, [loadHistoryTree, exitHistoryBatch]);
+
+  // 对话落盘后自动刷新历史列表：否则新对话要等用户手动点刷新才出现
+  useEffect(() => {
+    let timer: number | undefined
+    const onSaved = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        void loadHistoryTree(true)
+        // 新对话按日期归组：最新一组若被收起，刷新了也看不见，顺手展开
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        const key = `group:${today}`
+        setHistoryExpanded((prev) => (prev.includes(key) ? prev : [key, ...prev]))
+      }, 600)
+    }
+    window.addEventListener('chat:history-saved', onSaved)
+    return () => {
+      window.removeEventListener('chat:history-saved', onSaved)
+      window.clearTimeout(timer)
+    }
+  }, [loadHistoryTree])
+
+  // 宽屏侧栏是常驻的：进来就该有数据，不能等用户点「历史记录」或刷新才加载
+  useEffect(() => {
+    if (isWide && historySideOpen) void loadHistoryTree()
+  }, [isWide, historySideOpen, loadHistoryTree])
 
   // 悬浮预览：懒读开头一段并缓存，避免"只想看一眼"却把当前对话换掉
   const onHoverPreview = useCallback(async (node: TreeNode, open: boolean) => {
@@ -670,9 +796,11 @@ const ChatPage: React.FC = () => {
   const showBigPreview = useCallback(async (node: TreeNode) => {
     setPreviewNode(node)
     setPreviewText('')
+    setPreviewAttachments([])
     setPreviewLoading(true)
     try {
       const res = await historyApi.previewHistory(node.key, 2000)
+      setPreviewAttachments(res.attachments || [])
       setPreviewText(res.preview || t('historyEmptyPreview'))
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -682,11 +810,13 @@ const ChatPage: React.FC = () => {
     }
   }, [t]);
 
+  showBigPreviewRef.current = (n: TreeNode) => { void showBigPreview(n) }
+
   // 行内 ⋯ 菜单的动作分发
   const handleHistoryAction = useCallback(async (action: string, node: TreeNode) => {
     const path = node.key
     if (!path) return
-    if (action === 'open') { await handleHistorySelect([path], { node }); return }
+    if (action === 'open') { await loadHistoryNode(node); return }
     if (action === 'preview') { void showBigPreview(node); return }
     if (action === 'rename') { setRenameNode(node); setRenameValue(node.title || ''); return }
     if (action === 'del') { setDeleteNode(node); return }
@@ -891,7 +1021,7 @@ const ChatPage: React.FC = () => {
   // 处理语音输入
   const handleVoiceTranscript = useCallback((text: string) => {
     setInput((prev) => prev + text)
-    inputRef.current?.focus()
+    inputRef.current?.focus({ preventScroll: true })
   }, [])
 
   // 处理摄像头拍照
@@ -969,8 +1099,237 @@ const ChatPage: React.FC = () => {
   // 判断是否处于流式状态（普通模式或学伴模式）
   const isAnyStreaming = companionMode ? companionIsStreaming : isStreaming
   const activeMessages = companionMode ? companionMessages : messages
+  const ICON_BTN: React.CSSProperties = { width: 22, minWidth: 22, height: 22, padding: 0 }
+
+  // 空态随机样例：从词库抽 4 条，刷新/切语言才重抽，避免每次渲染都在跳
+  const samplePrompts = useMemo(() => {
+    const raw = t('emptySamples', { returnObjects: true }) as unknown
+    const pool = Array.isArray(raw) ? (raw as string[]) : []
+    const copy = [...pool]
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[copy[i], copy[j]] = [copy[j], copy[i]]
+    }
+    return copy.slice(0, 4)
+  }, [i18n.language])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const historyContent = (
+    <>
+        {/* 右边缘拖拽改宽度；窄屏铺满时不显示 */}
+        {historyOpen && historyWidth < window.innerWidth - 1 && (
+          <div
+            onMouseDown={startHistoryResize}
+            title={t('historyResizeHint')}
+            style={{
+              position: 'fixed', left: historyWidth - 4, top: 0,
+              width: 8, height: '100vh', cursor: 'col-resize', zIndex: 1001,
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: '50%', left: 3, transform: 'translateY(-50%)',
+              width: 2, height: 36, borderRadius: 1, background: 'var(--border-color-secondary)',
+            }} />
+          </div>
+        )}
+
+        {/* 工具条吸顶：列表一长就不怕按钮滚出视野 */}
+        <div className="hist-toolbar">
+        <Space orientation="vertical" size={8} style={{
+          width: '100%', marginBottom: 10,
+          position: 'sticky', top: 0, zIndex: 2,
+          background: 'var(--bg-container)', paddingTop: 10, paddingBottom: 6,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Input
+              allowClear
+              size="small"
+              style={{ flex: 1, minWidth: 0 }}
+              prefix={<SearchOutlined style={{ fontSize: 12, color: 'var(--text-tertiary)' }} />}
+              placeholder={t('historySearchPlaceholder')}
+              value={historyQuery}
+              onChange={(e) => { setHistoryQuery(e.target.value); if (!e.target.value) setHistoryHits([]) }}
+              onPressEnter={() => { void runHistoryContentSearch() }}
+            />
+            {isWide && historySideOpen && (
+              <Tooltip title={t('historyCollapsePanel')} placement="left">
+                <Button type="text" size="small" style={{ ...ICON_BTN, flex: '0 0 auto', color: 'var(--text-tertiary)' }}
+                  onClick={() => { setHistorySideOpen(false); localStorage.setItem('chat:history:side', '0') }}>
+                  <LeftOutlined />
+                </Button>
+              </Tooltip>
+            )}
+          </div>
+          <Space size={2} wrap={false}>
+            <span style={{ display: 'inline-flex', gap: 4, flexShrink: 0 }}>
+              {[
+                { k: false, label: t('historyRangeAll') },
+                { k: true, label: t('historyRangeToday') },
+              ].map((it) => {
+                const on = historyOnlyToday === it.k
+                return (
+                  <span key={String(it.k)} onClick={() => setHistoryOnlyToday(it.k)}
+                    style={{
+                      fontSize: 14, padding: '1px 8px', borderRadius: 999, cursor: 'pointer', lineHeight: '20px',
+                      border: '1px solid ' + (on ? 'transparent' : 'var(--border-color)'),
+                      background: on ? 'var(--primary-color-bg, #e6f4ff)' : 'transparent',
+                      color: on ? 'var(--primary-color, #1677ff)' : 'var(--text-secondary)',
+                    }}>{it.label}</span>
+                )
+              })}
+            </span>
+            <Tooltip title={t('historyRefresh')}>
+              <Button size="small" type="text" style={ICON_BTN} icon={<ReloadOutlined />} onClick={() => { void loadHistoryTree() }} />
+            </Tooltip>
+            <Tooltip title={t(historyAllExpanded ? 'historyCollapseAll' : 'historyExpandAll')}>
+              <Button size="small" type="text" style={ICON_BTN}
+                icon={historyAllExpanded ? <UpOutlined /> : <DownOutlined />}
+                onClick={() => setHistoryExpanded(historyAllExpanded ? [] : historyView.map(g => g.key))} />
+            </Tooltip>
+            <Tooltip title={t(historyBatchMode ? 'historyBatchExit' : 'historyBatchMode')}>
+              <Button size="small" style={ICON_BTN} type={historyBatchMode ? 'primary' : 'text'} icon={<CheckOutlined />}
+                onClick={() => { if (historyBatchMode) exitHistoryBatch(); else setHistoryBatchMode(true) }} />
+            </Tooltip>
+          </Space>
+        </Space>
+        </div>
+        <div className="hist-scroll">
+
+        {historyLoading && historyView.length === 0 && (
+          <div style={{ padding: '6px 4px' }}>
+            {[92, 70, 84, 62, 88, 74].map((w, i) => (
+              <div key={i} style={{ padding: '8px 6px', marginBottom: 6, borderRadius: 8, background: 'var(--bg-layout)' }}>
+                <div style={{ width: `${w}%`, height: 10, borderRadius: 4, background: 'var(--border-color)' }} />
+                <div style={{ width: '42%', height: 8, marginTop: 6, borderRadius: 4, background: 'var(--border-color)' }} />
+              </div>
+            ))}
+          </div>
+        )}
+        <Spin spinning={historySearching || (historyLoading && historyView.length > 0)}>
+          {historyView.length > 0 ? (
+            <div style={{ padding: '2px 0' }}>
+              {historyView.map((group, gi) => {
+                const kids = (group.children || []).filter((c) => c.isLeaf && c.key)
+                const gYear = String((kids[0] && kids[0].date) || '').slice(0, 4)
+                const prevGroup = gi > 0 ? historyView[gi - 1] : null
+                const prevYear = String(((prevGroup?.children || []).find((c) => c.isLeaf)?.date) || '').slice(0, 4)
+                const showYear = !!gYear && gYear !== prevYear
+                const opened = historyExpanded.includes(group.key!)
+                const dates = Array.from(new Set(kids.map((c) => c.date || '').filter(Boolean)))
+                const checkedN = kids.filter((c) => historyCheckedSet.has(c.key!)).length
+                return (
+                  <div key={group.key}>
+                    {showYear && <div className="hist-year">{t('historyYearLabel', { year: gYear })}</div>}
+                    <div className="hist-row hist-group" onClick={() => setHistoryExpanded(
+                      opened ? historyExpanded.filter((k) => k !== group.key) : [...historyExpanded, group.key!])}>
+                      {historyBatchMode && (
+                        <span onClick={(e) => e.stopPropagation()} style={{ display: 'flex' }}>
+                          <Checkbox checked={kids.length > 0 && checkedN === kids.length}
+                            indeterminate={checkedN > 0 && checkedN < kids.length}
+                            onChange={() => toggleHistoryGroup(group)} />
+                        </span>
+                      )}
+                      <span style={{ width: 12, flexShrink: 0, display: 'flex', alignItems: 'center', color: 'var(--text-tertiary)' }}>
+                        {opened ? <DownOutlined style={{ fontSize: 10 }} /> : <RightOutlined style={{ fontSize: 10 }} />}
+                      </span>
+                      <span className="hist-title" style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{group.title}</span>
+                      <span style={{ fontSize: 14, color: 'var(--text-tertiary)', flexShrink: 0 }}>{group.count ?? kids.length}</span>
+                      {!historyBatchMode && (
+                        <span className="hist-del" onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex' }}>
+                          <Popconfirm
+                            title={dates.length > 1
+                              ? t('confirmDeleteGroupDays', { count: kids.length, days: dates.length })
+                              : t('confirmDeleteDirCount', { count: kids.length })}
+                            onConfirm={() => handleHistoryDelete(dates[0])}>
+                            <Button type="text" size="small" danger style={{ height: 22, padding: '0 2px' }} icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        </span>
+                      )}
+                    </div>
+                    {opened && kids.map((node) => {
+                      const fname = (node.filename || node.title || '') as string
+                      const isCompanion = fname.startsWith('companion_')
+                      const isAssistant = fname.startsWith('assistant_')
+                      const isTask = fname.startsWith('task_')
+                      return (
+                        <div key={node.key} className="hist-row hist-leaf"
+                          onClick={() => { if (!historyBatchMode) showBigPreviewRef.current(node) }}>
+                          {historyBatchMode && (
+                            <span onClick={(e) => e.stopPropagation()} style={{ display: 'flex' }}>
+                              <Checkbox checked={historyCheckedSet.has(node.key!)} onChange={() => toggleHistoryCheck(node.key!)} />
+                            </span>
+                          )}
+                          <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                            <div className="hist-title" title={node.title}>{node.title}</div>
+                            <div className="hist-sub">
+                              <span style={{
+                                width: 6, height: 6, borderRadius: 3, flexShrink: 0,
+                                background: isAssistant ? '#13a8a8' : isCompanion ? '#722ed1' : isTask ? '#1677ff' : 'var(--border-color)',
+                              }} />
+                              <span>{historyMeta(node)}</span>
+                            </div>
+                          </div>
+                          {!historyBatchMode && (
+                            <Dropdown trigger={['click']} menu={{
+                              items: [
+                                { key: 'open', icon: <HistoryOutlined />, label: t('historyOpen') },
+                                { key: 'preview', icon: <EyeOutlined />, label: t('historyPreview') },
+                                { key: 'copy', icon: <CopyOutlined />, label: t('copy') },
+                                { key: 'download', icon: <DownloadOutlined />, label: t('historyDownload') },
+                                { key: 'rename', icon: <EditOutlined />, label: t('historyRename') },
+                                { type: 'divider' },
+                                { key: 'del', danger: true, icon: <DeleteOutlined />, label: t('delete') },
+                              ],
+                              onClick: ({ key }) => { void handleHistoryAction(key as string, node) },
+                            }}>
+                              <Button type="text" size="small" className="hist-more"
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ height: 22, width: 22, minWidth: 22, padding: 0, flexShrink: 0 }}
+                                icon={<MoreOutlined />} />
+                            </Dropdown>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <Typography.Text type="secondary">
+              {historyQuery || historyOnlyToday || historyHits.length > 0 ? t('noHistoryMatch') : t('noHistory')}
+            </Typography.Text>
+          )}
+        </Spin>
+
+        {historyBatchMode && (
+          <div style={{
+            position: 'sticky', bottom: 0, zIndex: 2, marginTop: 6, padding: '8px 4px 6px',
+            borderTop: '1px solid var(--border-color)', background: 'var(--bg-container, #fff)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-secondary)' }}>
+              <span>{t('historyBatchSelected', { n: historyChecked.length })}</span>
+              <span style={{ display: 'inline-flex', gap: 10 }}>
+                <a onClick={toggleHistoryCheckAll} style={{ color: historyVisibleLeaves.length ? 'var(--primary-color)' : 'var(--text-disabled)' }}>
+                  {t('historyBatchAllShort')}
+                </a>
+                <a onClick={() => setHistoryChecked([])} style={{ color: historyChecked.length ? 'var(--primary-color)' : 'var(--text-disabled)' }}>
+                  {t('historyBatchClearShort')}
+                </a>
+              </span>
+            </div>
+            <Button danger block size="small" icon={<DeleteOutlined />}
+              style={{ marginTop: 6 }} disabled={!historyChecked.length}
+              onClick={() => setBatchConfirmOpen(true)}>
+              {t('historyBatchDelShort')}
+            </Button>
+          </div>
+        )}
+        </div>
+    </>
+  )
+
   return (
-    <Layout className="chat-layout" style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'hidden' }}>
+    <Layout className="chat-layout" style={{ height: '100%', background: token.colorBgContainer, borderRadius: 8, overflow: 'hidden' }}>
       {/* 顶部模式切换 */}
       <div className="chat-mode-bar" style={{
         padding: '8px 24px',
@@ -1059,6 +1418,53 @@ const ChatPage: React.FC = () => {
       </div>
 
       <div className="chat-body" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* 桌面端历史侧栏：推挤布局（不遮罩），窄屏仍走抽屉 */}
+        {isWide && historySideOpen && (
+          <aside style={{
+            width: sideW, flex: '0 0 auto', minWidth: 0, minHeight: 0, alignSelf: 'stretch', position: 'relative',
+            background: '#fff', borderRight: '1px solid var(--border-color)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            <div className="chat-history-panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{historyContent}</div>
+            <div title={t('historyResizeHint')}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                const startX = e.clientX
+                let last = sideW
+                const move = (ev: MouseEvent) => {
+                  last = Math.min(300, Math.max(176, sideW + ev.clientX - startX))
+                  setSideW(last)
+                }
+                const up = () => {
+                  document.removeEventListener('mousemove', move)
+                  document.removeEventListener('mouseup', up)
+                  localStorage.setItem('chat:history:width', String(last))
+                }
+                document.addEventListener('mousemove', move)
+                document.addEventListener('mouseup', up)
+              }}
+              style={{ position: 'absolute', right: 0, top: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 3 }} />
+          </aside>
+        )}
+        {isWide && !historySideOpen && (
+          <div style={{
+            width: 52, flex: '0 0 auto', background: '#fff', borderRight: '1px solid var(--border-color)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 0',
+          }}>
+            <Tooltip title={t('chatHistory')} placement="right">
+              <Button type="text" onClick={() => { setHistorySideOpen(true); localStorage.setItem('chat:history:side', '1'); loadHistoryTree() }}>›</Button>
+            </Tooltip>
+            <Tooltip title={t('newTopic')} placement="right">
+              <Button type="text" icon={<PlusOutlined />} onClick={() => {
+                setImagePreviewHtml('')
+                setFilePaths([])
+                fileUploadCache.clear()
+                if (companionMode) useCompanionStore.getState().clearMessages()
+                else newTopic()
+              }} />
+            </Tooltip>
+          </div>
+        )}
         {/* 消息列表 */}
         <div ref={messagesRef} className="chat-messages" style={{
           flex: 1, overflow: 'auto', padding: 24,
@@ -1169,9 +1575,25 @@ const ChatPage: React.FC = () => {
                 </div>
               )
             ) : (
-              <div style={{ textAlign: 'center', paddingTop: 40, color: token.colorTextTertiary }}>
-                <Typography.Title level={4} type="secondary">{t('emptyChatTitle')}</Typography.Title>
+              <div style={{
+                minHeight: '100%', display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+                color: token.colorTextTertiary,
+              }}>
+                <Typography.Title level={4} type="secondary" style={{ margin: 0 }}>{t('emptyChatTitle')}</Typography.Title>
                 <Typography.Text type="secondary">{t('emptyChatDesc')}</Typography.Text>
+                {samplePrompts.length > 0 && (
+                  <>
+                    <div style={{ marginTop: 28, fontSize: 13, color: token.colorTextTertiary }}>{t('emptyTryLabel')}</div>
+                    <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: 640 }}>
+                      {samplePrompts.map((sp) => (
+                        <span key={sp} className="sample-chip"
+                          onClick={() => { setInput(sp); inputRef.current?.focus({ preventScroll: true }) }}
+                        >{sp}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )
           ) : (
@@ -1394,118 +1816,8 @@ const ChatPage: React.FC = () => {
           ))}
         </div>
       )}
-      </div>
 
-      {/* 推送消息弹窗 */}
-      <Modal
-        open={pushModalOpen}
-        onCancel={() => setPushModalOpen(false)}
-        footer={null}
-        width={420}
-        styles={{ body: { padding: 0 } }}
-      >
-        <div style={{ maxHeight: 420, display: 'flex', flexDirection: 'column' }}>
-          {/* 头部 */}
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '8px 12px', borderBottom: '1px solid var(--border-color)',
-          }}>
-            <Typography.Text strong style={{ fontSize: 14 }}>{t('pushModalTitle')}</Typography.Text>
-            <Space size={4}>
-              {companionPushes.length > 0 && (
-                <Button type="text" size="small" icon={<CheckOutlined />}
-                  onClick={async () => {
-                    await companionMarkAllPushesRead();
-                    setPushModalOpen(false);
-                  }}
-                >
-                  {t('markAllRead')}
-                </Button>
-              )}
-            </Space>
-          </div>
-          {/* 列表 */}
-          <div style={{ flex: 1, overflow: 'auto', minHeight: 100 }}>
-            {companionPushes.length === 0 ? (
-              <Empty description={t('noUnread')} style={{ padding: 24 }} />
-            ) : (
-              <RowList
-                items={companionPushes}
-                renderItem={(item) => {
-                  const PUSH_TYPES: Record<string, { color: string; icon: string; label: string }> = {
-                    morning: { color: '#fa8c16', icon: '☀️', label: t('pushMorning') },
-                    achievement: { color: '#52c41a', icon: '🏆', label: t('pushAchievement') },
-                    encourage: { color: '#1677ff', icon: '💪', label: t('pushEncourage') },
-                    reminder: { color: '#ff4d4f', icon: '📌', label: t('pushReminder') },
-                    milestone: { color: '#722ed1', icon: '⭐', label: t('pushMilestone') },
-                  }
-                  const cfg = PUSH_TYPES[item.push_type] || { color: 'var(--text-tertiary)', icon: '💌', label: item.push_type_label }
-                  const isUnread = !item.is_read
-                  return (
-                    <RowItem
-                      style={{
-                        padding: '8px 12px',
-                        background: isUnread ? token.colorPrimaryBg : 'transparent',
-                        cursor: 'default',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = token.colorFillTertiary }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = isUnread ? token.colorPrimaryBg : 'transparent'
-                      }}
-                      actions={[
-                        isUnread ? (
-                          <Button key="read" type="text" size="small" icon={<CheckOutlined />}
-                            onClick={async () => {
-                              await companionMarkPushRead(item.id);
-                              companionLoadPushes();
-                            }}
-                          />
-                        ) : null,
-                        <Popconfirm key="delete" title={t('deleteConfirm')} placement="left"
-                          onConfirm={async () => {
-                            const { deletePush } = await import('../api/companion');
-                            await deletePush(item.id);
-                            companionLoadPushes();
-                          }}
-                        >
-                          <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-                        </Popconfirm>,
-                      ].filter(Boolean)}
-                      avatar={<span style={{ fontSize: 18, lineHeight: '36px' }}>{cfg.icon}</span>}
-                        title={
-                          <Space size={4}>
-                            <Typography.Text strong={isUnread} style={{ fontSize: 13 }}>{item.title}</Typography.Text>
-                            <Tag color={cfg.color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', border: 'none' }}>{cfg.label}</Tag>
-                            {isUnread && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('pushNew')}</Tag>}
-                          </Space>
-                        }
-                        description={
-                          <div>
-                            {item.content && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.content}</Typography.Text>}
-                            <br />
-                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                              {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
-                            </Typography.Text>
-                          </div>
-                        }
-                    />
-                  )
-                }}
-              />
-            )}
-          </div>
-          {/* 底部 */}
-          {companionPushes.length > 0 && (
-            <div style={{ borderTop: '1px solid var(--border-color)', padding: '6px 12px', textAlign: 'center' }}>
-              <Button type="link" size="small"
-                onClick={() => { setPushModalOpen(false); navigate('/notifications') }}
-              >
-                {t('viewAllMessages')} <RightOutlined />
-              </Button>
-            </div>
-          )}
-        </div>
-      </Modal>
+      </div>
 
       {/* 输入区域 */}
       <div style={{
@@ -1664,6 +1976,117 @@ const ChatPage: React.FC = () => {
         </Space>
       </div>
 
+      {/* 推送消息弹窗 */}
+      <Modal
+        open={pushModalOpen}
+        onCancel={() => setPushModalOpen(false)}
+        footer={null}
+        width={420}
+        styles={{ body: { padding: 0 } }}
+      >
+        <div style={{ maxHeight: 420, display: 'flex', flexDirection: 'column' }}>
+          {/* 头部 */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '8px 12px', borderBottom: '1px solid var(--border-color)',
+          }}>
+            <Typography.Text strong style={{ fontSize: 14 }}>{t('pushModalTitle')}</Typography.Text>
+            <Space size={4}>
+              {companionPushes.length > 0 && (
+                <Button type="text" size="small" icon={<CheckOutlined />}
+                  onClick={async () => {
+                    await companionMarkAllPushesRead();
+                    setPushModalOpen(false);
+                  }}
+                >
+                  {t('markAllRead')}
+                </Button>
+              )}
+            </Space>
+          </div>
+          {/* 列表 */}
+          <div style={{ flex: 1, overflow: 'auto', minHeight: 100 }}>
+            {companionPushes.length === 0 ? (
+              <Empty description={t('noUnread')} style={{ padding: 24 }} />
+            ) : (
+              <RowList
+                items={companionPushes}
+                renderItem={(item) => {
+                  const PUSH_TYPES: Record<string, { color: string; icon: string; label: string }> = {
+                    morning: { color: '#fa8c16', icon: '☀️', label: t('pushMorning') },
+                    achievement: { color: '#52c41a', icon: '🏆', label: t('pushAchievement') },
+                    encourage: { color: '#1677ff', icon: '💪', label: t('pushEncourage') },
+                    reminder: { color: '#ff4d4f', icon: '📌', label: t('pushReminder') },
+                    milestone: { color: '#722ed1', icon: '⭐', label: t('pushMilestone') },
+                  }
+                  const cfg = PUSH_TYPES[item.push_type] || { color: 'var(--text-tertiary)', icon: '💌', label: item.push_type_label }
+                  const isUnread = !item.is_read
+                  return (
+                    <RowItem
+                      style={{
+                        padding: '8px 12px',
+                        background: isUnread ? token.colorPrimaryBg : 'transparent',
+                        cursor: 'default',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = token.colorFillTertiary }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = isUnread ? token.colorPrimaryBg : 'transparent'
+                      }}
+                      actions={[
+                        isUnread ? (
+                          <Button key="read" type="text" size="small" icon={<CheckOutlined />}
+                            onClick={async () => {
+                              await companionMarkPushRead(item.id);
+                              companionLoadPushes();
+                            }}
+                          />
+                        ) : null,
+                        <Popconfirm key="delete" title={t('deleteConfirm')} placement="left"
+                          onConfirm={async () => {
+                            const { deletePush } = await import('../api/companion');
+                            await deletePush(item.id);
+                            companionLoadPushes();
+                          }}
+                        >
+                          <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                        </Popconfirm>,
+                      ].filter(Boolean)}
+                      avatar={<span style={{ fontSize: 18, lineHeight: '36px' }}>{cfg.icon}</span>}
+                        title={
+                          <Space size={4}>
+                            <Typography.Text strong={isUnread} style={{ fontSize: 13 }}>{item.title}</Typography.Text>
+                            <Tag color={cfg.color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', border: 'none' }}>{cfg.label}</Tag>
+                            {isUnread && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('pushNew')}</Tag>}
+                          </Space>
+                        }
+                        description={
+                          <div>
+                            {item.content && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.content}</Typography.Text>}
+                            <br />
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
+                            </Typography.Text>
+                          </div>
+                        }
+                    />
+                  )
+                }}
+              />
+            )}
+          </div>
+          {/* 底部 */}
+          {companionPushes.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--border-color)', padding: '6px 12px', textAlign: 'center' }}>
+              <Button type="link" size="small"
+                onClick={() => { setPushModalOpen(false); navigate('/notifications') }}
+              >
+                {t('viewAllMessages')} <RightOutlined />
+              </Button>
+            </div>
+          )}
+        </div>
+      </Modal>
+
       {/* 历史记录侧栏（点击文件加载到对话面板） */}
       <Drawer
         title={`📋 ${t('chatHistory')}`}
@@ -1672,208 +2095,8 @@ const ChatPage: React.FC = () => {
         open={historyOpen}
         onClose={() => { setHistoryOpen(false); exitHistoryBatch(); }}
       >
-        {/* 右边缘拖拽改宽度；窄屏铺满时不显示 */}
-        {historyOpen && historyWidth < window.innerWidth - 1 && (
-          <div
-            onMouseDown={startHistoryResize}
-            title={t('historyResizeHint')}
-            style={{
-              position: 'fixed', left: historyWidth - 4, top: 0,
-              width: 8, height: '100vh', cursor: 'col-resize', zIndex: 1001,
-            }}
-          >
-            <span style={{
-              position: 'absolute', top: '50%', left: 3, transform: 'translateY(-50%)',
-              width: 2, height: 36, borderRadius: 1, background: 'var(--border-color-secondary)',
-            }} />
-          </div>
-        )}
+        {historyContent}
 
-        {/* 工具条吸顶：列表一长就不怕按钮滚出视野 */}
-        <Space orientation="vertical" size={8} style={{
-          width: '100%', marginBottom: 10,
-          position: 'sticky', top: 0, zIndex: 2,
-          background: 'var(--bg-container)', paddingTop: 2, paddingBottom: 6,
-        }}>
-          <Input.Search
-            allowClear
-            size="small"
-            placeholder={t('historySearchPlaceholder')}
-            value={historyQuery}
-            loading={historySearching}
-            enterButton={<SearchOutlined />}
-            onChange={(e) => { setHistoryQuery(e.target.value); if (!e.target.value) setHistoryHits([]) }}
-            onSearch={() => { void runHistoryContentSearch() }}
-          />
-          <Space size={4} wrap>
-            <Checkbox checked={historyOnlyToday} onChange={(e) => setHistoryOnlyToday(e.target.checked)}>
-              {t('historyOnlyToday')}
-            </Checkbox>
-            <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => { void loadHistoryTree() }}>
-              {t('historyRefresh')}
-            </Button>
-            <Button
-              size="small"
-              type="text"
-              icon={historyAllExpanded ? <UpOutlined /> : <DownOutlined />}
-              onClick={() => setHistoryExpanded(historyAllExpanded ? [] : historyView.map(g => g.key))}
-            >
-              {t(historyAllExpanded ? 'historyCollapseAll' : 'historyExpandAll')}
-            </Button>
-            <Button
-              size="small"
-              type={historyBatchMode ? 'primary' : 'text'}
-              icon={<CheckOutlined />}
-              onClick={() => { if (historyBatchMode) exitHistoryBatch(); else setHistoryBatchMode(true) }}
-            >
-              {t(historyBatchMode ? 'historyBatchExit' : 'historyBatchMode')}
-            </Button>
-          </Space>
-          {historyBatchMode && (
-            <div style={{
-              border: '1px solid var(--border-color-secondary)', borderRadius: 6,
-              padding: '6px 8px', background: 'var(--bg-layout)',
-            }}>
-              <Space size={4} wrap>
-                <Typography.Text style={{ fontSize: 12 }}>
-                  {t('historyBatchSelected', { n: historyChecked.length })}
-                </Typography.Text>
-                <Button size="small" type="link" onClick={toggleHistoryCheckAll}
-                  disabled={!historyVisibleLeaves.length}>
-                  {t('historyBatchSelectAll')}
-                </Button>
-                <Button size="small" type="link" onClick={() => setHistoryChecked([])}
-                  disabled={!historyChecked.length}>
-                  {t('historyBatchClear')}
-                </Button>
-                <Button size="small" danger icon={<DeleteOutlined />}
-                  disabled={!historyChecked.length} onClick={() => setBatchConfirmOpen(true)}>
-                  {t('historyBatchDelete')}
-                </Button>
-              </Space>
-            </div>
-          )}
-        </Space>
-
-        <Spin spinning={historyLoading || historySearching}>
-          {historyView.length > 0 ? (
-            <Tree<TreeNode>
-              treeData={historyView}
-              showLine
-              expandedKeys={historyExpanded}
-              onExpand={(keys) => setHistoryExpanded(keys as React.Key[])}
-              selectedKeys={historyBatchMode ? [] : historySelected}
-              onSelect={historyBatchMode ? undefined : handleHistorySelect}
-              titleRender={(node: TreeNode) => {
-                // 类型看文件名前缀；标题由后端给（首条学生发言），解析不出来时才回退成时间戳
-                const fname = (node.filename || node.title || '') as string
-                const isCompanion = node.isLeaf && fname.startsWith('companion_')
-                const isTask = node.isLeaf && fname.startsWith('task_')
-                const displayTitle = node.title as string
-                const meta = node.isLeaf ? historyMeta(node) : ''
-                if (node.isGroup) {
-                  // 只覆盖一个日期目录的分组才给删除键，跨月的分组不给（一次删太多天太危险）
-                  const dates = Array.from(new Set((node.children || []).map(c => c.date || '').filter(Boolean)))
-                  const groupKeys = (node.children || []).filter(c => c.isLeaf && c.key).map(c => c.key)
-                  const checkedCount = groupKeys.filter(k => historyCheckedSet.has(k)).length
-                  return (
-                    <Space size={4} style={{ width: '100%' }}>
-                      {historyBatchMode && (
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={groupKeys.length > 0 && checkedCount === groupKeys.length}
-                            indeterminate={checkedCount > 0 && checkedCount < groupKeys.length}
-                            onChange={() => toggleHistoryGroup(node)}
-                          />
-                        </span>
-                      )}
-                      <FolderOutlined />
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>{displayTitle}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                        {node.count ?? (node.children?.length ?? 0)}
-                      </span>
-                      {!historyBatchMode && dates.length === 1 && (
-                        <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
-                          style={{ flexShrink: 0, opacity: 0.4, marginLeft: 'auto' }}>
-                          <Popconfirm title={t('confirmDeleteDirCount', { count: node.children?.length ?? 0 })}
-                            onConfirm={() => handleHistoryDelete(dates[0])}>
-                            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
-                        </span>
-                      )}
-                    </Space>
-                  )
-                }
-                return (
-                  <Space orientation="vertical" size={0} style={{ width: '100%' }} className="history-tree-node">
-                    <Space size={4} style={{ width: '100%' }}>
-                      {historyBatchMode && (
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={historyCheckedSet.has(node.key)}
-                            onChange={() => toggleHistoryCheck(node.key)} />
-                        </span>
-                      )}
-                      {isCompanion ? <span>🧠</span> : <FileOutlined />}
-                      {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('companionLabel')}</Tag>}
-                      {isTask && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('taskLabel')}</Tag>}
-                      <Popover
-                        trigger="hover"
-                        mouseEnterDelay={0.45}
-                        placement="rightTop"
-                        onOpenChange={(open) => { void onHoverPreview(node, open) }}
-                        content={
-                          <div style={{
-                            maxWidth: 320, maxHeight: 220, overflow: 'auto',
-                            fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap',
-                          }}>
-                            {hoverPreview && hoverPreview.key === node.key ? hoverPreview.text : t('loadingHistory')}
-                          </div>
-                        }
-                      >
-                        <span style={{
-                          fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap', flex: 1, minWidth: 0,
-                          display: 'inline-block', verticalAlign: 'middle',
-                        }} title={`${displayTitle}\n${fname}`}>{displayTitle}</span>
-                      </Popover>
-                      {meta && (
-                        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{meta}</span>
-                      )}
-                      {!historyBatchMode && (<Dropdown
-                        trigger={['click']}
-                        menu={{
-                          items: [
-                            { key: 'open', icon: <HistoryOutlined />, label: t('historyOpen') },
-                            { key: 'preview', icon: <EyeOutlined />, label: t('historyPreview') },
-                            { key: 'copy', icon: <CopyOutlined />, label: t('copy') },
-                            { key: 'download', icon: <DownloadOutlined />, label: t('historyDownload') },
-                            { key: 'rename', icon: <EditOutlined />, label: t('historyRename') },
-                            { type: 'divider' },
-                            { key: 'del', danger: true, icon: <DeleteOutlined />, label: t('delete') },
-                          ],
-                          onClick: ({ key }) => { void handleHistoryAction(key, node) },
-                        }}
-                      >
-                        <span onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
-                          <Button type="text" size="small" icon={<MoreOutlined />} />
-                        </span>
-                      </Dropdown>)}
-                    </Space>
-                    {node.snippet && (
-                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 18, wordBreak: 'break-all' }}>
-                        {node.snippet}
-                      </span>
-                    )}
-                  </Space>
-                )
-              }}
-            />
-          ) : (
-            <Typography.Text type="secondary">
-              {historyQuery || historyOnlyToday || historyHits.length > 0 ? t('noHistoryMatch') : t('noHistory')}
-            </Typography.Text>
-          )}
-        </Spin>
       </Drawer>
 
       {/* 载入历史前的确认：当前对话已自动存盘，说清楚免得以为被删了 */}
@@ -1920,7 +2143,7 @@ const ChatPage: React.FC = () => {
           <Button key="open" type="primary" icon={<HistoryOutlined />} onClick={() => {
             const node = previewNode;
             setPreviewNode(null);
-            if (node) void handleHistoryAction('open', node);
+            if (node) void loadHistoryNode(node);
           }}>{t('historyOpen')}</Button>,
         ]}
       >
@@ -1928,6 +2151,7 @@ const ChatPage: React.FC = () => {
           <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
             {t('historyPreviewHint')}
           </Typography.Text>
+          <AttachmentStrip items={previewAttachments} thumbSize={96} />
           <div style={{
             maxHeight: 420, overflow: 'auto', whiteSpace: 'pre-wrap',
             fontSize: 13, lineHeight: 1.7, padding: 10, borderRadius: 4,
@@ -2099,6 +2323,32 @@ const ChatPage: React.FC = () => {
           border-left: 3px solid #1677ff;
           padding-left: 8px;
         }
+        /* 面板内部自己滚：头部与工具条固定，只有列表区滚动。
+           注意别给 .chat-history-panel 设 height:100%——它上面还有 40px 的面板头，
+           设了会把列表顶出可视区底部 40px。抽屉里没有面板头，单独补高度。 */
+        .chat-history-panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+        .ant-drawer-body .chat-history-panel { height: 100%; }
+        .hist-toolbar { flex: 0 0 auto; }
+        .hist-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 4px; }
+        .chat-history-panel .ant-spin-nested-loading { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+        .chat-history-panel .ant-spin-container { height: 100%; overflow-y: auto; overflow-x: hidden; padding-bottom: 4px; }
+        .sample-chip { cursor: pointer; font-size: 13px; padding: 6px 12px; border-radius: 999px;
+          border: 1px solid var(--border-color); background: var(--bg-container, #fff);
+          color: var(--text-secondary); line-height: 20px; transition: border-color .15s, color .15s, background .15s; }
+        .sample-chip:hover { border-color: var(--primary-color); color: var(--primary-color); background: var(--primary-color-bg, #e6f4ff); }
+        .hist-year { padding: 10px 8px 2px; font-size: 12px; color: var(--text-tertiary); letter-spacing: 0.3px; }
+        .hist-row { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 6px; border-radius: 8px; cursor: pointer; }
+        .hist-leaf { align-items: flex-start; padding: 6px 6px 6px 14px; }
+        .hist-sub { display: flex; align-items: center; gap: 5px; margin-top: 1px; font-size: 14px; color: var(--text-tertiary); }
+        .hist-leaf .hist-more { align-self: center; }
+        .hist-row:hover { background: var(--bg-layout); }
+        .hist-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+        .hist-meta { flex: 0 0 auto; font-size: 14px; color: var(--text-tertiary); }
+        .hist-leaf .hist-title { line-height: 1.45; }
+        .hist-del { opacity: 0; transition: opacity .15s; }
+        .hist-row:hover .hist-del { opacity: 1; }
+        .hist-leaf .hist-more { opacity: 0.55; }
+        .hist-leaf:hover .hist-more { opacity: 1; }
         .history-tree-node:hover .history-delete-btn {
           opacity: 1 !important;
         }

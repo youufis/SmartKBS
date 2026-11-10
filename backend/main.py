@@ -173,6 +173,9 @@ async def lifespan(app: FastAPI):
         start_explore_sweeper()
         from backend.explore_text_index import start_backfill as start_explore_text_index
         start_explore_text_index()
+        # 聊天附件回收：只回收「已无历史引用且闲置 N 天」的文件
+        from backend.chat_asset_gc import start as start_chat_asset_gc
+        start_chat_asset_gc()
     except Exception as e:
         print(f"[main] 探索画布清理线程启动失败: {e}", file=sys.stderr)
     try:

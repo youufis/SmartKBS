@@ -1,6 +1,6 @@
 /** 历史记录 API */
 import apiClient from './client';
-import type { TreeNode } from '../types';
+import type { ChatAttachment, TreeNode } from '../types';
 
 export async function getHistoryTree(): Promise<{ tree: TreeNode[]; root: string }> {
   const { data } = await apiClient.get('/api/history/tree');
@@ -31,6 +31,8 @@ export interface HistoryPreview {
   message_count: number;
   size: number;
   created_at: string;
+  /** 开头几条消息里带的附件（最多 3 个） */
+  attachments?: ChatAttachment[];
 }
 
 /** 预览开头一段（悬浮或弹窗用），不替换当前对话 */

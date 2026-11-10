@@ -1746,7 +1746,7 @@ def _read_backup_manifest(backup_dir: Path) -> dict[str, Any]:
 
 def _content_backup_pairs() -> list[tuple[Path, str]]:
     """整站备份要附带的内容目录（相对 STORAGE_DIR 的名字）"""
-    names = ("root", "stu", "question_media", "temp_uploads", "ChatHistory")
+    names = ("root", "stu", "question_media", "temp_uploads", "chat_assets", "ChatHistory")
     out: list[tuple[Path, str]] = []
     for name in names:
         d = Path(STORAGE_DIR) / name

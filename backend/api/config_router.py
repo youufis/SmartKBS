@@ -63,6 +63,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "HOMEWORK_MAX_FILE_MB": 10,        # 单文件上限，同时是教师可设值的天花板
     "HOMEWORK_MAX_FILES": 3,           # 一次提交最多几个文件（教师未按作业设时）
     "HOMEWORK_ENABLE_VL": True,        # 图片作业的多模态预解读（聊天侧已无多模态开关，这里保持独立）
+    # 对话附件：已入档的附件与历史记录同寿命，这里只管「每人容量」与「无引用多久回收」
+    "CHAT_ASSET_QUOTA_MB": 1024,       # 每人附件空间上限（MB，0=不限）
+    "CHAT_ASSET_GC_DAYS": 7,           # 无任何历史引用的附件闲置多少天后回收（0=不回收）
     "HOMEWORK_ALLOWED_EXTS": [".docx", ".pdf", ".txt", ".md", ".xlsx", ".pptx",
                               ".jpg", ".jpeg", ".png", ".webp", ".bmp"],
     # ── 错题本：自动错题巩固练习（判定逻辑见 wrong_book_router.wrong_practice_policy）──
@@ -527,7 +530,7 @@ def config_health() -> dict[str, Any]:
 def storage_info() -> dict[str, Any]:
     """数据落盘概览（备份与恢复页要显示"数据到底在哪、有多大、有没有第二份在危险位置"）"""
     from backend.data_migration import storage_overview
-    from backend.config import DATA_DIR, DB_DIR, MEDIA_ROOT, TEMP_UPLOAD_ROOT
+    from backend.config import DATA_DIR, DB_DIR, MEDIA_ROOT, TEMP_UPLOAD_ROOT, CHAT_ASSET_ROOT
     out = storage_overview()
     try:
         usage = shutil.disk_usage(str(STORAGE_DIR))
@@ -543,6 +546,7 @@ def storage_info() -> dict[str, Any]:
     out["db_dir"] = str(DB_DIR)
     out["media_root"] = str(MEDIA_ROOT)
     out["temp_uploads"] = str(TEMP_UPLOAD_ROOT)
+    out["chat_assets"] = str(CHAT_ASSET_ROOT)
     out["data_dir"] = str(DATA_DIR)
     out["base_dir"] = str(BASE_DIR)
     # 危险信号：安装目录（代码目录）里还躺着一份库 —— 桌面版覆盖安装会把它连目录一起删
@@ -573,6 +577,8 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     # 探索画布（配额与素材清理，见 personal_canvas_router / explore_asset_sweeper）
     "EXPLORE_CHAT_QUOTA": (0, 999), "EXPLORE_IMAGE_QUOTA": (0, 999), "EXPLORE_TTS_QUOTA": (0, 999),
     "EXPLORE_CANVAS_MAX": (0, 500),
+    "CHAT_ASSET_QUOTA_MB": (0, 102400),
+    "CHAT_ASSET_GC_DAYS": (0, 3650),
     "EXPLORE_CONTINUOUS_REMIND_MIN": (5, 180), "EXPLORE_ASSET_ORPHAN_DAYS": (1, 365),
     "EXPLORE_ASSET_TRASH_DAYS": (1, 90), "EXPLORE_TMP_HOURS": (1, 168), "EXPLORE_CANVAS_TRASH_DAYS": (7, 365), "EXPLORE_SHARE_EXPIRE_DAYS": (1, 90),
     "EXPLORE_ASSET_MAX_MB": (64, 10240), "EXPLORE_SWEEP_HOUR": (0, 23), "EXPLORE_TTS_CACHE_MB": (50, 4000),

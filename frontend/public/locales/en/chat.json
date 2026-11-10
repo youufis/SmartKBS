@@ -221,5 +221,26 @@
   "modeAgent": "Agent",
   "modeKb": "Knowledge Base",
   "modeBadgeTip": "The chat pipeline is set by system config (priority: knowledge base > agent > LLM); admins adjust it in System Settings",
-  "pageTitle": "Knowledge Q&A"
+  "pageTitle": "Knowledge Q&A",
+  "historyRangeAll": "All",
+  "historyRangeToday": "Today",
+  "confirmDeleteGroupDays": "This group spans {{days}} days with {{count}} items — delete all of them?",
+  "historyBatchAllShort": "All",
+  "historyBatchClearShort": "Clear",
+  "historyBatchDelShort": "Delete",
+  "historyCollapsePanel": "Collapse history panel",
+  "emptyTryLabel": "Try asking",
+  "emptySamples": [
+    "How does photosynthesis work?",
+    "Walk me through this problem",
+    "Turn this PDF into an outline",
+    "How do I sketch a quadratic function?",
+    "Why is the sky blue?",
+    "Make me a set of final exam questions",
+    "Translate this and explain the grammar",
+    "Compare the civil service exams of Tang and Song",
+    "Explain Newton's third law with an everyday example"
+  ],
+  "attachmentExpired": "Attachment expired",
+  "historyYearLabel": "{{year}}"
 }

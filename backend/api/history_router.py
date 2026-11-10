@@ -3,6 +3,7 @@
 目录树浏览 / 文件读取 / 删除
 """
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -391,12 +392,38 @@ def _read_head_text(file_path: str, chars: int) -> str:
         return ""
     raw = re.sub(r"^文件:.*$", "", raw, flags=re.M)
     raw = re.sub(r"^创建时间:.*$", "", raw, flags=re.M)
+    # 附件元数据是给程序看的，别当正文露出来；消息分隔线也别显示成三条横杠
+    raw = re.sub(r"<!--\s*attachments:.*?-->", "", raw, flags=re.S)
+    raw = re.sub(r"(?m)^\s*-{3,}\s*$", "", raw)
     raw = re.sub(r"```[\s\S]*?```", "（代码块）", raw)
     raw = re.sub(r"\$+", "", raw)
     raw = re.sub(r"[#*_>`~]", "", raw)
     raw = re.sub(r"[ \t]+", " ", raw)
     raw = re.sub(r"\n{3,}", "\n\n", raw).strip()
     return raw[:chars]
+
+
+def _read_head_attachments(file_path: str, limit: int = 3) -> list[dict]:
+    """从历史文件头部抽附件元数据（预览用，读得越少越好）"""
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            raw = f.read(20000)
+    except OSError:
+        return []
+    out: list[dict] = []
+    for m in re.finditer(r"<!--\s*attachments:\s*(\[.*?\])\s*-->", raw, re.S):
+        try:
+            arr = json.loads(m.group(1))
+        except Exception:
+            continue
+        if not isinstance(arr, list):
+            continue
+        for a in arr:
+            if isinstance(a, dict) and a.get("f"):
+                out.append({"name": a.get("name") or "", "f": a["f"], "kind": a.get("kind") or "file"})
+                if len(out) >= limit:
+                    return out
+    return out
 
 
 @router.get("/preview")
@@ -418,6 +445,7 @@ async def preview_history_file(request: Request, path: str = Query(...),
     return {
         "title": (row[0][0] if row and row[0][0] else "") or _file_stem(rel),
         "filename": rel.split("/")[-1],
+        "attachments": await asyncio.to_thread(_read_head_attachments, target, 3),
         "preview": preview,
         "message_count": (row[0][1] if row else 0) or 0,
         "size": (row[0][2] if row else 0) or os.path.getsize(target),

@@ -221,5 +221,26 @@
   "modeAgent": "智能体",
   "modeKb": "知识库",
   "modeBadgeTip": "AI 对话链路由系统配置决定（优先级：知识库 > 智能体 > 大模型），教师/管理员可在「系统配置」调整",
-  "pageTitle": "知识问答"
+  "pageTitle": "知识问答",
+  "historyRangeAll": "全部",
+  "historyRangeToday": "今天",
+  "confirmDeleteGroupDays": "这一组跨 {{days}} 天、共 {{count}} 条，全部删除？",
+  "historyBatchAllShort": "全选",
+  "historyBatchClearShort": "清空",
+  "historyBatchDelShort": "删除",
+  "historyCollapsePanel": "收起历史面板",
+  "emptyTryLabel": "试试这样问",
+  "emptySamples": [
+    "光合作用是怎么进行的？",
+    "帮我讲讲这道题的思路",
+    "把这份 PDF 的重点整理成提纲",
+    "二次函数图像怎么画",
+    "为什么天空是蓝色的",
+    "帮我出一套期末复习题",
+    "这段英文帮我翻译并讲清语法",
+    "对比唐朝和宋朝的科举制度",
+    "用一个生活例子解释牛顿第三定律"
+  ],
+  "attachmentExpired": "原附件已过期",
+  "historyYearLabel": "{{year}} 年"
 }

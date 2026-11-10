@@ -398,6 +398,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat', level: 'basic' },
   { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', longDescKey: 'field_ENABLE_REQUEST_LIMIT_tip', type: 'boolean', group: 'chat', level: 'basic' },
   { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'chat', level: 'basic', unitKey: 'unitTime' },
+  // 对话附件：已入档的附件与历史记录同寿命，这里只管容量与回收节奏
+  { key: 'CHAT_ASSET_QUOTA_MB', labelKey: 'field_CHAT_ASSET_QUOTA_MB', descKey: 'field_CHAT_ASSET_QUOTA_MB_desc', type: 'number', group: 'chat', level: 'basic', required: false, unitKey: 'unitMB' },
+  { key: 'CHAT_ASSET_GC_DAYS', labelKey: 'field_CHAT_ASSET_GC_DAYS', descKey: 'field_CHAT_ASSET_GC_DAYS_desc', type: 'number', group: 'chat', required: false, unitKey: 'unitDay' },
   // 回答质量（V8.6.1 知识问答输出质量闸门；backend/chat_intent.py / chat_prompts.py）
   // 这几项是提示词工程调参，与「谁能用、能用几次」不是一件事，单独成节并默认收在高级里
   { key: 'CHAT_META_GUARD_ENABLED', labelKey: 'field_CHAT_META_GUARD_ENABLED', descKey: 'field_CHAT_META_GUARD_ENABLED_desc', type: 'boolean', group: 'quality', level: 'basic', required: false },

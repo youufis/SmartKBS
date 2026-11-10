@@ -53,7 +53,7 @@ _DB_FILES = ("smartkb.db", "questions.db")
 #: 只是 backend/database.py 数据自愈清理脏行时的整行留底（需要时自己 mkdir），
 #: 历史上还堆过一批一次性手工 .db 副本 —— 2026-11-03 已确认为无用文件并清理，
 #: 再把它算进"内容目录"会让页面看起来像重要数据、还会误导整站备份口径。
-_CONTENT_TOPS = ("root", "stu", "question_media", "temp_uploads", "ChatHistory")
+_CONTENT_TOPS = ("root", "stu", "question_media", "temp_uploads", "chat_assets", "ChatHistory")
 
 #: 历史顶层目录里、新版本已经并到 question_media 下面的一批
 _CONTENT_INTO_MEDIA = ("whiteboard_assets",)
