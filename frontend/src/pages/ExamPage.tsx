@@ -1966,12 +1966,13 @@ const ExamPage: React.FC = () => {
         onCancel={() => setResultModal(false)}
         width="min(1040px, 96vw)"
         footer={[
-          <Button key="explain" icon={<BulbOutlined />} onClick={() => resultExam && handleExplainWrong(resultExam.id)}>
-            {t('aiExplainTitle')}
-          </Button>,
-          <Button key="export" icon={<DownloadOutlined />}
-            disabled={!resultExam?.id}
-            onClick={() => window.open(`/api/export/exam/${resultExam?.id}`, '_blank')}>{t('exportReport')}</Button>,
+          // 底部只留「逐题错因解析」；成绩 Excel 导出挪进「名册」页签，
+          // 免得同一弹窗里出现两个下载按钮、两个 AI 按钮分不清
+          <Tooltip key="explain" title={t('aiExplainTip')}>
+            <Button icon={<BulbOutlined />} onClick={() => resultExam && handleExplainWrong(resultExam.id)}>
+              {t('aiExplainTitle')}
+            </Button>
+          </Tooltip>,
           <Button key="refresh" icon={<ReloadOutlined />} loading={resultLoading}
             onClick={() => { void refreshResults() }}>{t('refresh')}</Button>,
           <Button key="close" onClick={() => setResultModal(false)}>{t('close')}</Button>,
@@ -2047,14 +2048,21 @@ const ExamPage: React.FC = () => {
                                 loading={gradingNow}>{t('exGradeNow')}</Button>
                             </Popconfirm>
                           )}
-                          <Button size="small" icon={<RobotOutlined />} loading={examAiLoading}
-                            onClick={() => handleExamAiAnalysis(!!(examAiReport || examAiCached))}>
-                            {examAiReport ? t('aiReAnalyze') : t('exAiAnalyze')}
-                          </Button>
-                          <Button size="small" icon={<DownloadOutlined />}
-                            onClick={() => window.open(`/api/analytics/exam/${resultExam?.id}/report/export`, '_blank')}>
-                            {t('exAiReportWord')}
-                          </Button>
+                          {/* 这一对是「整场分析」：生成 + 把同一份报告存成 Word，说明写清各自产物 */}
+                          <Tooltip title={t('exAiAnalyzeTip')}>
+                            <Button size="small" icon={<RobotOutlined />} loading={examAiLoading}
+                              onClick={() => handleExamAiAnalysis(!!(examAiReport || examAiCached))}>
+                              {examAiReport ? t('aiReAnalyze') : t('exAiAnalyze')}
+                            </Button>
+                          </Tooltip>
+                          <Tooltip title={examAiReport || examAiCached ? t('exAiReportWordTip') : t('exAiReportNeedFirst')}>
+                            <span style={{ display: 'inline-block', cursor: examAiReport || examAiCached ? 'default' : 'not-allowed' }}>
+                              <Button size="small" icon={<DownloadOutlined />} disabled={!examAiReport && !examAiCached}
+                                onClick={() => window.open(`/api/analytics/exam/${resultExam?.id}/report/export`, '_blank')}>
+                                {t('exAiReportWord')}
+                              </Button>
+                            </span>
+                          </Tooltip>
                         </Space>
                         {examAiReport ? (
                           <Card size="small" title={<Space><RobotOutlined />{t('exAiAnalyze')}</Space>}>
@@ -2150,6 +2158,11 @@ const ExamPage: React.FC = () => {
                           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                             {t('exTotalStudents', { count: rows.length })}
                           </Typography.Text>
+                          {/* 名册就是这张成绩表：导出明细放这儿，就地下载 */}
+                          <Tooltip title={t('exportReportTip')}>
+                            <Button size="small" icon={<DownloadOutlined />} disabled={!resultExam?.id}
+                              onClick={() => window.open(`/api/export/exam/${resultExam?.id}`, '_blank')}>{t('exportReport')}</Button>
+                          </Tooltip>
                         </Space>
                         <Table
                           dataSource={rows}
