@@ -55,6 +55,11 @@
 > - 📱 On phones the panel no longer collides with the canvas toolbar; opening a canvas zooms to its content
 >
 > **Conversations and attachments**
+> **Exercises, quizzes and exams: AI and exports**
+> - 🧑‍🏫 New class-wide error review in the score dialog: picks the questions the class missed most, with typical wrong answers, causes, how to explain them and follow-up practice, exportable to Word
+> - 🩹 Score dialog buttons renamed and separated: AI Analysis Report / Download Word / Class Error Review / Export Grades, so they no longer look duplicated
+> - 📄 Sync practice and in-class quiz AI analyses can now be exported to Word; results are stored, so exporting no longer calls the model again
+>
 > - 🗂️ History as a docked sidebar: pushes content aside on desktop instead of covering it; a single click previews without replacing the running conversation; new chats appear as soon as they are saved, today / yesterday expand by default and each year gets its own divider
 > - 📎 Attachments live with the conversation: images and documents are archived together with it, so reopening a history entry still shows the original image and lets you download the file; a recycled file reads "Attachment expired"
 > - 🔒 Attachments belong to their owner: downloads require auth and reject cross-user access and path traversal; per-user capacity and idle-recycle days are managed in System Configuration
@@ -1233,6 +1238,14 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - 🎛️ Labeled AI panel actions (icons only on narrow panels), shorter empty-state hint
 - 📱 Mobile: the toolbar steps aside for the panel and the AI bubble clears it
 - 🩹 Opening a canvas zooms to content; console noise removed; copy fully localized; new page-trash retention setting
+
+**Exercises, quizzes and exams: AI and exports**
+
+- 🧑‍🏫 Exams gained a class-wide error review: picks the highest-error questions, generates the review in one call and exports it to Word; the old button always 404'd for teachers and was replaced (students keep their own wrong-answer explanation)
+- 🩹 Score dialog buttons renamed and separated: AI Analysis Report / Download Word / Class Error Review / Export Grades (Excel moved into the roster tab)
+- 📄 Sync practice and in-class quiz AI analyses are now exportable to Word, with results cached so exporting does not bill the model twice
+- 🏷️ “Export result” renamed to “Export Grades (CSV)”; read-only previews no longer show an export button
+- 🩹 Development console noise cleared (tldraw font race, deprecated antd 6 props)
 
 **Conversations and attachments**
 
