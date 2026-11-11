@@ -344,7 +344,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   }, 0)
 
   return (
-    <Modal maskClosable={false}
+    <Modal mask={{ closable: false }}
       title={
         <Space>
           <RobotOutlined style={{ color: '#1677ff' }} />

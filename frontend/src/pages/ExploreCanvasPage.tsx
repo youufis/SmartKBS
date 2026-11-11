@@ -1,6 +1,6 @@
 /** 探索画布 · 列表页：卡片墙（悬停菜单 / 真实缩略图 / 搜索直达命中页）+ 新建 + 回收站 */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Dropdown, Empty, Input, Modal, Pagination, Select, Space, Spin, Tabs, Tag, Tooltip, message } from 'antd'
+import { Button, Card, Dropdown, Empty, Input, Modal, Pagination, Popconfirm, Select, Space, Spin, Tabs, Tag, Tooltip, message } from 'antd'
 import { DeleteOutlined, MoreOutlined, PlusOutlined, PlusSquareOutlined, RestOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -9,8 +9,8 @@ import { useAuthStore } from '../stores/authStore'
 import { authedFileUrl } from '../api/client'
 import { BUILTIN_TEMPLATES, type BuiltinTemplate } from '../constants/exploreTemplates'
 import {
-  archiveCanvas, createCanvas, deleteTemplate, listArchives, listCanvases, listShares, listTemplates, listTrash, renameCanvas, restoreCanvas, revokeShare, applyTemplate,
-  type ExploreCanvasMeta, type ShareMeta, type TemplateMeta,
+  archiveCanvas, createCanvas, deleteArchive, deleteTemplate, listArchives, listCanvases, listShares, listTemplates, listTrash, renameCanvas, restoreCanvas, revokeShare, applyTemplate,
+  type ArchiveItem, type ExploreCanvasMeta, type ShareMeta, type TemplateMeta,
 } from '../api/explore'
 
 /** 预置画布封面表情：品牌统一、归属感放画布名（命名定稿 2026-11-08） */
@@ -49,6 +49,10 @@ const ExploreCanvasPage: React.FC = () => {
   const thumbLoadedRef = useRef(false)
   const [query, setQuery] = useState('')
   const [thumbs, setThumbs] = useState<Record<number, string>>({})
+  // 成长档案（「存入档案」的出口）
+  const [archives, setArchives] = useState<ArchiveItem[]>([])
+  const [archLoading, setArchLoading] = useState(false)
+  const [archView, setArchView] = useState<ArchiveItem | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [titleInput, setTitleInput] = useState('')
   const [presetKey, setPresetKey] = useState('blank')
@@ -72,10 +76,11 @@ const ExploreCanvasPage: React.FC = () => {
       if (!r.canvases.length && p > 1 && r.total > 0) { setPage(p - 1); return }
       setList(r.canvases)
       setTotal(r.total)
-      // 归档缩略图只拉一次并缓存：搜索/翻页不重复请求
+      // 归档只拉一次并缓存：卡片封面与「我的档案」共用这份数据，搜索/翻页不重复请求
       if (!thumbLoadedRef.current) {
         thumbLoadedRef.current = true
         const arch = await listArchives().catch(() => [])
+        setArchives(arch)
         const map: Record<number, string> = {}
         for (const a of arch) {
           if (a.image_src && !map[a.canvas_id]) map[a.canvas_id] = a.image_src
@@ -165,11 +170,26 @@ const ExploreCanvasPage: React.FC = () => {
   }, [shares, shareQuery, IS_STUDENT])
   const pagedShares = useMemo(() => visibleShares.slice((sharePage - 1) * 10, sharePage * 10), [visibleShares, sharePage])
 
+  const loadArchives = useCallback(async () => {
+    setArchLoading(true)
+    try {
+      const arch = await listArchives()
+      setArchives(arch)
+      const map: Record<number, string> = {}
+      for (const a of arch) {
+        if (a.image_src && !map[a.canvas_id]) map[a.canvas_id] = a.image_src
+      }
+      setThumbs(map)
+      thumbLoadedRef.current = true
+    } catch { /* 空态即可 */ } finally { setArchLoading(false) }
+  }, [])
+
   const onTab = (k: string) => {
     setTab(k)
     setSharePage(1)
     if (k === 'tpl') void loadTpl()
     if (k === 'shares') void loadShares()
+    if (k === 'arch') void loadArchives()
   }
 
   const useBuiltin = async (tpl: BuiltinTemplate) => {
@@ -185,7 +205,7 @@ const ExploreCanvasPage: React.FC = () => {
     try {
       const d = await applyTemplate(id)
       nav('/explore/' + d.canvas_id)
-    } catch (e: any) { message.error(e?.response?.data?.detail || '使用失败') }
+    } catch (e: any) { message.error(e?.response?.data?.detail || t('tplUseFail')) }
   }
 
   const doDeleteTpl = (id: number) => {
@@ -198,11 +218,80 @@ const ExploreCanvasPage: React.FC = () => {
     })
   }
 
+  // 从成长档案移除一条：只删档案记录，画布那一页与时间线都不动
+  const doDropArchive = async (a: ArchiveItem) => {
+    const rest = archives.filter((x) => x.id !== a.id)
+    try {
+      await deleteArchive(a.id)
+      setArchives(rest)
+      const map: Record<number, string> = {}
+      for (const x of rest) {
+        if (x.image_src && !map[x.canvas_id]) map[x.canvas_id] = x.image_src
+      }
+      setThumbs(map)
+      message.success(t('archDropped'))
+    } catch { message.error(t('archDropFail')) }
+  }
+
   const doRevokeShare = async (id: number) => {
     try { await revokeShare(id); void loadShares() } catch { message.error(t('shareRevokeFail')) }
   }
 
   const fmtTime = (s: string) => (s ? s.slice(5, 16) : '')
+
+  // 「我的档案」：存入成长档案的作品在这里能翻出来看/下载/回到那一页——
+  // 之前这些记录只被拿来当卡片封面，学生存完找不到东西，等于没有出口。
+  const archNode = archLoading && !archives.length ? (
+    <div style={{ textAlign: 'center', padding: 48 }}><Spin /></div>
+  ) : archives.length === 0 ? (
+    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('archEmptyList')} style={{ padding: 32 }} />
+  ) : (
+    <div style={{
+      display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+      gap: 14, padding: '8px 0',
+    }}>
+      {archives.map((a) => (
+        <Card key={a.id} size="small" hoverable={!!a.image_src} styles={{ body: { padding: 10 } }}
+          onClick={() => { if (a.image_src) setArchView(a) }}>
+          <div style={{
+            height: 116, borderRadius: 8, overflow: 'hidden', background: '#f7f9fc',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {a.image_src
+              ? <img src={authedFileUrl(a.image_src)} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              : <span style={{ fontSize: 30, color: '#c3cbd8' }}>🖼️</span>}
+          </div>
+          <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {a.title}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginTop: 2 }}>
+            {a.canvas_title} · {fmtTime(a.created_at)}
+          </div>
+          {!!a.summary && (
+            <div style={{
+              fontSize: 12, marginTop: 4, color: 'var(--text-secondary, #667)', display: '-webkit-box',
+              WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>{a.summary}</div>
+          )}
+          <Space size={6} style={{ marginTop: 8 }} wrap>
+            {!!a.image_src && <Button size="small" onClick={(e) => { e.stopPropagation(); setArchView(a) }}>{t('archView')}</Button>}
+            {!!a.image_src && (
+              <Button size="small" href={authedFileUrl(a.image_src)} download={a.title + '.png'}
+                onClick={(e) => e.stopPropagation()}>{t('archDownload')}</Button>
+            )}
+            <Button size="small" type="text"
+              onClick={(e) => { e.stopPropagation(); nav('/explore/' + a.canvas_id + '?page=' + a.page_number) }}>
+              {t('archGoto')}
+            </Button>
+            <Popconfirm title={t('archDropConfirm')} description={t('archDropBody')} okText={t('archDropOk')}
+              onConfirm={() => void doDropArchive(a)}>
+              <Button size="small" type="text" danger onClick={(e) => e.stopPropagation()}>{t('archDrop')}</Button>
+            </Popconfirm>
+          </Space>
+        </Card>
+      ))}
+    </div>
+  )
 
   const wallNode = (
     loading ? (
@@ -213,7 +302,7 @@ const ExploreCanvasPage: React.FC = () => {
               gap: 16, padding: '8px 0',
             }}>
               {list.map((c) => {
-                const thumb = thumbs[c.id]
+                const thumb = c.cover_src || thumbs[c.id]
                 return (
                   <Card key={c.id} hoverable styles={{ body: { padding: 12 } }} onClick={() => openCanvas(c)}>
                     <div className="explore-thumb" style={{
@@ -246,13 +335,13 @@ const ExploreCanvasPage: React.FC = () => {
                     </div>
                     <div className="explore-meta" style={{ marginTop: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
-                      {!!c.hit_page && <Tag color="blue" style={{ marginInlineEnd: 0 }}>{t('hitTag', { page: c.hit_page })}</Tag>}
+                      {!!c.hit_page && <Tag color="blue" style={{ marginInlineEnd: 0 }}>{t('hitTag', { page: c.hit_ordinal ?? c.hit_page })}</Tag>}
                     </div>
                     <div className="explore-submeta" style={{
                       fontSize: 12, color: 'var(--text-secondary, #888)',
                       display: 'flex', justifyContent: 'space-between', marginTop: 4,
                     }}>
-                      <span>{t('pagesCount', { n: c.page_count || 0 })}</span>
+                      <span>{c.page_count ? t('pagesCount', { n: c.page_count }) : t('pagesBlank')}</span>
                       <span>{fmtTime(c.updated_at)}</span>
                     </div>
                   </Card>
@@ -418,10 +507,20 @@ const ExploreCanvasPage: React.FC = () => {
         onChange={onTab}
         items={[
           { key: 'wall', label: t('tabWall'), children: wallNode },
+          { key: 'arch', label: t('tabArchives'), children: archNode },
           { key: 'tpl', label: t('tabTemplates'), children: tplNode },
           { key: 'shares', label: IS_STUDENT ? t('tabSharesMine') : t('tabSharesIn'), children: shareNode },
         ]}
       />
+
+      <Modal open={!!archView} title={archView?.title} footer={null} onCancel={() => setArchView(null)} width={760}>
+        {!!archView?.image_src && (
+          <img src={authedFileUrl(archView.image_src)} alt="" style={{ width: '100%', borderRadius: 8, display: 'block' }} />
+        )}
+        {!!archView?.summary && (
+          <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{archView.summary}</div>
+        )}
+      </Modal>
 
       <Modal title={t('createTitle')} open={createOpen} onOk={doCreate} onCancel={() => setCreateOpen(false)} okText={t('createOk')}>
         <Space orientation="vertical" style={{ width: '100%' }} size={10}>

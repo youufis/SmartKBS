@@ -509,7 +509,7 @@ const QuickQuizPage: React.FC = () => {
       )}
 
       {/* ── 创建房间弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('createQuizModal')}
         open={createModal}
         onCancel={() => {
@@ -615,7 +615,7 @@ const QuickQuizPage: React.FC = () => {
       </Modal>
 
       {/* ── 加入房间弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('enterJoinCodeModal')}
         open={joinModal}
         onCancel={() => { setJoinModal(false); setJoinCode('') }}
@@ -640,7 +640,7 @@ const QuickQuizPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑房间弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('editQuizModal')}
         open={editModal}
         onCancel={() => {
@@ -736,7 +736,7 @@ const QuickQuizPage: React.FC = () => {
       </Modal>
 
       {/* ── 重新开始弹窗：复制配置开新一场，本场数据不动 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={<Space><RedoOutlined />{t('restartActivity')}</Space>}
         open={!!restartRoom}
         onCancel={() => setRestartRoom(null)}

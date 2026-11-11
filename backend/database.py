@@ -2616,7 +2616,11 @@ def init_db():
             )""")
             # 乐观锁版本号：多端同时编辑时用 rev 做条件更新，防止后写覆盖前写
             _ensure_column(c, "pc_pages", "rev", "INTEGER NOT NULL DEFAULT 0")
+            # 页面回收站：删页改成软删（archived=1），快照与时间线一起留着，30 天内可还原
+            _ensure_column(c, "pc_pages", "archived", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(c, "pc_pages", "archived_at", "TEXT NOT NULL DEFAULT ''")
             c.execute("CREATE INDEX IF NOT EXISTS idx_pcbp_canvas ON pc_pages(canvas_id, page_number)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_pcbp_archived ON pc_pages(archived, archived_at)")
             c.execute("""CREATE TABLE IF NOT EXISTS pc_pages_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 canvas_id INTEGER NOT NULL,
@@ -2625,6 +2629,8 @@ def init_db():
                 saved_at TEXT NOT NULL
             )""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_pbch_page ON pc_pages_history(canvas_id, page_number, saved_at)")
+            # 时间线每条存档带一份线框预览（backend/explore_preview.py），抽屉里能看出那一份长什么样
+            _ensure_column(c, "pc_pages_history", "preview", "TEXT NOT NULL DEFAULT ''")
             # 页面纯文本索引：搜索只扫这张小表，不碰 MB 级快照（backend/explore_text_index.py）
             c.execute("""CREATE TABLE IF NOT EXISTS pc_page_text (
                 canvas_id INTEGER NOT NULL,

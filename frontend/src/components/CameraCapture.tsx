@@ -272,7 +272,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture 
   }, [open, startCamera, stopCamera])
 
   return (
-    <Modal maskClosable={false}
+    <Modal mask={{ closable: false }}
       title={<span><CameraOutlined style={{ marginRight: 8 }} />{t('app.cameraInputTitle')}</span>}
       open={open}
       onCancel={handleClose}

@@ -1929,7 +1929,9 @@ export const AIPanel: React.FC<Props> = ({
           0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4); }
           50% { box-shadow: 0 0 0 6px rgba(255, 77, 79, 0); }
         }
+        /* tldraw 5.x 把工具条根节点改名成 .tlui-main-toolbar，两个都写，否则规则是死的 */
         .wb-ai-pop .tlui-toolbar,
+        .wb-ai-pop .tlui-main-toolbar,
         .wb-ai-pop .tlui-style-panel__wrapper { display: none !important; }
         .ai-msg-content, .ai-msg-content * {
           user-select: text !important;

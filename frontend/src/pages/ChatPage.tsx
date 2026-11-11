@@ -2101,7 +2101,7 @@ const ChatPage: React.FC = () => {
 
       {/* 载入历史前的确认：当前对话已自动存盘，说清楚免得以为被删了 */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         open={!!pendingHistoryNode}
         title={t('historyReplaceTitle')}
         width={460}
@@ -2164,7 +2164,7 @@ const ChatPage: React.FC = () => {
 
       {/* 重命名：只改列表显示标题，不动磁盘文件名 */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         open={!!renameNode}
         width={480}
         title={t('historyRename')}
@@ -2185,7 +2185,7 @@ const ChatPage: React.FC = () => {
 
       {/* 删除单条历史 */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         open={!!deleteNode}
         width={420}
         title={t('historyConfirmDelete')}
@@ -2204,7 +2204,7 @@ const ChatPage: React.FC = () => {
 
       {/* 批量删除确认：列出待删条目，避免筛选切换后误删看不见的记录 */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         open={batchConfirmOpen}
         width={460}
         title={t('historyBatchConfirmTitle')}

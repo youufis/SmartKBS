@@ -15,6 +15,26 @@ import { loadResourceKinds } from './constants/resourceKinds'
 import { useThemeStore, initTheme, themeMap } from './stores/themeStore'
 import { useLocaleStore } from './stores/localeStore'
 
+// tldraw 5.1 的 FontManager 用对象当 AtomMap 的键，React StrictMode 双挂载时，
+// 前一个已销毁的编辑器实例会在字体加载回调里抛 "AtomMap: key [object Object] not found"。
+// 只脏开发控制台（生产不双挂载，功能也不受影响），这里精确屏蔽这一条，其它报错原样保留，
+// 免得真错误被这几十行噪音埋掉。升级 tldraw 后如果不再出现，就把这段删掉。
+if (import.meta.env.DEV) {
+  const rawError = console.error.bind(console)
+  console.error = (...args: unknown[]) => {
+    if (args.some((a) => typeof a === 'string' && a.includes('AtomMap: key'))) return
+    rawError(...args)
+  }
+  // tldraw 的 zh-cn 语言包缺 page-menu 两个键。翻译是在 fetchTranslation() 里拉取后就告警的，
+  // 我们的 overrides（constants/tldrawUiZh.ts）在那之后才合并，补了也压不住这条——
+  // 它只在 development 打印，生产构建里根本没有。这里同样只屏蔽这一句，别的一律放行。
+  const rawWarn = console.warn.bind(console)
+  console.warn = (...args: unknown[]) => {
+    if (args.some((a) => typeof a === 'string' && a.startsWith('Language zh-cn: missing messages for keys'))) return
+    rawWarn(...args)
+  }
+}
+
 // 启动时从后端加载题型配置（使用默认值 fallback，不阻塞渲染）
 loadQuestionTypes()
 // 网页资源「内容类型」唯一清单（后端为准，失败用兜底）

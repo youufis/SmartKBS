@@ -1405,7 +1405,7 @@ const TeacherView: React.FC = () => {
           </>
       )}
       {/* ── 修改名称（草稿/进行中/已结束都可改，学生看到的标题同步更新） ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('renameTitle')}
         open={!!renameTarget}
         onCancel={() => setRenameTarget(null)}

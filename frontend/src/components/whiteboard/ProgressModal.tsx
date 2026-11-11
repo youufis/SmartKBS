@@ -76,7 +76,7 @@ const ProgressModal: React.FC<Props> = ({
       }
       closable={status !== 'running'}
       onCancel={status === 'running' ? undefined : onClose}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={440}
       destroyOnClose
     >

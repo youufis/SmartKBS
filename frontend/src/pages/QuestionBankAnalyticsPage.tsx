@@ -539,7 +539,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
       )}
 
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         open={auditOpen}
         title={`${t('analyticsCreatorAudit')} · ${auditCreator}`}
         width={860}

@@ -485,7 +485,7 @@ const ActivityMonitorPage: React.FC = () => {
       {/* ── 活动完成详情：弹窗展示（原来排在整张列表下面，点完还得往下滚） ── */}
       {selectedActivity && (
         <Modal
-          maskClosable={false}
+          mask={{ closable: false }}
           open={!!selectedActivity}
           onCancel={closeStatus}
           footer={<Button onClick={closeStatus}>{t('activityMonitor.close')}</Button>}

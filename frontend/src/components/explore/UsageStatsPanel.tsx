@@ -56,8 +56,8 @@ const UsageStatsPanel: React.FC<Props> = () => {
       .filter((x) => !gradeFilter || x.grade === gradeFilter)
       .map((x) => String(x.class || '').trim()).filter(Boolean))
     return Array.from(set).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
-      .map((s) => ({ value: s, label: s + ' 班' }))
-  }, [data, gradeFilter])
+      .map((s) => ({ value: s, label: s + ' ' + t('classSuffix') }))
+  }, [data, gradeFilter, t])
 
   const maxAsks = Math.max(1, ...(data?.trend || []).map((x) => x.asks))
 
@@ -75,7 +75,7 @@ const UsageStatsPanel: React.FC<Props> = () => {
     { title: t('careColStudent'), dataIndex: 'name', key: 'cn', width: 150,
       render: (_: string, r: CareStudentRow) => <span>{r.name}<span style={{ color: '#aab', fontSize: 11, marginInlineStart: 4 }}>{r.username}</span></span> },
     { title: t('careColClass'), key: 'cc', width: 110,
-      render: (_: unknown, r: CareStudentRow) => `${r.grade} ${r.class ? r.class + ' 班' : ''}`.trim() || '—' },
+      render: (_: unknown, r: CareStudentRow) => `${r.grade} ${r.class ? r.class + ' ' + t('classSuffix') : ''}`.trim() || '—' },
     { title: t('careColCount'), key: 'cnt', width: 130,
       render: (_: unknown, r: CareStudentRow) => <>
         <Tag color="orange">{r.count}</Tag>

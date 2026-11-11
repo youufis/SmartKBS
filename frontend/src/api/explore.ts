@@ -6,14 +6,19 @@ export interface ExploreCanvasMeta {
   title: string
   preset_key: string
   subject_tag?: string
-  cover?: number | null
+  /** 墙上卡片封面：最新一次存入档案/分享/发布模板时生成的导出图；没有就退回预设表情 */
+  cover_src?: string | null
   updated_at: string
   page_count?: number
   hit_page?: number | null
+  /** 命中页在墙上的展示序号（连续编号）；hit_page 仍是跳转用的内部编号 */
+  hit_ordinal?: number | null
 }
 
 export interface ExplorePageMeta {
   page_number: number
+  /** 页签展示用的连续序号：删过页后 page_number 会有空洞，不能直接当“第几页” */
+  ordinal?: number
   title: string
   updated_at: string
 }
@@ -76,6 +81,16 @@ export async function savePage(id: number, page: number, snapshotData: string, t
 
 export async function addPage(id: number): Promise<{ page_number: number; title: string }> {
   const { data } = await apiClient.post('/api/explore/canvases/' + id + '/pages')
+  return data
+}
+
+export async function listPageTrash(id: number): Promise<PageTrashItem[]> {
+  const { data } = await apiClient.get('/api/explore/canvases/' + id + '/pages/trash')
+  return (data.items || []) as PageTrashItem[]
+}
+
+export async function restorePage(id: number, page: number): Promise<{ page_number: number }> {
+  const { data } = await apiClient.post('/api/explore/canvases/' + id + '/pages/' + page + '/restore')
   return data
 }
 
@@ -213,7 +228,11 @@ export async function archivePortfolio(
   return data
 }
 
-export interface ArchiveItem { id: number; canvas_id: number; title: string; canvas_title: string; page_number: number; image_src: string; created_at: string }
+export interface ArchiveItem { id: number; canvas_id: number; title: string; canvas_title: string; page_number: number; image_src: string; created_at: string; summary?: string }
+
+export async function deleteArchive(id: number): Promise<void> {
+  await apiClient.delete('/api/explore/archives/' + id)
+}
 
 export async function listArchives(): Promise<ArchiveItem[]> {
   const { data } = await apiClient.get('/api/explore/archives')
@@ -274,7 +293,17 @@ export async function archivePage(canvasId: number, page: number, snapshotData: 
   return data
 }
 
-export interface HistoryItem { id: number; saved_at: string; bytes: number }
+export interface HistoryItem { id: number; saved_at: string; bytes: number; preview?: string }
+
+/** 页面回收站里的一页：快照与时间线都还在，30 天内可还原 */
+export interface PageTrashItem {
+  page_number: number
+  title: string
+  archived_at: string
+  bytes: number
+  history_count: number
+  preview?: string
+}
 
 export async function pageHistory(canvasId: number, page: number): Promise<HistoryItem[]> {
   const { data } = await apiClient.get('/api/explore/canvases/' + canvasId + '/pages/' + page + '/history')

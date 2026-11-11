@@ -11,6 +11,7 @@ import { Modal, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { getPage, savePage, uploadAsset, type SaveState } from '../../api/explore'
 import { AskCardUtil } from './AskCardShape'
+import { TLUI_ZH_OVERRIDES } from '../../constants/tldrawUiZh'
 import { saveDraft, loadDraft, clearDraft } from '../../utils/exploreDraft'
 
 const minimalComponents: TLComponents = {
@@ -138,6 +139,17 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
           message.info(t('offlineRestored'))
         } catch { /* ignore */ }
       }
+      // 重开画布先确认"内容在视野里"：相机随快照存着，但落卡/整理布局用的是绝对坐标，
+      // 视野停在空白处时学生以为画的东西没了。只在当前视野里一个形状都看不到时才缩放。
+      try {
+        const shapes = editor.getCurrentPageShapes()
+        const vp = editor.getViewportPageBounds()
+        const inView = shapes.some((sh) => {
+          const b = editor.getShapePageBounds(sh.id)
+          return !!b && b.x < vp.x + vp.w && b.x + b.w > vp.x && b.y < vp.y + vp.h && b.y + b.h > vp.y
+        })
+        if (shapes.length && !inView) editor.zoomToFit()
+      } catch { /* 缩放失败不影响打开 */ }
       setReady(true)
       try { onReadyRef.current && onReadyRef.current() } catch { /* 落卡失败不影响打开 */ }
     })()
@@ -211,7 +223,7 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Tldraw onMount={handleMount} components={minimalComponents}
-        assets={assetStore} shapeUtils={[AskCardUtil]} licenseKey="oss" />
+        assets={assetStore} shapeUtils={[AskCardUtil]} licenseKey="oss" overrides={TLUI_ZH_OVERRIDES} />
       {/* 隐藏 TLDraw 右下角许可水印（与协作白板同一处理） */}
       <style>{`
         .tl-watermark,

@@ -555,7 +555,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
 
   return (
     <Modal
-      maskClosable={false}
+      mask={{ closable: false }}
       title={
         <Space size={6}>
           <ShareAltOutlined style={{ color: '#ff4d4f' }} />

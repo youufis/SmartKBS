@@ -802,7 +802,7 @@ const TaskPage: React.FC = () => {
       </Card>
 
       {/* 创建任务弹窗 */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={editingTaskId ? t('edit') : t('createNewTask')}
         open={createModal}
         onOk={handleCreate}
@@ -1263,7 +1263,7 @@ const TaskPage: React.FC = () => {
 
       {/* AI 起草作业：先出草稿，教师确认后填入创建表单 */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         title={<Space><BulbOutlined />{t('aiCreateTitle')}</Space>}
         open={aiDraftOpen}
         onCancel={() => setAiDraftOpen(false)}

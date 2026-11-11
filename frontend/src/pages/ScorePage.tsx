@@ -908,7 +908,7 @@ const ScorePage: React.FC = () => {
       </Drawer>
 
       {/* ── 自定义分值：单人加/扣任意分，或给勾选的多人批量加/扣 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={customTarget
           ? t('customPointsFor', { name: customTarget.name })
           : t('customPointsBatch', { count: selectedStudents.length })}

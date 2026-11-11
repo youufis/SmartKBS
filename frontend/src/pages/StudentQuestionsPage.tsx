@@ -1044,7 +1044,7 @@ const StudentQuestionsPage: React.FC = () => {
       </Card>
 
       {/* ── 编辑提问弹窗 ── */}
-      <Modal maskClosable={false} title={t('editQuestionTitle')} open={!!editQuestionModal} onCancel={() => setEditQuestionModal(null)}
+      <Modal mask={{ closable: false }} title={t('editQuestionTitle')} open={!!editQuestionModal} onCancel={() => setEditQuestionModal(null)}
         onOk={handleEditQuestion} okText={t('save')}>
         <Form form={editQuestionForm} layout="vertical">
           <Form.Item name="content" label={t('contentLabel')} rules={[

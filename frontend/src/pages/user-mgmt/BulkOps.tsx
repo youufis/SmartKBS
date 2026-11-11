@@ -250,7 +250,7 @@ export const BulkDeleteModal: React.FC<BulkDeleteProps> = ({ open, onClose, onDe
         open={open && !progress.visible}
         onCancel={onClose}
         width={600}
-        maskClosable={false}
+        mask={{ closable: false }}
         footer={preview
           ? [
             <Button key="back" onClick={() => { setPreview(null); setConfirmed(false) }}>{t('cancel')}</Button>,

@@ -746,7 +746,7 @@ const HtmlFilesPage: React.FC = () => {
         />
 
         {/* 新建/重命名分组弹窗 */}
-        <Modal maskClosable={false}
+        <Modal mask={{ closable: false }}
           title={groupModalTitle}
           open={groupModalOpen}
           onOk={handleGroupSubmit}
@@ -764,7 +764,7 @@ const HtmlFilesPage: React.FC = () => {
         </Modal>
 
         {/* 自动归类：先看清要建哪些组、各收多少份，确认后才写库 */}
-        <Modal maskClosable={false}
+        <Modal mask={{ closable: false }}
           title={<span><ThunderboltOutlined /> {t('autoClassify')}</span>}
           open={classifyOpen}
           onCancel={() => setClassifyOpen(false)}

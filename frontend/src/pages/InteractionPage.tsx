@@ -703,7 +703,7 @@ const InteractionPage: React.FC = () => {
       </Card>
 
       {/* ── 答题弹窗 ── */}
-      <Modal maskClosable={false} title={takingQuiz?.title} open={!!takingQuiz && !quizResult}
+      <Modal mask={{ closable: false }} title={takingQuiz?.title} open={!!takingQuiz && !quizResult}
         onCancel={() => {
           // A1: 有未提交作答时先确认（草稿已存本机，离开不会真丢）
           const close = () => { setTakingQuiz(null); setQuizResult(null); setQuizDraftInfo(null); setQuizSubmitError(null) }
@@ -1163,7 +1163,7 @@ const InteractionPage: React.FC = () => {
       </Modal>
 
       {/* ── AI 生成测验弹窗 ── */}
-      <Modal maskClosable={false} title={<Space><RobotOutlined />{t('aiGenerateQuiz')}</Space>} open={aiQuizModal}
+      <Modal mask={{ closable: false }} title={<Space><RobotOutlined />{t('aiGenerateQuiz')}</Space>} open={aiQuizModal}
         onCancel={() => { setAiQuizModal(false); setAiQuizResult(null); setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         footer={aiQuizResult?.questions?.length > 0 ? [
           <Button key="cancel" onClick={() => { setAiQuizModal(false); setAiQuizResult(null); setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}>{t('cancel')}</Button>,
@@ -1248,7 +1248,7 @@ const InteractionPage: React.FC = () => {
 
 
       {/* ── 编辑测验弹窗 ── */}
-      <Modal maskClosable={false} title={t('ipEditQuiz')} open={!!editQuizModal} onCancel={() => setEditQuizModal(null)}
+      <Modal mask={{ closable: false }} title={t('ipEditQuiz')} open={!!editQuizModal} onCancel={() => setEditQuizModal(null)}
         onOk={handleEditQuiz} okText={t('ipSave')}>
         <Form form={editQuizForm} layout="vertical">
           <Form.Item name="title" label={t('quizTitle')} rules={[{ required: true }]}>

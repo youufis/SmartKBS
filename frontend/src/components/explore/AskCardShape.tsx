@@ -4,6 +4,7 @@
  * 卡上可 追问 / 朗读 / 复制；按钮通过 window 事件（explore:card-action）与 AI 面板通信。
  */
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Rectangle2d, ShapeUtil, T,
   type Editor, type Geometry2d, type TLBaseShape,
@@ -60,6 +61,7 @@ function wrapForExport(text: string, widthPx: number, maxLines: number): string[
 }
 
 function AskCardView({ editor, shape }: { editor: Editor; shape: AskCardShape }) {
+  const { t } = useTranslation('explore')
   const { question, answer, refs, w, h, createdAt } = shape.props
   let refList: { doc_name?: string; title?: string }[] = []
   try { refList = JSON.parse(refs || '[]') } catch { refList = [] }
@@ -87,7 +89,7 @@ function AskCardView({ editor, shape }: { editor: Editor; shape: AskCardShape })
         fontSize: 12, color: '#8a94a6', lineHeight: 1.5, marginBottom: 6,
         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
       }}>
-        Q｜{question || '（无标题）'}
+        {t('cardQPrefix')}{question || t('cardNoTitle')}
       </div>
       <div style={{
         flex: 1, overflowY: 'auto', fontSize: 13, lineHeight: 1.65, color: '#2b3242',
@@ -97,13 +99,13 @@ function AskCardView({ editor, shape }: { editor: Editor; shape: AskCardShape })
       </div>
       {!!refList.length && (
         <div style={{ fontSize: 10, color: '#98a2b3', margin: '6px 0 2px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }} title={uniq.map((r) => r.doc_name || '').join(' · ')}>
-          来源：{refLine}
+          {t('cardSource')}{refLine}
         </div>
       )}
       <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
-        <button style={btnStyle} onPointerDown={stop(() => dispatchCardAction('followup', shape))}>追问</button>
-        <button style={btnStyle} onPointerDown={stop(() => dispatchCardAction('speak', shape))}>朗读</button>
-        <button style={btnStyle} onPointerDown={stop(() => dispatchCardAction('copy', shape))}>复制</button>
+        <button style={btnStyle} onPointerDown={stop(() => dispatchCardAction('followup', shape))}>{t('cardFollow')}</button>
+        <button style={btnStyle} onPointerDown={stop(() => dispatchCardAction('speak', shape))}>{t('cardSpeak')}</button>
+        <button style={btnStyle} onPointerDown={stop(() => dispatchCardAction('copy', shape))}>{t('cardCopy')}</button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 10, color: '#c2c9d4' }}>{(createdAt || '').slice(5, 16)}</span>
       </div>

@@ -640,7 +640,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
 
   return (
     <Modal
-      maskClosable={false}
+      mask={{ closable: false }}
       open={open}
       onCancel={onClose}
       width={isMobile ? '100vw' : 'min(1180px, 94vw)'}

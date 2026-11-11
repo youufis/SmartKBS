@@ -64,6 +64,15 @@ def _collect_refs():
                         refs.update(REF_RE.findall(snap))
             except Exception as e:
                 logger.warning("[explore-sweep] 扫描 %s 失败: %s", table, e)
+        # 画布封面也算引用：只被封面用到的导出图不该当孤儿清掉
+        try:
+            for (fn,) in c.execute(
+                    "SELECT a.filename FROM pc_canvases cv JOIN pc_assets a ON a.id = cv.cover_asset_id"
+                    " WHERE cv.cover_asset_id IS NOT NULL"):
+                if fn:
+                    refs.add(fn)
+        except Exception as e:
+            logger.warning("[explore-sweep] 扫描画布封面失败: %s", e)
     return refs
 
 
@@ -97,7 +106,7 @@ def sweep_once(dry=None):
     tmp_hours = _num("EXPLORE_TMP_HOURS", 24)
     watermark_mb = _num("EXPLORE_ASSET_MAX_MB", 1024)
     entries = []
-    moved = purged = healed = reclaimed = 0
+    moved = purged = healed = reclaimed = pages_purged = 0
 
     refs = _collect_refs()
 
@@ -237,6 +246,23 @@ def sweep_once(dry=None):
                     except OSError:
                         pass
 
+        # 4.7) 页面回收站到期：删除超过 EXPLORE_PAGE_TRASH_DAYS 天的页面，
+        # 连带它的时间线存档与文本索引一起物删（还原窗口只在这 30 天内）
+        page_days = _num("EXPLORE_PAGE_TRASH_DAYS", 30)
+        cutoff = _fmt(now - timedelta(days=page_days))
+        dead = c.execute(
+            "SELECT canvas_id, page_number FROM pc_pages"
+            " WHERE archived = 1 AND archived_at <> '' AND archived_at < ?", (cutoff,)).fetchall()
+        for dcid, dpn in dead:
+            if not dry:
+                c.execute("DELETE FROM pc_pages WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
+                c.execute("DELETE FROM pc_pages_history WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
+                c.execute("DELETE FROM pc_page_text WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
+            pages_purged += 1
+            entries.append({"canvas_id": dcid, "page_number": dpn, "rule": "page_trash_expired", "dry": dry})
+        if dead:
+            conn.commit()
+
     over = active_bytes > watermark_mb * 1024 * 1024
     if over:
         logger.warning("[explore-sweep] 素材目录 %s MB 已超水位 %s MB（在用作品不自动删，请管理员处理）",
@@ -259,10 +285,11 @@ def sweep_once(dry=None):
         logger.warning("[explore-sweep] manifest 写入失败: %s", e)
 
     summary = {"dry": dry, "moved_to_trash": moved, "purged": purged, "healed": healed,
-               "reclaimed": reclaimed, "active_bytes": active_bytes, "over_watermark": over,
+               "reclaimed": reclaimed, "pages_purged": pages_purged,
+               "active_bytes": active_bytes, "over_watermark": over,
                "entries": len(entries)}
-    logger.info("[explore-sweep] 一轮完成 dry=%s 入站=%s 物删=%s 自愈=%s 救回=%s 活动=%sMB",
-                dry, moved, purged, healed, reclaimed, round(active_bytes / 1048576, 1))
+    logger.info("[explore-sweep] 一轮完成 dry=%s 入站=%s 物删=%s 自愈=%s 救回=%s 页面到期=%s 活动=%sMB",
+                dry, moved, purged, healed, reclaimed, pages_purged, round(active_bytes / 1048576, 1))
     return summary
 
 

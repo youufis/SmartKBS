@@ -96,10 +96,10 @@ const FallbackMic: React.FC<{ onText: (t: string) => void; disabled?: boolean }>
     }
   }
   return (
-    <Tooltip title={rec ? '说完了？再点一下结束并转文字' : '口述提问（后端语音识别，需管理员开启）'}>
+    <Tooltip title={rec ? t('micTipOn') : t('micTipOff')}>
       <Button icon={rec ? <LoadingOutlined /> : <AudioOutlined />} type={rec ? 'primary' : 'default'}
         onClick={() => void toggle()} disabled={disabled && !rec}>
-        {rec ? '聆听中…' : '口述'}
+        {rec ? t('micListening') : t('micSay')}
       </Button>
     </Tooltip>
   )
@@ -184,6 +184,10 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
   const refsRef = useRef<KbRefItem[]>([])
   const lastDrawsRef = useRef<{ id: string; ts: number }[]>([])
   const [ctxHint, setCtxHint] = useState('')
+  // 动作行的文字标签按面板实际宽度决定：侧栏 440 / 手机窄屏放不下六个带字按钮（会挤成两行，
+  // 把输入区顶得更窄），这时只留图标 + 悬停说明；宽栏与弹出窗才显示文字。
+  const actionsRef = useRef<HTMLDivElement | null>(null)
+  const [roomy, setRoomy] = useState(true)
   const inputRef = useRef('')
   const textAreaRef = useRef<any>(null)
   const prefillTimer = useRef(0)
@@ -193,6 +197,16 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
   }, [])
 
   useEffect(() => { refreshQuota() }, [refreshQuota])
+
+  useEffect(() => {
+    const el = actionsRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const fit = () => setRoomy(el.clientWidth >= 560)
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // 画布卡片「追问」→ 预填输入框（由工作台派发）
   useEffect(() => {
@@ -219,8 +233,8 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
       const e2 = getEditor()
       if (!e2) { setCtxHint(''); return }
       const n = e2.getSelectedShapeIds().length
-      if (n > 0) setCtxHint('已选中 ' + n + ' 项内容，提问会自动带上')
-      else if (lastDrawsRef.current.some((r) => Date.now() - r.ts < 90000)) setCtxHint('检测到你刚画了个圈，圈住的内容会一起问')
+      if (n > 0) setCtxHint(t('ctxSelected', { n }))
+      else if (lastDrawsRef.current.some((r) => Date.now() - r.ts < 90000)) setCtxHint(t('ctxCircle'))
       else setCtxHint('')
     }
     const onDraw = (ev: Event) => {
@@ -237,7 +251,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
         const smart = smartExcerptInCircle(e3, circ)
         if (smart) {
           setInput(smart)
-          setCtxHint('已提取圈内的文字放进输入框：可直接发送，或改成你的问题')
+          setCtxHint(t('ctxExtracted'))
           window.setTimeout(() => textAreaRef.current?.focus?.(), 60)
           return
         }
@@ -248,7 +262,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
         const excerpt = (pick.startsWith('Q：') ? pick.slice(2) : pick).replace(/[#*·]/g, '').trim().slice(0, 80)
         if (!excerpt) return
         setInput(excerpt)
-        setCtxHint('圈住的内容已放进输入框：可直接发送，或改成你的问题')
+        setCtxHint(t('ctxPlaced'))
         window.setTimeout(() => textAreaRef.current?.focus?.(), 60)
       }, 700)
     }
@@ -395,8 +409,8 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
         y: bounds.center.y - 110,
         props: {
           w: 360, h: 230,
-          question: (c.emoji ? c.emoji + ' ' : '') + '每日精选 · ' + (c.category || ''),
-          answer: c.title + '\n\n' + (c.summary || '') + (c.source ? '\n\n出处：' + c.source : ''),
+          question: (c.emoji ? c.emoji + ' ' : '') + t('pickCardPrefix') + (c.category || ''),
+          answer: c.title + '\n\n' + (c.summary || '') + (c.source ? '\n\n' + t('pickSource') + c.source : ''),
           refs: '[]',
           createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
         },
@@ -432,7 +446,8 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
     const desc = input.trim()
     if (!desc || genBusy) return
     setInput('')
-    setMessages((prev) => [...prev, { role: 'user', content: '🖼 生图：' + desc }, { role: 'assistant', content: '生成中…（SVG 优先，通常十几秒）' }])
+    setMessages((prev) => [...prev,
+      { role: 'user', content: t('msgGenImage', { desc }) }, { role: 'assistant', content: t('msgGenBusy') }])
     setGenBusy(true)
     try {
       const { task_id } = await submitGenerate(desc, '', canvasId)
@@ -440,15 +455,15 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
       const ed = getEditor()
       if (r.mode === 'svg' && r.svg && ed) {
         await ed.putExternalContent({ type: 'svg-text', text: r.svg } as never)
-        setMessages((prev) => [...prev, { role: 'assistant', content: '图示已落画布：' + (r.title || '') }])
+        setMessages((prev) => [...prev, { role: 'assistant', content: t('msgSvgPlaced', { title: r.title || '' }) }])
       } else if (r.mode === 'image' && r.image_url && ed) {
         await ed.putExternalContent({ type: 'url', url: r.image_url } as never)
-        setMessages((prev) => [...prev, { role: 'assistant', content: '图片已落画布：' + (r.title || '') }])
+        setMessages((prev) => [...prev, { role: 'assistant', content: t('msgImagePlaced', { title: r.title || '' }) }])
       } else {
-        setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(r.error, '生成失败') }])
+        setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(r.error, t('genFail')) }])
       }
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(e?.response?.data?.detail, '生成失败') }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(e?.response?.data?.detail, t('genFail')) }])
     } finally {
       setGenBusy(false)
       refreshQuota()
@@ -461,8 +476,8 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
     if (!topic || structBusy) return
     setInput('')
     setMessages((prev) => [...prev,
-      { role: 'user', content: (kind === 'mind' ? '🧠 思维导图：' : '🌌 知识星图：') + topic },
-      { role: 'assistant', content: kind === 'mind' ? '正在排思维导图…' : '正在铺开知识星图…' }])
+      { role: 'user', content: kind === 'mind' ? t('msgMindPrefix', { topic }) : t('msgTopicPrefix', { topic }) },
+      { role: 'assistant', content: kind === 'mind' ? t('msgMindBusy') : t('msgTopicBusy') }])
     setStructBusy(kind)
     setFollowUps([])
     try {
@@ -472,13 +487,13 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
       const r = await pollStruct(task_id)
       if (r.mode === 'shapes' && r.shapes?.length) {
         insertShapes(r.shapes)
-        setMessages((prev) => [...prev, { role: 'assistant', content: (r.intro || ('《' + (r.title || topic) + '》已铺到画布，圈住任何一块都能继续问')) }])
+        setMessages((prev) => [...prev, { role: 'assistant', content: (r.intro || t('msgTopicDone', { title: r.title || topic })) }])
         setFollowUps(r.followups || [])
       } else {
-        setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(r.error, '生成失败') }])
+        setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(r.error, t('genFail')) }])
       }
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(e?.response?.data?.detail, '生成失败') }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: asAssistantText(e?.response?.data?.detail, t('genFail')) }])
     } finally {
       setStructBusy(null)
       refreshQuota()
@@ -551,7 +566,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
         <CustomerServiceOutlined style={{ marginRight: 8 }} />
         <Text strong>{t('panelTitle')}</Text>
         <div style={{ flex: 1 }} />
-        <Tooltip title={popMode ? '收回侧栏' : '弹出对话窗（更大、可拖动）'}>
+        <Tooltip title={popMode ? t('popBack') : t('popOut')}>
           <Button size="small" type="text" icon={popMode ? <ColumnWidthOutlined /> : <ExpandOutlined />}
             onClick={() => { setPos(null); onPopToggle() }} />
         </Tooltip>
@@ -573,9 +588,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
                   <div ref={listRef} style={{ flex: 1, minHeight: 120, overflowY: 'auto', padding: '10px 10px 6px' }}>
         {messages.length === 0 && (
           <Paragraph type="secondary" style={{ fontSize: 12 }}>
-            想问画布上的内容？两种圈法都行：① 用选择工具框选/套索；② 直接用画笔在内容周围画个圈再提问。
-            输入主题后点「导图」铺开思维导图，点「星图」展开一张知识星图。
-            命中教材知识库时，回答下方会标注来源。
+            {t('panelIntro')}
           </Paragraph>
         )}
         {messages.length === 0 && (
@@ -598,13 +611,13 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
             }}>
               {m.role === 'assistant' && m.content && !m.content.startsWith('⚠️')
                 ? <div className="explore-md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
-                : (m.content || (busy ? '思考中…' : ''))}
+                : (m.content || (busy ? t('thinking') : ''))}
               {m.role === 'assistant' && !!m.refs?.length && (
                 <div style={{
                   marginTop: 6, fontSize: 11, color: 'var(--text-secondary, #999)',
                   display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'flex-start',
                 }}>
-                  <span style={{ flexShrink: 0, lineHeight: '20px' }}>教材来源：</span>
+                  <span style={{ flexShrink: 0, lineHeight: '20px' }}>{t('kbSourceLabel')}</span>
                   {uniqRefs(m.refs).map((r, j) => {
                     const label = (r.doc_name || '') + (r.title ? '·' + r.title : '')
                     return (
@@ -619,14 +632,14 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
               )}
               {m.role === 'assistant' && m.content && !m.content.startsWith('⚠️') && i === messages.length - 1 && (
                 <Space size={4} style={{ marginTop: 6 }}>
-                  <Tooltip title="放到画布上，成为可再圈选的内容">
+                  <Tooltip title={t('dropCanvasTip')}>
                     <Button size="small" icon={<ExportOutlined />} onClick={() => placeOnCanvas(m)}>{t('dropCanvas')}</Button>
                   </Tooltip>
-                  <Tooltip title="朗读这条回答">
+                  <Tooltip title={t('readAloudTip')}>
                     <Button size="small" icon={<SoundOutlined />} loading={playBusy} onClick={() => void playTts(m.content)}>{t('readAloud')}</Button>
                   </Tooltip>
                   {!!m.cardId && (
-                    <Tooltip title="在画布上找到这张卡">
+                    <Tooltip title={t('locateTip')}>
                       <Button size="small" icon={<AimOutlined />} onClick={() => {
                         const ed = getEditor()
                         if (!ed || !m.cardId) return
@@ -673,25 +686,29 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
           value={input}
           onChange={(e) => { setInput(e.target.value); inputRef.current = e.target.value }}
           onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); void send() } }}
-          placeholder="想问什么？先圈住画布上的内容，问得更准"
+          placeholder={t('askPh')}
           autoSize={{ minRows: 1, maxRows: 4 }}
           disabled={busy}
         />
-        <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center' }}>
+        <div ref={actionsRef} style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button type="primary" icon={<SendOutlined />} loading={busy} onClick={() => void send()} style={{ marginInlineEnd: 4 }}>{t('askAi')}</Button>
-          <Tooltip title="输入主题，生成思维导图">
-            <Button icon={<ApartmentOutlined />} loading={structBusy === 'mind'} disabled={!!structBusy && structBusy !== 'mind'}
-              onClick={() => void doStructured('mind')} />
+          <Tooltip title={t('mindmapTip')}>
+            <Button icon={<ApartmentOutlined />} aria-label={t('mindmap')} loading={structBusy === 'mind'} disabled={!!structBusy && structBusy !== 'mind'}
+              onClick={() => void doStructured('mind')}>{roomy ? t('mindmap') : null}</Button>
           </Tooltip>
-          <Tooltip title="输入一个词，铺开一整页知识星图（含导语和 5 个可追问）">
-            <Button icon={<DeploymentUnitOutlined />} loading={structBusy === 'topic'} disabled={!!structBusy && structBusy !== 'topic'}
-              onClick={() => void doStructured('topic')} />
+          <Tooltip title={t('topicmapTip')}>
+            <Button icon={<DeploymentUnitOutlined />} aria-label={t('topicmap')} loading={structBusy === 'topic'} disabled={!!structBusy && structBusy !== 'topic'}
+              onClick={() => void doStructured('topic')}>{roomy ? t('topicmap') : null}</Button>
           </Tooltip>
-          <Tooltip title={t('genimg')}><Button icon={<PictureOutlined />} loading={genBusy} onClick={() => void doGenerate()} /></Tooltip>
-          <Tooltip title="贴一条每日精选到画布">
-            <Button icon={<ReadOutlined />} loading={picking} onClick={() => void openPick()} />
+          <Tooltip title={t('genimgTip')}>
+            <Button icon={<PictureOutlined />} aria-label={t('genimg')} loading={genBusy} onClick={() => void doGenerate()}>{roomy ? t('genimg') : null}</Button>
           </Tooltip>
-          <Tooltip title={t('photo')}><Button icon={<CameraOutlined />} onClick={() => setCamOpen(true)} /></Tooltip>
+          <Tooltip title={t('pickTip')}>
+            <Button icon={<ReadOutlined />} aria-label={t('pick')} loading={picking} onClick={() => void openPick()}>{roomy ? t('pick') : null}</Button>
+          </Tooltip>
+          <Tooltip title={t('photoTip')}>
+            <Button icon={<CameraOutlined />} aria-label={t('photo')} onClick={() => setCamOpen(true)}>{roomy ? t('photo') : null}</Button>
+          </Tooltip>
           <div style={{ flex: 1 }} />
           {SPEECH_SUPPORTED
             ? <VoiceInput onTranscript={(txt) => setInput((s) => (s ? s + txt : txt))} disabled={busy} />
@@ -699,7 +716,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
         </div>
       </div>
 
-      <Modal title="贴哪一条到画布？" open={pickOpen} footer={null} onCancel={() => setPickOpen(false)}>
+      <Modal title={t('pickModalTitle')} open={pickOpen} footer={null} onCancel={() => setPickOpen(false)}>
         {pickCards.map((c, i) => (
           <div key={i} style={{ padding: '10px 2px', borderBottom: '1px solid var(--border-color, #f0f0f0)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
@@ -707,7 +724,7 @@ const ExploreAIPanel: React.FC<Props> = ({ canvasId, getEditor, onClose, wide, o
                 <Tag style={{ marginInlineStart: 6 }}>{c.category}</Tag></div>
               <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginTop: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{c.summary}</div>
             </div>
-            <Button size="small" type="primary" onClick={() => pasteCard(c)}>贴上去</Button>
+            <Button size="small" type="primary" onClick={() => pasteCard(c)}>{t('pickPaste')}</Button>
           </div>
         ))}
       </Modal>

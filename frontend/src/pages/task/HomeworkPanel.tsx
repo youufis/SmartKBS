@@ -301,7 +301,7 @@ export const HomeworkSubmitModal: React.FC<SubmitProps> = ({ task, open, onClose
   const extAccept = (allowed.length ? allowed : ['.docx', '.pdf', '.txt', '.md', '.xlsx', '.pptx']).join(',')
 
   return (
-    <Modal maskClosable={false}
+    <Modal mask={{ closable: false }}
       open={open}
       title={`📎 ${task.name}`}
       onCancel={onClose}
@@ -471,7 +471,7 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
     try {
       const res = await tasksApi.publishGrades(task.id)
       Modal[res.notified ? 'success' : 'warning']({
-        title: t('hwPublished'), content: res.message, maskClosable: false,
+        title: t('hwPublished'), content: res.message, mask: { closable: false },
       })
       await load(); onChanged?.()
     } catch (e: any) {
@@ -485,7 +485,7 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
       const res = await tasksApi.getTaskSimilarity(task.id)
       Modal.info({ title: t('hwSimilarity'), content: res.message, description: res.pairs.map(
         (p) => `${p.a} ↔ ${p.b}（${Math.round(p.ratio * 100)}%）`).join('；') || t('hwSimNone'),
-      maskClosable: false })
+      mask: { closable: false } })
       await load()
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('loadDetailFailed'))
@@ -665,7 +665,7 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
         )
       })}
 
-      <Modal maskClosable={false} open={!!review} title={t('hwReview')} onCancel={() => setReview(null)}
+      <Modal mask={{ closable: false }} open={!!review} title={t('hwReview')} onCancel={() => setReview(null)}
         onOk={saveReview} okText={t('save')} cancelText={t('cancel')} confirmLoading={busy === 'review'}
       >
         {review && (

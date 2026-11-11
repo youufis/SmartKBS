@@ -981,7 +981,7 @@ const QuestBankTab: React.FC = () => {
       </Card>
 
       {/* ── 编辑弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('editQuestTitle')}
         open={editModalOpen}
         onOk={handleEditSave}

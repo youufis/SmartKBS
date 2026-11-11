@@ -576,7 +576,7 @@ const ResourceMgmtPage: React.FC = () => {
       ]} />
 
       {/* ── AI 生成 HTML 弹窗 ── */}
-      <Modal maskClosable={false} title={t('resource.aiModalTitle')} open={aiModalOpen}
+      <Modal mask={{ closable: false }} title={t('resource.aiModalTitle')} open={aiModalOpen}
         onCancel={() => setAiModalOpen(false)}
         width={640}
         footer={null}
@@ -804,7 +804,7 @@ const ResourceMgmtPage: React.FC = () => {
       </Modal>
 
       {/* 重命名弹窗 */}
-      <Modal maskClosable={false} title={t('resource.renameModalTitle')} open={renameModal}
+      <Modal mask={{ closable: false }} title={t('resource.renameModalTitle')} open={renameModal}
         onOk={handleRename} onCancel={() => setRenameModal(false)}
         okText={t('resource.renameOk')} cancelText={t('resource.renameCancel')}>
         <Space orientation="vertical" style={{ width: '100%' }}>

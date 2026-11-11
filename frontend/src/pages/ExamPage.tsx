@@ -1354,7 +1354,7 @@ const ExamPage: React.FC = () => {
       </Space>
 
       {/* ── 创建考试弹窗 ── */}
-      <Modal maskClosable={false} title={t('createExam')} open={createModal}
+      <Modal mask={{ closable: false }} title={t('createExam')} open={createModal}
         onCancel={() => closeWithDirtyGuard(createForm.isFieldsTouched(), tc, () => setCreateModal(false))}
         onOk={handleCreate} confirmLoading={saving}
         okText={t('createExam')} width={640}>
@@ -1431,7 +1431,7 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑考试弹窗 ── */}
-      <Modal maskClosable={false} title={t('editExam')} open={editModal}
+      <Modal mask={{ closable: false }} title={t('editExam')} open={editModal}
         onCancel={() => closeWithDirtyGuard(editForm.isFieldsTouched(), tc, () => setEditModal(false))}
         onOk={handleSaveEdit} confirmLoading={saving}
         okText={t('save')} width={640}>
@@ -1501,7 +1501,7 @@ const ExamPage: React.FC = () => {
       {/* ── 题目管理弹窗 ── */}
       <Modal title={`${t('manageQuestions')} - ${questionExam?.title || ''}`}
         open={questionModal}
-        maskClosable={false}
+        mask={{ closable: false }}
         onCancel={() => closeQModal()}
         width={960}
         footer={[
@@ -1881,7 +1881,7 @@ const ExamPage: React.FC = () => {
       {/* ── 卷面体检弹窗 ── */}
       <Modal title={<Space><SafetyCertificateOutlined />{t('paperHealth')}</Space>}
         open={healthModal}
-        maskClosable={false}
+        mask={{ closable: false }}
         onCancel={() => setHealthModal(false)}
         width={860}
         footer={[
@@ -2669,7 +2669,7 @@ const StudentExamDetail: React.FC<{
       })}
 
       {/* ── 教师复核弹窗 ── */}
-      <Modal maskClosable={false} title={t('reviewAiTitle')} open={reviewModal} onCancel={() => setReviewModal(false)}
+      <Modal mask={{ closable: false }} title={t('reviewAiTitle')} open={reviewModal} onCancel={() => setReviewModal(false)}
         onOk={handleReviewSubmit} confirmLoading={reviewing}
         okText={t('confirmRecheck')} cancelText={t('cancel')}>
         <Space orientation="vertical" style={{ width: '100%' }}>

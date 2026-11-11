@@ -574,7 +574,7 @@ const AnnouncementsPage: React.FC = () => {
       </Modal>
 
       {/* ── AI 生成公告弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('anDraftTitle')}
         open={aiModal}
         onCancel={() => setAiModal(false)}
@@ -610,7 +610,7 @@ const AnnouncementsPage: React.FC = () => {
       </Modal>
 
       {/* ── 发布公告弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('addAnnouncement')}
         open={createModal}
         onCancel={() => { setCreateModal(false); setAnnounceScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
@@ -657,7 +657,7 @@ const AnnouncementsPage: React.FC = () => {
         </Form>
       </Modal>
       {/* ── 编辑公告弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('editAnnouncement')}
         open={!!editModal}
         onCancel={() => setEditModal(null)}

@@ -680,7 +680,7 @@ const DiscussionPage: React.FC = () => {
 
       {/* 创建讨论弹窗 */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         title={t('createDiscussionTitle')}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
@@ -694,7 +694,7 @@ const DiscussionPage: React.FC = () => {
 
       {/* 编辑讨论弹窗 */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         title={t('editDiscussion')}
         open={editOpen}
         onCancel={() => { setEditOpen(false); setEditing(null) }}
@@ -855,7 +855,7 @@ const DiscussionPage: React.FC = () => {
       </Modal>
 
       {/* AI generate plan modal */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('aiGenerateTopic')}
         open={aiModal}
         onCancel={() => setAiModal(false)}

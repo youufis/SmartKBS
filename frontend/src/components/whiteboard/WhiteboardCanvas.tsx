@@ -13,6 +13,7 @@ import { useWhiteboardStore } from '../../stores/whiteboardStore'
 import { useWhiteboardWS } from '../../hooks/useWhiteboardWS'
 import apiClient from '../../api/client'
 import { reportLoadError } from '../../utils/loadError'
+import { TLUI_ZH_OVERRIDES } from '../../constants/tldrawUiZh'
 import { startPoller, stopPoller } from '../../utils/poller'
 
 // 使用自建 WebSocket 后端，屏蔽 TLDraw 默认的云同步面板和右下角水印
@@ -600,7 +601,7 @@ ws.send({ type: 'request_sync' })
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Tldraw onMount={handleMount} components={minimalComponents}
-        assets={assetStore} licenseKey="oss" />
+        assets={assetStore} licenseKey="oss" overrides={TLUI_ZH_OVERRIDES} />
       {/* 隐藏 TLDraw 右下角 "Get a license for production" 水印 */}
       <style>{`
         .tl-watermark,

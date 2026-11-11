@@ -2,22 +2,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { Editor } from 'tldraw'
 import { Button, Drawer, Dropdown, Empty, Input, Modal, Popconfirm, Space, Tabs, Tag, Tooltip, message } from 'antd'
-import { AppstoreOutlined, ArrowLeftOutlined, CustomerServiceOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, HistoryOutlined, MoreOutlined, PlusSquareOutlined, SendOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, ArrowLeftOutlined, CustomerServiceOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, HistoryOutlined, MoreOutlined, PlusSquareOutlined, RestOutlined, SendOutlined } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import ExploreCanvas from '../components/explore/ExploreCanvas'
+import PageThumb from '../components/explore/PageThumb'
 import { useAuthStore } from '../stores/authStore'
 import ExploreAIPanel from '../components/explore/ExploreAIPanel'
 import { insertShapesIntoEditor } from '../components/explore/shapeInsert'
 import { BUILTIN_TEMPLATES } from '../constants/exploreTemplates'
 import {
-  addPage, archivePage, archivePortfolio, createShare, deletePage, getCanvas, getQuota, pageHistory, publishTemplate, renameCanvas, restoreHistory, savePage, speak, uploadAsset,
-  type ExplorePageMeta, type HistoryItem, type SaveState,
+  addPage, archivePage, archivePortfolio, createShare, deletePage, getCanvas, getQuota, listPageTrash, pageHistory, publishTemplate, renameCanvas, restoreHistory, restorePage, savePage, speak, uploadAsset,
+  type ExplorePageMeta, type HistoryItem, type PageTrashItem, type SaveState,
 } from '../api/explore'
 
 // 连续使用提醒默认 40 分钟，实际值由 /api/explore/quota 按系统配置下发
 
 /** 角色判定走平台统一数据源（authStore 的 role 是字符串 student/teacher/admin） */
+
+/** 页面标题的默认形态（后端自动写“第 N 页”）：命中就按现存顺序显示连续序号，自定义标题原样保留 */
+const DEFAULT_PAGE_TITLE = /^第\s*\d+\s*页$/
 
 const ExploreWorkspacePage: React.FC = () => {
   const { canvasId } = useParams()
@@ -58,6 +62,9 @@ const ExploreWorkspacePage: React.FC = () => {
   const cardAudioRef = useRef<HTMLAudioElement | null>(null)
   const [archiving, setArchiving] = useState(false)
   const [histItems, setHistItems] = useState<HistoryItem[]>([])
+  // 页面回收站：删掉的页只是软删，快照和时间线都还在，30 天内可还原
+  const [pageTrash, setPageTrash] = useState<PageTrashItem[]>([])
+  const [pageTrashOpen, setPageTrashOpen] = useState(false)
   // ── M2：分享给老师 / 发布为模板 ──
   const [shareOpen, setShareOpen] = useState(false)
   const [shareTitle, setShareTitle] = useState('')
@@ -90,6 +97,7 @@ const ExploreWorkspacePage: React.FC = () => {
       const d = await getCanvas(cid)
       setTitle(d.canvas.title)
       setPages(d.pages)
+      void listPageTrash(cid).then(setPageTrash).catch(() => setPageTrash([]))
       if (d.pages.length && !d.pages.some((p) => p.page_number === current)) {
         setCurrent(d.pages[0].page_number)
       }
@@ -98,6 +106,12 @@ const ExploreWorkspacePage: React.FC = () => {
       nav('/explore')
     }
   }, [cid, current, nav]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 这一页在页签上的序号：page_number 是稳定内部编号，删页会留空洞，展示要用位置 */
+  const ordinalOf = useCallback((pn: number) => {
+    const i = pages.findIndex((p) => p.page_number === pn)
+    return i >= 0 ? i + 1 : pn
+  }, [pages])
 
   useEffect(() => { if (Number.isFinite(cid) && cid > 0) void refresh() }, [cid]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -127,7 +141,7 @@ const ExploreWorkspacePage: React.FC = () => {
       if (d.action === 'followup') {
         localStorage.setItem('explore:panel:open', '1')
         setPanelOpen(true)
-        setPendingAsk({ text: '关于「' + (d.question || '').slice(0, 24) + '」，我还想问：', nonce: Date.now() })
+        setPendingAsk({ text: t('followupPrefix', { q: (d.question || '').slice(0, 24) }), nonce: Date.now() })
       } else if (d.action === 'speak') {
         speak(d.answer || d.question || '').then((r) => {
           r.urls.reduce((p, url) => p.then(() => new Promise<void>((resolve) => {
@@ -260,7 +274,7 @@ const ExploreWorkspacePage: React.FC = () => {
       const { blob } = await ed.toImage(shapes as never, { format: 'png', background: true, padding: 24 })
       const png = new File([blob], 'archive.png', { type: 'image/png' })
       const up = await uploadAsset(cid, png)
-      const r = await archivePortfolio(cid, current, { image_src: up.src, title: title ? title + ' · 第 ' + current + ' 页' : '' })
+      const r = await archivePortfolio(cid, current, { image_src: up.src, title: title ? title + ' · ' + t('pageLabel', { n: ordinalOf(current) }) : '' })
       const badgeText = (r.badges || []).map((b) => b.icon + ' ' + b.name).join('、')
       message.success(t('archDone')
         + (r.points ? t('archPoints', { n: r.points }) : '')
@@ -289,7 +303,7 @@ const ExploreWorkspacePage: React.FC = () => {
       revRef.current = (await savePage(cid, current, JSON.stringify(ed.getSnapshot()), undefined, revRef.current)).rev ?? revRef.current
       setSaveState('saved')
       setHistOpen(false)
-      message.success(t('histDone', { id: hid }))
+      message.success(t('histDone'))
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('histFail'))
     }
@@ -312,11 +326,28 @@ const ExploreWorkspacePage: React.FC = () => {
       onOk: async () => {
         try {
           await deletePage(cid, pn)
-          if (pn === current) setCurrent(1)
+          const next = pages.find((p) => p.page_number !== pn)
+          if (next) setCurrent(next.page_number)
           await refresh()
+          message.success(t('pageTrashed'))
         } catch (e: any) { message.error(e?.response?.data?.detail || t('delPageFail')) }
       },
     })
+  }
+
+  const openPageTrash = async () => {
+    try { setPageTrash(await listPageTrash(cid)) } catch { setPageTrash([]) }
+    setPageTrashOpen(true)
+  }
+
+  const doRestorePage = async (pn: number) => {
+    try {
+      await restorePage(cid, pn)
+      setPageTrash(await listPageTrash(cid).catch(() => []))
+      setCurrent(pn)
+      await refresh()
+      message.success(t('pageRestored'))
+    } catch (e: any) { message.error(e?.response?.data?.detail || t('pageRestoreFail')) }
   }
 
   const doRename = async () => {
@@ -331,21 +362,22 @@ const ExploreWorkspacePage: React.FC = () => {
 
   const displayPages: ExplorePageMeta[] = pages.length
     ? pages
-    : [{ page_number: 1, title: '第 1 页', updated_at: '' }]
+    : [{ page_number: 1, ordinal: 1, title: '第 1 页', updated_at: '' }]
 
-  const tabItems = displayPages.map((p) => ({
+  const tabItems = displayPages.map((p, i) => ({
     key: String(p.page_number),
-    label: p.title,
+    // 删过页的画布 page_number 不连续，页签一律按现存顺序重新编号
+    label: DEFAULT_PAGE_TITLE.test(p.title || '') ? t('pageLabel', { n: p.ordinal ?? i + 1 }) : p.title,
     closable: displayPages.length > 1,
   }))
 
   const saveTagMap: Record<SaveState, { text: string; color: string }> = {
-    idle: { text: '已保存', color: 'default' },
-    saving: { text: '保存中', color: 'processing' },
-    saved: { text: '已保存', color: 'success' },
-    offline: { text: '离线·本地已暂存', color: 'warning' },
-    conflict: { text: '别处已修改·本地已暂存', color: 'error' },
-    toolarge: { text: '内容过大·未能存云端', color: 'error' },
+    idle: { text: t('saveIdle'), color: 'default' },
+    saving: { text: t('saveSaving'), color: 'processing' },
+    saved: { text: t('saveSaved'), color: 'success' },
+    offline: { text: t('saveOffline'), color: 'warning' },
+    conflict: { text: t('saveConflict'), color: 'error' },
+    toolarge: { text: t('saveTooLarge'), color: 'error' },
   }
   const tag = saveTagMap[saveState]
 
@@ -394,7 +426,7 @@ const ExploreWorkspacePage: React.FC = () => {
           <>
             <Button size="small" icon={<AppstoreOutlined />} onClick={doOrganize}>{t('organize')}</Button>
             <Button size="small" icon={<HistoryOutlined />} onClick={() => void openHistory()}>{t('history')}</Button>
-            <Tooltip title="把本页作品存入成长档案">
+            <Tooltip title={t('archiveTip')}>
               <Button size="small" icon={<FolderAddOutlined />} loading={archiving} onClick={() => void doArchive()}>{t('archive')}</Button>
             </Tooltip>
             {myRole === 'student' && (
@@ -407,7 +439,7 @@ const ExploreWorkspacePage: React.FC = () => {
                 <Button size="small" icon={<PlusSquareOutlined />} onClick={() => { setTplTitle(title); setTplOpen(true) }}>{t('tplBtn')}</Button>
               </Tooltip>
             )}
-            <Tooltip title="清空当前页（可经时间线找回）">
+            <Tooltip title={t('clearTip')}>
               <Button size="small" icon={<DeleteOutlined />} onClick={doClearPage}>{t('clearPage')}</Button>
             </Tooltip>
             <Button size="small" type={panelOpen ? 'primary' : 'default'} icon={<CustomerServiceOutlined />} onClick={togglePanel}>{t('aiAssistant')}</Button>
@@ -423,6 +455,16 @@ const ExploreWorkspacePage: React.FC = () => {
         onEdit={(targetKey, action) => {
           if (action === 'add') void doAddPage()
           else if (action === 'remove') doDeletePage(Number(targetKey))
+        }}
+        tabBarExtraContent={{
+          right: (
+            <Tooltip title={t('pageTrashTip')}>
+              <Button size="small" type="text" icon={<RestOutlined />} onClick={() => void openPageTrash()}>
+                {mobile ? (pageTrash.length ? String(pageTrash.length) : null)
+                  : t('pageTrash') + (pageTrash.length ? ' · ' + pageTrash.length : '')}
+              </Button>
+            </Tooltip>
+          ),
         }}
         style={{ padding: '0 16px', flexShrink: 0 }}
       />
@@ -452,11 +494,12 @@ const ExploreWorkspacePage: React.FC = () => {
             onAskConsumed={() => setPendingAsk(null)}
           />
         ) : (
-          <Tooltip title="唤起 AI 助手（问 / 画 / 说 / 贴）">
+          <Tooltip title={t('aiFabTip')}>
             <button
+              className="explore-fab"
               onClick={togglePanel}
               style={{
-                position: 'absolute', right: 22, bottom: 26, zIndex: 25,
+                position: 'absolute', zIndex: 25,
                 width: 54, height: 54, borderRadius: '50%', cursor: 'pointer',
                 border: '1px solid var(--border-color, #d9e3f2)', background: '#fff',
                 boxShadow: '0 4px 16px rgba(15, 35, 75, 0.18)', fontSize: 26, lineHeight: 1,
@@ -481,23 +524,31 @@ const ExploreWorkspacePage: React.FC = () => {
         </Space>
       </Modal>
 
-      <Drawer title={t('histTitle')} placement="right" width={340} open={histOpen} onClose={() => setHistOpen(false)}>
+      <Drawer title={t('histTitle')} placement="right" size={mobile ? 320 : 400} open={histOpen} onClose={() => setHistOpen(false)}>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', lineHeight: 1.7, marginBottom: 10 }}>
+          {t('histHint')}
+        </div>
         {histItems.length === 0 ? (
           <Empty description={t('histEmpty')} />
         ) : (
           <div>
-            {histItems.map((it) => (
+            {histItems.map((it, i) => (
               <div key={it.id} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                display: 'flex', alignItems: 'center', gap: 10,
                 padding: '10px 2px', borderBottom: '1px solid var(--border-color, #f0f0f0)',
               }}>
-                <div>
+                <PageThumb preview={it.preview} width={mobile ? 96 : 128} height={mobile ? 70 : 92} />
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{it.saved_at}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)' }}>{Math.max(1, Math.round(it.bytes / 1024))} KB</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginTop: 2 }}>
+                    {Math.max(1, Math.round(it.bytes / 1024))} KB
+                    {i === 0 && <Tag style={{ marginInlineStart: 6 }}>{t('histLatest')}</Tag>}
+                  </div>
+                  <Popconfirm title={t('restoreTitle')} description={t('restoreBody')} okText={t('restoreOk')}
+                    onConfirm={() => void doRestore(it.id)}>
+                    <Button size="small" style={{ marginTop: 8 }}>{t('restoreHere')}</Button>
+                  </Popconfirm>
                 </div>
-                <Popconfirm title={t('restoreTitle')} description={t('restoreBody')} okText={t('restore')} onConfirm={() => void doRestore(it.id)}>
-                  <Button size="small">{t('restoreHere')}</Button>
-                </Popconfirm>
               </div>
             ))}
           </div>
@@ -508,13 +559,47 @@ const ExploreWorkspacePage: React.FC = () => {
         .explore-canvas-wrap .tlui-style-panel__wrapper { transition: transform 0.18s ease; }
         /* 弹出对话窗 = 专注对话：tldraw 工具栏与样式面板让位，收回侧栏模式即恢复 */
         .explore-canvas-wrap.panel-pop .tlui-style-panel__wrapper { display: none; }
-        .explore-canvas-wrap.panel-pop .tlui-toolbar { display: none; }
+        /* tldraw 5.x 把工具条根节点改名成 .tlui-main-toolbar，两个都写，否则规则是死的 */
+        .explore-canvas-wrap.panel-pop .tlui-toolbar,
+        .explore-canvas-wrap.panel-pop .tlui-main-toolbar { display: none; }
         .explore-canvas-wrap.panel-open .tlui-style-panel__wrapper { transform: translateX(-470px); }
         .explore-canvas-wrap.panel-open.panel-wide .tlui-style-panel__wrapper { transform: translateX(-670px); }
         @media (max-width: 1000px) {
           .explore-canvas-wrap.panel-open .tlui-style-panel__wrapper { display: none; }
         }
+        /* 悬浮 AI 入口：默认压在右下角，手机上要抬到 tldraw 工具条之上 */
+        .explore-fab { right: 22px; bottom: 26px; }
+        /* 手机上 AI 面板占下半屏：tldraw 工具条/样式面板不让位就会盖住输入区（点不到也看不见） */
+        @media (max-width: 767px) {
+          .explore-canvas-wrap .tlui-style-panel__wrapper { display: none; }
+          .explore-canvas-wrap.panel-open .tlui-toolbar,
+          .explore-canvas-wrap.panel-open .tlui-main-toolbar { display: none; }
+          .explore-fab { right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 108px); }
+        }
       `}</style>
+
+      <Modal title={t('pageTrashTitle')} open={pageTrashOpen} onCancel={() => setPageTrashOpen(false)}
+        footer={<Button onClick={() => setPageTrashOpen(false)}>{t('close')}</Button>} width={560}>
+        {pageTrash.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('pageTrashEmpty')} />
+        ) : (
+          pageTrash.map((p) => (
+            <div key={p.page_number} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px',
+              borderBottom: '1px solid var(--border-color, #f0f0f0)',
+            }}>
+              <PageThumb preview={p.preview} width={104} height={76} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{p.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginTop: 2 }}>
+                  {t('pageTrashRow', { time: p.archived_at, n: p.history_count })}
+                </div>
+              </div>
+              <Button size="small" type="primary" onClick={() => void doRestorePage(p.page_number)}>{t('restore')}</Button>
+            </div>
+          ))
+        )}
+      </Modal>
 
       <Modal title={t('rename')} open={renameOpen} onOk={doRename} onCancel={() => setRenameOpen(false)}>
         <Input value={nameInput} maxLength={60} onChange={(e) => setNameInput(e.target.value)} onPressEnter={doRename} autoFocus />

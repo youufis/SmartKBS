@@ -610,7 +610,7 @@ const QuickQuizConsole: React.FC = () => {
       )}
 
       {/* ── 从题库选题弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={<Space><DatabaseOutlined style={{ color: '#1677ff' }} /> {t('selectFromBank')}</Space>}
         open={bankModalOpen}
         onCancel={() => { setBankModalOpen(false); setSelectedBankIds([]) }}

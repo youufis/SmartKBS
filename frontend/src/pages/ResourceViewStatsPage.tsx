@@ -349,7 +349,7 @@ const ResourceViewStatsPage: React.FC = () => {
 
       {/* 学生明细：宽弹窗（原来铺在页面最底部，点完还得往下滚） */}
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         open={detailModalOpen}
         onCancel={() => setDetailModalOpen(false)}
         footer={<Button onClick={() => setDetailModalOpen(false)}>{t('activityMonitor.close')}</Button>}

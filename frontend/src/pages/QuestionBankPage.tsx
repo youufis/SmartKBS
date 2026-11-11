@@ -1417,7 +1417,7 @@ const QuestionBankPage: React.FC = () => {
       </Space>
 
       {/* ── 编辑弹窗 ── */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('editQuestion_', { id: editingQuestion?.id })}
         open={editModal}
         onOk={handleSaveEdit}

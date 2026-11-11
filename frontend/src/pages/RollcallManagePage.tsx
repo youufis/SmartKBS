@@ -1544,7 +1544,7 @@ const AttendanceStats: React.FC = () => {
       </Card>
 
       {/* 清除确认弹窗 */}
-      <Modal maskClosable={false}
+      <Modal mask={{ closable: false }}
         title={t('confirmClearLogTitle')}
         open={clearModalVisible}
         onOk={handleClearLogs}

@@ -197,6 +197,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "EXPLORE_ASSET_TRASH_DAYS": 14,          # 回收站保留（天），到期物理删除
     "EXPLORE_TMP_HOURS": 24,                 # 临时素材（如 ASR 录音）存活小时数
     "EXPLORE_CANVAS_TRASH_DAYS": 30,       # 回收站画布保留（天），到期连页面/历史一并销毁
+    "EXPLORE_PAGE_TRASH_DAYS": 30,         # 页面回收站保留（天），到期连时间线存档一并销毁
     "EXPLORE_SHARE_EXPIRE_DAYS": 7,         # 学生分享给老师的只读快照保留（天），到期自动回收
     "EXPLORE_ASSET_MAX_MB": 1024,            # 素材目录水位（MB）；全在用则只告警不强删
     "EXPLORE_SWEEP_HOUR": 3,                 # 每日自动清理时段（凌晨低峰）
@@ -581,6 +582,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "CHAT_ASSET_GC_DAYS": (0, 3650),
     "EXPLORE_CONTINUOUS_REMIND_MIN": (5, 180), "EXPLORE_ASSET_ORPHAN_DAYS": (1, 365),
     "EXPLORE_ASSET_TRASH_DAYS": (1, 90), "EXPLORE_TMP_HOURS": (1, 168), "EXPLORE_CANVAS_TRASH_DAYS": (7, 365), "EXPLORE_SHARE_EXPIRE_DAYS": (1, 90),
+    "EXPLORE_PAGE_TRASH_DAYS": (1, 365),
     "EXPLORE_ASSET_MAX_MB": (64, 10240), "EXPLORE_SWEEP_HOUR": (0, 23), "EXPLORE_TTS_CACHE_MB": (50, 4000),
     "EXPLORE_ASR_MINUTES": (1, 120),
     "wrong_practice_threshold": (0, 500),

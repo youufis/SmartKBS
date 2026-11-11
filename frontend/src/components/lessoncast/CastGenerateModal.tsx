@@ -351,7 +351,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
       open={open}
       title={`AI 讲演 · ${kp?.name || ''}`}
       onCancel={() => { if (!busy) onClose(); }}
-      maskClosable={!busy}
+      mask={{ closable: !busy }}
       footer={null}
       width={step === 'outline' ? 760 : 620}
       destroyOnHidden

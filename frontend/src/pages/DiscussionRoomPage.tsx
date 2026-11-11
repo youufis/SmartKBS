@@ -796,7 +796,7 @@ const DiscussionRoomPage: React.FC = () => {
       </Modal>
 
       <Modal
-        maskClosable={false}
+        mask={{ closable: false }}
         title={t('broadcast')}
         open={broadcastOpen}
         onCancel={() => setBroadcastOpen(false)}

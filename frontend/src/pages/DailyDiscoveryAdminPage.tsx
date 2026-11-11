@@ -271,7 +271,7 @@ const DailyDiscoveryAdminPage: React.FC = () => {
       <Modal
         title={t('edit')}
         open={!!editing}
-        maskClosable={false}
+        mask={{ closable: false }}
         onCancel={() => setEditing(null)}
         onOk={save}
         okText={t('save')}

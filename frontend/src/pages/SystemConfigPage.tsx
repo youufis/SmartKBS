@@ -461,6 +461,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'EXPLORE_TMP_HOURS', labelKey: 'field_EXPLORE_TMP_HOURS', descKey: 'field_EXPLORE_TMP_HOURS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitHour' },
   { key: 'EXPLORE_TTS_CACHE_MB', labelKey: 'field_EXPLORE_TTS_CACHE_MB', descKey: 'field_EXPLORE_TTS_CACHE_MB_desc', type: 'number', group: 'explore', required: false },
   { key: 'EXPLORE_CANVAS_TRASH_DAYS', labelKey: 'field_EXPLORE_CANVAS_TRASH_DAYS', descKey: 'field_EXPLORE_CANVAS_TRASH_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
+  { key: 'EXPLORE_PAGE_TRASH_DAYS', labelKey: 'field_EXPLORE_PAGE_TRASH_DAYS', descKey: 'field_EXPLORE_PAGE_TRASH_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
   { key: 'EXPLORE_SHARE_EXPIRE_DAYS', labelKey: 'field_EXPLORE_SHARE_EXPIRE_DAYS', descKey: 'field_EXPLORE_SHARE_EXPIRE_DAYS_desc', type: 'number', group: 'explore', required: false, unitKey: 'unitDay' },
   { key: 'EXPLORE_ASSET_MAX_MB', labelKey: 'field_EXPLORE_ASSET_MAX_MB', descKey: 'field_EXPLORE_ASSET_MAX_MB_desc', type: 'number', group: 'explore', required: false },
   { key: 'EXPLORE_SWEEP_HOUR', labelKey: 'field_EXPLORE_SWEEP_HOUR', descKey: 'field_EXPLORE_SWEEP_HOUR_desc', type: 'number', group: 'explore', required: false },
