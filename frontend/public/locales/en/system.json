@@ -1748,5 +1748,11 @@
   "field_EXAM_WA_MAX_QUESTIONS": "Error review question cap",
   "field_EXAM_WA_MAX_QUESTIONS_desc": "How many highest-error questions one class review covers (1-30, default 8) — bounds wait time and token cost",
   "field_EXAM_WA_RATE_CEILING": "Error review accuracy threshold (%)",
-  "field_EXAM_WA_RATE_CEILING_desc": "Only questions with accuracy below this enter the review (10-100, default 90); lower = only the worst, higher = wider coverage"
+  "field_EXAM_WA_RATE_CEILING_desc": "Only questions with accuracy below this enter the review (10-100, default 90); lower = only the worst, higher = wider coverage",
+  "field_EXAM_ANTI_COPY": "Question copy protection",
+  "field_EXAM_ANTI_COPY_desc": "On exam / practice / quiz answer pages, block selecting, copying, right-click and print shortcuts; answer inputs stay unaffected",
+  "field_EXAM_ANTI_COPY_tip": "Raises the cost of lifting questions but cannot stop OS screenshots, phone photos or DevTools. Answering and pasting answers keep working. Off by default — enable only for formal exams.",
+  "field_EXAM_WATERMARK": "Answer-page personal watermark",
+  "field_EXAM_WATERMARK_desc": "Tiles a faint “name · student ID · time” watermark so leaked screenshots can be traced",
+  "field_EXAM_WATERMARK_tip": "The overlay never blocks clicks or scrolling and appears in print. It contains personal data — use it only for leak tracing and tell students."
 }

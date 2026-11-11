@@ -369,5 +369,6 @@
   "answerNavLabel": "Question no.",
   "jumpToQuestion": "Question {{n}}",
   "leaveConfirmOk": "Leave",
-  "codeChip": "{{count}}-line code"
+  "codeChip": "{{count}}-line code",
+  "antiCopyBlocked": "Question text can't be copied — please answer directly"
 }

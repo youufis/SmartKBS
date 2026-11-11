@@ -23,6 +23,7 @@ import { useSearchParams } from 'react-router-dom'
 import ScopeTag from '../components/ScopeTag'
 import AnswerLine from '../components/AnswerLine'
 import { useAuthStore } from '../stores/authStore'
+import { ExamWatermark, GUARD_PROPS, useExamProtect } from '../components/ExamProtect'
 import KnowledgePointSelect, { joinKps } from '../components/KnowledgePointSelect'
 import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
@@ -48,6 +49,8 @@ const isQuizPending = (r: any) => r?.grading === 'pending' || r?.graded_by === '
 const InteractionPage: React.FC = () => {
   const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
+  const protect = useExamProtect()   // 防复制与水印开关（系统配置，默认全关）
+
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
 
@@ -783,8 +786,9 @@ const InteractionPage: React.FC = () => {
             }
           />
         )}
+        <ExamWatermark show={protect.watermark} />
         {takingQuiz?.questions?.map((q: any, i: number) => (
-          <div key={i} id={`quiz-q-${i}`} style={{ marginBottom: 12, padding: 12, background: 'var(--bg-layout)', borderRadius: 4, border: '1px solid var(--border-color)' }}>
+          <div key={i} id={`quiz-q-${i}`} {...(protect.antiCopy ? GUARD_PROPS : {})} style={{ marginBottom: 12, padding: 12, background: 'var(--bg-layout)', borderRadius: 4, border: '1px solid var(--border-color)' }}>
             <div style={{ marginBottom: 8 }}>
               <Text strong>{i + 1}. </Text>
               <FormulaRenderer content={q.question || q.question_text} />

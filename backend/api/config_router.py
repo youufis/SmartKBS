@@ -262,6 +262,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "AI_JSON_OBJECT_MODE": False,          # 强制 response_format=json_object（个别网关不支持，失败会自动降级）
     "AI_STRICT_PARSE": True,               # 严格解析：不接受截断救回的残缺结果，并逐题做字段体检
     "IMAGE_EXTRACT_MAX_TOKENS": 8000,      # 单次图片识别（题目提取）的 token 预算，长图/多图可上调
+    # 学生作答页防泄题（默认全关：关掉时前端不挂监听、不注入水印，作答链路与改动前一致）
+    "EXAM_ANTI_COPY": False,             # 题目区禁止选中/复制/剪切/右键/打印快捷键，输入区始终豁免
+    "EXAM_WATERMARK": False,             # 作答页平铺个人水印（姓名 + 学号 + 时间），用于事后追溯
     "EXAM_WA_MAX_QUESTIONS": 8,            # 全班错因讲评一次最多讲几道题（控 token 与等待时间）
     "EXAM_WA_RATE_CEILING": 90,            # 正确率低于此百分比的题目才进讲评
     # AI 线程池并发上限 — 全站同步 AI 调用（图示/板书/出题/批改/讨论/闯关）共用的工作线程数。
@@ -672,6 +675,7 @@ _BOOL_KEYS = {
     "SHOWCASE_AUTO_ENABLED",
     "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
     "AI_JSON_OBJECT_MODE", "AI_STRICT_PARSE",
+    "EXAM_ANTI_COPY", "EXAM_WATERMARK",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
     "HOMEWORK_ENABLE_VL",
 }
@@ -1305,6 +1309,16 @@ async def get_public_config():
     return {
         "AGENT_NAME": full_name,
         "ORG_NAME": cfg.get("ORG_NAME", ""),
+    }
+
+
+@router.get("/exam-protect", summary="学生作答页防复制与水印开关（登录后）")
+async def get_exam_protect(request: Request):
+    """作答页进页面时取一次。前端读不到就按全关处理——配置异常绝不能影响学生答题。"""
+    get_current_user(request)
+    return {
+        "anti_copy": bool(get_config_value("EXAM_ANTI_COPY", False)),
+        "watermark": bool(get_config_value("EXAM_WATERMARK", False)),
     }
 
 

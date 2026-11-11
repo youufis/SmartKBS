@@ -1748,5 +1748,11 @@
   "field_EXAM_WA_MAX_QUESTIONS": "错因讲评题目数上限",
   "field_EXAM_WA_MAX_QUESTIONS_desc": "「全班错因讲评」一次最多讲几道错误率最高的题（1~30，默认 8），控制等待时间与算力消耗",
   "field_EXAM_WA_RATE_CEILING": "错因讲评正确率阈值（%）",
-  "field_EXAM_WA_RATE_CEILING_desc": "正确率低于这个百分比的题目才进入讲评（10~100，默认 90）；调低=只讲最差的几题，调高=讲评范围更宽"
+  "field_EXAM_WA_RATE_CEILING_desc": "正确率低于这个百分比的题目才进入讲评（10~100，默认 90）；调低=只讲最差的几题，调高=讲评范围更宽",
+  "field_EXAM_ANTI_COPY": "题目防复制",
+  "field_EXAM_ANTI_COPY_desc": "考试 / 同步练习 / 随堂测验的作答页禁止选中、复制、右键与打印快捷键；答题输入框不受影响",
+  "field_EXAM_ANTI_COPY_tip": "只提高搬运成本，拦不住系统截屏、手机拍照和开发者工具。开启后学生复制题目会被提示，正常作答与粘贴答案不受影响。默认关闭，建议只在正式考试时临时开启。",
+  "field_EXAM_WATERMARK": "作答页个人水印",
+  "field_EXAM_WATERMARK_desc": "作答页平铺「姓名 · 学号 · 时间」浅色水印，截图外传后可追溯到人",
+  "field_EXAM_WATERMARK_tip": "水印层不拦截点击、不影响答题与滚动，打印时也会带上。含学生个人信息，仅用于泄题追溯，请在考试说明里告知学生。"
 }

@@ -365,5 +365,6 @@
   "answerNavLabel": "题号",
   "jumpToQuestion": "第 {{n}} 题",
   "leaveConfirmOk": "离开",
-  "codeChip": "代码 {{count}} 行"
+  "codeChip": "代码 {{count}} 行",
+  "antiCopyBlocked": "题目内容不可复制，请直接作答"
 }

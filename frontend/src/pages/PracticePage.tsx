@@ -20,6 +20,7 @@ import MediaDisplay from '../components/MediaDisplay'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
+import { ExamWatermark, GUARD_PROPS, useExamProtect } from '../components/ExamProtect'
 import { classText } from '../utils/studentLabel'
 import ScopeTag from '../components/ScopeTag'
 import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTypes'
@@ -187,6 +188,8 @@ const SessionRoster: React.FC<{
 // ════════════════════════════════════════
 const StudentView: React.FC = () => {
   const { t } = useTranslation('practice')
+  const protect = useExamProtect()   // 防复制与水印开关（系统配置，默认全关）
+
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const openedRef = useRef(false)
@@ -460,8 +463,9 @@ const StudentView: React.FC = () => {
           />
         </div>
         <Divider />
+        <ExamWatermark show={protect.watermark} />
         {questions.map((q, i) => (
-          <Card key={q.id} id={`practice-q-${i}`} size="small" title={t('questionNWithType', { n: i+1, type: typeLabel[q.type] || q.type })}
+          <Card key={q.id} id={`practice-q-${i}`} size="small" {...(protect.antiCopy ? GUARD_PROPS : {})} title={t('questionNWithType', { n: i+1, type: typeLabel[q.type] || q.type })}
             style={{ marginBottom: 12 }}>
             <FormulaRenderer content={q.question_text} />
             <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} />

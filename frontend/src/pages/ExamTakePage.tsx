@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import { ExamWatermark, GUARD_PROPS, useExamProtect } from '../components/ExamProtect'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import * as examsApi from '../api/exams'
 import type { ExamInfo, ExamQuestion } from '../types'
@@ -68,6 +69,8 @@ function pickRestoredAnswers(attempt: any, examId: string | number, attemptId?: 
 
 const ExamTakePage: React.FC = () => {
   const { t } = useTranslation('exam')
+  const protect = useExamProtect()   // 防复制与水印开关（系统配置，默认全关）
+
   const { examId } = useParams<{ examId: string }>()
   const navigate = useNavigate()
   const { token } = theme.useToken()
@@ -340,6 +343,7 @@ const ExamTakePage: React.FC = () => {
     return (
       <Card
         key={q.id}
+        {...(protect.antiCopy ? GUARD_PROPS : {})}
         title={
           <Space>
             <Tag color="blue">{TYPE_LABELS[q.type] || q.type}</Tag>
@@ -575,6 +579,7 @@ const ExamTakePage: React.FC = () => {
 
   return (
     <Layout style={{ minHeight: '100dvh', background: token.colorBgLayout }}>
+      <ExamWatermark show={protect.watermark} />
       {/* ── 顶栏 ── */}
       <div
         className="exam-topbar"

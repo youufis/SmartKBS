@@ -508,6 +508,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'LOGIN_BLOCK_STUDENT', labelKey: 'field_LOGIN_BLOCK_STUDENT', descKey: 'field_LOGIN_BLOCK_desc', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
   { key: 'LOGIN_BLOCK_TEACHER', labelKey: 'field_LOGIN_BLOCK_TEACHER', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
   { key: 'LOGIN_BLOCK_EXTERNAL', labelKey: 'field_LOGIN_BLOCK_EXTERNAL', type: 'login_gate', group: 'guard', level: 'basic', danger: true },
+  // 考场防护：默认关，管理员按考场场景开；关掉时前端不挂监听、不注入水印
+  { key: 'EXAM_ANTI_COPY', labelKey: 'field_EXAM_ANTI_COPY', descKey: 'field_EXAM_ANTI_COPY_desc', longDescKey: 'field_EXAM_ANTI_COPY_tip', type: 'boolean', group: 'guard', required: false },
+  { key: 'EXAM_WATERMARK', labelKey: 'field_EXAM_WATERMARK', descKey: 'field_EXAM_WATERMARK_desc', longDescKey: 'field_EXAM_WATERMARK_tip', type: 'boolean', group: 'guard', required: false },
   // 版本与自动同步（升级/回滚操作在「版本与升级」标签页）
   { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade', level: 'basic', danger: true },
   // 升级前自动留底（backend/api/upgrade_router.py Step 1d）：默认关，关掉只保留配置守护快照

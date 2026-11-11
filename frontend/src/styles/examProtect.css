@@ -1,0 +1,32 @@
+/* 学生作答页防复制 / 个人水印（系统配置 EXAM_ANTI_COPY、EXAM_WATERMARK，默认关）
+ * 只作用于打了 data-exam-guard 的题目区；答题输入区永远豁免，
+ * 否则学生没法粘贴代码、公式，也读不了屏幕内容。 */
+.exam-guard {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.exam-guard input,
+.exam-guard textarea,
+.exam-guard select,
+.exam-guard [contenteditable="true"],
+.exam-guard [role="textbox"],
+.exam-guard .monaco-editor,
+.exam-guard .exam-guard-allow {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+.exam-guard img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* 平铺水印：不占位、不拦截任何点击与滚动 */
+.exam-watermark {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  background-repeat: repeat;
+}
