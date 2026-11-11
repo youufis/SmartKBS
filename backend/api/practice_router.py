@@ -18,6 +18,7 @@ from backend.api.dependencies import get_current_user
 from backend.question_db import execute_insert, execute_query, execute_query_one, execute_update
 from backend.database import execute_query as db_execute_query, execute_insert_update as db_execute_update
 from backend.api.chat_router import get_api_keys
+from backend.ai_report_cache import get_latest_report, save_report
 from backend.api.ai_service import call_ai_async
 from backend.utils import extract_json_from_text
 from backend.api.config_router import get_config_value
@@ -954,6 +955,13 @@ async def practice_ai_analysis(session_id: int, request: Request):
         )
         prompt = apply_skills(prompt, "practice")
         analysis = await call_ai_async(prompt, api_key, use_kb=False)
+        # 落库缓存：Word 导出只读这一份，不再二次调用模型（与考试分析报告同一套做法）
+        try:
+            save_report("practice_report", f"pa:{session_id}", analysis or "",
+                        user.get("username", ""),
+                        {"session_id": session_id, "title": sess.get("title") or ""})
+        except Exception as e:  # 缓存失败不影响分析本身
+            logger.warning("[practice] 学情分析入缓存失败 session=%s: %s", session_id, e)
         return {
             "analysis": analysis,
             "question_stats": detail.get("question_stats") or [],
@@ -966,6 +974,28 @@ async def practice_ai_analysis(session_id: int, request: Request):
         dedupe_key=f"practice-ai:{session_id}", max_concurrent=4,
     )
     return {"task_id": task_id, "message": "AI 分析已提交，请稍后查询结果"}
+
+
+@router.get("/sessions/{session_id}/ai-analysis/export", summary="导出同步练习 AI 学情分析为 Word 文档")
+async def export_practice_ai_analysis(session_id: int, request: Request):
+    """只读已生成的分析缓存（页面点过「AI 分析」才有），不再重复调用模型"""
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
+    detail = await get_session_detail(session_id, request)   # 内部已校验创建者/管理员
+    sess = detail.get("session") or {}
+
+    report = get_latest_report("practice_report", f"pa:{session_id}")
+    if not report or not (report.get("content") or "").strip():
+        raise HTTPException(status_code=409, detail="请先在页面点「AI 分析」生成学情分析，再导出")
+
+    title = sess.get("title") or f"练习 #{session_id}"
+    from backend.ai_report_cache import docx_response
+    return docx_response(
+        f"同步练习学情分析 - {title}",
+        f"知识点：{sess.get('knowledge_points') or '-'}  生成时间：{report.get('created_at', '')}",
+        report.get("content") or "",
+        f"练习学情分析_{title}.docx")
 
 
 @router.post("/sessions/{session_id}/notify-unsubmitted", summary="一键提醒未提交学生")

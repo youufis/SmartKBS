@@ -538,7 +538,7 @@
   "ipQuizSuffix": "{{topic}} - 随堂测验",
   "ipNCount": "{{count}} 题",
   "ipTargetedN": "指定 {{n}} 人",
-  "ipExport": "导出",
+  "ipExport": "导出成绩 CSV",
   "ipEdit": "编辑",
   "ipScoreOf": "{{score}} / {{total}} 分",
   "ipMyScore": "我的成绩 - {{title}}",
@@ -751,5 +751,9 @@
   "pollEditLockHint": "已有投票记录时只能改选项文字，不能增删选项",
   "pollRegenerate": "重新生成",
   "pollAutoCount": "自动（由 AI 决定个数）",
-  "pageSubtitle": "按班级查看点名记录与出勤"
+  "pageSubtitle": "按班级查看点名记录与出勤",
+  "ipExportWord": "下载 Word",
+  "ipExportWordTip": "把上面这份答题分析存成 Word 文档",
+  "ipExportWordNeed": "先点「AI 分析」生成答题分析，再导出 Word",
+  "ipExportCsv": "下载本场测验的逐人成绩（CSV）"
 }

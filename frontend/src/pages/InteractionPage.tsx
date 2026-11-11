@@ -10,6 +10,7 @@ import {
 import {
   ThunderboltOutlined, BarChartOutlined,
   PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined,
+  FileTextOutlined,
   RobotOutlined,
   EditOutlined, DeleteOutlined, DownloadOutlined,
   SearchOutlined,
@@ -633,7 +634,7 @@ const InteractionPage: React.FC = () => {
                               <Button size="small" icon={<BarChartOutlined />}
                                 onClick={(e) => { e.stopPropagation(); void handleViewQuizResults(quiz.id) }} />
                             </Tooltip>
-                            <Tooltip title={t('ipExport')}>
+                            <Tooltip title={t('ipExportCsv')}>
                               <Button size="small" icon={<DownloadOutlined />}
                                 onClick={(e) => { e.stopPropagation(); window.open(`/api/export/quiz/${quiz.id}`, '_blank') }} />
                             </Tooltip>
@@ -885,6 +886,17 @@ const InteractionPage: React.FC = () => {
                 onClick={() => handleQuizAiAnalysis(quizResultsView?.quiz?.id, !!(quizAiAnalysis || quizAiCached))}>
                 {quizAiAnalysis ? t('aiReAnalyze') : t('ipAiAnalyze')}
               </Button>
+              )}
+              {/* 分析稿生成后才能存 Word：导出只读缓存，不再二次调用模型 */}
+              {!quizResultsReadonly && (
+              <Tooltip title={quizAiAnalysis ? t('ipExportWordTip') : t('ipExportWordNeed')}>
+                <span style={{ display: 'inline-block', cursor: quizAiAnalysis ? 'default' : 'not-allowed' }}>
+                  <Button size="small" icon={<FileTextOutlined />} disabled={!quizAiAnalysis}
+                    onClick={() => window.open(`/api/interaction/quizzes/${quizResultsView?.quiz?.id}/ai-analysis/export`, '_blank')}>
+                    {t('ipExportWord')}
+                  </Button>
+                </span>
+              </Tooltip>
               )}
               <Button type="primary" onClick={closeQuizResults}>{t('close')}</Button>
             </Space>

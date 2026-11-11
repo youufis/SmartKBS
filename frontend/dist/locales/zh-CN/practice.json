@@ -344,7 +344,7 @@
   "notifySent": "已提醒 {{count}} 名学生",
   "notifyNone": "所有学生都已提交，无需提醒",
   "notifyFailed": "提醒失败",
-  "exportResult": "导出结果",
+  "exportResult": "导出成绩 CSV",
   "moreActions": "更多",
   "levelExcellent": "优秀",
   "levelGood": "良好",
@@ -449,5 +449,9 @@
   "pSearchPh": "搜索练习标题 / 知识点",
   "noMatchFilter": "当前筛选条件下没有记录，可清除筛选再试",
   "teacherSubtitle": "发布练习、看进度、错题自动巩固",
-  "submissionCount": "提交次数"
+  "submissionCount": "提交次数",
+  "exportWord": "下载 Word",
+  "exportWordTip": "把上面这份 AI 学情分析存成 Word 文档",
+  "exportWordNeed": "先点「AI 分析」生成学情分析，再导出 Word",
+  "exportResultTip": "下载本次练习的逐人成绩明细（CSV）"
 }

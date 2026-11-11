@@ -1449,11 +1449,24 @@ const TeacherView: React.FC = () => {
                 {t('notifyUnsubmitted')}
               </Button>
             )}
+            {/* 分析稿生成后才能存 Word：导出只读缓存，不再二次调用模型 */}
             {!detailReadonly && (
-              <Button icon={<DownloadOutlined />}
-                onClick={() => window.open(`/api/export/practice/${detailSid}`, '_blank')}>
-                {t('exportResult')}
-              </Button>
+              <Tooltip title={detailAiAnalysis ? t('exportWordTip') : t('exportWordNeed')}>
+                <span style={{ display: 'inline-block', cursor: detailAiAnalysis ? 'default' : 'not-allowed' }}>
+                  <Button icon={<FileTextOutlined />} disabled={!detailAiAnalysis}
+                    onClick={() => window.open(`/api/practice/sessions/${detailSid}/ai-analysis/export`, '_blank')}>
+                    {t('exportWord')}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+            {!detailReadonly && (
+              <Tooltip title={t('exportResultTip')}>
+                <Button icon={<DownloadOutlined />}
+                  onClick={() => window.open(`/api/export/practice/${detailSid}`, '_blank')}>
+                  {t('exportResult')}
+                </Button>
+              </Tooltip>
             )}
             <Button onClick={() => { setDetailOpen(false); setSheetAttempt(null) }}>{t('close')}</Button>
           </Space>

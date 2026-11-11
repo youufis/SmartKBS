@@ -582,5 +582,15 @@
   "exAiReportWordTip": "Save the AI analysis report above as a Word document",
   "exAiReportNeedFirst": "Generate the AI analysis report first, then export it as Word",
   "exportReportTip": "Download the full grade sheet for this exam (Excel)",
-  "aiExplainTip": "Question-by-question analysis of wrong answers, shown in its own window"
+  "aiExplainTip": "Question-by-question analysis of wrong answers, shown in its own window",
+  "wrongAnaTitle": "Class Error Review",
+  "wrongAnaTip": "Picks the questions the class missed most, with typical wrong answers, causes, how to explain them and follow-up practice (10-30s)",
+  "wrongAnaLoading": "Analysing the causes question by question…",
+  "wrongAnaCount": "This review covers {{n}} high-error questions (accuracy below 90%)",
+  "wrongAnaExport": "Download Word",
+  "wrongAnaExportTip": "Save this review as a Word document",
+  "wrongAnaExportNeed": "Wait until the review is generated",
+  "wrongAnaRegenerate": "Regenerate",
+  "wrongAnaTimeout": "The review timed out, please retry",
+  "wrongAnaFailed": "Failed to generate the review"
 }

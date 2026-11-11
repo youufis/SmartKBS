@@ -538,7 +538,7 @@
   "ipQuizSuffix": "{{topic}} - Quiz",
   "ipNCount": "{{count}} questions",
   "ipTargetedN": "For {{n}} student(s)",
-  "ipExport": "Export",
+  "ipExport": "Export Grades (CSV)",
   "ipEdit": "Edit",
   "ipScoreOf": "{{score}} / {{total}} pts",
   "ipMyScore": "My score - {{title}}",
@@ -751,5 +751,9 @@
   "pollEditLockHint": "Once votes exist you can reword options but cannot add or remove them",
   "pollRegenerate": "Regenerate",
   "pollAutoCount": "Auto (let the AI decide)",
-  "pageSubtitle": "Attendance records by class"
+  "pageSubtitle": "Attendance records by class",
+  "ipExportWord": "Download Word",
+  "ipExportWordTip": "Save the analysis above as a Word document",
+  "ipExportWordNeed": "Run “AI analysis” first, then export it as Word",
+  "ipExportCsv": "Download the per-student results of this quiz (CSV)"
 }

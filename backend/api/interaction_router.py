@@ -3424,6 +3424,13 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
         prompt = apply_skills(prompt, "quiz")
 
         analysis = await call_ai_async(prompt, api_key, use_kb=False)
+        # 落库缓存：Word 导出只读这一份，不再二次调用模型
+        try:
+            from backend.ai_report_cache import save_report
+            save_report("quiz_report", f"qa:{quiz_id}", analysis or "", user.get("username", ""),
+                        {"quiz_id": quiz_id, "title": quiz_row0.get("title") or ""})
+        except Exception as e:  # 缓存失败不影响分析本身
+            logger.warning("[quiz] 答题分析入缓存失败 quiz=%s: %s", quiz_id, e)
         # R2: 平均分也按百分制给, 避免"平均 3.5 分"这种没有满分参照的数
         avg_raw = sum(float(a[2] or 0) for a in answers) / max(participant_count, 1)
         return {
@@ -3441,6 +3448,33 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
         dedupe_key=f"quiz-ai:{quiz_id}", max_concurrent=4,
     )
     return {"task_id": task_id, "message": "AI 分析已提交，请稍后查询结果"}
+
+
+@router.get("/quizzes/{quiz_id}/ai-analysis/export", summary="导出随堂测验答题分析为 Word 文档")
+async def export_quiz_ai_analysis(quiz_id: int, request: Request):
+    """只读已生成的分析缓存（结果页点过「AI 分析」才有），不再重复调用模型"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
+    quiz = _get_quiz_row(quiz_id)
+    if not quiz:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    if not _can_view_activity_results(user["username"], role, quiz):
+        raise HTTPException(status_code=403, detail="无权导出该测验的分析结果")
+
+    from backend.ai_report_cache import get_latest_report
+    report = get_latest_report("quiz_report", f"qa:{quiz_id}")
+    if not report or not (report.get("content") or "").strip():
+        raise HTTPException(status_code=409, detail="请先在结果页点「AI 分析」生成答题分析，再导出")
+
+    title = quiz.get("title") or f"测验 #{quiz_id}"
+    from backend.ai_report_cache import docx_response
+    return docx_response(
+        f"随堂测验答题分析 - {title}",
+        f"生成时间：{report.get('created_at', '')}",
+        report.get("content") or "",
+        f"测验答题分析_{title}.docx")
 
 
 # ═══════════════════════════════════════════════════════════

@@ -344,7 +344,7 @@
   "notifySent": "Reminded {{count}} student(s)",
   "notifyNone": "Everyone has submitted — nothing to remind",
   "notifyFailed": "Failed to send reminders",
-  "exportResult": "Export",
+  "exportResult": "Export Grades (CSV)",
   "moreActions": "More",
   "levelExcellent": "Excellent",
   "levelGood": "Good",
@@ -449,5 +449,9 @@
   "pSearchPh": "Search title / knowledge point",
   "noMatchFilter": "No records match the current filters",
   "teacherSubtitle": "Publish practice, track progress, reinforce mistakes",
-  "submissionCount": "Submissions"
+  "submissionCount": "Submissions",
+  "exportWord": "Download Word",
+  "exportWordTip": "Save the AI analysis above as a Word document",
+  "exportWordNeed": "Run “AI analysis” first, then export it as Word",
+  "exportResultTip": "Download the per-student result sheet of this practice (CSV)"
 }
