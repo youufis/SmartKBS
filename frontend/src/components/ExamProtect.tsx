@@ -26,21 +26,26 @@ const EDITABLE = 'input, textarea, select, [contenteditable="true"], [role="text
 /** 题目区标记：只在开关打开时展开到 Card/div 上 */
 export const GUARD_PROPS = { 'data-exam-guard': '1', className: 'exam-guard' }
 
+// 只缓存 10 秒：同一页反复挂载不重复请求，但管理员改完配置不会被旧值卡住。
+// （之前是常驻缓存：在已经打开的作答页里改开关，要整页刷新才生效，实测就踩了这个坑）
+const TTL_MS = 10000
 let cached: ExamProtectFlags | null = null
+let cachedAt = 0
 
-async function fetchFlags(): Promise<ExamProtectFlags> {
-  if (cached) return cached
+async function fetchFlags(force = false): Promise<ExamProtectFlags> {
+  if (cached && !force && Date.now() - cachedAt < TTL_MS) return cached
   try {
     const { data } = await apiClient.get('/api/config/exam-protect')
     cached = { antiCopy: !!data?.anti_copy, watermark: !!data?.watermark }
   } catch {
     cached = OFF        // 取不到就按全关处理：配置异常绝不能挡住答题
   }
+  cachedAt = Date.now()
   return cached
 }
 
-/** 管理员改完配置后，下次进入作答页会自动重新取；这里留个手动失效口给热更新用 */
-export function invalidateExamProtect() { cached = null }
+/** 管理员保存配置后可强制丢弃缓存，让正在作答的页面下一次取数就是新值 */
+export function invalidateExamProtect() { cached = null; cachedAt = 0 }
 
 export function useExamProtect(): ExamProtectFlags {
   const [flags, setFlags] = useState<ExamProtectFlags>(OFF)
@@ -48,14 +53,27 @@ export function useExamProtect(): ExamProtectFlags {
 
   useEffect(() => {
     let alive = true
-    void fetchFlags().then((f) => { if (alive) setFlags(f) })
-    return () => { alive = false }
+    const pull = (force = false) => { void fetchFlags(force).then((f) => { if (alive) setFlags(f) }) }
+    pull(true)
+    // 管理员在别的标签页改完配置，这边切回来就生效，不用整页刷新
+    const onVisible = () => { if (document.visibilityState === 'visible') pull(true) }
+    const onFocus = () => pull(true)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      alive = false
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   useEffect(() => {
     if (!flags.antiCopy) return
-    const inGuard = (el: EventTarget | null) => el instanceof Element && !!el.closest('[data-exam-guard]')
-    const editable = (el: EventTarget | null) => el instanceof Element && !!el.closest(EDITABLE)
+    // 事件 target 有时是文本节点（选中题目文字后右键就是这种），先归一成元素再判断
+    const asElement = (t: EventTarget | null): Element | null =>
+      (t instanceof Element ? t : ((t as Node | null)?.parentElement ?? null)) as Element | null
+    const inGuard = (t: EventTarget | null) => !!asElement(t)?.closest('[data-exam-guard]')
+    const editable = (t: EventTarget | null) => !!asElement(t)?.closest(EDITABLE)
     const block = (e: Event) => {
       if (!inGuard(e.target) || editable(e.target)) return
       e.preventDefault()
