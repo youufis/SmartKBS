@@ -460,7 +460,7 @@ const CurriculumPage: React.FC = () => {
         const fileUrl = result.file_url
         setPracticeHtmlUrl(fileUrl)
         setPracticeDone({ fileUrl, fileName: result.filename || '' })
-        message.success(t('practiceGenerated', { count: result.total || 10 }))
+        message.success(`${t('practiceGenerated', { count: result.total || 10 })}，${t('practiceNotBoundHint')}`, 5)
       } else if (result && result.error) {
         message.error(result.error)
       } else {
@@ -617,7 +617,7 @@ const CurriculumPage: React.FC = () => {
         setPracticeHtmlUrl(data.file_url)
         setMixedAiQuestions([])
         setMixedBankIds([])
-        message.success(data.message || t('smartPracticeGenerated', { total: data.total }))
+        message.success(`${data.message || t('smartPracticeGenerated', { total: data.total })}，${t('practiceNotBoundHint')}`, 5)
       }
     } catch (err: any) {
       // 如果后端返回了详细错误，直接显示

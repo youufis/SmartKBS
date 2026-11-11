@@ -500,8 +500,13 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
   const cardTags = (it: ResourceCandidate) => (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
       <Tag style={tagStyle}>{labelOf(it.type)}</Tag>
+      {/* 「本知识点」是按文件名前缀判的**相关度**，不代表已经绑上 —— 早先只写「本知识点」，
+         老师会以为生成完就已经发出去了（2026-11-11 实例：35 份 AI 练习全部未绑定，
+         却都在候选列表里顶着这个标签）。未绑定就把状态写在标签上。 */}
       {it.kp_match === 'exact' && (
-        <Tag color="gold" icon={<StarFilled />} style={tagStyle}>{t('rbKpExact')}</Tag>
+        <Tag color={it.bound_here ? 'gold' : 'orange'} icon={<StarFilled />} style={tagStyle}>
+          {it.bound_here ? t('rbKpExact') : t('rbKpExactUnbound')}
+        </Tag>
       )}
       {it.kp_match === 'chapter' && <Tag style={tagStyle}>{t('rbKpChapter')}</Tag>}
       {it.type === 'html' && it.sub_kind && it.mine && it.kind_path ? (
@@ -584,7 +589,9 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
           </span>
         </Tooltip>
         {it.kp_match === 'exact' && (
-          <Tag color="gold" icon={<StarFilled />} style={tagStyle}>{t('rbKpExact')}</Tag>
+          <Tag color={it.bound_here ? 'gold' : 'orange'} icon={<StarFilled />} style={tagStyle}>
+            {it.bound_here ? t('rbKpExact') : t('rbKpExactUnbound')}
+          </Tag>
         )}
         <Tag style={tagStyle}>{labelOf(it.type)}</Tag>
         <span style={{ width: 210, flexShrink: 0, color: 'var(--text-tertiary)', fontSize: 12 }}>

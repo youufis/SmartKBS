@@ -719,10 +719,15 @@ def purge_dead_share_rows(owner: str | None = None, resource_ids: list | None = 
 
 
 def run_bind_repair(by_user: str = "system") -> dict:
-    """清理两类资源绑定残留，幂等可重复调用：
+    """清理/补齐三类资源绑定残留，幂等可重复调用：
     1) 悬挂绑定：curriculum_bindings 指向的共享行 id 已不存在（旧版重新共享换 id 造成）；
     2) 脏共享行：shared_resources 的 file_path 指向的文件/目录已不存在
-       （重命名/外部删除后的残留，列表显示旧名且点开 404），删除行并联动清理绑定/日志/成绩。
+       （重命名/外部删除后的残留，列表显示旧名且点开 404），删除行并联动清理绑定/日志/成绩；
+    3) 已绑定却仍是「只给自己」的私有范围：按绑定那一刻的同一口径补放开年级。
+       这类行是静默失效 —— 学生端按共享范围过滤看不到它，老师在「我共享的」里也看不到
+       （私有行被 _is_shared_only_to_self 有意剔除），只有知识点页的候选列表还会把它
+       标成「本知识点」，于是看起来"绑了"。钩子 _auto_open_file_share 是 2026-10-26
+       9097e00d 才引入的，之前的绑定没享受过，这里给存量补上。
     服务启动时自动执行一次；也可 POST /api/sharing/repair-bindings 手动触发。"""
     # 1) 悬挂绑定
     rows = execute_query(
@@ -748,10 +753,41 @@ def run_bind_repair(by_user: str = "system") -> dict:
     # 2) 脏共享行（文件/目录已不存在）
     stale_shares = purge_dead_share_rows()
 
-    if details or stale_shares:
-        logger.info(f"[资源绑定修复] 悬挂绑定 {len(details)} 条 + 脏共享行 {len(stale_shares)} 条 (by {by_user})")
+    # 3) 已绑定但仍是私有范围 -> 按绑定时的同一口径补放开（复用钩子，不另写一套年级口径）
+    scopes_opened: list[dict] = []
+    bound_private = execute_query(
+        """SELECT cb.id AS binding_id, cb.knowledge_point_id, cb.resource_type, cb.resource_id,
+                  s.owner_username, s.file_name
+           FROM curriculum_bindings cb
+           JOIN shared_resources s ON s.resource_type = cb.resource_type AND s.id = cb.resource_id
+           WHERE cb.resource_type IN ('html','download')
+             AND s.share_scope = 'teacher'
+             AND TRIM(COALESCE(s.target_grade,'')) = ''
+             AND TRIM(COALESCE(s.target_class,'')) = ''
+           ORDER BY cb.id""",
+    )
+    for r in bound_private:
+        try:
+            from backend.api.curriculum_router import _auto_open_file_share
+            _auto_open_file_share(r["owner_username"], r["knowledge_point_id"],
+                                  r["resource_type"], r["resource_id"])
+            after = execute_query("SELECT share_scope, target_grade FROM shared_resources WHERE id=?",
+                                  (r["resource_id"],))
+            if after and str(after[0]["share_scope"]) != "teacher":
+                scopes_opened.append({
+                    "binding_id": r["binding_id"], "resource_type": r["resource_type"],
+                    "resource_id": r["resource_id"], "file_name": r["file_name"],
+                    "share_scope": after[0]["share_scope"], "target_grade": after[0]["target_grade"],
+                })
+        except Exception as e:
+            logger.warning(f"补放开已绑定资源的共享范围失败 ({r['resource_type']}:{r['resource_id']}): {e}")
+
+    if details or stale_shares or scopes_opened:
+        logger.info(f"[资源绑定修复] 悬挂绑定 {len(details)} 条 + 脏共享行 {len(stale_shares)} 条 "
+                    f"+ 补放开范围 {len(scopes_opened)} 条 (by {by_user})")
     return {"removed": len(details), "details": details,
-            "removed_shares": len(stale_shares), "stale_share_rows": stale_shares}
+            "removed_shares": len(stale_shares), "stale_share_rows": stale_shares,
+            "scopes_opened": len(scopes_opened), "opened_details": scopes_opened}
 
 
 @router.post("/repair-bindings", summary="清理悬挂/无效的资源绑定残留")
