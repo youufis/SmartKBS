@@ -56,6 +56,10 @@
 >
 > **Conversations and attachments**
 > **Exercises, quizzes and exams: AI and exports**
+> - 🛡️ New classroom guard: question copy protection (no select / copy / right-click / print shortcuts) and a personal watermark on answer pages — both off by default, admin-controlled
+> - 📄 Exam report, class error review, practice and quiz AI analyses all export to Word, now with an “overview + per-question accuracy” data appendix
+> - 🧾 Chat history previews render tables and formulas like the answer body instead of raw Markdown
+> - 🩹 Guard switches take effect immediately — no longer stuck behind a front-end cache
 > - 🧑‍🏫 New class-wide error review in the score dialog: picks the questions the class missed most, with typical wrong answers, causes, how to explain them and follow-up practice, exportable to Word
 > - 🩹 Score dialog buttons renamed and separated: AI Analysis Report / Download Word / Class Error Review / Export Grades, so they no longer look duplicated
 > - 📄 Sync practice and in-class quiz AI analyses can now be exported to Word; results are stored, so exporting no longer calls the model again
@@ -307,6 +311,8 @@ Complete online exam management system:
 - **📋 Exam Flow**: Publish → Students answer online (real-time countdown) → Auto-grading of objective questions → View results
 - **📊 Score Statistics**: Score/total score/percentage/pass-fail/ranking
 - **📤 Data Export**: Export scores to Excel
+- **🧑‍🏫 AI Review**: whole-exam report, class-wide error review (typical wrong answers, causes, teaching advice, follow-up practice) and each student’s own wrong-answer review — all exportable to Word with per-question accuracy
+- **🛡️ Classroom Guard**: optional question copy protection and personal answer-page watermark (off by default, two independent switches in System Configuration)
 - **🔔 Notifications**: Auto-notify on publish/cancel/modify/early termination
 
 > **Admin/Teacher can create and manage; Student can take published exams**
@@ -484,7 +490,7 @@ Core intelligent Q&A interface based on SSE streaming, providing a smooth AI con
 - **🖼️ Multimodal Dialogue**: The chat model must accept image input, so images and text can be sent together without a summary pass first
 - **📄 File Summary Enhancement**: Automatically summarizes uploaded documents to enhance AI dialogue context
 - **🔍 RAG Knowledge Enhancement**: Retrieves relevant knowledge from question bank and course syllabus to improve answer accuracy
-- **📜 Chat History**: A docked sidebar on desktop (pushes content aside); new chats show up right after saving, today / yesterday expand by default and years are separated; a single click only previews, never replaces the running chat; title and full-text search, rename and download included
+- **📜 Chat History**: A docked sidebar on desktop (pushes content aside); new chats show up right after saving, today / yesterday expand by default and years are separated; a single click only previews, never replaces the running chat; title and full-text search, rename and download included; previews render tables and formulas like the answer body
 - **👁️ HTML Preview**: One-click preview of HTML code blocks in conversations
 - **📋 Example Prompts**: Built-in multiple teaching scenario examples, one-click fill
 - **🎭 Three Modes**: Smart Answer Mode / Companion Mode (Student) / Assistant Mode (Teacher/Admin)
@@ -566,6 +572,8 @@ Teachers generate targeted practice questions from wrong answer books or knowled
 - **🤖 AI Auto-Grading**: Short-answer questions are automatically graded
 - **⚡ Async Question Generation**: Non-blocking, supports background generation
 - **📊 Practice Records**: View history and performance statistics
+- **📄 AI Analysis Export**: save the analysis as Word with a completion overview and per-question accuracy
+- **🛡️ Classroom Guard**: question copy protection and personal watermark on answer pages (configurable, off by default)
 
 > **Admin/Teacher can create questions; Student can participate**
 
@@ -643,7 +651,9 @@ Classroom instant quiz system:
 - 🤖 One-click AI generation (specify topic/question type/quantity): the bank comes first, AI only fills the shortfall and those questions are saved back for reuse
 - 📊 Auto-grading and result statistics
 - 📐 Supports LaTeX formulas and images
-- 📤 Data export
+- 📤 Data export (grades CSV)
+- 📄 AI answer analysis exports to Word with per-question accuracy and wrong-option distribution
+- 🛡️ Classroom guard: question copy protection and personal watermark (configurable, off by default)
 
 #### Classroom Voting
 
@@ -1131,6 +1141,8 @@ Centralized management of all system configuration parameters:
 - **🤖 Model Configuration**: APPID, API address, default chat model, long-text model, vision model, multimodal switch (all chosen from dropdowns)
 - **💬 AI Chat Settings**: Chat permission roles, daily request quota (switch plus limit)
 - **⚙️ System Limits**: File size limit, token validity, online timeout, IP protection and login gates
+- **🛡️ Classroom Guard**: question copy protection and answer-page watermark (off by default; only the question block is affected)
+- **🧪 AI Output & Parsing**: strict parsing, image extraction token budget, class error review question cap and accuracy threshold
 - **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test; duration options plus length and page caps for both AI podcast and AI lesson cast live here too
 - **📚 Course Settings**: Course name list, question types
 - **🔔 Notifications**: Enabled notification types
@@ -1246,6 +1258,14 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - 📄 Sync practice and in-class quiz AI analyses are now exportable to Word, with results cached so exporting does not bill the model twice
 - 🏷️ “Export result” renamed to “Export Grades (CSV)”; read-only previews no longer show an export button
 - 🩹 Development console noise cleared (tldraw font race, deprecated antd 6 props)
+
+**Classroom guard and AI review exports**
+
+- 🛡️ Two switches, off by default: question copy protection (select / copy / cut / right-click / print shortcuts) and a personal watermark (name · student ID · time) on answer pages, covering exams, targeted practice and in-class quizzes
+- 🎯 Only the question block is guarded — answer inputs, code editors and formula fields keep working; with the switches off nothing is attached or injected
+- 🧑‍🏫 Exams gained a class-wide error review (typical wrong answers, causes, how to explain, follow-up practice) exportable to Word; the old button always 404'd for teachers and was replaced
+- 📄 Four AI exports now carry a data appendix (overview + per-question accuracy); students can export their own wrong-answer review too
+- 🧾 Chat history previews render tables and formulas; guard switches apply without a page reload; review size and accuracy threshold are configurable
 
 **Conversations and attachments**
 
