@@ -183,7 +183,7 @@ const ExamPage: React.FC = () => {
   const [myResults, setMyResults] = useState<ExamAttempt[]>([])
   const [myResultsLoading, setMyResultsLoading] = useState(false)
 
-  // ── AI 错题讲解 ──
+  // ── AI 错题讲解（学生端「我的成绩」）：查的是点击者本人的答卷 ──
   const [explainModal, setExplainModal] = useState(false)
   const [explainLoading, setExplainLoading] = useState(false)
   const [explainData, setExplainData] = useState<{ exam_title: string; explanations: any[]; total_wrong: number } | null>(null)
@@ -205,6 +205,39 @@ const ExamPage: React.FC = () => {
       setExplainModal(false)
     } finally {
       setExplainLoading(false)
+    }
+  }
+
+  // ── 全班错因讲评（教师端）：按每题错误率挑高错题 → AI 出讲评稿 → 可导出 Word ──
+  // 旧端点 /explain-wrong 查的是「点击者本人」的答卷，教师没有答卷必然 404，已不再从这里调用
+  const [waOpen, setWaOpen] = useState(false)
+  const [waLoading, setWaLoading] = useState(false)
+  const [waText, setWaText] = useState('')
+  const [waCount, setWaCount] = useState(0)
+  const handleWrongAnalysis = async () => {
+    const examId = resultExam?.id
+    if (!examId) return
+    setWaOpen(true)
+    setWaLoading(true)
+    setWaText('')
+    try {
+      const { data } = await apiClient.get(`/api/exams/${examId}/wrong-analysis`, { timeout: 60000 })
+      // 没有高错题时后端直接回一段结论，不建 AI 任务
+      if (!data?.task_id) {
+        setWaText(data?.report || '')
+        setWaCount(0)
+        return
+      }
+      setWaCount(Number(data.question_count || 0))
+      const out: any = await pollAiTask(data.task_id, 300000)
+      const text = out?.result || out?.report || ''
+      if (text) setWaText(text)
+      else message.error(out?.error || t('wrongAnaTimeout'))
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('wrongAnaFailed'))
+      setWaOpen(false)
+    } finally {
+      setWaLoading(false)
     }
   }
 
@@ -1966,11 +1999,11 @@ const ExamPage: React.FC = () => {
         onCancel={() => setResultModal(false)}
         width="min(1040px, 96vw)"
         footer={[
-          // 底部只留「逐题错因解析」；成绩 Excel 导出挪进「名册」页签，
-          // 免得同一弹窗里出现两个下载按钮、两个 AI 按钮分不清
-          <Tooltip key="explain" title={t('aiExplainTip')}>
-            <Button icon={<BulbOutlined />} onClick={() => resultExam && handleExplainWrong(resultExam.id)}>
-              {t('aiExplainTitle')}
+          // 底部这一个入口是「全班维度」：挑错误率最高的题给讲评稿，可存 Word；
+          // 成绩 Excel 导出在「名册」页签就地下载，两者不再同名
+          <Tooltip key="wrongAna" title={t('wrongAnaTip')}>
+            <Button icon={<BulbOutlined />} loading={waLoading} onClick={() => void handleWrongAnalysis()}>
+              {t('wrongAnaTitle')}
             </Button>
           </Tooltip>,
           <Button key="refresh" icon={<ReloadOutlined />} loading={resultLoading}
@@ -2253,7 +2286,7 @@ const ExamPage: React.FC = () => {
         )}
       </Modal>
 
-      {/* ── AI 错题讲解弹窗 ── */}
+      {/* ── 学生端：我的错题讲解（逐题） ── */}
       <Modal title={<><BulbOutlined style={{ color: '#faad14' }} /> {t('aiExplainTitle')} - {explainData?.exam_title || t('loading')}</>}
         open={explainModal}
         onCancel={() => { if (explainLoading) return; setExplainModal(false) }}
@@ -2288,6 +2321,43 @@ const ExamPage: React.FC = () => {
                 )}
               </Card>
             ))}
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ── 全班错因讲评弹窗：Markdown 讲评稿 + 导出 Word ── */}
+      <Modal title={<><BulbOutlined style={{ color: '#faad14' }} /> {t('wrongAnaTitle')} - {resultExam?.title || ''}</>}
+        open={waOpen}
+        onCancel={() => { if (waLoading) return; setWaOpen(false) }}
+        width={820}
+        footer={waLoading ? null : (
+          <Space>
+            <Tooltip title={waText ? t('wrongAnaExportTip') : t('wrongAnaExportNeed')}>
+              <span style={{ display: 'inline-block', cursor: waText ? 'default' : 'not-allowed' }}>
+                <Button icon={<DownloadOutlined />} disabled={!waText}
+                  onClick={() => window.open(`/api/exams/${resultExam?.id}/wrong-analysis/export`, '_blank')}>
+                  {t('wrongAnaExport')}
+                </Button>
+              </span>
+            </Tooltip>
+            <Button icon={<ReloadOutlined />} onClick={() => void handleWrongAnalysis()}>{t('wrongAnaRegenerate')}</Button>
+            <Button onClick={() => setWaOpen(false)}>{t('close')}</Button>
+          </Space>
+        )}
+      >
+        {waLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('wrongAnaLoading')}</div>
+          </div>
+        ) : waText ? (
+          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+            {!!waCount && (
+              <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                {t('wrongAnaCount', { n: waCount })}
+              </Typography.Text>
+            )}
+            <div className="markdown-content"><FormulaRenderer content={waText} /></div>
           </div>
         ) : null}
       </Modal>

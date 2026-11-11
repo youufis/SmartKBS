@@ -582,5 +582,15 @@
   "exAiReportWordTip": "把上面这份 AI 分析报告存成 Word 文档",
   "exAiReportNeedFirst": "先点「AI 分析报告」生成，再导出 Word",
   "exportReportTip": "导出本场完整成绩明细（Excel）",
-  "aiExplainTip": "逐题解析错题原因与讲法，结果在单独的窗口显示"
+  "aiExplainTip": "逐题解析错题原因与讲法，结果在单独的窗口显示",
+  "wrongAnaTitle": "全班错因讲评",
+  "wrongAnaTip": "挑出全班错误率最高的题，给出典型错答、错因判断、讲法建议与跟进练习（约 10-30 秒）",
+  "wrongAnaLoading": "AI 正在逐题分析错因…",
+  "wrongAnaCount": "本次讲评覆盖 {{n}} 道高错题（正确率低于 90%）",
+  "wrongAnaExport": "下载 Word",
+  "wrongAnaExportTip": "把上面这份讲评存成 Word 文档",
+  "wrongAnaExportNeed": "等讲评生成完成后再导出",
+  "wrongAnaRegenerate": "重新生成",
+  "wrongAnaTimeout": "错因讲评超时，请稍后重试",
+  "wrongAnaFailed": "错因讲评失败"
 }

@@ -34,6 +34,9 @@ from backend.ai_grading import GradingJob, SourceAdapter, register_source, pendi
 from backend.question_db import get_connection
 # E1: 考试成绩口径的唯一实现（结果页 / 学情分析 / Excel 导出三处共用）
 from backend.exam_stats import (
+    exam_graded,
+    is_pending as exam_is_pending,
+    is_question_correct as exam_is_correct,
     pending_keys as exam_pending_keys,
     question_stats as exam_question_stats,
     score_stats as exam_score_stats,
@@ -2976,6 +2979,142 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
     task_id = await task_manager.create_task(description="AI 错题讲解", coro_factory=_do_explain,
                                           dedupe_key=f"explain-wrong:{exam_id}", max_concurrent=4)
     return {"task_id": task_id, "message": "AI 讲解已提交，请稍后查询结果"}
+
+
+# ═══════════════════════════════════════════════════════════
+# 全班错因讲评（教师端）：按每题错误率挑高错题 → 一次 AI 调用出讲评 → 可导出 Word。
+# 上面的 /explain-wrong 只查「点击者本人」的答卷（学生看自己的错题），
+# 教师没有答卷，从成绩弹窗点它必然 404 —— 教师端改用这一组端点。
+# ═══════════════════════════════════════════════════════════
+
+WA_KIND = "exam_wrong_analysis"       # ai_reports 缓存类型：导出只读缓存，不再二次调用模型
+WA_MAX_QUESTIONS = 8                  # 一次讲评最多挑几道题（控 token 与等待时间）
+WA_RATE_CEILING = 90.0                # 正确率高于此值的题不进讲评
+
+
+def _wrong_analysis_focus(exam_id: int) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    """挑出该讲评的题目，并给每题带上「典型错答 + 人数」——生成与导出共用同一份口径。"""
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+    attempts = execute_query(
+        "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded')",
+        (exam_id,))
+    questions = execute_query(
+        """SELECT qb.id as qid, qb.type, qb.question_text, qb.correct_answer, qb.difficulty,
+                  qb.knowledge_points, qb.options, eq.score as question_score
+           FROM exam_questions eq
+           JOIN question_bank qb ON eq.question_id = qb.id
+           WHERE eq.exam_id = ? ORDER BY eq.sort_order""",
+        (exam_id,))
+
+    parsed = []
+    for a in attempts:
+        graded = exam_graded(a.get("answers"))
+        ans_map = {str(k): (v.get("student_answer", "") if isinstance(v, dict) else str(v or ""))
+                   for k, v in (graded or {}).items()}
+        parsed.append((a.get("student_username", ""), ans_map, graded))
+
+    graded_n = sum(1 for _u, _a, g in parsed if g)
+    if graded_n == 0:
+        raise HTTPException(status_code=400, detail="还没有已判分的答卷，无法生成错因讲评")
+
+    focus: list[dict[str, Any]] = []
+    for q in exam_question_stats(questions, parsed):
+        if q["total_count"] <= 0 or q["correct_rate"] >= WA_RATE_CEILING:
+            continue
+        qid = str(q["qid"])
+        wrong_map: dict[str, int] = {}
+        for _u, ans_map, graded in parsed:
+            entry = (graded or {}).get(qid)
+            if entry is None or exam_is_pending(entry):
+                continue
+            stu_ans = str(ans_map.get(qid, "") or "")
+            if exam_is_correct(entry, stu_ans, str(q["correct_answer"] or ""), q["type"], q["options"]):
+                continue
+            key = stu_ans.strip()[:60] or "（空白未答）"
+            wrong_map[key] = wrong_map.get(key, 0) + 1
+        top_wrong = sorted(wrong_map.items(), key=lambda kv: -kv[1])[:3]
+        focus.append({**q, "wrong_answers": [{"answer": k, "count": v} for k, v in top_wrong]})
+
+    focus.sort(key=lambda x: x["correct_rate"])
+    return dict(exam), focus[:WA_MAX_QUESTIONS], {"graded_count": graded_n, "submitted_count": len(parsed)}
+
+
+@router.get("/{exam_id}/wrong-analysis", summary="全班错因讲评（教师/管理员）")
+async def get_wrong_analysis(exam_id: int, request: Request):
+    """按每题错误率挑高错题，AI 产出「典型错答 → 错因 → 讲法 → 跟进练习」的讲评稿"""
+    user = get_current_user(request)
+    if int(user.get("role", 2)) == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+    exam, focus, meta = _wrong_analysis_focus(exam_id)
+    from backend.api.export_router import _assert_can_view_exam
+    _assert_can_view_exam(user, exam)
+
+    if not focus:
+        return {"report": "本场考试各题正确率都在 90% 以上，暂无需要集体讲评的错题。", "question_count": 0}
+
+    lines = []
+    for q in focus:
+        wrong = "；".join(f"「{w['answer']}」{w['count']} 人" for w in q["wrong_answers"]) or "（未取到错答明细）"
+        lines.append(
+            f"- 第{int(q['index']) + 1}题（{q['type']}，正确率 {q['correct_rate']}%，"
+            f"答错 {q['total_count'] - q['correct_count']}/{q['total_count']} 人）"
+            f"正确答案：{q['correct_answer']}｜典型错答：{wrong}"
+            + (f"｜知识点：{q['knowledge_points']}" if q.get("knowledge_points") else "")
+            + f"\n  题干摘要：{str(q['question_text'] or '')[:160]}"
+        )
+
+    role_hint = build_ai_role(subject=exam.get("subject", ""), grade=exam.get("grade", ""))
+    prompt = f"""{role_hint}下面是这场考试里**全班错误率最高**的题目与真实错答分布，请写一份可直接拿去备课讲评的「错因讲评」。
+
+考试：{exam['title']}（{exam.get('subject', '')}），已判分 {meta['graded_count']} 份。
+
+{chr(10).join(lines)}
+
+要求（Markdown，逐题输出，最后一节给共性建议）：
+### 第N题 <一句话题目要点>
+- **典型错答**：<最常见的错答，以及它反映的理解偏差>
+- **错因判断**：<概念不清 / 审题偏差 / 方法错误 / 表达不全，落到这道题具体说明>
+- **讲法建议**：<课堂上三步以内怎么讲，可换一个更贴切的例子>
+- **跟进练习**：<一道同类变式题的题干要点，不要长篇>
+
+结尾加一节 **共性薄弱点与下一步**（不超过 150 字）。不要整段复述题干原文。"""
+
+    from backend.api.analytics_router import _call_ai_task
+    scope_key = f"ewa:{exam_id}"
+    task_id = await _call_ai_task(
+        "全班错因讲评", prompt,
+        dedupe_key=scope_key, max_concurrent=4,
+        cache_kind=WA_KIND, cache_scope=scope_key,
+        created_by=user.get("username", ""),
+        cache_meta={"exam_id": exam_id,
+                    "qids": [int(q["qid"]) if str(q["qid"]).isdigit() else q["qid"] for q in focus]})
+    return {"task_id": task_id, "question_count": len(focus)}
+
+
+@router.get("/{exam_id}/wrong-analysis/export", summary="导出全班错因讲评为 Word 文档")
+async def export_wrong_analysis(exam_id: int, request: Request):
+    """只读已生成的讲评缓存，不再重复调用模型（与考试分析报告导出同一套做法）"""
+    user = get_current_user(request)
+    if int(user.get("role", 2)) == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+    from backend.api.export_router import _assert_can_view_exam
+    _assert_can_view_exam(user, dict(exam))
+
+    from backend.ai_report_cache import docx_response, get_latest_report
+    report = get_latest_report(WA_KIND, f"ewa:{exam_id}")
+    if not report or not (report.get("content") or "").strip():
+        raise HTTPException(status_code=409, detail="请先在页面生成「全班错因讲评」，再导出")
+
+    return docx_response(
+        f"错因讲评 - {exam['title']}",
+        f"科目：{exam.get('subject', '')}  生成时间：{report.get('created_at', '')}",
+        report.get("content") or "",
+        f"错因讲评_{exam['title']}.docx")
 
 
 # ═══════════════════════════════════════════════════════════

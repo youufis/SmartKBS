@@ -44,6 +44,53 @@ def _ensure_table() -> None:
     _READY = True
 
 
+def build_docx_bytes(title: str, subtitle: str, markdown_text: str) -> bytes:
+    """报告正文（Markdown）→ docx 字节。各处 AI 报告导出共用，样式与考试分析报告一致。"""
+    import io as _io
+
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, RGBColor
+
+    from backend.api.analytics_router import _markdown_to_docx
+
+    doc = Document()
+    style = doc.styles["Normal"]  # type: ignore[union-attr, attr-defined]
+    style.font.name = "Microsoft YaHei"  # type: ignore[attr-defined]
+    style.font.size = Pt(11)  # type: ignore[attr-defined]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
+
+    head = doc.add_heading(title, level=1)
+    head.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if subtitle:
+        info = doc.add_paragraph()
+        info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = info.add_run(subtitle)
+        run.font.size = Pt(10)
+        run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+    doc.add_paragraph()
+    _markdown_to_docx(doc, markdown_text or "")
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+def docx_response(title: str, subtitle: str, markdown_text: str, filename: str):
+    """包成浏览器直接下载的 Word 附件响应。"""
+    import urllib.parse
+
+    from fastapi.responses import StreamingResponse
+
+    data = build_docx_bytes(title, subtitle, markdown_text)
+    safe = urllib.parse.quote(filename)
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe}"})
+
+
 def save_report(kind: str, scope_key: str, content: str,
                 created_by: str = "", meta: dict[str, Any] | None = None) -> int:
     _ensure_table()
