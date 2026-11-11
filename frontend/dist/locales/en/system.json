@@ -1728,6 +1728,8 @@
   "field_EXPLORE_CANVAS_TRASH_DAYS_desc": "Archived canvases older than this are destroyed with their pages; restorable within",
   "field_EXPLORE_TTS_CACHE_MB": "TTS cache watermark (MB)",
   "field_EXPLORE_TTS_CACHE_MB_desc": "When the speech cache exceeds this size the sweeper drops least-recently-used files; classroom outputs from the last 7 days are exempt and cache is regenerable",
+  "field_EXPLORE_PAGE_TRASH_DAYS": "Page trash retention (days)",
+  "field_EXPLORE_PAGE_TRASH_DAYS_desc": "How long deleted pages stay restorable; after that the page and its timeline snapshots are destroyed",
   "field_EXPLORE_SHARE_EXPIRE_DAYS": "Share snapshot retention (days)",
   "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "Read-only snapshots shared to teachers are auto-recycled after expiry",
   "assetPanelTitle": "Asset storage (read-only)",

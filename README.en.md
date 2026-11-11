@@ -45,6 +45,15 @@
 > - 🎖️ Soft points + strong honors: first question, deep-dive chains and archiving earn points, plus 5 explore badges; never graded, never ranked, badges stay on the student's own profile, and the hall of glory follows its existing rule (cards are created automatically once the points threshold is met — no review step)
 > - 🔒 Configurable daily quotas for chat / image generation / read-aloud; admins are unlimited but still metered. Expressions of self-harm or suicidal thoughts switch to a fixed care script (no model call) plus a zero-raw-text alert to administrators, and the care ledger is queryable in the admin console
 >
+> **Explore Canvas · usability overhaul**
+> - 🔢 Contiguous page numbers: deleting a page no longer leaves holes like "Page 3"
+> - 🗑️ Page trash: deleted pages stay restorable for 30 days, snapshots and timeline kept
+> - 🖼️ Every timeline entry now carries a thumbnail, so you can tell what it was
+> - 📁 New "My portfolio" tab: view, download, jump back or remove archived work; same-day duplicates merge
+> - 🏷️ Clear naming: canvas trash / page trash / portfolio / timeline
+> - 🎛️ AI panel buttons gain labels (icons only on narrow panels) and the empty-state hint shrinks to one line
+> - 📱 On phones the panel no longer collides with the canvas toolbar; opening a canvas zooms to its content
+>
 > **Conversations and attachments**
 > - 🗂️ History as a docked sidebar: pushes content aside on desktop instead of covering it; a single click previews without replacing the running conversation; new chats appear as soon as they are saved, today / yesterday expand by default and each year gets its own divider
 > - 📎 Attachments live with the conversation: images and documents are archived together with it, so reopening a history entry still shows the original image and lets you download the file; a recycled file reads "Attachment expired"
@@ -504,7 +513,8 @@ An intelligent upgrade of AI dialogue, providing personalized learning companion
 
 A personal infinite canvas shared by teachers and students: ask, learn, explore and doodle freely. One brand with role-based presets — students open "My Question Pile / Doodle Desk / Exploration Notes", teachers open "Lesson Ideas / Asset Workshop / Self-Training".
 
-- **🧭 Canvas wall, multi-page boards**: autosave, timeline rollback, one-click clear (archived first), tidy layout, search jumps straight to the page that matched
+- **🧭 Canvas wall, multi-page boards**: autosave, contiguous page numbers, page trash (30-day restore), one-click clear (archived first), tidy layout, search that jumps to the matching page
+- **🖼️ Timeline and portfolio**: an automatic snapshot every 30 minutes with a wireframe thumbnail and one-click rewind; archived work shows up under "My portfolio" on the wall (view / download / jump back), and same-day repeats merge into one entry
 - **💬 Floating AI companion**: chat with textbook citations, image generation (SVG-first), read-aloud, voice input, camera capture; sidebar / draggable pop-out / mobile drawer, with the toolbar stepping aside when popped out
 - **🖍️ Circle-to-ask**: draw a pen circle around anything and its text fills the input; only the circled area is sent as context — no retyping
 - **🃏 Ask-cards**: answers settle onto the canvas with follow-up / read-aloud / copy / locate, and exports keep every word
@@ -1212,6 +1222,17 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - 🎖️ Soft points and honors (never graded); self-harm expressions switch to a care script with a zero-raw-text admin alert; configurable daily quotas, admins exempt but metered
 - 🗂️ Asset ledger with automatic cleanup: reference renewal, orphan recycling (daily job, no manual trigger), dry-run available for inspection
 - 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only
+
+**Explore Canvas · usability overhaul**
+
+- 🔢 Contiguous page numbers across tabs, portfolio and share titles
+- 🗑️ Page trash: deleting a page is soft, restorable for 30 days, timeline preserved
+- 🖼️ Wireframe thumbnails on every timeline entry
+- 📁 "My portfolio" tab: view / download / jump back / remove, same-day duplicates merged
+- 🏷️ Terminology split: canvas trash, page trash, portfolio, timeline
+- 🎛️ Labeled AI panel actions (icons only on narrow panels), shorter empty-state hint
+- 📱 Mobile: the toolbar steps aside for the panel and the AI bubble clears it
+- 🩹 Opening a canvas zooms to content; console noise removed; copy fully localized; new page-trash retention setting
 
 **Conversations and attachments**
 

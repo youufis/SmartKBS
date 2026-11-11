@@ -1728,6 +1728,8 @@
   "field_EXPLORE_CANVAS_TRASH_DAYS_desc": "移入回收站的画布超期后连同页面一并销毁；期内可还原",
   "field_EXPLORE_TTS_CACHE_MB": "朗读缓存水位（MB）",
   "field_EXPLORE_TTS_CACHE_MB_desc": "语音合成缓存超过该体积时，清理线程会清掉最久未命中的旧音频（最近 7 天课堂产物豁免；缓存可再生，最多重合成一次）",
+  "field_EXPLORE_PAGE_TRASH_DAYS": "页面回收站保留（天）",
+  "field_EXPLORE_PAGE_TRASH_DAYS_desc": "删掉的页面在回收站里保留的天数，到期连同时间线存档一并销毁；期内可还原",
   "field_EXPLORE_SHARE_EXPIRE_DAYS": "分享快照保留（天）",
   "field_EXPLORE_SHARE_EXPIRE_DAYS_desc": "学生分享给老师的只读快照到期后自动回收",
   "assetPanelTitle": "素材存储（只读）",
