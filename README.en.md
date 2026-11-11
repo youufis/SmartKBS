@@ -7,7 +7,7 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 50 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -71,6 +71,11 @@
 > **Whiteboard**
 > - 🧑‍🏫 AI assistant upgrade: textbook source tags, selection / pen-circle as priority context, chat can pop out as a draggable window (toolbar steps aside)
 > - 🚪 Self-study mode retired: classroom collaboration stays on the whiteboard, personal creation moves to Explore Canvas
+>
+> **Question tags and selection**
+> - 🏷️ Question management and bank analytics gain a tag-status filter: show only questions without knowledge-point tags, combinable with subject / type / difficulty / creator / knowledge point
+> - 📛 An untagged badge on the bank page (admins): one click to filter, click again to clear; the count drops as soon as AI tagging writes
+> - 🧩 One shared definition of "untagged" across list, analytics and badge — separator-only tags count as untagged too; the "no knowledge point" figure jumps straight to that filter
 >
 > **Data and analytics**
 > - 🗂️ Asset ledger with automatic cleanup: uploads, generated images and recordings are all registered; references renew lifetime, orphans are recycled (daily, no manual trigger) and a dry-run mode shows what a round would do
@@ -161,7 +166,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI lesson cast, AI podcast, AI teaching assistant, question bank, exams, composing with Word export, AI resources, resource centre and management, file centre | 12 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI lesson cast, AI podcast, AI teaching assistant, question bank and tag maintenance, exams, composing with Word export, AI resources, resource centre and management, file centre | 12 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 11 |
@@ -293,6 +298,7 @@ AI-powered smart question management system supporting multiple question types a
   - Supports image generation, preview, deletion, concurrent generation optimization
   - Image placeholder management
 - **📂 Question Bank Management**: filtering, search, edit, delete; **multi-select bulk deletion** with the same rules as single delete (others' questions and ones in use are skipped with per-row reasons, 500 per call)
+- **🏷️ Tag maintenance**: filter by tag status to see only untagged questions (one definition across list, analytics and the header badge), working together with AI tagging and knowledge-point linking
 - **📐 Compact list**: fixed table layout with measured column widths — the stem column takes the remaining space, media thumbnails shrink, rows lose about 30% height
 - **🔄 AI Image Generation**: Automatically generates images for subjective question SVG/image placeholders
 
@@ -1300,6 +1306,12 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - 📢 Announcements: keyword + priority filters, batch delete, read counts and reader lists; opening details marks them read
 - 🎨 Student pages share one page header and relative timestamps (to-do, questions, points, portraits, notifications, files, daily discovery, news, quest, classroom interactions)
 - 🩹 Fixed notification pagination and quest list page-flash; localized empty-state and remaining-time copy for quiz / poll / interaction
+
+**Question tags and selection**
+
+- 🏷️ Question management and bank analytics can both show only questions without knowledge-point tags, combined with other filters, and the analytics figure jumps straight into that filter
+- 📛 An untagged badge on the bank page for admins: the number is the backlog — one click to filter, click again to clear, and it drops after AI tagging writes
+- 🧩 A single shared definition of "untagged" across list, analytics and badge, so separator-only dirty tags count as untagged too
 
 ### v7.x – v9.0.0
 
