@@ -262,6 +262,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "AI_JSON_OBJECT_MODE": False,          # 强制 response_format=json_object（个别网关不支持，失败会自动降级）
     "AI_STRICT_PARSE": True,               # 严格解析：不接受截断救回的残缺结果，并逐题做字段体检
     "IMAGE_EXTRACT_MAX_TOKENS": 8000,      # 单次图片识别（题目提取）的 token 预算，长图/多图可上调
+    "EXAM_WA_MAX_QUESTIONS": 8,            # 全班错因讲评一次最多讲几道题（控 token 与等待时间）
+    "EXAM_WA_RATE_CEILING": 90,            # 正确率低于此百分比的题目才进讲评
     # AI 线程池并发上限 — 全站同步 AI 调用（图示/板书/出题/批改/讨论/闯关）共用的工作线程数。
     # 这些线程只挂在网络等待上，放开到 8 不会压住数据库；调太小会让高峰期请求排队。
     "AI_MAX_CONCURRENCY": 8,
@@ -627,6 +629,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "AI_REQUEST_TIMEOUT": (5, 900),
     # 图片题目提取的 token 预算：下限防呆，上限按住模型上下文（超出只会白等一次超时）
     "IMAGE_EXTRACT_MAX_TOKENS": (500, 32000),
+    "EXAM_WA_MAX_QUESTIONS": (1, 30), "EXAM_WA_RATE_CEILING": (10, 100),
     "AI_MAX_CONCURRENCY": (1, 32),
     "CHAT_MEMORY_MAX_TURNS": (1, 30),
     "CHAT_MEMORY_TTL_MINUTES": (1, 1440),

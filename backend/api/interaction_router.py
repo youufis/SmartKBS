@@ -3470,11 +3470,46 @@ async def export_quiz_ai_analysis(quiz_id: int, request: Request):
 
     title = quiz.get("title") or f"测验 #{quiz_id}"
     from backend.ai_report_cache import docx_response
+    # 附页数据表：每题正确率 + 错选分布，与结果页同一口径（backend.quiz_stats）
+    tables: list[dict[str, Any]] = []
+    try:
+        questions = _quiz_questions(quiz)
+        answers = execute_query(
+            "SELECT student_username, answers, score, graded FROM interaction_quiz_answers WHERE quiz_id = ?",
+            (quiz_id,))
+        parsed_list = []
+        for a in answers:
+            idx_map = {}
+            try:
+                ua_list = json.loads(a[1]) if isinstance(a[1], str) else (a[1] or [])
+            except (json.JSONDecodeError, TypeError):
+                ua_list = []
+            for ua in ua_list if isinstance(ua_list, list) else []:
+                if isinstance(ua, dict) and ua.get("question_index") is not None:
+                    try:
+                        idx_map[int(ua["question_index"])] = str(ua.get("answer", "")).strip()
+                    except (TypeError, ValueError):
+                        continue
+            parsed_list.append((a, idx_map, _quiz_graded(a[3])))
+        st_rows = _build_question_stats(questions, parsed_list)
+        if st_rows:
+            tables = [{
+                "heading": "附录：每题正确率与错选分布",
+                "columns": ["题号", "题型", "正确率%", "答对/已答", "错选分布"],
+                "rows": [[s["index"] + 1, s["type"], s["correct_rate"],
+                          f"{s['correct_count']}/{s['total_count']}",
+                          "、".join(f"{k}({v}人)" for k, v in (s.get("wrong_options") or []))[:70]]
+                         for s in st_rows],
+            }]
+    except Exception as e:  # noqa: BLE001 - 附表失败不影响导出正文
+        logger.warning("[quiz] 导出附表生成失败 quiz=%s: %s", quiz_id, e)
+
     return docx_response(
         f"随堂测验答题分析 - {title}",
         f"生成时间：{report.get('created_at', '')}",
         report.get("content") or "",
-        f"测验答题分析_{title}.docx")
+        f"测验答题分析_{title}.docx",
+        tables)
 
 
 # ═══════════════════════════════════════════════════════════

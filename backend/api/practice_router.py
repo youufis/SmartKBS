@@ -991,11 +991,29 @@ async def export_practice_ai_analysis(session_id: int, request: Request):
 
     title = sess.get("title") or f"练习 #{session_id}"
     from backend.ai_report_cache import docx_response
+    cs = detail.get("stats") or {}
+    qs = detail.get("question_stats") or []
+    tables = []
+    if cs:
+        tables.append({"heading": "附录一：完成概览", "columns": ["指标", "数值"], "rows": [
+            ["应完成人数", cs.get("student_count")],
+            ["已提交", cs.get("submitted_count")],
+            ["已判分", cs.get("graded_count")],
+            ["提交率", f"{cs.get('participation_rate')}%"],
+            ["平均得分率", f"{cs.get('avg_rate')}%" if cs.get("avg_rate") is not None else "-"],
+        ]})
+    if qs:
+        tables.append({"heading": "附录二：每题正确率",
+                       "columns": ["题号", "题型", "分值", "正确率%", "答对/已判", "本题批改中"],
+                       "rows": [[i + 1, q.get("type"), q.get("score"), q.get("correct_rate"),
+                                 f"{q.get('correct_count')}/{q.get('total_count')}",
+                                 q.get("pending_count")] for i, q in enumerate(qs)]})
     return docx_response(
         f"同步练习学情分析 - {title}",
         f"知识点：{sess.get('knowledge_points') or '-'}  生成时间：{report.get('created_at', '')}",
         report.get("content") or "",
-        f"练习学情分析_{title}.docx")
+        f"练习学情分析_{title}.docx",
+        tables)
 
 
 @router.post("/sessions/{session_id}/notify-unsubmitted", summary="一键提醒未提交学生")

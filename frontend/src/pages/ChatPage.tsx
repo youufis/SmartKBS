@@ -2152,12 +2152,14 @@ const ChatPage: React.FC = () => {
             {t('historyPreviewHint')}
           </Typography.Text>
           <AttachmentStrip items={previewAttachments} thumbSize={96} />
-          <div style={{
-            maxHeight: 420, overflow: 'auto', whiteSpace: 'pre-wrap',
+          {/* 预览与正文同一套渲染：Markdown 表格、公式、列表都要认，
+              否则 AI 排好的表格在这里只剩一堆竖线 */}
+          <div className="markdown-content" style={{
+            maxHeight: 420, overflow: 'auto',
             fontSize: 13, lineHeight: 1.7, padding: 10, borderRadius: 4,
-            background: 'var(--bg-layout)',
+            background: 'var(--bg-layout)', wordBreak: 'break-word',
           }}>
-            {previewText}
+            <FormulaRenderer content={previewText} />
           </div>
         </Spin>
       </Modal>

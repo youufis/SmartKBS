@@ -592,5 +592,8 @@
   "wrongAnaExportNeed": "等讲评生成完成后再导出",
   "wrongAnaRegenerate": "重新生成",
   "wrongAnaTimeout": "错因讲评超时，请稍后重试",
-  "wrongAnaFailed": "错因讲评失败"
+  "wrongAnaFailed": "错因讲评失败",
+  "explainExport": "下载 Word",
+  "explainExportTip": "把这份错题讲解存成 Word 文档，便于打印或发给家长",
+  "explainExportNeed": "等讲解生成完成后再导出"
 }

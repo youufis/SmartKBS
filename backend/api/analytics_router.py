@@ -774,8 +774,49 @@ async def export_exam_report_docx(
     run.font.size = Pt(10)
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
+    # 附页数据表：与页面统计同一口径（backend.exam_stats），不另写一套匹配逻辑
+    tables: list[dict[str, Any]] = []
+    try:
+        atts = q_execute_query(
+            "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded')",
+            (exam_id,))
+        q_rows = q_execute_query(
+            """SELECT qb.id as qid, qb.type, qb.question_text, qb.correct_answer, qb.difficulty,
+                      qb.knowledge_points, qb.options, eq.score as question_score
+               FROM exam_questions eq
+               JOIN question_bank qb ON eq.question_id = qb.id
+               WHERE eq.exam_id = ? ORDER BY eq.sort_order""",
+            (exam_id,))
+        parsed = []
+        for a in atts:
+            graded = exam_graded(a.get("answers"))
+            ans_map = {str(k): (v.get("student_answer", "") if isinstance(v, dict) else str(v or ""))
+                       for k, v in (graded or {}).items()}
+            parsed.append((a.get("student_username", ""), ans_map, graded))
+        qs = exam_question_stats(q_rows, parsed)
+        ss = exam_score_stats(atts, exam["total_score"], exam["pass_score"])
+        tables = [
+            {"heading": "附录一：班级概览", "columns": ["指标", "数值"], "rows": [
+                ["已判分人数", ss.get("graded_count")],
+                ["提交人数（含批改中）", ss.get("submitted_count")],
+                ["平均分", f"{ss.get('avg_score')}/{exam['total_score']}"],
+                ["平均得分率", f"{ss.get('avg_rate')}%"],
+                ["最高分 / 最低分", f"{ss.get('max_score')} / {ss.get('min_score')}"],
+                ["及格人数", f"{ss.get('pass_count')}/{ss.get('graded_count')}"
+                            f"（及格线 {exam['pass_score']} 分）"],
+            ]},
+            {"heading": "附录二：每题正确率", "columns": ["题号", "题型", "正确率%", "答对/已判", "知识点"],
+             "rows": [[i + 1, q["type"], q["correct_rate"],
+                       f"{q['correct_count']}/{q['total_count']}",
+                       str(q.get("knowledge_points") or "")[:40]] for i, q in enumerate(qs)]},
+        ]
+    except Exception as e:  # noqa: BLE001 - 附表失败不该挡住导出
+        logger.warning("[analytics] 考试报告附表生成失败 exam=%s: %s", exam_id, e)
+
     doc.add_paragraph()
     _markdown_to_docx(doc, content)
+    from backend.ai_report_cache import _add_docx_tables
+    _add_docx_tables(doc, tables)
 
     buf = io.BytesIO()
     doc.save(buf)

@@ -44,7 +44,35 @@ def _ensure_table() -> None:
     _READY = True
 
 
-def build_docx_bytes(title: str, subtitle: str, markdown_text: str) -> bytes:
+def _add_docx_tables(doc, tables: list[dict[str, Any]] | None) -> None:
+    """正文之后追加「数据附表」：每张表 {heading, columns, rows, note}。"""
+    for tb in tables or []:
+        cols = tb.get("columns") or []
+        rows = tb.get("rows") or []
+        if not cols or not rows:
+            continue
+        doc.add_heading(tb.get("heading") or "数据附表", level=2)
+        if tb.get("note"):
+            doc.add_paragraph(str(tb["note"]))
+        table = doc.add_table(rows=1, cols=len(cols))
+        try:
+            table.style = "Table Grid"
+        except Exception:  # noqa: BLE001 - 样式缺失就用默认表格样式
+            pass
+        for i, col in enumerate(cols):
+            cell = table.rows[0].cells[i]
+            cell.text = str(col)
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    run.bold = True
+        for row in rows[: int(tb.get("max_rows", 200))]:
+            cells = table.add_row().cells
+            for i, val in enumerate(list(row)[:len(cols)]):
+                cells[i].text = "" if val is None else str(val)
+
+
+def build_docx_bytes(title: str, subtitle: str, markdown_text: str,
+                     tables: list[dict[str, Any]] | None = None) -> bytes:
     """报告正文（Markdown）→ docx 字节。各处 AI 报告导出共用，样式与考试分析报告一致。"""
     import io as _io
 
@@ -70,6 +98,7 @@ def build_docx_bytes(title: str, subtitle: str, markdown_text: str) -> bytes:
         run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
     doc.add_paragraph()
     _markdown_to_docx(doc, markdown_text or "")
+    _add_docx_tables(doc, tables)
 
     buf = _io.BytesIO()
     doc.save(buf)
@@ -77,13 +106,14 @@ def build_docx_bytes(title: str, subtitle: str, markdown_text: str) -> bytes:
     return buf.read()
 
 
-def docx_response(title: str, subtitle: str, markdown_text: str, filename: str):
-    """包成浏览器直接下载的 Word 附件响应。"""
+def docx_response(title: str, subtitle: str, markdown_text: str, filename: str,
+                  tables: list[dict[str, Any]] | None = None):
+    """包成浏览器直接下载的 Word 附件响应；tables 是正文之后的数据附表。"""
     import urllib.parse
 
     from fastapi.responses import StreamingResponse
 
-    data = build_docx_bytes(title, subtitle, markdown_text)
+    data = build_docx_bytes(title, subtitle, markdown_text, tables)
     safe = urllib.parse.quote(filename)
     return StreamingResponse(
         iter([data]),

@@ -1744,5 +1744,9 @@
   "field_CHAT_ASSET_QUOTA_MB": "Attachment space per user",
   "field_CHAT_ASSET_QUOTA_MB_desc": "Per-user cap for chat attachments (0 = unlimited). Attachments live as long as the conversation history; deleting a chat frees space only after the cleanup job runs",
   "field_CHAT_ASSET_GC_DAYS": "Recycle unreferenced attachments",
-  "field_CHAT_ASSET_GC_DAYS_desc": "Delete attachments that no longer appear in any saved conversation and have been idle for this many days (0 = never)"
+  "field_CHAT_ASSET_GC_DAYS_desc": "Delete attachments that no longer appear in any saved conversation and have been idle for this many days (0 = never)",
+  "field_EXAM_WA_MAX_QUESTIONS": "Error review question cap",
+  "field_EXAM_WA_MAX_QUESTIONS_desc": "How many highest-error questions one class review covers (1-30, default 8) — bounds wait time and token cost",
+  "field_EXAM_WA_RATE_CEILING": "Error review accuracy threshold (%)",
+  "field_EXAM_WA_RATE_CEILING_desc": "Only questions with accuracy below this enter the review (10-100, default 90); lower = only the worst, higher = wider coverage"
 }

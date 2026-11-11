@@ -187,7 +187,10 @@ const ExamPage: React.FC = () => {
   const [explainModal, setExplainModal] = useState(false)
   const [explainLoading, setExplainLoading] = useState(false)
   const [explainData, setExplainData] = useState<{ exam_title: string; explanations: any[]; total_wrong: number } | null>(null)
+  // 导出要带考试 id：弹窗打开后成绩弹窗可能已经切走，不能依赖 resultExam
+  const [explainExamId, setExplainExamId] = useState<number | null>(null)
   const handleExplainWrong = async (examId: number) => {
+    setExplainExamId(examId)
     setExplainModal(true)
     setExplainLoading(true)
     setExplainData(null)
@@ -2291,7 +2294,19 @@ const ExamPage: React.FC = () => {
         open={explainModal}
         onCancel={() => { if (explainLoading) return; setExplainModal(false) }}
         width={800}
-        footer={explainLoading ? null : <Button onClick={() => setExplainModal(false)}>{t('close')}</Button>}
+        footer={explainLoading ? null : (
+          <Space>
+            <Tooltip title={explainData ? t('explainExportTip') : t('explainExportNeed')}>
+              <span style={{ display: 'inline-block', cursor: explainData ? 'default' : 'not-allowed' }}>
+                <Button icon={<DownloadOutlined />} disabled={!explainData}
+                  onClick={() => window.open(`/api/exams/${explainExamId || resultExam?.id}/explain-wrong/export`, '_blank')}>
+                  {t('explainExport')}
+                </Button>
+              </span>
+            </Tooltip>
+            <Button onClick={() => setExplainModal(false)}>{t('close')}</Button>
+          </Space>
+        )}
       >
         {explainLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>

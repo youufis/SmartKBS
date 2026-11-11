@@ -592,5 +592,8 @@
   "wrongAnaExportNeed": "Wait until the review is generated",
   "wrongAnaRegenerate": "Regenerate",
   "wrongAnaTimeout": "The review timed out, please retry",
-  "wrongAnaFailed": "Failed to generate the review"
+  "wrongAnaFailed": "Failed to generate the review",
+  "explainExport": "Download Word",
+  "explainExportTip": "Save this wrong-answer review as a Word document for printing or sharing",
+  "explainExportNeed": "Wait until the review is generated"
 }

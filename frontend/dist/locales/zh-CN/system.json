@@ -1744,5 +1744,9 @@
   "field_CHAT_ASSET_QUOTA_MB": "每人附件空间",
   "field_CHAT_ASSET_QUOTA_MB_desc": "对话附件的每人容量上限（0 = 不限）。附件与历史记录同寿命，删对话不会立刻腾空间，回收任务清理后才释放",
   "field_CHAT_ASSET_GC_DAYS": "无引用附件回收",
-  "field_CHAT_ASSET_GC_DAYS_desc": "附件不再被任何历史记录引用、且闲置超过这么多天后才删除（0 = 不回收）。设为 0 时空间只增不减"
+  "field_CHAT_ASSET_GC_DAYS_desc": "附件不再被任何历史记录引用、且闲置超过这么多天后才删除（0 = 不回收）。设为 0 时空间只增不减",
+  "field_EXAM_WA_MAX_QUESTIONS": "错因讲评题目数上限",
+  "field_EXAM_WA_MAX_QUESTIONS_desc": "「全班错因讲评」一次最多讲几道错误率最高的题（1~30，默认 8），控制等待时间与算力消耗",
+  "field_EXAM_WA_RATE_CEILING": "错因讲评正确率阈值（%）",
+  "field_EXAM_WA_RATE_CEILING_desc": "正确率低于这个百分比的题目才进入讲评（10~100，默认 90）；调低=只讲最差的几题，调高=讲评范围更宽"
 }

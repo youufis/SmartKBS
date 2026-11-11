@@ -413,6 +413,8 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AI_JSON_OBJECT_MODE', labelKey: 'field_AI_JSON_OBJECT_MODE', descKey: 'field_AI_JSON_OBJECT_MODE_desc', longDescKey: 'field_AI_JSON_OBJECT_MODE_tip', type: 'boolean', group: 'aioutput', required: false },
   { key: 'AI_STRICT_PARSE', labelKey: 'field_AI_STRICT_PARSE', descKey: 'field_AI_STRICT_PARSE_desc', longDescKey: 'field_AI_STRICT_PARSE_tip', type: 'boolean', group: 'aioutput', required: false },
   { key: 'IMAGE_EXTRACT_MAX_TOKENS', labelKey: 'field_IMAGE_EXTRACT_MAX_TOKENS', descKey: 'field_IMAGE_EXTRACT_MAX_TOKENS_desc', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'EXAM_WA_MAX_QUESTIONS', labelKey: 'field_EXAM_WA_MAX_QUESTIONS', descKey: 'field_EXAM_WA_MAX_QUESTIONS_desc', type: 'number', group: 'aioutput', required: false, unitKey: 'unitItem' },
+  { key: 'EXAM_WA_RATE_CEILING', labelKey: 'field_EXAM_WA_RATE_CEILING', descKey: 'field_EXAM_WA_RATE_CEILING_desc', type: 'number', group: 'aioutput', required: false },
   // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
   { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', longDescKey: 'field_CHAT_MEMORY_ENABLED_tip', type: 'boolean', group: 'memory', level: 'basic' },
   { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitTurn' },
