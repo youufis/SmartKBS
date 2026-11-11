@@ -597,5 +597,12 @@
   "wbScopeTip": "错题本只收这些活动里答错的题，可在 系统配置 › 错题本与自动巩固 里增减；考试固定接入",
   "questManageSubtitle": "关卡、题库与榜单都在这里管",
   "pageSubtitle": "题库的生成、提取、去重与标签维护",
-  "moreActions": "更多操作"
+  "moreActions": "更多操作",
+  "kpStateFilter": "标注状态",
+  "kpStateNone": "无知识点",
+  "kpStateTagged": "有知识点",
+  "kpUnlabeled": "未标注",
+  "kpUnlabeledTip": "该题没有知识点标签：按知识点选题时只能靠题干命中，建议补标",
+  "kpUnlabeledChipTip": "还有 {{count}} 道题没有知识点标签——按知识点选题时它们只能靠题干命中。点击只看这些题，再点取消",
+  "analyticsNoKpJumpTip": "点击跳到试题管理，只看没有知识点的题"
 }

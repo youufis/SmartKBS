@@ -33,9 +33,10 @@ interface AnalyticsFilters {
   type: string
   difficulty: string
   creator: string
+  kp_state: string
 }
 
-const EMPTY_FILTERS: AnalyticsFilters = { subject: '', type: '', difficulty: '', creator: '' }
+const EMPTY_FILTERS: AnalyticsFilters = { subject: '', type: '', difficulty: '', creator: '', kp_state: '' }
 
 /** 后端 detail 可能是字符串，也可能是 FastAPI 422 的对象数组；必须转成字符串再渲染。 */
 function errorText(e: any, fallback: string): string {
@@ -127,13 +128,16 @@ const QuestionBankAnalyticsPage: React.FC = () => {
     }))
   }, [data, t])
 
-  const goList = () => {
+  const goList = (override: { kp_state?: string } = {}) => {
     const q = new URLSearchParams()
     if (filters.subject) q.set('subject', filters.subject)
     if (filters.type) q.set('type', filters.type)
     if (filters.difficulty) q.set('difficulty', filters.difficulty)
     if (filters.creator) q.set('creator', filters.creator)
     if (kpFilter.length) q.set('knowledge_points', joinKps(kpFilter))
+    // 质量卡片的「无知识点」点进来要直接落在未标注筛选上，所以允许调用方覆盖这一项
+    const kpState = override.kp_state ?? filters.kp_state
+    if (kpState) q.set('kp_state', kpState)
     if (keyword) q.set('keyword', keyword)
     if (range?.[0]) q.set('start_date', range[0].format('YYYY-MM-DD'))
     if (range?.[1]) q.set('end_date', range[1].format('YYYY-MM-DD'))
@@ -356,7 +360,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
             <Space>
               <Button icon={<DownloadOutlined />} onClick={exportCsv} disabled={!data}>{t('analyticsExport')}</Button>
               <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>{t('refresh')}</Button>
-              <Button type="primary" onClick={goList}>{t('analyticsViewList')}</Button>
+              <Button type="primary" onClick={() => goList()}>{t('analyticsViewList')}</Button>
             </Space>
           </Col>
         </Row>
@@ -400,6 +404,15 @@ const QuestionBankAnalyticsPage: React.FC = () => {
             extraOptions={(data?.knowledge_points || []).map(x => x.name)}
             style={{ minWidth: 260 }}
             placeholder={t('analyticsKnowledgePointFilter')}
+          />
+          <Select
+            allowClear placeholder={t('kpStateFilter')} style={{ width: 120 }}
+            value={filters.kp_state || undefined}
+            onChange={v => setFilters(f => ({ ...f, kp_state: v || '' }))}
+            options={[
+              { value: 'none', label: t('kpStateNone') },
+              { value: 'tagged', label: t('kpStateTagged') },
+            ]}
           />
           <RangePicker value={range} onChange={v => setRange(v as [Dayjs | null, Dayjs | null] | null)} />
           <Input.Search
@@ -527,7 +540,14 @@ const QuestionBankAnalyticsPage: React.FC = () => {
           />
           <Card size="small" title={t('analyticsQuality')}>
             <Row gutter={[12, 12]}>
-              <Col xs={12} md={4}><Statistic title={t('analyticsNoKp')} value={data.quality.no_knowledge_point} /></Col>
+              <Col xs={12} md={4}>
+                {/* 未标注是"按知识点选题选不到"的头号原因：点这个数字直接跳到试题管理的未标注筛选 */}
+                <Tooltip title={t('analyticsNoKpJumpTip')}>
+                  <div style={{ cursor: 'pointer' }} onClick={() => goList({ kp_state: 'none' })}>
+                    <Statistic title={t('analyticsNoKp')} value={data.quality.no_knowledge_point} />
+                  </div>
+                </Tooltip>
+              </Col>
               <Col xs={12} md={4}><Statistic title={t('analyticsNoExplanation')} value={data.quality.no_explanation} /></Col>
               <Col xs={12} md={4}><Statistic title={t('analyticsNoMedia')} value={data.quality.no_media} /></Col>
               <Col xs={12} md={4}><Statistic title={t('analyticsPendingMedia')} value={data.quality.pending_media} /></Col>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image,
-  DatePicker, Dropdown,
+  DatePicker, Dropdown, Badge,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
@@ -85,13 +85,14 @@ interface QBFilters {
   subject?: string
   creator?: string
   knowledge_points?: string
+  kp_state?: string
   keyword?: string
   start_date?: string
   end_date?: string
 }
 
 const FILTER_KEYS: (keyof QBFilters)[] = [
-  'type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'keyword', 'start_date', 'end_date',
+  'type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'kp_state', 'keyword', 'start_date', 'end_date',
 ]
 
 /** 支持从统计页下钻：/question-bank?type=...&creator=...&keyword=... */
@@ -182,12 +183,24 @@ const QuestionBankPage: React.FC = () => {
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(() => rangeFromQuery(queryString))
   const [creatorOptions, setCreatorOptions] = useState<{ username: string; name: string }[]>([])
 
-  // 创建者筛选项（与统计页共用同一份元数据）
-  useEffect(() => {
-    questionsApi.getQuestionAnalyticsMeta()
-      .then((meta) => setCreatorOptions(meta.creators || []))
-      .catch(() => setCreatorOptions([]))
+  // 创建者筛选项 + 未标注角标：与统计页共用同一份元数据，页面本来就拉一次，不多打请求
+  const [untaggedCount, setUntaggedCount] = useState(0)
+  const loadMeta = useCallback(async () => {
+    try {
+      const meta = await questionsApi.getQuestionAnalyticsMeta()
+      setCreatorOptions(meta.creators || [])
+      setUntaggedCount(Number(meta.untagged_count ?? 0))
+    } catch {
+      setCreatorOptions([])
+    }
   }, [])
+  useEffect(() => { void loadMeta() }, [loadMeta])
+
+  // 一键只看未标注，再点取消；数字与 kp_state=none 的列表口径同源，点进去"共 N 道题"必然对得上
+  const toggleUntaggedFilter = () => {
+    setFilters(f => ({ ...f, kp_state: f.kp_state === 'none' ? undefined : 'none' }))
+    setPage(1)
+  }
 
   // 多选批量删除：只作用于当前页可见行（翻页后自动剔除不可见 id，见下方 effect）
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -413,7 +426,7 @@ const QuestionBankPage: React.FC = () => {
         .map((it) => ({ id: it.id, tags: it.tags.slice(0, 3) }))
       const res = await questionsApi.tagFillQuestions(true, edited.length ? 0 : 50, edited.length ? edited : undefined)
       setTagFillResult(res)
-      if ((res.written ?? 0) > 0) loadQuestions()
+      if ((res.written ?? 0) > 0) { loadQuestions(); void loadMeta() }
     } catch (e: any) {
       message.error(t('tagFillFail') + ': ' + (e?.response?.data?.detail || e?.message || tc('failed')))
     } finally {
@@ -756,7 +769,11 @@ const QuestionBankPage: React.FC = () => {
         <Tooltip title={text}>
           <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{text}</span>
         </Tooltip>
-      ) : '-',
+      ) : (
+        <Tooltip title={t('kpUnlabeledTip')}>
+          <Tag color="default" style={{ marginInlineEnd: 0, fontSize: 12 }}>{t('kpUnlabeled')}</Tag>
+        </Tooltip>
+      ),
     },
     {
       title: t('difficulty'),
@@ -885,6 +902,18 @@ const QuestionBankPage: React.FC = () => {
             <>
               <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}
                 aria-label={t('refresh')} />
+              {user?.role === 'admin' && untaggedCount > 0 && (
+                <Tooltip title={t('kpUnlabeledChipTip', { count: untaggedCount })}>
+                  <Badge count={untaggedCount} size="small" overflowCount={9999}
+                         color={filters.kp_state === 'none' ? '#ff4d4f' : '#faad14'} offset={[-4, 4]}>
+                    <Button icon={<TagsOutlined />}
+                            type={filters.kp_state === 'none' ? 'primary' : 'default'}
+                            onClick={toggleUntaggedFilter}>
+                      {t('kpUnlabeled')}
+                    </Button>
+                  </Badge>
+                </Tooltip>
+              )}
               <Button icon={<BarChartOutlined />} onClick={() => navigate('/question-bank/analytics')}>
                 {t('analyticsTitle')}
               </Button>
@@ -1301,6 +1330,19 @@ const QuestionBankPage: React.FC = () => {
               style={{ width: '100%' }}
               placeholder={t('analyticsKnowledgePointFilter')}
             />
+          </Col>
+          <Col span={3}>
+            {/* 标注状态：管理员批量补标/编辑时先只看没标的题（配合"更多操作 → AI 补标"用） */}
+            <Select
+              allowClear
+              placeholder={t('kpStateFilter')}
+              style={{ width: '100%' }}
+              value={filters.kp_state}
+              onChange={(val) => { setFilters(f => ({ ...f, kp_state: val })); setPage(1) }}
+            >
+              <Option value="none">{t('kpStateNone')}</Option>
+              <Option value="tagged">{t('kpStateTagged')}</Option>
+            </Select>
           </Col>
           <Col span={4}>
             <DatePicker.RangePicker

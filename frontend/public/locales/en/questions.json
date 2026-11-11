@@ -597,5 +597,12 @@
   "wbScopeTip": "Only mistakes from these activities are collected; change them in System settings › Mistake book. Exams are always included",
   "questManageSubtitle": "Levels, question pools and leaderboards in one place",
   "pageSubtitle": "Generate, extract, dedupe and tag your question bank",
-  "moreActions": "More"
+  "moreActions": "More",
+  "kpStateFilter": "Tag status",
+  "kpStateNone": "Untagged",
+  "kpStateTagged": "Tagged",
+  "kpUnlabeled": "Untagged",
+  "kpUnlabeledTip": "No knowledge-point tag: KP-based selection can only reach it via question text - consider tagging",
+  "kpUnlabeledChipTip": "{{count}} questions have no knowledge-point tag - KP-based selection can only reach them via question text. Click to filter, click again to clear",
+  "analyticsNoKpJumpTip": "Open the question list filtered to untagged questions"
 }

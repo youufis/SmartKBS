@@ -221,6 +221,17 @@ def _esc_like(v: str) -> str:
     return re.sub(r"([%_!])", "!\\1", v or "")
 
 
+def _kp_blank_sql(alias: str = "") -> str:
+    """未标注知识点的 SQL 口径：列表筛选、统计页筛选、顶部角标计数三处必须同一个口径。
+
+    知识点是自由文本，只判空会漏掉"只有分隔符/空白"的脏值（批量导入与 AI 补标都可能留下），
+    所以先把全角逗号/顿号/分号统一成半角逗号，再剥掉逗号与空白，压成空串才算没标注。
+    """
+    col = f"{alias}.knowledge_points" if alias else "knowledge_points"
+    return ("TRIM(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(%s, ''), "
+            "'，', ','), '、', ','), ';', ','), ',', ''))" % col)
+
+
 def _question_refs(question_id: int) -> tuple[list, list]:
     """Q2: 返回引用该题的(考试, 同步练习)。
 
@@ -735,6 +746,7 @@ async def list_questions(
     difficulty: str = Query(None, description="筛选难度"),
     subject: str = Query(None, description="筛选科目"),
     knowledge_points: str = Query(None, description="筛选知识点（多个用逗号/顿号分隔）"),
+    kp_state: str = Query(None, description="筛选知识点标注状态：none=未标注、tagged=已标注"),
     start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
     end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
     page: int = Query(1, ge=1),
@@ -778,6 +790,8 @@ async def list_questions(
                 "(" + " OR ".join("q.knowledge_points LIKE ? ESCAPE '!'" for _ in kps) + ")"
             )
             params.extend(f"%{_esc_like(kp)}%" for kp in kps)
+    if kp_state in ("none", "tagged"):
+        conditions.append(f"{_kp_blank_sql('q')} {'=' if kp_state == 'none' else '<>'} ''")
     if start_date:
         try:
             datetime.strptime(start_date, "%Y-%m-%d")
@@ -889,12 +903,17 @@ def _question_analytics_meta() -> dict[str, Any]:
         "SELECT MIN(created_at) AS min_date, MAX(created_at) AS max_date "
         "FROM question_bank WHERE status='active'"
     ) or {}
+    untagged_row = execute_query_one(
+        f"SELECT COUNT(*) AS n FROM question_bank WHERE status='active' AND {_kp_blank_sql()} = ''"
+    ) or {}
     return {
         "subjects": sorted(subject_labels),
         "creators": creators,
         "types": sorted(str(r.get("type") or "") for r in type_rows if r.get("type")),
         "min_date": str(date_row.get("min_date") or "")[:10],
         "max_date": str(date_row.get("max_date") or "")[:10],
+        # 与列表 kp_state=none 同一口径：角标数字和点进去看到的"共 N 道题"永远对得上
+        "untagged_count": int(untagged_row.get("n") or 0),
     }
 
 
@@ -914,6 +933,7 @@ async def question_analytics(
     difficulty: str = Query("", description="难度"),
     creator: str = Query("", description="创建者用户名"),
     knowledge_points: str = Query("", description="知识点（多个用逗号/顿号分隔）"),
+    kp_state: str = Query("", description="筛选知识点标注状态：none=未标注、tagged=已标注"),
     keyword: str = Query("", description="题干/知识点关键词"),
     start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
     end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
@@ -954,6 +974,8 @@ async def question_analytics(
         kw = f"%{_esc_like(keyword)}%"
         conds.append("(question_text LIKE ? ESCAPE '!' OR knowledge_points LIKE ? ESCAPE '!')")
         params.extend([kw, kw])
+    if kp_state in ("none", "tagged"):
+        conds.append(f"{_kp_blank_sql()} {'=' if kp_state == 'none' else '<>'} ''")
     if start_date:
         try:
             datetime.strptime(start_date, "%Y-%m-%d")

@@ -43,6 +43,7 @@ export async function listQuestions(params?: {
   difficulty?: string;
   subject?: string;
   knowledge_points?: string;
+  kp_state?: string;
   start_date?: string;
   end_date?: string;
   page?: number;
@@ -105,6 +106,8 @@ export interface QuestionAnalytics {
     types: string[]
     min_date: string
     max_date: string
+    /** 没有知识点标签的题目数（与列表 kp_state=none 同一口径） */
+    untagged_count?: number
   }
 }
 
@@ -114,6 +117,7 @@ export async function getQuestionAnalytics(params?: {
   difficulty?: string
   creator?: string
   knowledge_points?: string
+  kp_state?: string
   keyword?: string
   start_date?: string
   end_date?: string
