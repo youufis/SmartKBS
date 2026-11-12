@@ -314,6 +314,69 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass
 
+            # ── L2: scores 增加学号列并回填存量（姓名+年级+班级唯一匹配才写, 同名歧义留空）──
+            try:
+                c.execute("ALTER TABLE scores ADD COLUMN student_username TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_scores_student ON scores(student_username)")
+            except sqlite3.OperationalError:
+                pass
+            # L2: 唯一约束迁入学号维度 —— 同班同名学生可各有一行（老数据学号空, 仍按姓名唯一）。
+            # SQLite 不支持改约束, 走建表-拷贝-改名（与 teacher_assignments 迁移同一套路）。
+            try:
+                c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='scores'")
+                _scores_sql = (c.fetchone() or [""])[0] or ""
+                if "UNIQUE(teacher_username, grade, class_name, student_name)" in _scores_sql:
+                    c.execute("""CREATE TABLE scores_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        teacher_username TEXT NOT NULL,
+                        grade TEXT NOT NULL,
+                        class_name TEXT NOT NULL,
+                        student_name TEXT NOT NULL,
+                        score INTEGER DEFAULT 0,
+                        updated_at TEXT,
+                        grade_id INTEGER,
+                        class_id INTEGER,
+                        student_username TEXT
+                    )""")
+                    c.execute("""INSERT INTO scores_new
+                        (id, teacher_username, grade, class_name, student_name, score, updated_at, grade_id, class_id, student_username)
+                        SELECT id, teacher_username, grade, class_name, student_name, score, updated_at, grade_id, class_id, student_username
+                        FROM scores""")
+                    c.execute("DROP TABLE scores")
+                    c.execute("ALTER TABLE scores_new RENAME TO scores")
+                    c.execute("CREATE INDEX IF NOT EXISTS idx_scores_teacher ON scores(teacher_username)")
+                    c.execute("CREATE INDEX IF NOT EXISTS idx_scores_lookup ON scores(teacher_username, grade, class_name)")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_scores_student ON scores(student_username)")
+                c.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_scores_key
+                             ON scores(teacher_username, grade, class_name, student_name, COALESCE(student_username,''))""")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("""
+                    UPDATE scores SET student_username = (
+                        SELECT u.username FROM users u
+                        WHERE u.role=2 AND u.name=scores.student_name AND u.grade=scores.grade
+                          AND (u.class=scores.class_name
+                               OR u.class_id IN (SELECT cc.id FROM classes cc
+                                                 WHERE cc.display_name=scores.class_name))
+                        LIMIT 1
+                    )
+                    WHERE IFNULL(student_username,'')=''
+                      AND (SELECT COUNT(*) FROM users u2
+                           WHERE u2.role=2 AND u2.name=scores.student_name AND u2.grade=scores.grade
+                             AND (u2.class=scores.class_name
+                                  OR u2.class_id IN (SELECT cc.id FROM classes cc
+                                                     WHERE cc.display_name=scores.class_name))) = 1
+                """)
+            except sqlite3.OperationalError:
+                pass
+
             # ── 课堂积分流水表（S-LOG）──
             # scores 只存"当前总分"，改一次就覆盖一次：老师无法回答"这分谁什么时候加的"，
             # 也无法撤销。每次加减/重置都在这里落一行，op_id 把一次操作（单个/批量/整班重置）

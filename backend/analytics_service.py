@@ -239,11 +239,13 @@ def build_class_snapshot(
 
     teacher_sql = "AND teacher_username=?" if teacher_filter else ""
     score_params: list[Any] = [grade, *variants, *([teacher_filter] if teacher_filter else [])]
+    # L2: 学号优先聚合（同班同名分开计）; 无学号的老数据仍按姓名兜底
     score_rows = execute_query_dict(
-        f"""SELECT student_name, COALESCE(SUM(score),0) AS total
+        f"""SELECT COALESCE(NULLIF(student_username,''), student_name) AS skey,
+                   COALESCE(SUM(score),0) AS total
             FROM scores
             WHERE grade=? AND class_name IN ({ph}) {teacher_sql}
-            GROUP BY student_name""",
+            GROUP BY skey""",
         tuple(score_params),
     )
     score_totals = [int(r["total"] or 0) for r in score_rows]
@@ -264,17 +266,6 @@ def build_class_snapshot(
 
     students = scope["students"]
     student_names = list(students.keys())
-    attempts_by_exam: dict[int, list[dict[str, Any]]] = {}
-    if student_names:
-        sph = ",".join("?" for _ in student_names)
-        rows = q_execute_query(
-            f"""SELECT exam_id, student_username, score, total_score, teacher_score
-                FROM exam_attempts
-                WHERE student_username IN ({sph}) AND status IN ('submitted', 'graded')""",
-            tuple(student_names),
-        )
-        for r in rows:
-            attempts_by_exam.setdefault(int(r["exam_id"]), []).append(dict(r))
 
     exams_sql = (
         "SELECT id, title, subject, total_score, pass_score, creator_username, "
@@ -286,6 +277,21 @@ def build_class_snapshot(
         " ORDER BY created_at DESC LIMIT 50",
         (teacher_filter,) if teacher_filter else (),
     )
+
+    # L3: 按候选考试预筛答卷, 不再把全班所有考试的答卷全量拉进内存
+    attempts_by_exam: dict[int, list[dict[str, Any]]] = {}
+    _exam_ids = [int(e["id"]) for e in exam_rows]
+    if student_names and _exam_ids:
+        sph = ",".join("?" for _ in student_names)
+        eph = ",".join("?" for _ in _exam_ids)
+        rows = q_execute_query(
+            f"""SELECT exam_id, student_username, score, total_score, teacher_score
+                FROM exam_attempts
+                WHERE exam_id IN ({eph}) AND student_username IN ({sph}) AND status IN ('submitted', 'graded')""",
+            tuple(_exam_ids) + tuple(student_names),
+        )
+        for r in rows:
+            attempts_by_exam.setdefault(int(r["exam_id"]), []).append(dict(r))
     exams: list[dict[str, Any]] = []
     for e in exam_rows:
         att = attempts_by_exam.get(int(e["id"]), [])

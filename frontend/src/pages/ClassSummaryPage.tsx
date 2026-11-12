@@ -117,9 +117,9 @@ const ClassSummaryPage: React.FC = () => {
   useEffect(() => {
     setSelectedClass('')
     setClasses([])
-    if (!selectedGrade) return
+    if (!selectedGrade || !user?.username) return
     apiClient.get('/api/scores/classes', {
-      params: { grade: selectedGrade, teacher: user?.username || 'root' },
+      params: { grade: selectedGrade, teacher: user.username },
     })
       .then(({ data }) => {
         const list = Array.isArray(data) ? data : []

@@ -4,6 +4,7 @@ AI 智能学情分析 API 路由
 """
 import json
 import os
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -14,7 +15,6 @@ from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
 from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
-from backend.prompts import apply_skills
 from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT, TEACHING_SUGGESTIONS_PROMPT
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 from backend.prompts import build_ai_role
@@ -49,28 +49,16 @@ def _resolve_class_id(grade_name: str, cls_name: str) -> int | None:
 
 router = APIRouter()
 
+# L4: 学生个体分析每日次数（内存态, 重启清零; 与 security_guard 同风格）
+_STUDENT_ANALYTICS_LOCK = threading.Lock()
+_student_analytics_usage: dict[str, tuple[str, int]] = {}
+
 
 def _get_dashscope_api_key() -> str:
     """获取 DashScope API Key（使用统一缓存入口）"""
     from backend.api.chat_router import get_api_keys
     key, _ = get_api_keys("")
     return key
-
-
-def _call_ai(prompt: str) -> str:  # type: ignore[misc]
-    """调用 AI 分析（同步，保留兼容）"""
-    api_key = _get_dashscope_api_key()
-    if not api_key:
-        return "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
-
-    prompt = apply_skills(prompt, "analytics")
-
-    from backend.api.ai_service import call_ai_sync
-    try:
-        return call_ai_sync(prompt, api_key, use_kb=False)
-    except Exception as e:
-        logger.error(f"AI 学情分析调用失败: {e}")
-        return f"AI 分析出错：{str(e)}"
 
 
 async def _call_ai_task(description: str, prompt: str, dedupe_key: str = "",
@@ -253,6 +241,23 @@ async def student_analytics(target_username: str, request: Request):
         if not is_student_in_teacher_scope(target_username, user["username"]):
             raise HTTPException(status_code=403, detail="该学生不在您的任教范围内")
 
+    # L4: 学生个体分析每日次数上限（ANALYTICS_STUDENT_DAILY_LIMIT, 0=不限）
+    if role == 2:
+        from backend.api.config_router import get_config_value
+        try:
+            _daily_limit = int(get_config_value("ANALYTICS_STUDENT_DAILY_LIMIT", 0) or 0)
+        except (TypeError, ValueError):
+            _daily_limit = 0
+        if _daily_limit > 0:
+            _today = datetime.now().strftime("%Y-%m-%d")
+            with _STUDENT_ANALYTICS_LOCK:
+                _d, _n = _student_analytics_usage.get(target_username, ("", 0))
+                if _d != _today:
+                    _d, _n = _today, 0
+                if _n >= _daily_limit:
+                    raise HTTPException(status_code=429, detail=f"今日学情分析次数已达上限（{_daily_limit} 次），请明天再试")
+                _student_analytics_usage[target_username] = (_d, _n + 1)
+
     # 获取学生信息
     user_rows = execute_query(
         "SELECT name, grade, class FROM users WHERE username = ?",
@@ -278,10 +283,12 @@ async def student_analytics(target_username: str, request: Request):
     from backend.analytics_service import class_name_variants
     variants = class_name_variants(student_grade, str(student_class or "")) or [str(student_class or "")]
     vph = ",".join("?" for _ in variants)
+    # L2: 学号优先、老数据按姓名兜底（与点名同口径, 同班同名不再互相顶数）
     score_rows = execute_query(
         f"SELECT COALESCE(SUM(score),0) FROM scores "
-        f"WHERE student_name=? AND grade=? AND class_name IN ({vph})",
-        (student_name, student_grade, *variants),
+        f"WHERE (student_username=? OR (IFNULL(student_username,'')='' AND student_name=?)) "
+        f"AND grade=? AND class_name IN ({vph})",
+        (target_username, student_name, student_grade, *variants),
     )
     total_score = score_rows[0][0] if score_rows else 0
 

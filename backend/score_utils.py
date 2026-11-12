@@ -36,6 +36,21 @@ def save_teacher_scores(scores_data, teacher):
 
         new_keys = set(scores_data.keys())
 
+    # L2: 按姓名+年级+班级解析学号（唯一匹配才写; 同名歧义留空, 聚合侧按姓名兜底）
+    _stu_rows = execute_query("SELECT username, name, grade, class, class_id FROM users WHERE role=2")
+    _cls_disp = {r[0]: r[1] for r in execute_query("SELECT id, display_name FROM classes")}
+    _by_name_grade: dict = {}
+    for _u, _n, _g, _cl, _cid in _stu_rows:
+        _by_name_grade.setdefault((_g, _n), []).append((_u, _cl or "", _cls_disp.get(_cid, "")))
+
+    def _resolve(grade, cls, name):
+        cands = _by_name_grade.get((grade, name), [])
+        hit = [u for u, cl, disp in cands
+               if cls and (cls in (cl, disp)
+                           or cls.rstrip("班") == cl.rstrip("班")
+                           or cls.rstrip("班") == disp.rstrip("班"))]
+        return hit[0] if len(hit) == 1 else ""
+
         # 删除已移除的记录
         for key in existing_keys - new_keys:
             parts = key.split("|")
@@ -55,15 +70,16 @@ def save_teacher_scores(scores_data, teacher):
                     c.execute(
                         # A4: 必须用 localtime —— 读取方(portfolio 的"近 N 天"统计)拿
                         # Python 本地时间做 >= 比较, 旧写法存 UTC 会整体偏移 8 小时
-                        "UPDATE scores SET score=?, updated_at=datetime('now', 'localtime') "
+                        "UPDATE scores SET score=?, updated_at=datetime('now', 'localtime'), "
+                        "student_username=COALESCE(NULLIF(student_username,''), ?) "
                         "WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=?",
-                        (score, teacher, grade, cls, name),
+                        (score, _resolve(grade, cls, name), teacher, grade, cls, name),
                     )
                 else:
                     c.execute(
-                        "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))",
-                        (teacher, grade, cls, name, score),
+                        "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, updated_at, student_username) "
+                        "VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?)",
+                        (teacher, grade, cls, name, score, _resolve(grade, cls, name)),
                     )
 
         conn.commit()
@@ -186,24 +202,42 @@ def apply_score_delta(teacher: str, grade: str, cls_display: str, name: str, del
 
     with get_connection() as conn:
         c = conn.cursor()
-        row = c.execute(
-            "SELECT id, score FROM scores "
-            "WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=?",
-            (teacher, grade, cls_display, name),
-        ).fetchone()
+        # L2: 带学号时按学号定位（同名学生各一行）; 命中无学号老行则认领它。
+        # 不带学号（姓名键 UI 流程）保持旧行为: 按姓名取一行更新, 不另起平行行。
+        if student_username:
+            row = c.execute(
+                "SELECT id, score FROM scores "
+                "WHERE teacher_username=? AND grade=? AND class_name=? AND student_username=?",
+                (teacher, grade, cls_display, student_username),
+            ).fetchone()
+            if not row:
+                row = c.execute(
+                    "SELECT id, score FROM scores "
+                    "WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=? "
+                    "AND IFNULL(student_username,'')=''",
+                    (teacher, grade, cls_display, name),
+                ).fetchone()
+        else:
+            row = c.execute(
+                "SELECT id, score FROM scores "
+                "WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=?",
+                (teacher, grade, cls_display, name),
+            ).fetchone()
         if row:
             total = int(row[1] or 0) + delta
             c.execute(
                 "UPDATE scores SET score=?, updated_at=datetime('now', 'localtime'), "
-                "grade_id=COALESCE(grade_id, ?), class_id=COALESCE(class_id, ?) WHERE id=?",
-                (total, gid, cid, row[0]),
+                "grade_id=COALESCE(grade_id, ?), class_id=COALESCE(class_id, ?), "
+                "student_username=COALESCE(NULLIF(student_username,''), ?) WHERE id=?",
+                (total, gid, cid, student_username or "", row[0]),
             )
         else:
             total = delta
             c.execute(
                 "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, "
-                "updated_at, grade_id, class_id) VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)",
-                (teacher, grade, cls_display, name, total, gid, cid),
+                "updated_at, grade_id, class_id, student_username) "
+                "VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?)",
+                (teacher, grade, cls_display, name, total, gid, cid, student_username or ""),
             )
         c.execute(
             "INSERT INTO score_logs (op_id, teacher_username, student_username, grade, class_name, "

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request, Query, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.config import ai_api_base
 from backend.model_catalog import resolve_vl_model
@@ -65,8 +65,8 @@ def _question_subject(subject: str) -> str:
 
 class GenerateRequest(BaseModel):
     """AI 生成试题请求"""
-    subject: str = ""  # 科目（由前端传递）
-    knowledge_points: str = ""         # 知识点
+    subject: str = Field("", max_length=100)  # 科目（由前端传递）
+    knowledge_points: str = Field("", max_length=2000)         # 知识点
     question_type: str = "single"      # single | multiple | true_false | short
     count: int = 5                     # 生成数量
     difficulty: str = "medium"         # easy | medium | hard
@@ -74,14 +74,14 @@ class GenerateRequest(BaseModel):
 
 class QuestionUpdate(BaseModel):
     """更新题目请求"""
-    question_text: str | None = None
+    question_text: str | None = Field(None, max_length=20000)
     options: str | dict[str, Any] | list[Any] | None = None
-    correct_answer: str | None = None
-    explanation: str | None = None
-    knowledge_points: str | None = None
-    difficulty: str | None = None
-    type: str | None = None          # Q8: 题型录错应可修正
-    subject: str | None = None       # Q8: 科目挂错应可修正
+    correct_answer: str | None = Field(None, max_length=5000)
+    explanation: str | None = Field(None, max_length=20000)
+    knowledge_points: str | None = Field(None, max_length=2000)
+    difficulty: str | None = Field(None, max_length=20)
+    type: str | None = Field(None, max_length=20)          # Q8: 题型录错应可修正
+    subject: str | None = Field(None, max_length=100)       # Q8: 科目挂错应可修正
 
 
 class CreatorTransferRequest(BaseModel):
@@ -100,15 +100,15 @@ _VALID_SOURCES = {"manual", "ai", "quiz_import", "batch_import", "exam_import"}
 
 class ImportQuestion(BaseModel):
     """导入题目到题库请求"""
-    type: str = "single"
-    subject: str = ""
-    question_text: str
+    type: str = Field("single", max_length=20)
+    subject: str = Field("", max_length=100)
+    question_text: str = Field(..., max_length=20000)
     options: str | list[Any] | dict[str, Any] | None = None
-    correct_answer: str = ""
-    explanation: str = ""
-    knowledge_points: str = ""
-    difficulty: str = "medium"
-    source: str = "manual"
+    correct_answer: str = Field("", max_length=5000)
+    explanation: str = Field("", max_length=20000)
+    knowledge_points: str = Field("", max_length=2000)
+    difficulty: str = Field("medium", max_length=20)
+    source: str = Field("manual", max_length=20)
     svg_content: str | None = None
     has_svg: int = 0
     media_placeholders: str | list[Any] | None = None
@@ -152,6 +152,39 @@ CODE_BANK_NOTE = (
 
 # ── 导入题目到题库（用于随堂测验题目复用） ──
 
+def _validate_question_state(qtype: str, opts_str: str, answer: str, *, require_answer: bool = True) -> None:
+    """M1: 题目合并态校验 —— update / import 同口径, 杜绝"永远判错"的题入库。
+
+    选择题: ≥2 选项、答案字母数与题型匹配、字母必须在选项内;
+    判断题: 答案枚举; 主观/填空: 参考答案必填(require_answer 控制部分更新场景)。
+    """
+    if qtype in ("single", "multiple"):
+        try:
+            opt_map = json.loads(opts_str) if opts_str else {}
+        except json.JSONDecodeError:
+            opt_map = {}
+        keys = {str(k) for k in (opt_map or {}).keys()}
+        if len(keys) < 2:
+            raise HTTPException(status_code=400, detail="选择题至少需要 2 个选项, 请补全后再保存")
+        letters = re.sub(r"[^A-Za-z]", "", answer).upper()
+        if qtype == "multiple" and len(letters) < 2:
+            raise HTTPException(status_code=400, detail="多选题的正确答案至少 2 个字母")
+        if qtype == "single" and len(letters) != 1:
+            raise HTTPException(status_code=400, detail="单选题的正确答案只能是 1 个字母")
+        bad = sorted({ch for ch in letters if ch not in keys})
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail="正确答案包含不在选项中的字母: %s（现有选项: %s）" % ("".join(bad), "".join(sorted(keys))),
+            )
+    elif qtype == "true_false":
+        if (answer or "").strip() not in ("对", "错", "T", "F", "true", "false", "TRUE", "FALSE"):
+            raise HTTPException(status_code=400, detail="判断题的正确答案只能是「对」或「错」")
+    elif qtype in ("short", "fill", "essay", "subjective") and require_answer \
+            and not (answer or "").strip():
+        raise HTTPException(status_code=400, detail="主观题/填空题必须填写参考答案, 否则无法批改")
+
+
 @router.post("/import", summary="导入题目到题库")
 async def import_question(req: ImportQuestion, request: Request):
     """将题目导入 question_bank，返回新题目的 ID"""
@@ -178,6 +211,15 @@ async def import_question(req: ImportQuestion, request: Request):
             options_str = json.dumps(req.options, ensure_ascii=False)
         else:
             options_str = req.options
+
+    # M1: 与 update 同口径 —— 题型/难度枚举、题干非空、合并态校验, 畸形题不得入库
+    if req.type not in QUESTION_TYPE_MAP:
+        raise HTTPException(status_code=400, detail=f"未知题型: {req.type}")
+    if req.difficulty not in ("easy", "medium", "hard"):
+        raise HTTPException(status_code=400, detail=f"未知难度: {req.difficulty}")
+    if not str(req.question_text or "").strip():
+        raise HTTPException(status_code=400, detail="题干不能为空")
+    _validate_question_state(req.type, options_str, req.correct_answer or "", require_answer=True)
 
     # 处理配图字段（外部导入按不可信输入处理：SVG 清洗、占位符与清单规整）
     # 导入不限占位符数量（教师可能一次搬 3 个描述进来），只有"自动生图"才受上限约束
@@ -574,6 +616,8 @@ async def generate_questions_async(req: GenerateRequest, request: Request):
     task_id = await _submit_ai_task(
         lambda: generate_questions(req, _InternalRequest(user)),
         f"教师 {username} AI 出题：{req.knowledge_points}({req.count}题)",
+        dedupe_key=f"qgen:{username}:{req.question_type}:{req.knowledge_points[:40]}:{req.count}",
+        reuse_completed=False,
     )
     return {"task_id": task_id, "message": "AI 已开始出题，请稍候..."}
 
@@ -1383,34 +1427,11 @@ async def update_question(question_id: int, req: QuestionUpdate, request: Reques
 
     opts_str = _options_to_str(req.options) if "options" in provided else (row.get("options") or "")
 
-    # 校验合并后的最终状态, 避免保存出"永远判错"的题
+    # 校验合并后的最终状态, 避免保存出"永远判错"的题（M1: 与 import 共用同一校验）
     final_type = req.type if "type" in provided else (row.get("type") or "single")
     final_ans = (req.correct_answer if "correct_answer" in provided else row.get("correct_answer")) or ""
-    if final_type in ("single", "multiple"):
-        try:
-            opt_map = json.loads(opts_str) if opts_str else {}
-        except json.JSONDecodeError:
-            opt_map = {}
-        keys = {str(k) for k in (opt_map or {}).keys()}
-        if len(keys) < 2:
-            raise HTTPException(status_code=400, detail="选择题至少需要 2 个选项, 请补全后再保存")
-        letters = re.sub(r"[^A-Za-z]", "", final_ans).upper()
-        if final_type == "multiple" and len(letters) < 2:
-            raise HTTPException(status_code=400, detail="多选题的正确答案至少 2 个字母")
-        if final_type == "single" and len(letters) != 1:
-            raise HTTPException(status_code=400, detail="单选题的正确答案只能是 1 个字母")
-        bad = sorted({ch for ch in letters if ch not in keys})
-        if bad:
-            raise HTTPException(
-                status_code=400,
-                detail="正确答案包含不在选项中的字母: %s（现有选项: %s）" % ("".join(bad), "".join(sorted(keys))),
-            )
-    elif final_type == "true_false":
-        if (final_ans or "").strip() not in ("对", "错", "T", "F", "true", "false", "TRUE", "FALSE"):
-            raise HTTPException(status_code=400, detail="判断题的正确答案只能是「对」或「错」")
-    elif final_type in ("short", "fill", "essay", "subjective") and "correct_answer" in provided \
-            and not (final_ans or "").strip():
-        raise HTTPException(status_code=400, detail="主观题/填空题必须填写参考答案, 否则无法批改")
+    _validate_question_state(final_type, opts_str, final_ans,
+                             require_answer="correct_answer" in provided)
 
     updates, params = [], []
     for field in ("question_text", "options", "correct_answer", "explanation",
@@ -1665,6 +1686,9 @@ async def dedup_questions(req: DedupRequest | None = Body(default=None), request
 
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    # M2: 跨创建者清理是管理员特权, 教师不得借该标志删他人的题
+    if req.include_all_creators and role != 0:
+        raise HTTPException(status_code=403, detail="仅管理员可跨创建者清理重复题")
 
     rows_all = [dict(r) for r in (execute_query(
         """SELECT id, question_text, type, IFNULL(correct_answer, '') AS ans
@@ -2047,11 +2071,19 @@ async def extract_questions_from_text(
         supported = {'.docx', '.txt', '.md', '.pdf', '.json'}
         if ext not in supported:
             raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}，支持 docx/txt/md/pdf/json")
+        # M4: 声明大小前置拒绝, 不全量读入内存
+        _MAX_DOC_BYTES = 20 * 1024 * 1024
+        if file.size is not None and file.size > _MAX_DOC_BYTES:
+            raise HTTPException(status_code=400, detail="文件过大（上限 20MB），请拆分后上传")
         try:
-            file_bytes = await file.read()
+            file_bytes = await file.read(_MAX_DOC_BYTES + 1)
+            if len(file_bytes) > _MAX_DOC_BYTES:
+                raise HTTPException(status_code=400, detail="文件过大（上限 20MB），请拆分后上传")
             # docx/pypdf 解析是纯 CPU 活, 放线程里做, 避免冻结事件循环(Q7)
             content = await asyncio.to_thread(_extract_text_from_file, file_bytes, ext)
             source_label = ext.lstrip(".")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"解析文件失败: {e}")
             raise HTTPException(status_code=400, detail=f"解析文件失败: {str(e)}")
@@ -2327,16 +2359,23 @@ async def extract_questions_from_image(
     if ext not in supported_images:
         raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}，支持 jpg/png/gif/webp/bmp")
 
-    # 读取图片（直接在内存处理，不落盘）
-
-    file_bytes = await file.read()
+    # 读取图片（直接在内存处理，不落盘）。M3: 大小前置 + 硬上限 + 魔法字节验真
+    _MAX_IMG_BYTES = 20 * 1024 * 1024
+    if file.size is not None and file.size > _MAX_IMG_BYTES:
+        raise HTTPException(status_code=400, detail="图片过大（上限 20MB），请压缩后重试")
+    file_bytes = await file.read(_MAX_IMG_BYTES + 1)
+    if len(file_bytes) > _MAX_IMG_BYTES:
+        raise HTTPException(status_code=400, detail="图片过大（上限 20MB），请压缩后重试")
     if len(file_bytes) < 100:
         raise HTTPException(status_code=400, detail="图片内容过小，请上传清晰的试卷截图")
-
-    # 根据扩展名确定 MIME 类型
-    mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-                '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
-    mime_type = mime_map.get(ext, 'image/jpeg')
+    from backend.api.image_gen_service import _sniff_image_format
+    _fmt = _sniff_image_format(file_bytes)
+    if not _fmt:
+        raise HTTPException(status_code=400, detail="上传内容不是可识别的图片文件")
+    # MIME 按真实格式定, 不信扩展名
+    _fmt_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                 "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp"}
+    mime_type = _fmt_mime.get(_fmt, "image/jpeg")
     # 获取 API Key
     api_key, _ = get_api_keys(username)
     if not api_key:
@@ -2590,8 +2629,8 @@ JSON 格式：
 
 class GenerateWithMediaRequest(BaseModel):
     """AI 生成试题请求（含多媒体配图和公式支持）"""
-    subject: str = ""
-    knowledge_points: str = ""
+    subject: str = Field("", max_length=100)
+    knowledge_points: str = Field("", max_length=2000)
     question_type: str = "single"
     count: int = 5
     difficulty: str = "medium"
@@ -2786,6 +2825,8 @@ async def generate_questions_with_media_async(req: GenerateWithMediaRequest, req
     task_id = await _submit_ai_task(
         lambda: generate_questions_with_media(req, _InternalRequest(user)),
         f"教师 {username} AI 出题(含配图)：{req.knowledge_points}",
+        dedupe_key=f"qgenmedia:{username}:{req.question_type}:{req.knowledge_points[:40]}:{req.count}",
+        reuse_completed=False,
     )
     return {"task_id": task_id, "message": "AI 已开始出题，请稍候..."}
 
@@ -3112,7 +3153,10 @@ async def upload_media_for_placeholder(
 
     max_size_mb = get_config_value("MAX_IMAGE_SIZE_MB", 5)
     max_size = max_size_mb * 1024 * 1024
-    content = await file.read()
+    # L2: 声明大小前置拒绝, 不全量读入内存
+    if file.size is not None and file.size > max_size:
+        raise HTTPException(status_code=400, detail=f"图片大小超过 {max_size_mb}MB 限制")
+    content = await file.read(max_size + 1)
     if len(content) > max_size:
         raise HTTPException(status_code=400, detail=f"图片大小超过 {max_size_mb}MB 限制")
 

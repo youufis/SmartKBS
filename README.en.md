@@ -40,15 +40,17 @@
 > - 🧭 **Explore Canvas (new)**: personal infinite canvas + floating AI companion (chat / image / read-aloud / voice / camera) + circle-to-ask + granted shares & template library + badges & care alerts; contiguous pages / page trash / timeline thumbnails / portfolio / mobile fit
 > - 🛡 **Security hardening**: share permission checks (forged re-share escalation blocked) · sandboxed HTML preview & attachment downloads · directory-browsing traversal guard · upload role/type/size limits · view-tracking visibility checks · exam anti-copy & watermark
 > - 📚 **Curriculum & practice**: server-side grading (no forged scores or answer leaks) · escaped question text & server-delivered explanations · same-course reorder check · recursive cascade delete + transactions · AI import unified at 20MB
+> - 🏷 **Question bank**: import & edit share one validation (malformed questions rejected) · cross-creator dedupe admin-only · extraction size caps & image magic-byte checks · generation dedupe · field length limits
+> - 📊 **Analytics & summaries**: scores student-ID migration (same-name separation, auto at startup) · ID-first aggregation · student analytics daily cap · class-summary prompt data isolation
 > - 🔗 **Resource lifecycle**: delete auto-clears bindings · rename auto-updates names (incl. re-share rows) · dead links hidden instantly · exact same-name matching · chat history sidebar & archived attachments
 > - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables)
 > - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
 > - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
-> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · 58 new regression tests
+> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · 89 new regression tests
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables are created automatically at startup, idempotent; Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + a new desktop build).
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables/fields are created and the scores student-ID migration runs automatically at startup (idempotent); Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + a new desktop build).
 
 ---
 
@@ -1219,6 +1221,19 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - AI import: parsing in thread pool + PDF page cap; transactional save + field validation; lesson-plan cache & refusal detection
 - Generation task dedupe (no double billing); KaTeX localized (offline math)
 
+**🏷 Question bank**
+
+- Import & edit share one merged-state validation: malformed questions (too few options / out-of-range answers / unknown types / empty stems) rejected
+- Cross-creator dedupe admin-only; text/image extraction size caps + image magic-byte verification
+- Async generation task dedupe; upload size pre-checks; model field length limits
+
+**📊 Analytics & summaries**
+
+- Scores student-ID migration: new column + unique-constraint migration + unambiguous backfill (auto at startup)
+- Class snapshot / individual analytics aggregate ID-first (same-name separated); legacy rows fall back to names
+- Exam attempts pre-filtered by candidate exams; student analytics daily cap (config, default unlimited)
+- Class-summary prompt data isolation (data, not instructions); analytics dead code removed
+
 **🔗 Resources & chat**
 
 - Lifecycle: delete auto-clears bindings / shares / logs; rename auto-updates names & URLs; dead links hidden instantly
@@ -1248,7 +1263,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 
 - Question bank "tag status" filter + untagged badge (list / stats / badge share one criterion)
 - WS proxy & reconnect fixes; silent notification-type loss fixed; timing/scoring idempotency corrected
-- 58 new regression tests (curriculum 27 + sharing 31); zero new ruff / tsc warnings
+- 89 new regression tests (curriculum 27 + sharing 31 + question bank 18 + analytics 7 + summary 6); zero new ruff / tsc warnings
 
 ### v7.x – v9.0.0
 
