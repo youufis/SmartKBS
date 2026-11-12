@@ -827,15 +827,13 @@ const checkValueShapes = (
       continue
     }
     if (storage === 'kv') {
-      if (typeof val !== 'string') {
+      // 注意：checkValueShapes 收到的是 toApiValues 之后的 API 形态——kv 已是 {名称: URL} 对象
+      if (!val || typeof val !== 'object' || Array.isArray(val)) {
         problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectKv' })
       } else {
-        for (const line of val.split('\n')) {
-          const t = line.trim()
-          if (!t) continue
-          const i = t.indexOf('=')
-          const url = i >= 0 ? t.slice(i + 1).trim() : ''
-          if (i <= 0 || (url && !/^https?:\/\//.test(url))) {
+        for (const [name, url] of Object.entries(val as Record<string, unknown>)) {
+          const u = String(url ?? '').trim()
+          if (!String(name).trim() || (u && !/^https?:\/\//.test(u))) {
             problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectKv' })
             break
           }
