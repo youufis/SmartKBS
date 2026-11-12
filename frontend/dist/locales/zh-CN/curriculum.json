@@ -367,7 +367,9 @@
   "cySortOrder": "排序号",
   "cyBindToKp": "绑定到知识点",
   "cyDownloadCourseware": "下载课件 (.html)",
-  "cyOpenNewTab": "新标签页打开",
+  "cyOpenNewTab": "新标签页打开",  "cyDownloadPage": "下载页面 (.html)",
+  "scopeAutoOpened": "已自动为这些资源放开共享年级：{{grades}}",
+
   "cyClose": "关闭",
   "cyCoursewarePreview": "课件预览",
   "cyGenPracticeWait": "AI 正在生成练习题，请稍候...（约 30-180 秒）",

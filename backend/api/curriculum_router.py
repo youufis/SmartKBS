@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 from datetime import datetime
 from typing import Any, Optional
 
@@ -15,6 +16,7 @@ from pydantic import BaseModel, field_validator
 
 from backend.database import (
     execute_query_dict as execute_query,
+    execute_query_one,
     execute_insert_update,
     get_connection,
     get_transaction,
@@ -39,6 +41,9 @@ from backend.api.chat_router import get_api_keys
 from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
+
+# M6: 个人资源自动登记串行化, 防并发 GET 重复登记
+_REGISTER_LOCK = threading.Lock()
 
 def _opts_of(v: Any) -> Any:
     """题面 options 可能是 dict 也可能是 JSON 字符串，统一成可用形式。"""
@@ -71,6 +76,12 @@ def _ai_json_object_mode() -> bool:
         return False
 
 LESSON_PLAN_CACHE_DAYS = 7   # G8: 教案缓存有效期(天)
+
+# AI 导入课程文件大小上限（MB）。口径必须与前端一致:
+#   frontend/src/components/AICurriculumGenerator.tsx 的 file.size 预检
+#   frontend/public/locales/{zh-CN,en}/curriculum.json 的 aiGenerator.uploadHint / uploadTooLarge
+# tests/test_curriculum_review_fixes.py 有一致性回归检查, 改这里必须同步改前端文案。
+AI_IMPORT_MAX_UPLOAD_MB = 20
 
 
 # ═══════════════════════════════════════════════════════════
@@ -598,39 +609,49 @@ async def ai_generate_from_file(request: Request):
     subject: str = str(subject_val) if subject_val else ""
     grade: str = str(grade_val) if grade_val else ""
 
-    # 读取文件内容
-    content_bytes = await file.read()
+    # 读取文件内容（M4: 先限大小再处理, 防超大文件吃满内存; 上限与前端文案统一为 20MB）
+    _MAX_UPLOAD = AI_IMPORT_MAX_UPLOAD_MB * 1024 * 1024
+    content_bytes = await file.read(_MAX_UPLOAD + 1)
+    if len(content_bytes) > _MAX_UPLOAD:
+        raise HTTPException(status_code=400, detail=f"文件过大（上限 {AI_IMPORT_MAX_UPLOAD_MB}MB），请拆分后上传")
     filename = (file.filename or "").lower()
 
-    # 提取文本（按扩展名处理）
-    text_content = ""
-    if filename.endswith(".txt") or filename.endswith(".md"):
-        text_content = content_bytes.decode("utf-8", errors="replace")
-    elif filename.endswith(".pdf"):
-        try:
-            import io
-            import importlib
-            PyPDF2 = importlib.import_module('PyPDF2')
-            reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
-            text_content = "\n".join(page.extract_text() for page in reader.pages)
-        except ImportError:
-            # 无 PyPDF2 时尝试 pdfminer
+    # 提取文本（按扩展名处理）。M4: 解析是 CPU/IO 密集且可能很慢（恶意 PDF）,
+    # 放线程池执行, 不再阻塞事件循环拖住全站。
+    def _extract_text() -> str:
+        if filename.endswith(".txt") or filename.endswith(".md"):
+            return content_bytes.decode("utf-8", errors="replace")
+        if filename.endswith(".pdf"):
             try:
                 import io
-                from pdfminer.high_level import extract_text as pdf_extract  # type: ignore
-                text_content = pdf_extract(io.BytesIO(content_bytes))
+                import importlib
+                PyPDF2 = importlib.import_module('PyPDF2')
+                reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
+                return "\n".join(page.extract_text() for page in reader.pages[:100])
             except ImportError:
-                raise HTTPException(status_code=400, detail="缺少 PDF 解析库，请安装 PyPDF2 或 pdfminer")
-    elif filename.endswith(".docx"):
-        try:
-            import io
-            from docx import Document
-            doc = Document(io.BytesIO(content_bytes))
-            text_content = "\n".join(p.text for p in doc.paragraphs)
-        except ImportError:
-            raise HTTPException(status_code=400, detail="缺少 DOCX 解析库，请安装 python-docx")
-    else:
+                try:
+                    import io
+                    from pdfminer.high_level import extract_text as pdf_extract  # type: ignore
+                    return pdf_extract(io.BytesIO(content_bytes))
+                except ImportError:
+                    raise HTTPException(status_code=400, detail="缺少 PDF 解析库，请安装 PyPDF2 或 pdfminer")
+        if filename.endswith(".docx"):
+            try:
+                import io
+                from docx import Document
+                doc = Document(io.BytesIO(content_bytes))
+                return "\n".join(p.text for p in doc.paragraphs)
+            except ImportError:
+                raise HTTPException(status_code=400, detail="缺少 DOCX 解析库，请安装 python-docx")
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {filename}，支持 txt/md/pdf/docx")
+
+    try:
+        text_content = await asyncio.to_thread(_extract_text)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[AI生成课程] 文件解析失败 {filename}: {e}")
+        raise HTTPException(status_code=400, detail="文件解析失败，请确认文件未损坏且格式正确")
 
     if not text_content.strip():
         raise HTTPException(status_code=400, detail="文件内容为空或无法提取文本")
@@ -717,96 +738,109 @@ def _parse_ai_json(text: str) -> dict[str, Any] | None:
 
 
 def _save_ai_result(result: dict[str, Any], subject: str, grade: str, username: str) -> dict[str, Any]:
-    """将 AI 生成的结构保存到数据库"""
+    """将 AI 生成的结构保存到数据库。
+
+    M4: 整体一个事务（旧实现逐条独立提交, 中途失败留下半套课程）;
+    AI 字段先做类型体检再入库（模型把 name 返回成对象/分钟数返回成字符串不再 500）。
+    """
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     saved = {"course_id": None, "chapters": 0, "knowledge_points": 0}
 
-    # 1. 创建课程
-    course_name = result.get("course_name", f"{subject}课程")
-    course_code = result.get("course_code", "")
-    course_desc = result.get("course_description", f"AI 自动生成的{subject}课程大纲")
+    def _s(v: Any, limit: int = 500) -> str:
+        if isinstance(v, (dict, list)):
+            v = json.dumps(v, ensure_ascii=False)
+        return str(v if v is not None else "")[:limit]
 
-    course_id = execute_insert_update(
-        """INSERT INTO courses (name, code, description, grade, subject, sort_order, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?)""",
-        (course_name, course_code, course_desc, grade, subject, now, now),
-    )
-    saved["course_id"] = course_id
+    def _mins(v: Any) -> int:
+        try:
+            return max(0, min(600, int(v)))
+        except (TypeError, ValueError):
+            return 30
 
-    # 2. 创建章节和知识点
-    chapters = result.get("chapters", [])
-    for ch_idx, ch in enumerate(chapters):
-        ch_id = execute_insert_update(
-            """INSERT INTO chapters (course_id, parent_id, name, description, sort_order, status, created_at, updated_at)
-               VALUES (?, NULL, ?, ?, ?, 'active', ?, ?)""",
-            (course_id, ch.get("name", ""), ch.get("description", ""), ch_idx, now, now),
+    def _diff(v: Any) -> str:
+        d = _s(v, 20)
+        return d if d in ("easy", "medium", "hard") else "medium"
+
+    def _kp_list(v: Any) -> list:
+        return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+    def _insert_kp_cur(c, chapter_id: int, kp: dict[str, Any], sort_order: int):
+        c.execute(
+            """INSERT INTO knowledge_points (chapter_id, name, description, learning_objectives, difficulty, estimated_minutes, sort_order, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+            (chapter_id, _s(kp.get("name"), 200), _s(kp.get("description"), 2000),
+             _s(kp.get("learning_objectives"), 2000), _diff(kp.get("difficulty", "medium")),
+             _mins(kp.get("estimated_minutes", 30)), sort_order, now, now),
         )
-        saved["chapters"] += 1
 
-        # 子章节（节）
-        children = ch.get("children", [])
-        top_kps = ch.get("knowledge_points", [])
+    course_name = _s(result.get("course_name", f"{subject}课程"), 200)
+    course_code = _s(result.get("course_code", ""), 100)
+    course_desc = _s(result.get("course_description", f"AI 自动生成的{subject}课程大纲"), 2000)
 
-        # 后处理：如果章既有子节又有章级知识点，将章级知识点合并到子节中
-        # 确保知识点不会与节平级（用户期望的结构）
-        if top_kps and children:
-            for kp in top_kps:
-                kp_name = kp.get("name", "")
-                # 查找同名节
-                matched = [s for s in children if s.get("name", "").strip() == kp_name.strip()]
-                if matched:
-                    # 追加到同名节的 knowledge_points 中
-                    matched[0].setdefault("knowledge_points", []).append(kp)
-                else:
-                    # 以知识点名称创建新节，将知识点放入其中
-                    children.append({
-                        "name": kp_name,
-                        "description": kp.get("description", ""),
-                        "knowledge_points": [kp],
-                    })
-            ch["knowledge_points"] = []  # 清空章级知识点，避免重复
+    with get_transaction() as conn:
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO courses (name, code, description, grade, subject, sort_order, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?)""",
+            (course_name, course_code, course_desc, _s(grade, 100), _s(subject, 100), now, now),
+        )
+        course_id = c.lastrowid
+        saved["course_id"] = course_id
 
-        for sec_idx, sec in enumerate(children):
-            sec_id = execute_insert_update(
+        chapters = result.get("chapters", [])
+        if not isinstance(chapters, list):
+            chapters = []
+        for ch_idx, ch in enumerate(chapters):
+            if not isinstance(ch, dict):
+                continue
+            c.execute(
                 """INSERT INTO chapters (course_id, parent_id, name, description, sort_order, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
-                (course_id, ch_id, sec.get("name", ""), sec.get("description", ""), sec_idx, now, now),
+                   VALUES (?, NULL, ?, ?, ?, 'active', ?, ?)""",
+                (course_id, _s(ch.get("name"), 200), _s(ch.get("description"), 2000), ch_idx, now, now),
             )
+            ch_id = c.lastrowid
             saved["chapters"] += 1
 
-            # 该节下专属的知识点
-            if sec_id is not None:
-                for kp_idx, kp in enumerate(sec.get("knowledge_points", [])):
-                    _insert_kp(sec_id, kp, kp_idx, now)
+            children = ch.get("children", [])
+            if not isinstance(children, list):
+                children = []
+            top_kps = _kp_list(ch.get("knowledge_points", []))
+
+            # 后处理：章既有子节又有章级知识点时, 把章级知识点并入子节（保留旧行为）
+            if top_kps and children:
+                for kp in top_kps:
+                    kp_name = _s(kp.get("name", ""), 200)
+                    matched = [s for s in children
+                               if isinstance(s, dict) and _s(s.get("name", ""), 200).strip() == kp_name.strip()]
+                    if matched:
+                        matched[0].setdefault("knowledge_points", []).append(kp)
+                    else:
+                        children.append({"name": kp_name, "description": kp.get("description", ""),
+                                         "knowledge_points": [kp]})
+                top_kps = []
+
+            for sec_idx, sec in enumerate(children):
+                if not isinstance(sec, dict):
+                    continue
+                c.execute(
+                    """INSERT INTO chapters (course_id, parent_id, name, description, sort_order, status, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+                    (course_id, ch_id, _s(sec.get("name"), 200), _s(sec.get("description"), 2000),
+                     sec_idx, now, now),
+                )
+                sec_id = c.lastrowid
+                saved["chapters"] += 1
+                for kp_idx, kp in enumerate(_kp_list(sec.get("knowledge_points", []))):
+                    _insert_kp_cur(c, sec_id, kp, kp_idx)
                     saved["knowledge_points"] += 1
 
-        # 只有章完全没有子节时，知识点才挂在章下
-        if top_kps and not children and ch_id is not None:
-            for kp_idx, kp in enumerate(top_kps):
-                _insert_kp(ch_id, kp, kp_idx, now)
-                saved["knowledge_points"] += 1
+            if top_kps and not children:
+                for kp_idx, kp in enumerate(top_kps):
+                    _insert_kp_cur(c, ch_id, kp, kp_idx)
+                    saved["knowledge_points"] += 1
 
     logger.info(f"AI 生成课程已保存: {course_name} (id={course_id}), {saved}")
     return saved
-
-
-def _insert_kp(chapter_id: int, kp: dict[str, Any], sort_order: int, now: str):
-    """插入单个知识点"""
-    execute_insert_update(
-        """INSERT INTO knowledge_points (chapter_id, name, description, learning_objectives, difficulty, estimated_minutes, sort_order, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
-        (
-            chapter_id,
-            kp.get("name", ""),
-            kp.get("description", ""),
-            kp.get("learning_objectives", ""),
-            kp.get("difficulty", "medium"),
-            kp.get("estimated_minutes", 30),
-            sort_order,
-            now,
-            now,
-        ),
-    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1066,68 +1100,61 @@ async def update_course(course_id: int, req: CourseUpdate, request: Request):
 
 @router.delete("/courses/{course_id}", summary="删除课程（硬删除）")
 async def delete_course(course_id: int, request: Request):
-    """删除课程（管理员）—— 硬删除课程及所有关联数据"""
+    """删除课程（管理员）—— 硬删除课程及所有关联数据。
+
+    M3: 递归 CTE 收集**任意深度**的章节（旧实现只收两层，深层节点成孤儿）；
+    主库全部删除在一个事务里，中途失败整体回滚；questions.db 跨库清理在提交后
+    best-effort 执行，失败只记日志不回滚主库。
+    """
     user = get_current_user(request)
     if not is_admin(user.get("username", "")):
         raise HTTPException(status_code=403, detail="权限不足：需要管理员权限")
 
-    course_rows = execute_query("SELECT * FROM courses WHERE id=?", (course_id,))
-    if not course_rows:
+    course = execute_query_one("SELECT * FROM courses WHERE id=?", (course_id,))
+    if not course:
         raise HTTPException(status_code=404, detail="课程不存在")
-    course = course_rows[0]
 
-    # 获取所有级联的章节ID和知识点ID
-    chapter_rows = execute_query(
-        "SELECT id FROM chapters WHERE course_id=?", (course_id,),
-    )
-    all_chapter_ids = [ch["id"] for ch in chapter_rows]
-    # 也获取子章节
+    # UNION(非 ALL)自带去重: 库里即使有环也能终止
+    all_chapter_ids = [r["id"] for r in execute_query(
+        """WITH RECURSIVE sub(id) AS (
+               SELECT id FROM chapters WHERE course_id=?
+               UNION
+               SELECT c.id FROM chapters c JOIN sub s ON c.parent_id = s.id
+           ) SELECT id FROM sub""", (course_id,))]
+    kp_ids: list[int] = []
     if all_chapter_ids:
-        placeholders = ",".join("?" for _ in all_chapter_ids)
-        child_rows = execute_query(
-            f"SELECT id FROM chapters WHERE parent_id IN ({placeholders})",
-            tuple(all_chapter_ids),
-        )
-        all_chapter_ids.extend(ch["id"] for ch in child_rows if ch["id"] not in all_chapter_ids)
+        _ph = ",".join("?" for _ in all_chapter_ids)
+        kp_ids = [r["id"] for r in execute_query(
+            f"SELECT id FROM knowledge_points WHERE chapter_id IN ({_ph})",
+            tuple(all_chapter_ids))]
 
-    if all_chapter_ids:
-        placeholders = ",".join("?" for _ in all_chapter_ids)
-        kp_rows = execute_query(
-            f"SELECT id FROM knowledge_points WHERE chapter_id IN ({placeholders})",
-            tuple(all_chapter_ids),
-        )
-        kp_ids = [kp["id"] for kp in kp_rows]
+    with get_transaction() as conn:
+        c = conn.cursor()
         if kp_ids:
-            kp_placeholders = ",".join("?" for _ in kp_ids)
+            kp_ph = ",".join("?" for _ in kp_ids)
             kp_tuple = tuple(kp_ids)
-            execute_insert_update(
-                f"DELETE FROM learning_progress WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
-            )
-            execute_insert_update(
-                f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
-            )
-            execute_insert_update(
-                f"DELETE FROM knowledge_prerequisites WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
-            )
-            execute_insert_update(
-                f"DELETE FROM knowledge_prerequisites WHERE prerequisite_id IN ({kp_placeholders})", kp_tuple,
-            )
-            # 清理 AI 练习独立成绩
+            c.execute(f"DELETE FROM learning_progress WHERE knowledge_point_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM knowledge_prerequisites WHERE knowledge_point_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM knowledge_prerequisites WHERE prerequisite_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM ai_lesson_plan_cache WHERE kp_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM kp_link WHERE kp_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM knowledge_points WHERE id IN ({kp_ph})", kp_tuple)
+        if all_chapter_ids:
+            ch_ph = ",".join("?" for _ in all_chapter_ids)
+            c.execute(f"DELETE FROM chapters WHERE id IN ({ch_ph})", tuple(all_chapter_ids))
+        c.execute("DELETE FROM courses WHERE id=?", (course_id,))
+
+    if kp_ids:
+        try:
             from backend.question_db import execute_insert as q_exec2
-            q_exec2(f"DELETE FROM ai_practice_results WHERE kp_id IN ({kp_placeholders})", kp_tuple)
-        execute_insert_update(
-            f"DELETE FROM knowledge_points WHERE chapter_id IN ({placeholders})", tuple(all_chapter_ids),
-        )
-        execute_insert_update(
-            f"DELETE FROM chapters WHERE id IN ({placeholders})", tuple(all_chapter_ids),
-        )
-        execute_insert_update(
-            f"DELETE FROM chapters WHERE parent_id IN ({placeholders})", tuple(all_chapter_ids),
-        )
+            kp_ph = ",".join("?" for _ in kp_ids)
+            q_exec2(f"DELETE FROM ai_practice_results WHERE kp_id IN ({kp_ph})", tuple(kp_ids))
+            q_exec2(f"DELETE FROM ai_practice_keys WHERE kp_id IN ({kp_ph})", tuple(kp_ids))
+        except Exception as e:
+            logger.warning(f"[删除课程] questions.db 清理失败 course={course_id}: {e}")
 
-    execute_insert_update("DELETE FROM courses WHERE id=?", (course_id,))
-
-    logger.info(f"管理员 {user['username']} 硬删除课程 id={course_id}")
+    logger.info(f"管理员 {user['username']} 硬删除课程 id={course_id} (章节={len(all_chapter_ids)}, 知识点={len(kp_ids)})")
     return {"message": f"课程「{course['name']}」已永久删除"}
 
 
@@ -1135,15 +1162,20 @@ async def delete_course(course_id: int, request: Request):
 # 章节 CRUD
 # ═══════════════════════════════════════════════════════════
 
-def _build_chapter_node(ch: dict[str, Any]) -> dict[str, Any]:
-    """构建单个章节的节点（含子章节和知识点）"""
+def _build_chapter_node(ch: dict[str, Any], _seen: frozenset = frozenset()) -> dict[str, Any]:
+    """构建单个章节的节点（含子章节和知识点）。L2: 带访问集合, 脏数据成环也不 RecursionError"""
     node = dict(ch)
+    if ch["id"] in _seen:
+        node["children"] = []
+        node["knowledge_points"] = []
+        return node
+    seen2 = _seen | {ch["id"]}
     # 子章节
     children = execute_query(
         "SELECT * FROM chapters WHERE parent_id=? AND status='active' ORDER BY sort_order, id",
         (ch["id"],),
     )
-    node["children"] = [_build_chapter_node(c) for c in children]
+    node["children"] = [_build_chapter_node(c, seen2) for c in children]
     # 知识点
     kps = execute_query(
         "SELECT * FROM knowledge_points WHERE chapter_id=? AND status='active' ORDER BY sort_order, id",
@@ -1266,64 +1298,53 @@ async def update_chapter(chapter_id: int, req: ChapterUpdate, request: Request):
 
 @router.delete("/chapters/{chapter_id}", summary="删除章节（硬删除）")
 async def delete_chapter(chapter_id: int, request: Request):
-    """删除章节（教师/管理员）—— 硬删除章节及所有关联数据"""
+    """删除章节（教师/管理员）—— 硬删除章节及所有关联数据（M3: 递归+事务，同 delete_course）"""
     user = get_current_user(request)
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    ch = execute_query("SELECT * FROM chapters WHERE id=?", (chapter_id,))
+    ch = execute_query_one("SELECT * FROM chapters WHERE id=?", (chapter_id,))
     if not ch:
         raise HTTPException(status_code=404, detail="章节不存在")
     _assert_can_edit_course(user, _course_of_chapter(chapter_id), "删除章节")
 
-    # 收集所有子章节ID
-    children = execute_query(
-        "SELECT id FROM chapters WHERE parent_id=?", (chapter_id,),
-    )
-    all_chapter_ids = [chapter_id] + [c["id"] for c in children]
-
+    all_chapter_ids = [r["id"] for r in execute_query(
+        """WITH RECURSIVE sub(id) AS (
+               SELECT id FROM chapters WHERE id=?
+               UNION
+               SELECT c.id FROM chapters c JOIN sub s ON c.parent_id = s.id
+           ) SELECT id FROM sub""", (chapter_id,))]
     placeholders = ",".join("?" for _ in all_chapter_ids)
     ch_tuple = tuple(all_chapter_ids)
+    kp_ids = [r["id"] for r in execute_query(
+        f"SELECT id FROM knowledge_points WHERE chapter_id IN ({placeholders})", ch_tuple)]
 
-    # 获取所有知识点ID
-    kp_rows = execute_query(
-        f"SELECT id FROM knowledge_points WHERE chapter_id IN ({placeholders})", ch_tuple,
-    )
-    kp_ids = [kp["id"] for kp in kp_rows]
+    with get_transaction() as conn:
+        c = conn.cursor()
+        if kp_ids:
+            kp_ph = ",".join("?" for _ in kp_ids)
+            kp_tuple = tuple(kp_ids)
+            c.execute(f"DELETE FROM learning_progress WHERE knowledge_point_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM knowledge_prerequisites WHERE knowledge_point_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM knowledge_prerequisites WHERE prerequisite_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM ai_lesson_plan_cache WHERE kp_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM kp_link WHERE kp_id IN ({kp_ph})", kp_tuple)
+            c.execute(f"DELETE FROM knowledge_points WHERE id IN ({kp_ph})", kp_tuple)
+        c.execute(f"DELETE FROM chapters WHERE id IN ({placeholders})", ch_tuple)
+
     if kp_ids:
-        kp_placeholders = ",".join("?" for _ in kp_ids)
-        kp_tuple = tuple(kp_ids)
-        execute_insert_update(
-            f"DELETE FROM learning_progress WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
-        )
-        execute_insert_update(
-            f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
-        )
-        execute_insert_update(
-            f"DELETE FROM knowledge_prerequisites WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
-        )
-        execute_insert_update(
-            f"DELETE FROM knowledge_prerequisites WHERE prerequisite_id IN ({kp_placeholders})", kp_tuple,
-        )
-        from backend.question_db import execute_insert as q_exec2
-        q_exec2(f"DELETE FROM ai_practice_results WHERE kp_id IN ({kp_placeholders})", kp_tuple)
-    execute_insert_update(
-        f"DELETE FROM knowledge_points WHERE chapter_id IN ({placeholders})", ch_tuple,
-    )
-    execute_insert_update(
-        f"DELETE FROM chapters WHERE parent_id IN ({placeholders})", ch_tuple,
-    )
-    execute_insert_update(
-        f"DELETE FROM chapters WHERE id IN ({placeholders})", ch_tuple,
-    )
+        try:
+            from backend.question_db import execute_insert as q_exec2
+            kp_ph = ",".join("?" for _ in kp_ids)
+            q_exec2(f"DELETE FROM ai_practice_results WHERE kp_id IN ({kp_ph})", tuple(kp_ids))
+            q_exec2(f"DELETE FROM ai_practice_keys WHERE kp_id IN ({kp_ph})", tuple(kp_ids))
+        except Exception as e:
+            logger.warning(f"[删除章节] questions.db 清理失败 chapter={chapter_id}: {e}")
 
-    logger.info(f"用户 {user['username']} 硬删除章节 id={chapter_id}")
+    logger.info(f"用户 {user['username']} 硬删除章节 id={chapter_id} (含子章节共 {len(all_chapter_ids)} 个, 知识点={len(kp_ids)})")
     return {"message": "章节已永久删除"}
 
-
-# ═══════════════════════════════════════════════════════════
-# 知识点 CRUD
-# ═══════════════════════════════════════════════════════════
 
 @router.get("/knowledge-points/{kp_id}", summary="获取知识点详情")
 async def get_knowledge_point(kp_id: int, request: Request):
@@ -1344,32 +1365,24 @@ async def get_knowledge_point(kp_id: int, request: Request):
     is_teacher_or_admin = user.get("role") in (0, 1)
     student_username = user.get("username") if user.get("role") == 2 else None
 
-    # 自动清理文件已不存在的脏共享行及其绑定（与列表接口一致）
-    try:
-        _rids = [b["resource_id"] for b in bindings if b["resource_type"] in ("html", "download")]
-        if _rids:
-            from backend.api.sharing_router import purge_dead_share_rows
-            if purge_dead_share_rows(resource_ids=_rids):
-                bindings = execute_query(
-                    """SELECT cb.* FROM curriculum_bindings cb
-                       WHERE cb.knowledge_point_id=? ORDER BY cb.sort_order, cb.id""",
-                    (kp_id,),
-                )
-    except Exception:
-        pass
+    # M6: GET 不再触发破坏性清理（purge 会联动删绑定/日志/成绩, 文件一时不可达即误删）。
+    # 清理由启动任务/后台负责; 这里只在展示时过滤已失效的绑定。
+    from backend.api.sharing_router import share_target_exists
     resources = []
     for b in bindings:
-        # 学生访问 html/download 资源时，同样按共享范围过滤
-        if student_username and b["resource_type"] in ("html", "download"):
-            share_rows = execute_query(
-                """SELECT share_scope, target_users, target_grade, target_class
+        # G1: html/download 先取共享行 —— 死链非破坏性过滤（文件不在就不展示, 清理交给 purge）
+        if b["resource_type"] in ("html", "download"):
+            sr = execute_query_one(
+                """SELECT owner_username, file_path, share_scope, target_users, target_grade, target_class
                    FROM shared_resources WHERE id=? AND resource_type=?""",
                 (b["resource_id"], b["resource_type"]),
             )
-            if not share_rows:
+            if not sr:
                 continue
-            sr = share_rows[0]
-            if not check_share_visibility(
+            if not share_target_exists(str(sr["owner_username"] or ""), str(sr["file_path"] or ""), b["resource_type"]):
+                continue
+            # 学生 additionally 按共享范围过滤
+            if student_username and not check_share_visibility(
                 student_username,
                 str(sr["share_scope"] or ""),
                 str(sr["target_users"] or ""),
@@ -1378,6 +1391,9 @@ async def get_knowledge_point(kp_id: int, request: Request):
             ):
                 continue
         info = _get_resource_info(b["resource_type"], b["resource_id"], include_stats=is_teacher_or_admin, student_username=student_username)
+        # M6: 资源行已不存在的脏绑定（占位名 [type:id]）展示时过滤, 删除交给后台清理
+        if str(info.get("name") or "").startswith(f"[{b['resource_type']}:"):
+            continue
         resources.append({
             "binding_id": b["id"],
             "resource_type": b["resource_type"],
@@ -1530,42 +1546,33 @@ async def get_kp_resources(kp_id: int, request: Request):
     is_teacher_or_admin = not is_student
     student_username = user.get("username") if is_student else None
 
-    # 自动清理文件已不存在的脏共享行及其绑定，绑定列表不留无法访问的残留
-    try:
-        _rids = [b["resource_id"] for b in bindings if b["resource_type"] in ("html", "download")]
-        if _rids:
-            from backend.api.sharing_router import purge_dead_share_rows
-            if purge_dead_share_rows(resource_ids=_rids):
-                bindings = execute_query(
-                    """SELECT cb.* FROM curriculum_bindings cb
-                       WHERE cb.knowledge_point_id=? ORDER BY cb.sort_order, cb.id""",
-                    (kp_id,),
-                )
-    except Exception:
-        pass
+    # M6/G1: GET 不做破坏性清理; 共享行缺失或文件已不存在的绑定展示时过滤
+    from backend.api.sharing_router import share_target_exists
     resources = []
     for b in bindings:
-        # 学生访问 html/download 资源时，检查共享范围（与共享列表使用同一套统一规则）
-        if is_student and b["resource_type"] in ("html", "download"):
-            share_rows = execute_query(
-                """SELECT share_scope, target_users, target_grade, target_class
+        if b["resource_type"] in ("html", "download"):
+            sr = execute_query_one(
+                """SELECT owner_username, file_path, share_scope, target_users, target_grade, target_class
                    FROM shared_resources WHERE id=? AND resource_type=?""",
                 (b["resource_id"], b["resource_type"]),
             )
-            can_access = False
-            if share_rows:
-                sr = share_rows[0]
-                can_access = check_share_visibility(
-                    student_username,
-                    str(sr["share_scope"] or ""),
-                    str(sr["target_users"] or ""),
-                    str(sr["target_grade"] or ""),
-                    str(sr["target_class"] or ""),
-                )
-            if not can_access:
+            if not sr:
+                continue
+            if not share_target_exists(str(sr["owner_username"] or ""), str(sr["file_path"] or ""), b["resource_type"]):
+                continue
+            if is_student and not check_share_visibility(
+                student_username,
+                str(sr["share_scope"] or ""),
+                str(sr["target_users"] or ""),
+                str(sr["target_grade"] or ""),
+                str(sr["target_class"] or ""),
+            ):
                 continue
 
         info = _get_resource_info(b["resource_type"], b["resource_id"], include_stats=is_teacher_or_admin, student_username=student_username)
+        # M6: 资源行已不存在的脏绑定（占位名 [type:id]）展示时过滤, 删除交给后台清理
+        if str(info.get("name") or "").startswith(f"[{b['resource_type']}:"):
+            continue
         resources.append({
             "binding_id": b["id"],
             "knowledge_point_id": b["knowledge_point_id"],
@@ -1595,7 +1602,7 @@ def _course_grade_names(kp_id: int) -> list[str]:
     return [g.strip() for g in str(rows[0]["grade"] or "").split(",") if g.strip()]
 
 
-def _auto_open_file_share(username: str, kp_id: int, resource_type: str, resource_id: str) -> None:
+def _auto_open_file_share(username: str, kp_id: int, resource_type: str, resource_id: str) -> dict | None:
     """绑定个人文件后自动放开共享范围：已有年级 ∪ 课程年级 ∪ 教师任教年级。
 
     （多年级教师不会只放开课程所在年级；重复绑定到其它年级课程时自动并入新年级）
@@ -1627,11 +1634,13 @@ def _auto_open_file_share(username: str, kp_id: int, resource_type: str, resourc
                 (",".join(merged), _now(), resource_id),
             )
             logger.info(f"绑定 {resource_type}:{resource_id} 后自动放开共享年级: {','.join(merged)}")
+            return {"resource_type": resource_type, "resource_id": str(resource_id), "grades": merged}
     except Exception as e:
         logger.warning(f"绑定后更新文件共享范围失败: {e}")
+    return None
 
 
-def _auto_open_activity_scope(username: str, kp_id: int, spec, resource_id: str) -> None:
+def _auto_open_activity_scope(username: str, kp_id: int, spec, resource_id: str) -> dict | None:
     """活动类资源（作业/同步练习/随堂测验/考试/讨论）绑定后，把可见范围收敛到课程年级。
 
     只处理「什么都没设」的情况：知识点页 AI 生成的练习 target_grade/target_scope 都是空串，
@@ -1665,8 +1674,10 @@ def _auto_open_activity_scope(username: str, kp_id: int, spec, resource_id: str)
             (",".join(grades), _now(), rr.normalize_id(resource_id)),
         )
         logger.info(f"绑定 {spec.key}:{resource_id} 后自动放开目标年级: {','.join(grades)}")
+        return {"resource_type": spec.key, "resource_id": str(resource_id), "grades": grades}
     except Exception as e:
         logger.warning(f"绑定后更新活动可见范围失败 ({spec.key}): {e}")
+    return None
 
 
 def _validate_bind(user: dict[str, Any], kp_id: int, resource_type: str, resource_id: str) -> tuple[str, str, str]:
@@ -1693,23 +1704,31 @@ def _validate_bind(user: dict[str, Any], kp_id: int, resource_type: str, resourc
     return "created", rid, ""
 
 
-def _after_bind_side_effects(username: str, kp_id: int, plans: list[tuple[str, str]]) -> None:
-    """绑定成功后的两件事（都是 best-effort，失败不回滚绑定）：放开可见范围、清理重绑练习的旧成绩。"""
+def _after_bind_side_effects(username: str, kp_id: int, plans: list[tuple[str, str]]) -> list[dict]:
+    """绑定成功后的两件事（都是 best-effort，失败不回滚绑定）：放开可见范围、清理重绑练习的旧成绩。
+
+    M7: 返回共享范围变更明细, 由响应带给前端明示教师;
+    M2: 只有绑定的确为练习答题页时才清旧成绩, 绑普通课件不再误伤。
+    """
+    changes: list[dict] = []
     for rtype, rid in plans:
         try:
             if rtype in ("html", "download"):
-                _auto_open_file_share(username, kp_id, rtype, rid)
+                ch = _auto_open_file_share(username, kp_id, rtype, rid)
             else:
-                _auto_open_activity_scope(username, kp_id, rr.spec_of(rtype), rid)
+                ch = _auto_open_activity_scope(username, kp_id, rr.spec_of(rtype), rid)
+            if ch:
+                changes.append(ch)
         except Exception as e:
             logger.warning(f"绑定后处理可见范围失败 ({rtype}:{rid}): {e}")
-    if any(t == "html" for t, _ in plans):
+    if any(t == "html" and _is_practice_html_resource(rid) for t, rid in plans):
         # 重新绑定练习资源时清空学生作答记录
         try:
             from backend.question_db import execute_insert as q_clear
             q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
         except Exception:
             pass
+    return changes
 
 
 @router.post("/bindings", summary="绑定资源到知识点")
@@ -1736,9 +1755,9 @@ async def create_binding(req: BindingCreate, request: Request):
            VALUES (?, ?, ?, ?, ?)""",
         (req.knowledge_point_id, req.resource_type, rid, req.sort_order, _now()),
     )
-    _after_bind_side_effects(user["username"], req.knowledge_point_id, [(req.resource_type, rid)])
+    scope_changes = _after_bind_side_effects(user["username"], req.knowledge_point_id, [(req.resource_type, rid)])
     logger.info(f"用户 {user['username']} 绑定资源 {req.resource_type}:{rid} 到知识点 {req.knowledge_point_id}")
-    return {"message": "资源绑定成功", "binding_id": binding_id}
+    return {"message": "资源绑定成功", "binding_id": binding_id, "scope_changes": scope_changes}
 
 
 @router.post("/bindings/batch", summary="批量绑定资源到知识点（可跨类型）")
@@ -1775,6 +1794,7 @@ async def create_bindings_batch(req: BindingBatchRequest, request: Request):
         plans.append((item.resource_type, rid, item.sort_order or idx))
 
     created = 0
+    scope_changes: list[dict] = []
     if plans:
         now = _now()
         with get_transaction() as conn:
@@ -1787,14 +1807,14 @@ async def create_bindings_batch(req: BindingBatchRequest, request: Request):
                     (req.knowledge_point_id, rtype, rid, sort_order, now),
                 )
                 created += 1
-        _after_bind_side_effects(
+        scope_changes = _after_bind_side_effects(
             user["username"], req.knowledge_point_id, [(t, r) for t, r, _ in plans])
 
     logger.info(
         f"用户 {user['username']} 批量绑定知识点 {req.knowledge_point_id}: "
         f"新增 {created} · 重复 {duplicated} · 失败 {len(failed)}")
     return {"message": f"成功绑定 {created} 个资源", "created": created,
-            "duplicated": duplicated, "failed": failed}
+            "duplicated": duplicated, "failed": failed, "scope_changes": scope_changes}
 
 
 
@@ -1810,8 +1830,8 @@ async def delete_binding(binding_id: int, request: Request):
         raise HTTPException(status_code=404, detail="绑定记录不存在")
     _assert_can_edit_course(user, _course_of_kp(binding["knowledge_point_id"]), "解绑资源")
 
-    # 解绑练习资源时清空学生作答记录
-    if binding["resource_type"] == "html":
+    # M2: 只有解绑练习答题页才清成绩, 解绑普通课件不再误伤学生作答记录
+    if binding["resource_type"] == "html" and _is_practice_html_resource(binding["resource_id"]):
         try:
             from backend.question_db import execute_insert as q_clear
             q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (binding["knowledge_point_id"],))
@@ -1879,51 +1899,53 @@ def _register_personal_resources(username: str, resource_type: str) -> None:
     scan_dir = os.path.join(get_user_base_dir(username), subdir)
     if not os.path.isdir(scan_dir):
         return
-    # 先清除本目录中文件已丢失的脏行（重命名/外部删除后的旧记录），再补登记新文件
-    try:
-        from backend.api.sharing_router import purge_dead_share_rows
-        purge_dead_share_rows(owner=username, resource_type=resource_type)
-    except Exception:
-        pass
-    exts = (".html", ".htm") if resource_type == "html" else None
-    try:
-        rows = execute_query(
-            "SELECT file_path FROM shared_resources WHERE owner_username=? AND resource_type=?",
-            (username, resource_type),
-        )
-        known = {(os.path.basename((r["file_path"] or "").replace("\\", "/")) or "").lower() for r in rows}
-    except Exception:
-        known = set()
-    now = _now()
-    created = 0
-    for fname in sorted(os.listdir(scan_dir), key=str.lower):
-        fpath = os.path.join(scan_dir, fname)
-        if not os.path.isfile(fpath):
-            continue
-        low = fname.lower()
-        if exts:
-            if not low.endswith(exts):
-                continue
-        elif "." not in fname:
-            # 无扩展名的下载文件会被空目录共享清理误判为目录，跳过
-            continue
-        if low in known:
-            continue
+    # M6: 串行化「读已知集合 → 扫盘 → 补登记」, 并发请求不再产生重复登记行
+    with _REGISTER_LOCK:
+        # 先清除本目录中文件已丢失的脏行（重命名/外部删除后的旧记录），再补登记新文件
         try:
-            execute_insert_update(
-                """INSERT INTO shared_resources
-                   (owner_username, file_path, file_name, resource_type, share_scope,
-                    target_users, target_grade, target_class, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, 'teacher', ?, '', '', ?, ?)""",
-                (username, f"{username}/{subdir}/{fname}", os.path.splitext(fname)[0],
-                 resource_type, username, now, now),
+            from backend.api.sharing_router import purge_dead_share_rows
+            purge_dead_share_rows(owner=username, resource_type=resource_type)
+        except Exception:
+            pass
+        exts = (".html", ".htm") if resource_type == "html" else None
+        try:
+            rows = execute_query(
+                "SELECT file_path FROM shared_resources WHERE owner_username=? AND resource_type=?",
+                (username, resource_type),
             )
-            known.add(low)
-            created += 1
-        except Exception as e:
-            logger.warning(f"自动登记个人资源失败 ({username}/{fname}): {e}")
-    if created:
-        logger.info(f"教师 {username} 自动登记个人资源 {created} 条 (type={resource_type})")
+            known = {(os.path.basename((r["file_path"] or "").replace("\\", "/")) or "").lower() for r in rows}
+        except Exception:
+            known = set()
+        now = _now()
+        created = 0
+        for fname in sorted(os.listdir(scan_dir), key=str.lower):
+            fpath = os.path.join(scan_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            low = fname.lower()
+            if exts:
+                if not low.endswith(exts):
+                    continue
+            elif "." not in fname:
+                # 无扩展名的下载文件会被空目录共享清理误判为目录，跳过
+                continue
+            if low in known:
+                continue
+            try:
+                execute_insert_update(
+                    """INSERT INTO shared_resources
+                       (owner_username, file_path, file_name, resource_type, share_scope,
+                        target_users, target_grade, target_class, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, 'teacher', ?, '', '', ?, ?)""",
+                    (username, f"{username}/{subdir}/{fname}", os.path.splitext(fname)[0],
+                     resource_type, username, now, now),
+                )
+                known.add(low)
+                created += 1
+            except Exception as e:
+                logger.warning(f"自动登记个人资源失败 ({username}/{fname}): {e}")
+        if created:
+            logger.info(f"教师 {username} 自动登记个人资源 {created} 条 (type={resource_type})")
 
 
 def _candidate_where(spec, username: str, admin_all: bool) -> tuple[str, list]:
@@ -2236,9 +2258,15 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
                 rejected.append({"id": item.id, "type": "knowledge_point", "reason": denial})
                 continue
             chapter_id = item.chapter_id if item.sets_chapter() else kp["chapter_id"]
-            if not execute_query_one("SELECT id FROM chapters WHERE id=?", (chapter_id,)):
+            target_ch = execute_query_one("SELECT id, course_id FROM chapters WHERE id=?", (chapter_id,))
+            if not target_ch:
                 rejected.append({"id": item.id, "type": "knowledge_point",
                                  "reason": f"目标章节 {chapter_id} 不存在"})
+                continue
+            # M1: 与 update_knowledge_point 同口径 —— 禁止借排序把知识点移进其它课程
+            if int(target_ch["course_id"]) != int(kp["course_id"]):
+                rejected.append({"id": item.id, "type": "knowledge_point",
+                                 "reason": "只能在同一门课程内移动知识点"})
                 continue
             plans.append((
                 "UPDATE knowledge_points SET sort_order=?, chapter_id=?, updated_at=? WHERE id=?",
@@ -2298,6 +2326,13 @@ async def update_progress(kp_id: int, req: ProgressUpdate, request: Request):
     if req.status not in ("not_started", "in_progress", "completed"):
         raise HTTPException(status_code=400, detail="无效的状态值")
 
+    # M5: 自报分数夹取到 0..100, 防脏数据污染统计（分数权威来源仍是练习/考试结果）
+    if req.score is not None:
+        try:
+            req.score = max(0.0, min(100.0, float(req.score)))
+        except (TypeError, ValueError):
+            req.score = None
+
     kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
@@ -2354,60 +2389,36 @@ async def update_progress(kp_id: int, req: ProgressUpdate, request: Request):
 
 @router.get("/progress/stats", summary="课程维度进度统计")
 async def get_progress_stats(request: Request, course_id: int = Query(None)):
-    """获取当前学生在各课程上的进度统计"""
+    """获取当前学生在各课程上的进度统计（L3: 单条聚合, 不再每课程两次查询）"""
     user = get_current_user(request)
     if user.get("role") != 2:
         raise HTTPException(status_code=403, detail="仅学生可查看")
 
+    cond = " AND ch.course_id=?" if course_id else ""
+    params: tuple = (user["username"], course_id) if course_id else (user["username"],)
+    rows = execute_query(
+        f"""SELECT ch.course_id, co.name AS course_name,
+                   COUNT(kp.id) AS total,
+                   SUM(CASE WHEN lp.status='completed' THEN 1 ELSE 0 END) AS done
+            FROM knowledge_points kp
+            JOIN chapters ch ON ch.id = kp.chapter_id AND ch.status='active'
+            JOIN courses co ON co.id = ch.course_id AND co.status='active'
+            LEFT JOIN learning_progress lp
+                   ON lp.knowledge_point_id = kp.id AND lp.student_username=?
+            WHERE kp.status='active'{cond}
+            GROUP BY ch.course_id, co.name
+            ORDER BY co.sort_order, ch.course_id""",
+        params,
+    )
+    stats = [{"course_id": r["course_id"], "course_name": r["course_name"],
+              "total": r["total"], "completed": int(r["done"] or 0),
+              "rate": round(int(r["done"] or 0) / r["total"] * 100, 1) if r["total"] else 0}
+             for r in rows if r["total"]]
     if course_id:
-        # 统计指定课程
-        kp_rows = execute_query(
-            """SELECT kp.id FROM knowledge_points kp
-               JOIN chapters ch ON ch.id = kp.chapter_id
-               WHERE ch.course_id=? AND kp.status='active'""",
-            (course_id,),
-        )
-        total = len(kp_rows)
-        kp_ids = [r["id"] for r in kp_rows]
-        if kp_ids:
-            placeholders = ",".join("?" for _ in kp_ids)
-            completed = execute_query(
-                f"SELECT COUNT(*) as cnt FROM learning_progress WHERE student_username=? AND knowledge_point_id IN ({placeholders}) AND status='completed'",
-                (user["username"], *kp_ids),
-            )
-            done = completed[0]["cnt"] if completed else 0
-        else:
-            done = 0
-        return {"course_id": course_id, "total": total, "completed": done, "rate": round(done / total * 100, 1) if total else 0}
-    else:
-        # 统计所有课程
-        courses = execute_query("SELECT id, name FROM courses WHERE status='active'")
-        stats = []
-        for c in courses:
-            kp_rows = execute_query(
-                """SELECT kp.id FROM knowledge_points kp
-                   JOIN chapters ch ON ch.id = kp.chapter_id
-                   WHERE ch.course_id=? AND kp.status='active'""",
-                (c["id"],),
-            )
-            total = len(kp_rows)
-            if total == 0:
-                continue
-            kp_ids = [r["id"] for r in kp_rows]
-            placeholders = ",".join("?" for _ in kp_ids)
-            completed = execute_query(
-                f"SELECT COUNT(*) as cnt FROM learning_progress WHERE student_username=? AND knowledge_point_id IN ({placeholders}) AND status='completed'",
-                (user["username"], *kp_ids),
-            )
-            done = completed[0]["cnt"] if completed else 0
-            stats.append({
-                "course_id": c["id"],
-                "course_name": c["name"],
-                "total": total,
-                "completed": done,
-                "rate": round(done / total * 100, 1),
-            })
-        return {"stats": stats}
+        if not stats:
+            return {"course_id": course_id, "total": 0, "completed": 0, "rate": 0}
+        return stats[0]
+    return {"stats": stats}
 
 
 def _cache_lesson_plan(kp_id: int, content: str) -> None:
@@ -2477,6 +2488,36 @@ def _save_practice_key(kp_id: int, question_ids: list[int]) -> None:
         )
     except Exception as e:
         logger.warning(f"[AI练习] 答案键写入失败 kp_id={kp_id}: {e}")
+
+
+def _is_practice_html_path(owner: str, file_path: str) -> bool:
+    """M2: 按属主+路径判断是否「课程练习」答题页（命名约定 + resource_kind 双判据）。
+
+    只有练习资源才允许在绑定/解绑/取消共享时清空学生成绩；普通课件不再误伤。
+    """
+    try:
+        fp = str(file_path or "").replace("\\", "/")
+        if fp.rsplit("/", 1)[-1].endswith("_练习.html"):
+            return True
+        from backend import resource_kind
+        canon = resource_kind.canon_path(str(owner or ""), fp, "html")
+        mark = resource_kind.marks_for([canon]).get(canon)
+        return bool(mark and mark[0] == "course_practice")
+    except Exception:
+        return False
+
+
+def _is_practice_html_resource(resource_id: str) -> bool:
+    """M2: 按共享行 id 判断（行可能已被删除的场景请改用 _is_practice_html_path）"""
+    try:
+        row = execute_query_one(
+            "SELECT owner_username, file_path FROM shared_resources WHERE id=? AND resource_type='html'",
+            (resource_id,))
+        if not row:
+            return False
+        return _is_practice_html_path(str(row["owner_username"] or ""), str(row["file_path"] or ""))
+    except Exception:
+        return False
 
 
 def _progress_student_conditions(user: dict[str, Any], grade: str | None,
@@ -2710,16 +2751,6 @@ async def get_student_progress_detail(
         "class": (stu or {}).get("class", ""),
         "courses": courses,
     }
-
-
-# ═══════════════════════════════════════════════════════════
-# 辅助：获取单个行（复用 execute_query_one 不存在的情况）
-# ═══════════════════════════════════════════════════════════
-
-def execute_query_one(sql: str, params: tuple[Any, ...] = ()):
-    """执行查询并返回单条结果"""
-    rows = execute_query(sql, params)
-    return rows[0] if rows else None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -3062,7 +3093,8 @@ async def ai_generate_courseware(kp_id: int, request: Request):
             logger.error(f"AI 课件生成失败: {e}", exc_info=True)
             return {"error": f"课件生成失败: {str(e)}"}
 
-    task_id = await task_manager.create_task(description="AI 课件生成", coro_factory=_generate)
+    task_id = await task_manager.create_task(description="AI 课件生成", coro_factory=_generate,
+                                             dedupe_key=f"curriculum:courseware:{kp_id}", reuse_completed=False)
     return {"task_id": task_id, "message": "AI 课件生成已开始，请稍候..."}
 
 
@@ -3319,7 +3351,8 @@ async def ai_generate_podcast(kp_id: int, request: Request):
             logger.error(f"[podcast] 生成异常 kp_id={kp_id}: {e}", exc_info=True)
             return {"error": f"播客生成失败: {str(e)[:160]}"}
 
-    task_id = await task_manager.create_task(description="AI 播客生成", coro_factory=_generate)
+    task_id = await task_manager.create_task(description="AI 播客生成", coro_factory=_generate,
+                                             dedupe_key=f"curriculum:podcast:{kp_id}", reuse_completed=False)
     return {"task_id": task_id, "message": "AI 播客生成已开始，请稍候..."}
 
 
@@ -3779,7 +3812,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
             logger.error(f"AI 练习生成失败: {e}", exc_info=True)
             return {"error": f"练习生成失败: {str(e)}"}
 
-    task_id = await task_manager.create_task(description="AI 练习生成", coro_factory=_generate)
+    task_id = await task_manager.create_task(description="AI 练习生成", coro_factory=_generate,
+                                             dedupe_key=f"curriculum:practice:{kp_id}", reuse_completed=False)
     return {"task_id": task_id, "message": "AI 练习生成已开始，请稍候..."}
 
 
@@ -3874,6 +3908,12 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
     _safe_questions = []
     for q in questions:
         item = {k: v for k, v in q.items() if k not in _leak_keys}
+        # H4: 题干/选项是不可信文本（教师手写/AI 生成）, 嵌入前统一转义,
+        # 杜绝 innerHTML 存储型 XSS; 解析不进页面数据（查看源码即泄答案）, 提交后由服务端提供
+        item.pop("explanation", None)
+        item["question"] = html_mod.escape(str(item.get("question") or ""))
+        if isinstance(item.get("options"), dict):
+            item["options"] = {k: html_mod.escape(str(v)) for k, v in item["options"].items()}
         raw_svg = item.get("svg_code") or item.get("svg_content") or ""
         if raw_svg:
             safe_svg = sanitize_svg(raw_svg)
@@ -3896,9 +3936,9 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{kp_name} - {practice_label}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<link rel="stylesheet" href="/katex/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css'">
+<script src="/katex/katex.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js';document.head.appendChild(s);"></script>
+<script src="/katex/contrib/auto-render.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/contrib/auto-render.min.js';document.head.appendChild(s);"></script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
@@ -4128,6 +4168,16 @@ document.addEventListener('keydown', function (e) {{
     }}
 }});
 
+// H1: 令牌优先取 URL ?token=（沙箱 iframe/不透明源下也能工作）,
+// localStorage 只作同源直开的兜底; 沙箱下访问会抛异常, 必须捕获
+function getToken() {{
+    try {{
+        var t = new URLSearchParams(window.location.search).get('token');
+        if (t) return t;
+    }} catch (e) {{}}
+    try {{ return localStorage.getItem('smartkb_token') || ''; }} catch (e) {{ return ''; }}
+}}
+
 function escAttr(s) {{
     return String(s === null || s === undefined ? '' : s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -4183,7 +4233,7 @@ function renderQuestions() {{
 
         const explanationHtml = '<div class="explanation-box" id="expl_' + i + '">' +
             '<div class="label">💡 解析</div>' +
-            '<div class="text">' + (q.explanation || '') + '</div>' +
+            '<div class="text" id="expl_text_' + i + '"></div>' +
         '</div>';
 
         card.innerHTML = '<div class="q-header">' +
@@ -4214,7 +4264,7 @@ function updateProgress() {{
 
 // 检查是否已作答过（独立 API，不依赖 practice_sessions）
 function checkPreviousAttempt() {{
-    var token = localStorage.getItem('smartkb_token');
+    var token = getToken();
     if (!token || !kpId) return;
     fetch('/api/curriculum/ai-practice/' + kpId + '/my-result', {{
         headers: {{ 'Authorization': 'Bearer ' + token }}
@@ -4307,7 +4357,7 @@ function submitPractice() {{
     const payload = {{}};
     questions.forEach((q, i) => {{ payload[q.id] = {{ student_answer: userAnswers[i] || '' }}; }});
 
-    const token = localStorage.getItem('smartkb_token');
+    const token = getToken();
     if (!token) {{
         var errMsg = document.getElementById('resultNote');
         if (errMsg) {{ errMsg.textContent = '⚠️ 未登录，成绩无法保存'; errMsg.style.display = 'block'; }}
@@ -4331,8 +4381,18 @@ function submitPractice() {{
         return r.json();
     }})
     .then(function(data) {{
-        // data.results 已按题序排列, 交给统一的渲染函数
-        showResults(data.accuracy || 0, data.score || 0, data.total_score || (total * 10), null, data.results || []);
+        // H3: 提交响应不再带正确答案/解析; 成功后拉 my-result 取回看明细（含答案与解析）
+        fetch('/api/curriculum/ai-practice/' + kpId + '/my-result', {{
+            headers: {{ 'Authorization': 'Bearer ' + token }}
+        }})
+        .then(function(r) {{ return r.ok ? r.json() : null; }})
+        .then(function(mr) {{
+            var review = (mr && mr.allResults && mr.allResults.length) ? mr.allResults : (data.results || []);
+            showResults(data.accuracy || 0, data.score || 0, data.total_score || (total * 10), null, review);
+        }})
+        .catch(function() {{
+            showResults(data.accuracy || 0, data.score || 0, data.total_score || (total * 10), null, data.results || []);
+        }});
         var noteEl = document.getElementById('resultNote');
         if (noteEl) {{
             var txt = '✅ 成绩已记录';
@@ -4409,6 +4469,11 @@ function showResults(accuracy, score, totalScore, results, prevResults) {{
 
         const expl = document.getElementById('expl_' + i);
         if (expl) expl.classList.add('show');
+        // H4: 解析由服务端在提交后提供（my-result）, 用 textContent 渲染, 不再嵌入页面数据
+        if (expl && res && res.explanation) {{
+            var et = document.getElementById('expl_text_' + i);
+            if (et) et.textContent = res.explanation;
+        }}
     }});
 
     document.getElementById('statCorrect').textContent = correct;
@@ -4895,6 +4960,23 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     import json
     from datetime import datetime
 
+    # ── H3: 前置校验 —— 仅学生、知识点必须存在、课程设了年级时学生须在范围内 ──
+    if user.get("role", 2) != 2:
+        raise HTTPException(status_code=403, detail="仅学生可提交练习成绩")
+    # 注意: 本函数局部 import 了 question_db.execute_query_one, 主库查询必须走 execute_query
+    _kp_scope_rows = execute_query(
+        """SELECT kp.id, co.grade FROM knowledge_points kp
+           JOIN chapters ch ON ch.id = kp.chapter_id
+           JOIN courses co ON co.id = ch.course_id WHERE kp.id=?""", (kp_id,))
+    if not _kp_scope_rows:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    _course_grades = [g.strip() for g in str(_kp_scope_rows[0]["grade"] or "").replace("，", ",").split(",") if g.strip()]
+    if _course_grades:
+        _stu_rows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
+        _stu_grade = str((_stu_rows[0] if _stu_rows else {}).get("grade") or "").strip()
+        if _stu_grade not in _course_grades:
+            raise HTTPException(status_code=403, detail="该课程练习不在你的年级范围内")
+
     # ── 防重复：已有记录则拒绝 ──
     existing = execute_query_one(
         "SELECT id, score FROM ai_practice_results WHERE kp_id=? AND student_username=?",
@@ -4912,8 +4994,9 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     except Exception:
         graded_ids = []
     if not graded_ids:
-        # 兼容改造前生成的页面: 退化为按提交里的题目 ID 判分(仍然用库里的答案, 不信客户端分数)
-        graded_ids = [int(k) for k in list(submitted.keys()) if str(k).isdigit()][:10]
+        # H3: 没有答案键 = 该知识点从未生成过练习 → 拒绝。
+        # 旧实现这里采信客户端分数, 可遍历 kp_id 伪造满分刷积分。
+        raise HTTPException(status_code=400, detail="该知识点没有可提交的练习")
     ans_map: dict[int, str] = {}
     if graded_ids:
         ph = ",".join("?" * len(graded_ids))
@@ -4945,13 +5028,16 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
             "score": 10 if is_ok else 0, "max_score": 10, "is_correct": is_ok,
         })
 
-    if results_list and ans_map:
-        score = earned
-        total_score = len(graded_ids) * 10
-    else:
-        # 没有任何可核对的答案(历史数据/题目已下架) -> 保留客户端数值但记录告警便于排查
-        score, total_score = req.score, max(req.total_score, 1)
-        logger.warning(f"[AI练习] kp_id={kp_id} 无可用答案键, 退回客户端分数 user={username}")
+    if not ans_map:
+        # H3: 答案键失效(题目下架/数据异常) → 拒绝, 绝不采信客户端分数
+        logger.warning(f"[AI练习] kp_id={kp_id} 答案键失效, 拒绝提交 user={username}")
+        raise HTTPException(status_code=409, detail="该练习的答案键已失效，请联系教师重新生成")
+    score = earned
+    total_score = len(graded_ids) * 10
+    # H3: 空提交留审计线索（正常流程允许未答完提交, 但批量空提交是答案探测的特征）
+    if not any(str((v.get("student_answer") if isinstance(v, dict) else "") or "").strip()
+               for v in submitted.values()):
+        logger.warning(f"[AI练习] 空提交 kp_id={kp_id} user={username}")
 
     # ── 生成评价 ──
     accuracy = round(score / max(total_score, 1) * 100, 1)
@@ -4995,7 +5081,8 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
            (kp_id, student_username, score, total_score, accuracy, evaluation,
             reward_points, answers, submitted_at)
            VALUES (?,?,?,?,?,?,?,?,?)""",
-        (kp_id, username, req.score, req.total_score, accuracy, evaluation,
+        # H2: 落库必须是服务端判分结果（旧实现误存 req.score, 学生可伪造成绩入库）
+        (kp_id, username, score, total_score, accuracy, evaluation,
          total_reward, answers_json, now),
     )
 
@@ -5016,7 +5103,9 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     except Exception as e:
         logger.warning(f"[课程练习] 错题本写入失败 kp_id={kp_id} user={username}: {e}")
 
-    logger.info(f"AI 练习成绩已保存: kp_id={kp_id}, username={username}, score={req.score}/{req.total_score}, reward={total_reward}")
+    logger.info(f"AI 练习成绩已保存: kp_id={kp_id}, username={username}, score={score}/{total_score}, reward={total_reward}")
+    # H3: 提交响应不回传正确答案（防 save-result 被当作"答案预言机"）;
+    # 答案解析由 my-result 在确认已有作答记录后提供
     return {
         "message": "成绩已记录",
         "score": score,
@@ -5024,7 +5113,7 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
         "accuracy": accuracy,
         "evaluation": evaluation,
         "reward_points": total_reward,
-        "results": results_list,
+        "results": [{k: v for k, v in r.items() if k != "correct_answer"} for r in results_list],
     }
 
 
@@ -5034,7 +5123,7 @@ async def get_my_ai_practice_result(kp_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    from backend.question_db import execute_query_one
+    from backend.question_db import execute_query_one, execute_query as q_query
     import json
 
     row = execute_query_one(
@@ -5062,6 +5151,15 @@ async def get_my_ai_practice_result(kp_id: int, request: Request):
                 "max_score": ans.get("max_score", 10),
                 "is_correct": ans.get("is_correct", False),
             })
+
+    # H4: 解析不再嵌入练习页（查看源码即泄答案）, 提交后由本端点按题提供
+    _qids = [r["question_id"] for r in all_results if isinstance(r["question_id"], int)]
+    if _qids:
+        _ph = ",".join("?" * len(_qids))
+        _expl = {int(r["id"]): (r["explanation"] or "") for r in q_query(
+            f"SELECT id, explanation FROM question_bank WHERE id IN ({_ph})", tuple(_qids))}
+        for r in all_results:
+            r["explanation"] = _expl.get(r["question_id"], "")
 
     return {
         "result": {

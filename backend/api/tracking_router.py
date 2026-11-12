@@ -43,6 +43,36 @@ async def log_resource_view(request: Request):
     if not resource_type or not file_path:
         raise HTTPException(status_code=400, detail="缺少必要参数 resource_type 或 file_path")
 
+    # ── M3: 资源必须存在且对该学生可见, 否则静默拒绝（防遍历 resource_id 刷首浏积分/伪造统计）──
+    try:
+        _rid_int = int(resource_id) if resource_id else 0
+    except (TypeError, ValueError):
+        _rid_int = 0
+    if _rid_int > 0:
+        from backend.permission_service import check_share_visibility
+        _sr = execute_query_one(
+            """SELECT owner_username, file_path, resource_type, share_scope,
+                      target_users, target_grade, target_class
+               FROM shared_resources WHERE id=?""", (_rid_int,))
+        if not _sr or not check_share_visibility(
+                username, str(_sr["share_scope"] or ""), str(_sr["target_users"] or ""),
+                str(_sr["target_grade"] or ""), str(_sr["target_class"] or "")):
+            return {"message": "ok"}
+        # 展示字段以服务端为准, 不信客户端
+        resource_type = str(_sr["resource_type"] or resource_type)
+        file_path = str(_sr["file_path"] or file_path)
+        owner_username = str(_sr["owner_username"] or "")
+
+    # M3: binding/kp 服务端反查, 客户端值不再直接入库
+    if binding_id:
+        _b = execute_query_one("SELECT knowledge_point_id FROM curriculum_bindings WHERE id=?", (binding_id,))
+        if _b:
+            knowledge_point_id = _b["knowledge_point_id"]
+        else:
+            binding_id, knowledge_point_id = None, None
+    else:
+        knowledge_point_id = None
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     client_ip = request.client.host if request.client else ""
 
@@ -189,12 +219,8 @@ async def get_all_resource_view_stats(request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    # 自动清理文件已不存在的脏共享行（重命名/删除后的残留），统计列表不留无效条目
-    try:
-        from backend.api.sharing_router import purge_dead_share_rows
-        purge_dead_share_rows(owner=None if role == 0 else username)
-    except Exception:
-        pass
+    # M6 补漏: GET 不做破坏性清理（与课程侧同口径）——文件一时不可达即删共享行
+    # 会联动误删绑定/日志/成绩; 脏行由启动任务与后台清理负责, 统计容忍短暂残留。
 
     # 排除共享给自己的记录（私有登记 / 仅共享给自己）
     _not_self_only = (

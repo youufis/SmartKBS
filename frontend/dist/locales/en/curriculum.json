@@ -367,7 +367,9 @@
   "cySortOrder": "Sort order",
   "cyBindToKp": "Bind to knowledge point",
   "cyDownloadCourseware": "Download (.html)",
-  "cyOpenNewTab": "Open in new tab",
+  "cyOpenNewTab": "Open in new tab",  "cyDownloadPage": "Download page (.html)",
+  "scopeAutoOpened": "Auto-opened sharing grades for these resources: {{grades}}",
+
   "cyClose": "Close",
   "cyCoursewarePreview": "Courseware preview",
   "cyGenPracticeWait": "AI is generating exercises, please wait... (about 30-180s)",

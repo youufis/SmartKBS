@@ -23,6 +23,15 @@ router = APIRouter()
 ADMIN_QUOTA = 0
 EXCLUDE = {"index.html"}
 
+# M2: 文件中心上传白名单（旧实现无任何类型限制, 学生可传可执行脚本）
+DOWNLOAD_ALLOWED_EXTENSIONS = {
+    '.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.csv', '.json', '.html', '.htm',
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg',
+    '.zip', '.rar', '.7z', '.tar', '.gz',
+    '.mp3', '.wav', '.ogg', '.m4a', '.mp4', '.webm', '.mov',
+}
+
 
 # ── 内部工具（原 downloads_api.py 直接迁移）──
 
@@ -164,6 +173,10 @@ async def api_upload(request: Request):
     if not user:
         return {"success": False, "files": [], "errors": ["未登录，请重新登录"]}
     username = user["username"]
+    # M2: 上传仅限教师/管理员（学生端 UI 本就无上传入口; 旧 API 无角色校验, 学生可传 5GB 任意文件）
+    from backend.auth import can_manage_html_files
+    if not can_manage_html_files(username):
+        return {"success": False, "files": [], "errors": ["权限不足：仅管理员和教师可以上传文件"]}
     dldir = _get_user_downloads_dir(username)
     os.makedirs(dldir, exist_ok=True)
 
@@ -195,6 +208,15 @@ async def api_upload(request: Request):
             else:
                 raw_filename = str(item) if item else ""
             if not raw_filename:
+                continue
+            # M2: 扩展名白名单
+            _ext = os.path.splitext(raw_filename.lower())[1]
+            if _ext not in DOWNLOAD_ALLOWED_EXTENSIONS:
+                errors.append(f"{raw_filename}: 不支持的文件类型 {_ext}")
+                continue
+            # M6: 先按声明大小判配额, 超限不全量读入内存
+            if item.size is not None and quota != 0 and current_usage + item.size > quota:
+                errors.append(f"{raw_filename}: 存储空间不足（配额 {_format_size(quota)}）")
                 continue
             content = await item.read()
             file_size = len(content)
@@ -279,6 +301,7 @@ async def api_delete(request: Request):
         else:
             raise FileNotFoundError()
 
+    _del_was_dir = os.path.isdir(filepath)   # G3: 删除前先捕获目录态
     try:
         _rm_and_clean(filepath)
         # 文件删除后清理空目录共享记录
@@ -290,11 +313,18 @@ async def api_delete(request: Request):
         # 清理该文件的共享记录和关联的课程绑定
         try:
             from backend.database import execute_insert_update, execute_query_dict
-            # 查找所有指向该文件的共享记录
-            share_rows = execute_query_dict(
-                "SELECT id FROM shared_resources WHERE owner_username=? AND (file_path=? OR file_path LIKE ?)",
-                (username, rel, f"%/{rel}"),
-            )
+            from backend import resource_kind
+            # G3: 按规范化物理路径精确匹配 + resource_type 过滤
+            # （旧 LIKE '%/rel' 无类型过滤, 会误删不同子目录的同名文件共享）
+            _del_canon = resource_kind.canon_path(username, rel, "download")
+            _all_rows = execute_query_dict(
+                "SELECT id, file_path FROM shared_resources WHERE owner_username=? AND resource_type='download'",
+                (username,))
+            share_rows = []
+            for _r in _all_rows:
+                _c = resource_kind.canon_path(username, str(_r["file_path"] or ""), "download")
+                if _c == _del_canon or (_del_was_dir and _c.startswith(_del_canon.rstrip("/") + "/")):
+                    share_rows.append(_r)
             for row in share_rows:
                 sid = row["id"]
                 # 先清理关联的课程绑定
@@ -302,6 +332,8 @@ async def api_delete(request: Request):
                     "DELETE FROM curriculum_bindings WHERE resource_type='download' AND resource_id=?",
                     (sid,),
                 )
+                # 浏览日志跟着清（与资源管理删除同口径）
+                execute_insert_update("DELETE FROM resource_view_logs WHERE resource_id=?", (sid,))
                 # 再删除共享记录
                 execute_insert_update("DELETE FROM shared_resources WHERE id=?", (sid,))
             if share_rows:
@@ -332,13 +364,19 @@ async def api_shared_list(request: Request, owner: str = "", dir_path: str = "")
     # 检查共享权限：该目录是否对当前用户可见
     from backend.api.sharing_router import is_file_shared_with_user
     clean_dir = dir_path.strip("/")
+    # M1: 拒绝 .. / . 段与反斜杠（旧实现父目录匹配会把 shared/../.. 判为可见, 列出属主任意目录）
+    if "\\" in clean_dir or any(seg in ("..", ".") for seg in clean_dir.split("/")):
+        return {"files": [], "error": "非法路径"}
     if not is_file_shared_with_user(clean_dir, "download", owner, username):
         return {"files": [], "error": "无权访问该目录"}
 
-    # 构建实际目录路径
-    from backend.utils import get_user_base_dir
+    # 构建实际目录路径（M1: realpath 后必须仍在该属主 downloads 目录内, 顺带收敛符号链接）
+    from backend.utils import get_user_base_dir, path_within
     base = get_user_base_dir(owner)
-    full_dir = os.path.join(str(STORAGE_DIR), base, "downloads", clean_dir)
+    dl_root = os.path.realpath(os.path.join(str(STORAGE_DIR), base, "downloads"))
+    full_dir = os.path.realpath(os.path.join(dl_root, clean_dir))
+    if not path_within(dl_root, full_dir):
+        return {"files": [], "error": "非法路径"}
 
     if not os.path.isdir(full_dir):
         return {"files": [], "error": "目录不存在"}
@@ -353,10 +391,7 @@ async def api_shared_list(request: Request, owner: str = "", dir_path: str = "")
 async def api_check(request: Request):
     """检查当前用户状态"""
     user = getattr(request.state, "user", None)
-    auth = request.headers.get("Authorization", "")
     return {
         "has_user": user is not None,
         "username": user["username"] if user else None,
-        "has_auth": bool(auth),
-        "auth_prefix": auth[:20] if auth else "",
     }

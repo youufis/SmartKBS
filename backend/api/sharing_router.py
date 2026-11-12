@@ -18,7 +18,7 @@ from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT
 from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.logger import logger
 from backend.api.config_router import get_config_value
-from backend.config import STU_DIR, ROOT_DIR, DATA_DIR
+from backend.config import STU_DIR, ROOT_DIR, DATA_DIR, STORAGE_DIR
 from backend.permission_service import check_share_visibility
 from backend import resource_registry as rr
 from backend import resource_kind
@@ -113,6 +113,87 @@ def _share_physical_path(row_owner: str, file_path: str, resource_type: str) -> 
     这里保留原名与全部调用点，行为一字不改。
     """
     return resource_kind.canon_path(row_owner, file_path, resource_type)
+
+
+def _legit_reshare_access(username: str, role: int, phys: str, resource_type: str) -> bool:
+    """H1: 调用者对物理路径是否有合法访问权（再共享的前提）。
+
+    判据：自己目录树内 / 管理员 / 文件属主已直接共享给本人（含目录共享）/ 已绑定课程（教师绑定即授权口径）。
+    刻意不走 is_file_shared_with_user 的"再共享"分支 —— 那条分支正是被伪造行利用的口子,
+    用它做校验会让伪造行互相背书。
+    """
+    from backend.utils import get_user_base_dir
+    dir_name = "html" if resource_type == "html" else "downloads"
+    base = os.path.relpath(get_user_base_dir(username), str(STORAGE_DIR)).replace("\\", "/")
+    if phys == f"{base}/{dir_name}" or phys.startswith(f"{base}/{dir_name}/"):
+        return True
+    if role == ROLE_ADMIN:
+        return True
+    parts = phys.split("/")
+    if parts[0] == STU_DIR and len(parts) >= 3:
+        phys_owner, rel = parts[1], "/".join(parts[2:])
+    elif len(parts) >= 2:
+        phys_owner, rel = parts[0], "/".join(parts[1:])
+    else:
+        return False
+    if not rel.startswith(dir_name + "/"):
+        return False
+    file_rel = rel[len(dir_name) + 1:]
+    # 直接共享（精确 + 逐级父目录），不含再共享分支。
+    # 共享行历史并存裸文件名/全物理路径两种格式, 两种都要匹配（与 files_router 双格式口径一致）
+    candidates = [file_rel, file_rel + "/", phys, phys + "/"]
+    for base_path in (file_rel, phys):
+        segs = base_path.strip("/").split("/")
+        for i in range(len(segs) - 1, 0, -1):
+            d = "/".join(segs[:i])
+            candidates.extend([d, d + "/"])
+    ph = ",".join("?" for _ in candidates)
+    try:
+        rows = execute_query(
+            f"""SELECT share_scope, target_users, target_grade, target_class
+                FROM shared_resources
+                WHERE owner_username=? AND resource_type=? AND file_path IN ({ph})""",
+            (phys_owner, resource_type, *candidates),
+        )
+        for r in rows:
+            if _check_share_scope((r[0], r[1] or "", r[2] or "", r[3] or ""), username):
+                return True
+    except Exception as e:
+        logger.warning(f"[共享] 直接共享判定失败 {phys}: {e}")
+    if role == ROLE_TEACHER and is_file_bound_to_course(file_rel, resource_type, phys_owner):
+        return True
+    return False
+
+
+def audit_reshare_rows(dry_run: bool = True) -> dict:
+    """H1: 审计存量"再共享"行（owner != 物理属主）。
+
+    对非管理员属主的行, 用 _legit_reshare_access 复核当前是否仍有合法访问权;
+    无权的行视为伪造/失效再共享, dry_run=False 时删除（联动清理绑定）。
+    """
+    rows = execute_query(
+        "SELECT id, owner_username, file_path, resource_type FROM shared_resources")
+    suspicious, dropped = [], []
+    for r in rows:
+        rid, owner, fp, rtype = r[0], str(r[1] or ""), str(r[2] or ""), str(r[3] or "")
+        if rtype not in ("html", "download"):
+            continue
+        phys = resource_kind.canon_path(owner, fp, rtype)
+        parts = phys.split("/")
+        phys_owner = parts[1] if parts[0] == STU_DIR and len(parts) >= 3 else parts[0]
+        if phys_owner == owner:
+            continue
+        role_row = execute_query("SELECT role FROM users WHERE username=?", (owner,))
+        role = int(role_row[0][0]) if role_row else 2
+        if _legit_reshare_access(owner, role, phys, rtype):
+            continue
+        suspicious.append({"id": rid, "owner": owner, "phys": phys})
+        if not dry_run:
+            _drop_share_row(rid, rtype)
+            dropped.append(rid)
+    if suspicious:
+        logger.warning(f"[共享审计] 非法再共享行 {len(suspicious)} 条 (dry_run={dry_run}): {suspicious[:10]}")
+    return {"suspicious": suspicious, "dropped": dropped, "dry_run": dry_run}
 
 
 def _teacher_allowed_grades(username: str) -> list[str]:
@@ -320,12 +401,27 @@ def _find_share_rows_multi_format(username: str, resource_type: str, file_path: 
     if exact and len(exact) != len(rows):
         logger.info(f"[共享] 同名不同目录的文件不再合并：精确命中 {len(exact)} 行，"
                     f"宽松匹配到 {len(rows)} 行（path={clean_fp!r}）")
-    return exact or rows
+    if exact:
+        return exact
+    # M5: 带目录的路径只认精确匹配 —— 宽松回落会把不同目录的同名文件当成同一资源
+    # （根目录新建 same.html 共享会顶掉子目录 same.html 的共享行）。
+    # 裸文件名保留旧回落, 兼容只传文件名的老客户端。
+    if "/" in clean_fp:
+        return []
+    return rows
 
 
 def _drop_share_row(rid: int, resource_type: str):
     """删除共享行并同步清理关联绑定/练习成绩/浏览日志（与取消共享行为一致）"""
     try:
+        # M4 补漏: 本函数是 purge/移除目标/审计清理的公共底座, 同样只有练习页才清成绩。
+        # 先取属主/路径（行删除后就取不到了）。
+        _is_practice = False
+        if resource_type == "html":
+            _row = execute_query("SELECT owner_username, file_path FROM shared_resources WHERE id=?", (rid,))
+            if _row:
+                from backend.api.curriculum_router import _is_practice_html_path
+                _is_practice = _is_practice_html_path(str(_row[0][0] or ""), str(_row[0][1] or ""))
         kp_rows = execute_query(
             "SELECT knowledge_point_id FROM curriculum_bindings WHERE resource_type=? AND resource_id=?",
             (resource_type, rid),
@@ -334,7 +430,7 @@ def _drop_share_row(rid: int, resource_type: str):
             "DELETE FROM curriculum_bindings WHERE resource_type=? AND resource_id=?",
             (resource_type, rid),
         )
-        if resource_type == "html" and kp_rows:
+        if resource_type == "html" and kp_rows and _is_practice:
             from backend.question_db import execute_insert as q_del
             for (kpid,) in kp_rows:
                 q_del("DELETE FROM ai_practice_results WHERE kp_id=?", (kpid,))
@@ -416,6 +512,16 @@ async def share_resource(request: Request, body: ShareRequest):
                         detail="教师只能共享给自己任教的年级（可共享年级："
                         + ("、".join(allowed_grades) or "无，请先在用户管理中配置任教年级") + "）",
                     )
+
+    # ── H1: 共享路径合法性 —— 文件必须真实存在; 物理属主不是自己时, 必须已有合法访问权 ──
+    # 旧实现不校验 file_path, 教师可伪造"再共享"行把他人私有文件开放给自己的学生（PoC 实证越权）。
+    _phys = resource_kind.canon_path(username, body.file_path, body.resource_type)
+    _abs = os.path.join(str(STORAGE_DIR), _phys.replace("/", os.sep))
+    if not os.path.exists(_abs):
+        raise HTTPException(status_code=400, detail="共享的文件不存在，请刷新资源列表后重试")
+    if not _legit_reshare_access(username, role, _phys, body.resource_type):
+        logger.warning(f"[共享] 拒绝越权共享: {username} -> {_phys}")
+        raise HTTPException(status_code=403, detail="无权共享该文件：只能共享自己目录内的文件，或已共享/绑定给你的资源")
 
     # 将数组转为逗号分隔字符串存储
     target_users_csv = _list_to_csv(sorted(set(_uniq_keep_order(body.target_users))))
@@ -678,6 +784,27 @@ async def share_resource(request: Request, body: ShareRequest):
 
 # ── 修复悬挂/无效的残留资源绑定（启动自动执行，也可手动触发） ──
 
+def share_target_exists(owner: str, file_path: str, resource_type: str) -> bool:
+    """G1: 非破坏性存在性判定 —— 共享行指向的文件/目录是否还在。
+
+    与 purge_dead_share_rows 同一套候选路径口径（裸文件名/全路径/stu 前缀都认）,
+    供知识点资源列表做死链过滤: 只隐藏不删除, 清理仍由 purge 负责。
+    """
+    fp = str(file_path or "").replace("\\", "/")
+    dir_name = "html" if resource_type == "html" else "downloads"
+    last = fp.rstrip("/").split("/")[-1]
+    try:
+        if is_dir_share_path(fp):
+            rel = fp[len(f"{owner}/{dir_name}/"):] if fp.startswith(f"{owner}/{dir_name}/") else fp
+            full_dir = os.path.join(str(DATA_DIR), owner, dir_name, rel.rstrip("/"))
+            return os.path.isdir(full_dir) and bool(os.listdir(full_dir))
+        cands = {fp.lstrip("/"), f"{owner}/{dir_name}/{fp.lstrip('/')}", f"stu/{owner}/{dir_name}/{fp.lstrip('/')}"}
+        cands |= {f"{owner}/{dir_name}/{last}", f"stu/{owner}/{dir_name}/{last}"}
+        return any(os.path.exists(os.path.join(str(DATA_DIR), c)) for c in cands)
+    except OSError:
+        return False
+
+
 def purge_dead_share_rows(owner: str | None = None, resource_ids: list | None = None,
                           resource_type: str | None = None) -> list[dict]:
     """检测并删除文件/目录已不存在的脏共享行（重命名、外部删除后的残留），
@@ -698,20 +825,8 @@ def purge_dead_share_rows(owner: str | None = None, resource_ids: list | None = 
     sql += " ORDER BY id"
     stale: list[dict] = []
     for (sid, sowner, stype, sfp) in execute_query(sql, tuple(params)):
-        fp = str(sfp or "").replace("\\", "/")
-        dir_name = "html" if stype == "html" else "downloads"
-        last = fp.rstrip("/").split("/")[-1]
-        is_dir = is_dir_share_path(fp)
-        if is_dir:
-            rel = fp[len(f"{sowner}/{dir_name}/"):] if fp.startswith(f"{sowner}/{dir_name}/") else fp
-            full_dir = os.path.join(str(DATA_DIR), sowner, dir_name, rel.rstrip("/"))
-            ok = os.path.isdir(full_dir) and bool(os.listdir(full_dir))
-        else:
-            cands = {fp.lstrip("/"), f"{sowner}/{dir_name}/{fp.lstrip('/')}", f"stu/{sowner}/{dir_name}/{fp.lstrip('/')}"}
-            cands |= {f"{sowner}/{dir_name}/{last}", f"stu/{sowner}/{dir_name}/{last}"}
-            ok = any(os.path.exists(os.path.join(str(DATA_DIR), c)) for c in cands)
-        if not ok:
-            stale.append({"id": sid, "owner": sowner, "resource_type": stype, "file_path": fp})
+        if not share_target_exists(sowner, sfp, stype):
+            stale.append({"id": sid, "owner": sowner, "resource_type": stype, "file_path": str(sfp or "")})
             _drop_share_row(sid, stype)
     if stale:
         logger.info(f"[资源记录自动清理] 文件已不存在的脏共享行 {len(stale)} 条 (owner={owner or 'ALL'}, type={resource_type or 'ALL'})")
@@ -840,9 +955,12 @@ async def unshare_resource(request: Request, id: int = Query(...)):
                 (resource_type, id),
             )
             if bind_rows:
-                # 仅 HTML 资源（练习）需要清理学生作答记录
-                if resource_type == "html":
-                    kp_ids = [r["knowledge_point_id"] for r in bind_rows]
+                # M4: 仅练习答题页才清学生作答记录（普通课件取消共享不再误伤）
+                from backend.api.curriculum_router import _is_practice_html_path
+                if resource_type == "html" and _is_practice_html_path(owner, file_path):
+                    # 注意: 本模块 execute_query 返回元组（既有 bug: 旧写法 r["knowledge_point_id"]
+                    # 抛 TypeError 被静默吞掉, 练习成绩清理从未生效）
+                    kp_ids = [r[0] for r in bind_rows]
                     from backend.question_db import execute_insert as q_del
                     for kpid in kp_ids:
                         q_del("DELETE FROM ai_practice_results WHERE kp_id=?", (kpid,))

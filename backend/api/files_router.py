@@ -122,10 +122,13 @@ async def upload_temp_file(request: Request, file: UploadFile = File(...)):
     user_dir = TEMP_UPLOAD_DIR / username
     user_dir.mkdir(parents=True, exist_ok=True)
     try:
-        content = await file.read()
         max_size = 10 * 1024 * 1024
         if ext in get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']):
             max_size = 5 * 1024 * 1024
+        # M6: 先按声明大小拒绝超限文件, 不全量读入内存
+        if file.size is not None and file.size > max_size:
+            raise HTTPException(status_code=400, detail="文件超过大小限制")
+        content = await file.read()
         if len(content) > max_size:
             raise HTTPException(status_code=400, detail="文件超过大小限制")
 
@@ -391,6 +394,14 @@ async def serve_static_file(path: str, request: Request):
         return FileResponse(
             requested_path,
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+    # H2/M2: downloads 目录里的 HTML 一律附件下载 —— inline 打开会在主站源执行,
+    # 学生上传的 HTML 被管理员/教师浏览时即成存储型 XSS（课件预览走 html 目录的沙箱 iframe）
+    if "/downloads/" in rel_path and rel_path.lower().endswith((".html", ".htm")):
+        return FileResponse(
+            requested_path,
+            filename=os.path.basename(requested_path),
+            content_disposition_type="attachment",
         )
     return FileResponse(requested_path)
 

@@ -106,7 +106,9 @@ export async function getKpResources(kpId: number): Promise<{ resources: Curricu
 }
 
 /** 绑定资源到知识点 */
-export async function bindResource(req: BindingCreateRequest): Promise<{ message: string; binding_id: number }> {
+export interface ScopeChange { resource_type: string; resource_id: string; grades: string[] }
+
+export async function bindResource(req: BindingCreateRequest): Promise<{ message: string; binding_id: number; scope_changes?: ScopeChange[] }> {
   const { data } = await apiClient.post('/api/curriculum/bindings', req);
   return data;
 }
@@ -203,6 +205,7 @@ export async function bindResourcesBatch(req: {
   created: number;
   duplicated: number;
   failed: { resource_type: string; resource_id: string; reason: string }[];
+  scope_changes?: ScopeChange[];
 }> {
   const { data } = await apiClient.post('/api/curriculum/bindings/batch', req);
   return data;

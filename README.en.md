@@ -35,70 +35,21 @@
 
 ---
 
-> 📌 **Highlights of V9.1.0**
+> 📌 **Highlights of V9.1.0** (outline)
 >
-> **New: Explore Canvas**
-> - 🧭 A personal infinite canvas for every teacher and student: ask, learn, explore and doodle freely; one brand, role-based preset canvases (students: My Question Pile / Doodle Desk / Exploration Notes; teachers: Lesson Ideas / Asset Workshop / Self-Training)
-> - 💬 Floating AI companion: chat (with textbook citations), image generation (SVG-first), read-aloud, voice input and camera capture; sidebar / draggable pop-out / mobile drawer
-> - 🖍️ Circle-to-ask: pen-circle content and its text drops into the input; questions carry only the circled area; mind maps and star maps land on the canvas; answers become ask-cards
-> - 🤝 Student-granted read-only shares: one click creates a read-only snapshot for the student's own teachers, previewable as thumbnails, auto-expiring and revocable; the template library ships 3 built-in starter pages and teachers can publish their own for anyone to copy
-> - 🎖️ Soft points + strong honors: first question, deep-dive chains and archiving earn points, plus 5 explore badges; never graded, never ranked, badges stay on the student's own profile, and the hall of glory follows its existing rule (cards are created automatically once the points threshold is met — no review step)
-> - 🔒 Configurable daily quotas for chat / image generation / read-aloud; admins are unlimited but still metered. Expressions of self-harm or suicidal thoughts switch to a fixed care script (no model call) plus a zero-raw-text alert to administrators, and the care ledger is queryable in the admin console
->
-> **Explore Canvas · usability overhaul**
-> - 🔢 Contiguous page numbers: deleting a page no longer leaves holes like "Page 3"
-> - 🗑️ Page trash: deleted pages stay restorable for 30 days, snapshots and timeline kept
-> - 🖼️ Every timeline entry now carries a thumbnail, so you can tell what it was
-> - 📁 New "My portfolio" tab: view, download, jump back or remove archived work; same-day duplicates merge
-> - 🏷️ Clear naming: canvas trash / page trash / portfolio / timeline
-> - 🎛️ AI panel buttons gain labels (icons only on narrow panels) and the empty-state hint shrinks to one line
-> - 📱 On phones the panel no longer collides with the canvas toolbar; opening a canvas zooms to its content
->
-> **Conversations and attachments**
-> **Exercises, quizzes and exams: AI and exports**
-> - 🛡️ New classroom guard: question copy protection (no select / copy / right-click / print shortcuts) and a personal watermark on answer pages — both off by default, admin-controlled
-> - 📄 Exam report, class error review, practice and quiz AI analyses all export to Word, now with an “overview + per-question accuracy” data appendix
-> - 🧾 Chat history previews render tables and formulas like the answer body instead of raw Markdown
-> - 🩹 Guard switches take effect immediately — no longer stuck behind a front-end cache
-> - 🧑‍🏫 New class-wide error review in the score dialog: picks the questions the class missed most, with typical wrong answers, causes, how to explain them and follow-up practice, exportable to Word
-> - 🩹 Score dialog buttons renamed and separated: AI Analysis Report / Download Word / Class Error Review / Export Grades, so they no longer look duplicated
-> - 📄 Sync practice and in-class quiz AI analyses can now be exported to Word; results are stored, so exporting no longer calls the model again
->
-> - 🗂️ History as a docked sidebar: pushes content aside on desktop instead of covering it; a single click previews without replacing the running conversation; new chats appear as soon as they are saved, today / yesterday expand by default and each year gets its own divider
-> - 📎 Attachments live with the conversation: images and documents are archived together with it, so reopening a history entry still shows the original image and lets you download the file; a recycled file reads "Attachment expired"
-> - 🔒 Attachments belong to their owner: downloads require auth and reject cross-user access and path traversal; per-user capacity and idle-recycle days are managed in System Configuration
->
-> **Whiteboard**
-> - 🧑‍🏫 AI assistant upgrade: textbook source tags, selection / pen-circle as priority context, chat can pop out as a draggable window (toolbar steps aside)
-> - 🚪 Self-study mode retired: classroom collaboration stays on the whiteboard, personal creation moves to Explore Canvas
->
-> **Question tags and selection**
-> - 🏷️ Question management and bank analytics gain a tag-status filter: show only questions without knowledge-point tags, combinable with subject / type / difficulty / creator / knowledge point
-> - 📛 An untagged badge on the bank page (admins): one click to filter, click again to clear; the count drops as soon as AI tagging writes
-> - 🧩 One shared definition of "untagged" across list, analytics and badge — separator-only tags count as untagged too; the "no knowledge point" figure jumps straight to that filter
->
-> **Data and analytics**
-> - 🗂️ Asset ledger with automatic cleanup: uploads, generated images and recordings are all registered; references renew lifetime, orphans are recycled (daily, no manual trigger) and a dry-run mode shows what a round would do
-> - 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only, no content visible
->
-> **Group discussion & announcements**
-> - 🧑‍🏫 AI auto-guide for discussions: steps in on silence, teacher-controlled with three sensitivity levels, no more mechanical repeated nudges
-> - 👤 Students are cited as "Name (Grade · Class)" across bubbles, reports and monitoring
-> - 👥 "Participation" counts actual attendance: the roster only counts as expected, students count once they enter; monitoring shows attended / expected
-> - 📢 Announcements: search & priority filters, batch delete, read counts and reader lists
-> - 🎨 Student pages share one header style and relative timestamps; quest / poll / quiz copy fully localized
->
-> **Classroom & knowledge modules overhaul (this build refresh)**
-> - 🎪 Quick-Answer Competition: the reveal can hold or go fully teacher-paced; one server-side clock advances rounds and locks late answers; lock-answers-and-reveal, live roster of who answered, mid-session question adding, live student list
-> - 📺 Class Ladder: refresh resumes the in-flight run with server-side timing; auto/manual advance; the timer pauses while lifeline votes are entered; safe-level fallback and per-session lifeline picks; per-level review and an end-of-session report
-> - 🎯 Knowledge Quest & management: explanations are only released after answering, server-side timing, a refresh can resume the run; rules and score ladder served from one source; record filters with summary, manual question adding, media filter in the bank
-> - 📰 Trending News: favorites tab, keyword search, unread-only filter, time grouping, thumbnails and read counts, prev/next article, daily briefing now open to students
-> - 📖 Daily Picks: retryable error state, batch refresh keeps the old cards on screen, read markers, Markdown detail, shareable poster
-> - 🔄 Fully automatic news feeds: failing feeds are skipped, a total main outage falls back to the standby pool and then auto-probes candidates; dependable reserves auto-promote and demote after 24h; WYSIWYG source list with one-click discovery; every event notifies admins
+> - 🧭 **Explore Canvas (new)**: personal infinite canvas + floating AI companion (chat / image / read-aloud / voice / camera) + circle-to-ask + granted shares & template library + badges & care alerts; contiguous pages / page trash / timeline thumbnails / portfolio / mobile fit
+> - 🛡 **Security hardening**: share permission checks (forged re-share escalation blocked) · sandboxed HTML preview & attachment downloads · directory-browsing traversal guard · upload role/type/size limits · view-tracking visibility checks · exam anti-copy & watermark
+> - 📚 **Curriculum & practice**: server-side grading (no forged scores or answer leaks) · escaped question text & server-delivered explanations · same-course reorder check · recursive cascade delete + transactions · AI import unified at 20MB
+> - 🔗 **Resource lifecycle**: delete auto-clears bindings · rename auto-updates names (incl. re-share rows) · dead links hidden instantly · exact same-name matching · chat history sidebar & archived attachments
+> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables)
+> - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
+> - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
+> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · 58 new regression tests
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds can be **installed over the top** (data stays); new Explore Canvas tables are created automatically at startup; Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (feature hardening + a new desktop build).
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables are created automatically at startup, idempotent; Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + a new desktop build).
+
 ---
 
 <a id="intro"></a>
@@ -1245,92 +1196,59 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.1.0
 
-**New: Explore Canvas**
+**🧭 Explore Canvas (new)**
 
-- 🧭 A personal infinite canvas for teachers and students: free asking, learning, exploring and doodling; role-based preset canvases under one brand
-- 💬 Floating AI companion: chat, image generation (SVG-first), read-aloud, voice and camera; sidebar / pop-out / mobile drawer
-- 🖍️ Circle-to-ask: pen-circled content is auto-extracted into the input; mind maps and star maps land on the canvas; answers become ask-cards
-- 🤝 Student-granted read-only shares with thumbnail previews, auto-expiry and revocation; template library with one-click copy
-- 🎖️ Soft points and honors (never graded); self-harm expressions switch to a care script with a zero-raw-text admin alert; configurable daily quotas, admins exempt but metered
-- 🗂️ Asset ledger with automatic cleanup: reference renewal, orphan recycling (daily job, no manual trigger), dry-run available for inspection
-- 📊 Explore usage merged into Activity Monitor: grade → class filters, behavior counts only
+- Personal infinite canvas + floating AI companion (chat / image / read-aloud / voice / camera) + circle-to-ask + mind & star maps
+- Granted read-only shares (auto-expiry / revocable) + template library; soft points & honors + care alerts (zero raw text) + daily quotas
+- UX: contiguous pages / page trash (30 days) / timeline thumbnails / portfolio / unified terms / mobile fit
+- Asset ledger with auto-cleanup (reference renewal / recycling / dry-run); usage merged into Activity Monitor (behavior only)
 
-**Explore Canvas · usability overhaul**
+**🛡 Security hardening**
 
-- 🔢 Contiguous page numbers across tabs, portfolio and share titles
-- 🗑️ Page trash: deleting a page is soft, restorable for 30 days, timeline preserved
-- 🖼️ Wireframe thumbnails on every timeline entry
-- 📁 "My portfolio" tab: view / download / jump back / remove, same-day duplicates merged
-- 🏷️ Terminology split: canvas trash, page trash, portfolio, timeline
-- 🎛️ Labeled AI panel actions (icons only on narrow panels), shorter empty-state hint
-- 📱 Mobile: the toolbar steps aside for the panel and the AI bubble clears it
-- 🩹 Opening a canvas zooms to content; console noise removed; copy fully localized; new page-trash retention setting
+- Share permission checks: forged re-share escalation blocked; re-share rows follow owner renames
+- Sandboxed HTML preview (courseware / podcast / resource center); downloads HTML forced attachment; practice pages sandbox-compatible tokens
+- Uploads: file center restricted to teachers/admins + type whitelist; size pre-checks in three upload paths; AI import unified at 20MB
+- Directory-browsing traversal guard; view-tracking visibility checks + server-side lookup; diagnostic endpoint no longer echoes tokens
+- Exam protection: anti-copy + personal watermark (off by default)
+- Score protection: grade clearing limited to practice resources across bind/unbind/unshare/purge/delete; progress scores clamped
 
-**Exercises, quizzes and exams: AI and exports**
+**📚 Curriculum & practice**
 
-- 🧑‍🏫 Exams gained a class-wide error review: picks the highest-error questions, generates the review in one call and exports it to Word; the old button always 404'd for teachers and was replaced (students keep their own wrong-answer explanation)
-- 🩹 Score dialog buttons renamed and separated: AI Analysis Report / Download Word / Class Error Review / Export Grades (Excel moved into the roster tab)
-- 📄 Sync practice and in-class quiz AI analyses are now exportable to Word, with results cached so exporting does not bill the model twice
-- 🏷️ “Export result” renamed to “Export Grades (CSV)”; read-only previews no longer show an export button
-- 🩹 Development console noise cleared (tldraw font race, deprecated antd 6 props)
+- Server-side grading: persisted scores are server-computed; submit responses carry no answers; explanations delivered after submission; question text & options escaped
+- Outline maintenance: same-course reorder check; recursive cascade delete + transactions; non-destructive GETs
+- AI import: parsing in thread pool + PDF page cap; transactional save + field validation; lesson-plan cache & refusal detection
+- Generation task dedupe (no double billing); KaTeX localized (offline math)
 
-**Classroom guard and AI review exports**
+**🔗 Resources & chat**
 
-- 🛡️ Two switches, off by default: question copy protection (select / copy / cut / right-click / print shortcuts) and a personal watermark (name · student ID · time) on answer pages, covering exams, targeted practice and in-class quizzes
-- 🎯 Only the question block is guarded — answer inputs, code editors and formula fields keep working; with the switches off nothing is attached or injected
-- 🧑‍🏫 Exams gained a class-wide error review (typical wrong answers, causes, how to explain, follow-up practice) exportable to Word; the old button always 404'd for teachers and was replaced
-- 📄 Four AI exports now carry a data appendix (overview + per-question accuracy); students can export their own wrong-answer review too
-- 🧾 Chat history previews render tables and formulas; guard switches apply without a page reload; review size and accuracy threshold are configurable
+- Lifecycle: delete auto-clears bindings / shares / logs; rename auto-updates names & URLs; dead links hidden instantly
+- Exact same-name matching (delete/share no longer cross-hit); share updates keep stable ids
+- Chat history persistent sidebar (click to preview); attachments archived with chats (auth downloads / quota config / recycling)
 
-**Conversations and attachments**
+**📝 Exams & analytics**
 
-- 🗂️ History rebuilt as a docked sidebar: pushes content aside on desktop, a click only previews instead of replacing the running chat, and new chats appear as soon as they are saved
-- 📎 Images and documents are archived with the conversation — reopening history still shows the original image and keeps the file downloadable; recycled files read "Attachment expired"
-- 🔒 Attachments are owner-only with authenticated downloads; per-user capacity and idle-recycle days live in System Configuration
-- 🧾 Copy fix: "Download quota" is now "File center storage"
-- 🧭 Header stays put: the mode bar no longer scrolls out of view after a refresh
+- Class-wide error review (high-error picks + Word export); exam / practice / quiz AI analytics export to Word (per-question accuracy tables)
+- Score dialog button tiers; cached exports (no re-billing); history preview renders tables & math
 
-**Whiteboard**
+**🎪 Classroom interaction**
 
-- 🧑‍🏫 AI assistant: textbook source tags; selection / pen-circle as priority context; chat pops out as a draggable window
-- 🚪 Self-study mode retired; personal creation now lives in Explore Canvas
-- 🩹 Fixed the floating window covering dropdowns and dialogs
+- Quiz race: single server clock / late-answer cutoff / early collection / on-the-fly questions / controlled reveal
+- Class ladder: resume on refresh / manual-auto advance / hint voting pauses timer / safety floor / per-round review & report
+- Knowledge quest: explanations after answering / server timing / resume on refresh / single source of rules & scores
+- Discussion: AI auto-guidance (3 sensitivity levels) / actual-attendance counting / unified name citations / batched writes
+- Announcements: search / priority filter / bulk delete / read tracking; student page headers & times unified
 
-**Other**
+**📰 News & discovery**
 
-- 🧭 Randomized empty-state topics: different per student per day, with a shuffle button
-- 📝 Activity Monitor explore tab: shows only students with usage by default, with search and pagination
+- News: favorites / search / unread-only / time grouping / thumbnails & heat / prev-next / daily brief open to students
+- Daily picks: retry / refresh keeps old cards / read markers / Markdown detail / share poster
+- Feeds: circuit-breaker / standby fallback / auto-discovery / promotion & demotion / one-click discovery / event notifications
 
-**Group discussion**
+**⚙️ Engineering & data**
 
-- 🧑‍🏫 AI auto-guide: event-driven with an idle fallback; teachers can turn it off or pick conservative / standard / proactive sensitivity; never fires when the room is empty, students haven't replied, or during cooldown
-- 👤 Students are cited as "Name (Grade · Class)" across message bubbles, AI suggestions, reports and monitoring
-- 👥 "Participation" counts actual attendance: the start-time roster counts as expected, only students who enter count as attended; monitoring shows attended / expected
-- 🔀 Grouping semantics clarified: members-per-group (auto, shuffled) vs group count (random, shuffled)
-- ⚡ Bulk writes when starting a discussion: large rosters drop from ~40s to sub-second; start / end / restart buttons show loading to prevent double clicks
-- 🩹 Discussion room layout fixes; the AI plan dialog no longer shows a grey placeholder for group mode
-
-**Announcements & student-side polish**
-
-- 📢 Announcements: keyword + priority filters, batch delete, read counts and reader lists; opening details marks them read
-- 🎨 Student pages share one page header and relative timestamps (to-do, questions, points, portraits, notifications, files, daily discovery, news, quest, classroom interactions)
-- 🩹 Fixed notification pagination and quest list page-flash; localized empty-state and remaining-time copy for quiz / poll / interaction
-
-**Question tags and selection**
-
-- 🏷️ Question management and bank analytics can both show only questions without knowledge-point tags, combined with other filters, and the analytics figure jumps straight into that filter
-- 📛 An untagged badge on the bank page for admins: the number is the backlog — one click to filter, click again to clear, and it drops after AI tagging writes
-- 🧩 A single shared definition of "untagged" across list, analytics and badge, so separator-only dirty tags count as untagged too
-
-**Classroom & knowledge modules overhaul (9.1.0 build refresh)**
-
-- 🎪 Quick-Answer Competition: reveal hold 0–15s or fully teacher-paced; one server-side clock advances rounds and rejects late answers; lock-answers-and-reveal, live roster of who answered this round, add bank questions mid-session, minimum-players check, live student list
-- 📺 Class Ladder (big screen): refresh auto-resumes the session and the in-flight run with server-side remaining time; auto/manual advance; timer pauses while votes are entered; abandon needs confirmation; safe-level fallback and per-session lifelines; per-level review and end-of-session report
-- 🎯 Knowledge Quest & management: explanations only after answering (no pre-leak), server-side timing, refresh can resume the run; rules and score ladder from one source; discount hints and badge unlocks surfaced; mobile record columns fixed, manual question adding, status/date filters with summary, bank media filter
-- 📰 Trending News: favorites tab, keyword search, unread-only filter, time grouping, thumbnails and read counts, prev/next article, daily briefing now open to students, optimistic favoriting
-- 📖 Daily Picks: retryable error state, batch refresh keeps cards on screen, read markers, Markdown detail with paging, shareable poster
-- 🔄 Fully automatic news feeds: failing feeds circuit-broken and skipped, total main outage falls back to the standby pool, a full outage auto-probes candidates to keep publishing; dependable reserves are auto-promoted and demoted after 24h; WYSIWYG source list with one-click auto-discovery; every event notifies administrators
-- 🩹 Engineering fixes: dev proxy dropped WebSocket upgrades, WS reconnected only once, system notifications were silently disabled, quiz/ladder timing and scoring idempotency
+- Question bank "tag status" filter + untagged badge (list / stats / badge share one criterion)
+- WS proxy & reconnect fixes; silent notification-type loss fixed; timing/scoring idempotency corrected
+- 58 new regression tests (curriculum 27 + sharing 31); zero new ruff / tsc warnings
 
 ### v7.x – v9.0.0
 

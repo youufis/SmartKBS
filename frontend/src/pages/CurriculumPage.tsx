@@ -286,13 +286,18 @@ const CurriculumPage: React.FC = () => {
     if (!selectedKp) return
     setRecBindLoading(prev => ({ ...prev, [resourceId]: true }))
     try {
-      await curriculumApi.bindResource({
+      const bindRes = await curriculumApi.bindResource({
         knowledge_point_id: selectedKp.id,
         resource_type: resourceType,
         // 绑定表主键已统一为字符串（作业的主键本来就是 TEXT）
         resource_id: String(resourceId),
       })
       message.success(t('resourceBound'))
+      // M7: 自动放开共享范围必须让教师看见, 不能静默共享私有文件
+      if (bindRes.scope_changes?.length) {
+        const grades = Array.from(new Set(bindRes.scope_changes.flatMap(c => c.grades || [])))
+        if (grades.length) message.info(t('scopeAutoOpened', { grades: grades.join('、') }))
+      }
       // 刷新资源列表
       try {
         const res = await curriculumApi.getKpResources(selectedKp.id)
@@ -2562,10 +2567,6 @@ const CurriculumPage: React.FC = () => {
                   {t('cyDownloadCourseware')}
                 </Button>
               </a>
-              <Button icon={<FileTextOutlined />} disabled={!cwUrl}
-                onClick={() => { if (cwUrl) window.open(cwUrl, '_blank') }}>
-                {t('cyOpenNewTab')}
-              </Button>
               <Button onClick={() => setCwModal(false)}>{t('cyClose')}</Button>
             </Space>
           )
@@ -2578,7 +2579,7 @@ const CurriculumPage: React.FC = () => {
           </div>
         ) : cwUrl ? (
           <div style={{ height: '70vh', border: '1px solid var(--border-color-secondary)', borderRadius: 4, overflow: 'hidden' }}>
-            <iframe src={cwUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
+            <iframe src={cwUrl} sandbox="allow-scripts allow-forms allow-popups allow-modals" style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
           </div>
         ) : null}
       </Modal>
@@ -2595,10 +2596,11 @@ const CurriculumPage: React.FC = () => {
               <Button type="primary" icon={<ThunderboltOutlined />} onClick={handlePodcastGenerate}>
                 {podcastUrl ? t('podcastRegenerate') : t('podcastGenerate')}
               </Button>
-              <Button icon={<FileTextOutlined />} disabled={!podcastUrl}
-                onClick={() => { if (podcastUrl) window.open(podcastUrl, '_blank') }}>
-                {t('cyOpenNewTab')}
-              </Button>
+              <a href={podcastUrl || undefined} download style={{ textDecoration: 'none' }}>
+                <Button icon={<DownloadOutlined />} disabled={!podcastUrl}>
+                  {t('cyDownloadPage')}
+                </Button>
+              </a>
               <Button onClick={() => setPodcastModal(false)}>{t('cyClose')}</Button>
             </Space>
           )
@@ -2704,7 +2706,7 @@ const CurriculumPage: React.FC = () => {
                   ) : null}
                 </Space>
                 <div style={{ height: '60vh', border: '1px solid var(--border-color-secondary)', borderRadius: 8, overflow: 'hidden' }}>
-                  <iframe src={podcastUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={t('aiPodcastTitle')} />
+                  <iframe src={podcastUrl} sandbox="allow-scripts allow-forms allow-popups allow-modals" style={{ width: '100%', height: '100%', border: 'none' }} title={t('aiPodcastTitle')} />
                 </div>
               </div>
             )}

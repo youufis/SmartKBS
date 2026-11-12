@@ -11,7 +11,7 @@ const ResourcesPage: React.FC = () => {
           src="/api/resources/nav"
           style={{ width: '100%', height: 'calc(100vh - 200px)', border: 'none', minHeight: 500 }}
           title="Nav"
-          sandbox="allow-scripts allow-same-origin allow-forms"
+          sandbox="allow-scripts allow-forms allow-popups allow-modals"
         />
       </Card>
     </Layout>

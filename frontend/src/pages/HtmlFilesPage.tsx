@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Alert, Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, Radio, Select, Spin, theme } from 'antd'
-import { ReloadOutlined, FileOutlined, FileTextOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { ReloadOutlined, FileOutlined, FileTextOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ThunderboltOutlined, DownloadOutlined } from '@ant-design/icons'
+import { authedFileUrl } from '../api/client'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
@@ -29,6 +30,9 @@ const HtmlFilesPage: React.FC = () => {
   const [shareFile, setShareFile] = useState<{ path: string; name: string }>({ path: '', name: '' })
   const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
   const [shareType, setShareType] = useState<'html' | 'download'>('html')
+
+  // ── H2: 沙箱预览（不再 window.open 同源打开, 脚本拿不到主站令牌）──
+  const [previewRes, setPreviewRes] = useState<{ url: string; name: string } | null>(null)
 
   // ── 分页状态 ──
   const PAGE_SIZE = 24
@@ -361,7 +365,7 @@ const HtmlFilesPage: React.FC = () => {
         });
       });
     }
-    window.open(`/api/files/${urlPath}`, '_blank');
+    setPreviewRes({ url: authedFileUrl(`/api/files/${urlPath}`), name })
   }
 
   const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false, showGroupActions = false, resourceId?: number, resourceType?: string, subKind?: string, subKindSetBy?: string) => (
@@ -377,7 +381,7 @@ const HtmlFilesPage: React.FC = () => {
         if (isShared) {
           handleOpenResource(urlPath, name, owner, resourceId, resourceType)
         } else {
-          window.open(`/api/files/${urlPath}`, '_blank')
+          setPreviewRes({ url: authedFileUrl(`/api/files/${urlPath}`), name })
         }
       }}
     >
@@ -840,6 +844,33 @@ const HtmlFilesPage: React.FC = () => {
           opacity: 1 !important;
         }
       `}</style>
+
+      {/* H2: HTML 资源沙箱预览 —— 无 allow-same-origin, 页面脚本无法读取主站 localStorage/令牌;
+          练习页通过 URL ?token= 取令牌提交（getToken 已兼容） */}
+      <Modal
+        title={previewRes?.name || ''}
+        open={!!previewRes}
+        onCancel={() => setPreviewRes(null)}
+        width="90%"
+        destroyOnHidden
+        footer={
+          <Space>
+            <a href={previewRes?.url} download style={{ textDecoration: 'none' }}>
+              <Button icon={<DownloadOutlined />}>{t('cyDownloadCourseware')}</Button>
+            </a>
+            <Button onClick={() => setPreviewRes(null)}>{t('cyClose')}</Button>
+          </Space>
+        }
+      >
+        {previewRes && (
+          <iframe
+            src={previewRes.url}
+            sandbox="allow-scripts allow-forms allow-popups allow-modals"
+            style={{ width: '100%', height: '70vh', border: 'none' }}
+            title={previewRes.name}
+          />
+        )}
+      </Modal>
     </Layout>
   )
 }

@@ -205,7 +205,10 @@ async def upload_resource(request: Request):
             errors.append(f"文件 '{filename}' 类型不支持")
             continue
 
-        # 检查大小
+        # 检查大小（M6: 先看声明大小, 超限直接拒, 不全量读入内存）
+        if item.size is not None and item.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            errors.append(f"文件 '{filename}' 超过 {MAX_UPLOAD_SIZE_MB}MB 限制")
+            continue
         content = await item.read()
         if len(content) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
             errors.append(f"文件 '{filename}' 超过 {MAX_UPLOAD_SIZE_MB}MB 限制")
@@ -269,6 +272,12 @@ async def delete_resource(request: Request, path: str = Query(...)):
     if not os.path.exists(target_path):
         raise HTTPException(status_code=404, detail="文件不存在")
 
+    # M4/M5: 删除前捕获目录态与内容类型标注（删除后标注会被 purge, 届时取不到）
+    _del_rel_early = os.path.relpath(target_path, html_dir).replace("\\", "/")
+    _del_canon_early = resource_kind.canon_path(username, _del_rel_early, "html")
+    _was_dir = os.path.isdir(target_path)
+    _kind_mark = (resource_kind.marks_for([_del_canon_early]).get(_del_canon_early) or ("", ""))[0]
+
     # AI 播客页面：删除前先记下它引用了哪些音频，删完再回收"只有它引用"的那些
     # （音频是内容寻址缓存，不会被页面带走；不回收就会一直躺在 question_media/tts 里）
     _podcast_refs: set[str] = set()
@@ -320,21 +329,16 @@ async def delete_resource(request: Request, path: str = Query(...)):
         try:
             from backend.database import execute_insert_update, execute_query_dict
             basename = os.path.basename(target_path)
-            # 尝试多种路径格式匹配，确保能找到共享记录
-            share_rows = execute_query_dict(
-                """SELECT id FROM shared_resources
-                   WHERE owner_username=? AND resource_type='html'
-                   AND (file_path=? OR file_path=? OR file_path LIKE ? OR file_path LIKE ?)""",
-                (username, db_path, basename, f"%/{db_path}", f"%/{basename}"),
+            # M5: 按规范化物理路径精确匹配（旧 basename LIKE 会误删不同子目录同名文件的共享/绑定/日志）
+            _all_share_rows = execute_query_dict(
+                "SELECT id, file_path FROM shared_resources WHERE owner_username=? AND resource_type='html'",
+                (username,),
             )
-            if not share_rows:
-                # 再试一次：用文件名后缀匹配（兼容路径格式差异）
-                share_rows = execute_query_dict(
-                    """SELECT id FROM shared_resources
-                       WHERE owner_username=? AND resource_type='html'
-                       AND file_path LIKE ?""",
-                    (username, f"%{basename}"),
-                )
+            share_rows = []
+            for _r in _all_share_rows:
+                _c = resource_kind.canon_path(username, str(_r["file_path"] or ""), "html")
+                if _c == _del_canon_early or (_was_dir and _c.startswith(_del_canon_early.rstrip("/") + "/")):
+                    share_rows.append(_r)
             for row in share_rows:
                 sid = row["id"]
                 # 清理该共享关联的课程绑定
@@ -360,13 +364,28 @@ async def delete_resource(request: Request, path: str = Query(...)):
             if share_rows:
                 logger.info(f"已同步清理 {len(share_rows)} 条共享记录及关联绑定")
 
-            # ── 额外清理：如果文件名匹配 AI 练习模式 {kp_id}_*_练习.html，清理练习成绩 ──
+            # ── M4: 仅当删除的确为课程练习答题页时才清成绩 ──
+            # 判据：落盘定类 course_practice, 或命名匹配且该知识点确有绑定指向本文件。
+            # 旧实现只看文件名 —— 把任意文件改名成 123_x_练习.html 再删除即可误清知识点成绩。
             practice_match = re.match(r'^(\d+)_.*_练习\.html$', basename)
             if practice_match:
                 kp_id = int(practice_match.group(1))
-                from backend.question_db import execute_insert as q_exec_i
-                q_exec_i("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
-                logger.info(f"已清理知识点 {kp_id} 的 AI 练习成绩记录")
+                _sids = [str(r["id"]) for r in share_rows]
+                _bound = False
+                if _sids:
+                    _ph = ",".join("?" for _ in _sids)
+                    _b = execute_query_dict(
+                        f"""SELECT 1 AS ok FROM curriculum_bindings
+                            WHERE knowledge_point_id=? AND resource_type='html' AND resource_id IN ({_ph}) LIMIT 1""",
+                        (kp_id, *_sids),
+                    )
+                    _bound = bool(_b)
+                if _kind_mark == "course_practice" or _bound:
+                    from backend.question_db import execute_insert as q_exec_i
+                    q_exec_i("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
+                    logger.info(f"已清理知识点 {kp_id} 的 AI 练习成绩记录")
+                else:
+                    logger.info(f"[M4] 文件名似练习但无定类/绑定佐证, 不清成绩: {basename} (kp={kp_id})")
         except Exception as cleanup_err:
             logger.warning(f"清理共享记录失败: {cleanup_err}")
 
@@ -374,8 +393,6 @@ async def delete_resource(request: Request, path: str = Query(...)):
     except Exception as e:
         logger.error(f"删除资源失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
-
-    raise unauthorized()
 
 
 # ── 重命名 ──
@@ -419,6 +436,7 @@ async def rename_resource(request: Request):
     if os.path.exists(new_path):
         raise HTTPException(status_code=409, detail="目标名称已存在")
 
+    _rename_was_dir = os.path.isdir(old_path)   # G2: 改名后旧路径就不在了, 先捕获目录态
     try:
         os.rename(old_path, new_path)
         logger.info(f"资源已重命名: {old_path} -> {new_path}")
@@ -479,6 +497,31 @@ async def rename_resource(request: Request):
                         (swapped, now, row["id"]),
                     )
                 synced_shares += 1
+
+            # G2: 再共享行（owner != 物理属主, 如管理员/同事再共享）也要跟随改名,
+            # 否则同事的绑定变死链、最终被 purge 当脏行清掉（"改个名, 同事绑定的资源就没了"）。
+            old_canon = resource_kind.canon_path(username, old_rel, "html")
+            new_canon = resource_kind.canon_path(username, new_rel, "html")
+            _other_rows = execute_query_dict(
+                "SELECT id, owner_username, file_path FROM shared_resources WHERE resource_type='html' AND owner_username<>?",
+                (username,))
+            for _r in _other_rows:
+                _fp = str(_r["file_path"] or "").replace("\\", "/")
+                _c = resource_kind.canon_path(str(_r["owner_username"] or ""), _fp, "html")
+                if _c == old_canon:
+                    _new_fp = new_canon if _fp == _c else (
+                        _fp[:-len(old_bn)] + new_bn if _fp.endswith(old_bn) else new_canon)
+                    execute_insert_update(
+                        "UPDATE shared_resources SET file_path=?, file_name=?, updated_at=? WHERE id=?",
+                        (_new_fp, new_display, now, _r["id"]))
+                    synced_shares += 1
+                elif _rename_was_dir and _c.startswith(old_canon.rstrip("/") + "/"):
+                    _new_c = new_canon.rstrip("/") + _c[len(old_canon.rstrip("/")):]
+                    _new_fp = _new_c if _fp == _c else _fp.replace(old_canon, new_canon, 1)
+                    execute_insert_update(
+                        "UPDATE shared_resources SET file_path=?, updated_at=? WHERE id=?",
+                        (_new_fp, now, _r["id"]))
+                    synced_shares += 1
 
             # 资源分组引用：按统一后的规范路径重写（含目录改名下的子资源）
             synced_groups = _remap_group_items_after_rename(username, old_path, new_path)
@@ -2282,6 +2325,8 @@ async def ai_generate_async(request: Request):
     task_id = await _task_manager.create_task(
         description=f"AI 生成 {gen_type} 资源: {topic or custom_prompt[:30]}",
         coro_factory=_generate_task,
+        dedupe_key=f"resources:ai-html:{username}:{gen_type}:{(topic or custom_prompt)[:40]}",
+        reuse_completed=False,
     )
 
     return {

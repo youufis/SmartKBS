@@ -457,6 +457,11 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
       })
       if (res.created) message.success(t('rbBindSuccess', { count: res.created }))
       if (res.duplicated) message.info(t('rbBindDuplicated', { count: res.duplicated }))
+      // M7: 自动放开共享范围必须让教师看见, 不能静默共享私有文件
+      if (res.scope_changes?.length) {
+        const grades = Array.from(new Set(res.scope_changes.flatMap(c => c.grades || [])))
+        if (grades.length) message.info(t('scopeAutoOpened', { grades: grades.join('、') }))
+      }
       for (const f of res.failed || []) {
         message.error(`${resourceTypeLabel(t, f.resource_type)}: ${f.reason}`)
       }
