@@ -566,7 +566,8 @@ def _current_level(run: dict) -> int:
 def _save_run(run: dict) -> None:
     execute_insert_update(
         "UPDATE class_ladder_runs SET status=?, reached_level=?, correct_count=?, ladder_score=?, "
-        "points_awarded=?, lifelines_used=?, lifeline_by_level=?, questions=?, answers=?, ended_at=? "
+        "points_awarded=?, lifelines_used=?, lifeline_by_level=?, questions=?, answers=?, ended_at=?, "
+        "level_served_at=? "
         "WHERE id=?",
         (
             run.get("status") or "playing", int(run.get("reached_level") or 0),
@@ -576,7 +577,9 @@ def _save_run(run: dict) -> None:
             _encode(run.get("lifeline_by_level"), {}),
             _encode(run.get("questions"), []),
             _encode(run.get("answers"), []),
-            run.get("ended_at"), run["id"],
+            run.get("ended_at"),
+            float(run.get("level_served_at") or 0),
+            run["id"],
         ),
     )
 
@@ -712,6 +715,12 @@ def _run_public(run: dict, session: dict, *, with_question: bool = True) -> dict
         "time_limit_sec": _as_time_limit(session.get("time_limit_sec")),
         "answered": answers,
     }
+    if out["status"] == "playing":
+        # 页面刷新/断线重连后按服务端时间续表
+        _tl = out["time_limit_sec"]
+        _sv = float(run.get("level_served_at") or 0)
+        out["remaining"] = (max(0.0, round(_tl - (time.time() - _sv), 1))
+                            if (_tl > 0 and _sv > 0) else _tl)
     if with_question and run.get("status") == "playing":
         snaps = _decode(run.get("questions"), [])
         snap = next((s for s in snaps if int(s.get("level") or 0) == level), None)
@@ -943,6 +952,27 @@ async def open_run(request: Request):
     if not names:
         raise HTTPException(status_code=404, detail="该班级暂无学生名单")
 
+    # 在途局守卫：默认拒绝重复抽取（409 结构化），前端弹窗选「继续旧局 / 终止再抽」；
+    # force=true 时把旧局按已答内容结算（lost），保持与"结束本场终止在途局"同一口径。
+    playing = execute_query_one(
+        "SELECT * FROM class_ladder_runs WHERE session_id=? AND status='playing' "
+        "ORDER BY id DESC LIMIT 1",
+        (session["id"],),
+    )
+    if playing and not body.get("force"):
+        raise HTTPException(status_code=409, detail={
+            "code": "run_in_progress",
+            "run_id": int(playing["id"]),
+            "student": playing.get("student_name") or "",
+            "level": _current_level(playing),
+            "message": "已有进行中的一局",
+        })
+    if playing:
+        playing["status"] = "lost"
+        playing["ended_at"] = _now()
+        _settle_run(playing, session)
+        _save_run(playing)
+
     picked = _pick_student_for(session)
     if not picked:
         raise HTTPException(status_code=404, detail="没有可抽取的学生")
@@ -956,10 +986,10 @@ async def open_run(request: Request):
         "INSERT INTO class_ladder_runs "
         "(session_id, student_name, student_username, status, reached_level, correct_count, "
         " ladder_score, points_awarded, lifelines_used, lifeline_by_level, questions, answers, "
-        " created_at, ended_at) "
-        "VALUES (?, ?, ?, 'playing', 0, 0, 0, 0, '[]', '{}', ?, '[]', ?, NULL)",
+        " created_at, ended_at, level_served_at) "
+        "VALUES (?, ?, ?, 'playing', 0, 0, 0, 0, '[]', '{}', ?, '[]', ?, NULL, ?)",
         (session["id"], picked["name"], picked["username"],
-         json.dumps(snaps, ensure_ascii=False), now),
+         json.dumps(snaps, ensure_ascii=False), now, time.time()),
     )
     # 台账那行指回本局，点名管理的抽人记录能一键跳到关卡明细
     pick_engine.attach_ref(pick_id=picked["pick_id"], ref_table="class_ladder_runs", ref_id=int(run_id or 0))
@@ -967,6 +997,23 @@ async def open_run(request: Request):
     return {"run": _run_public(run, session),
             "covered": picked["covered"], "round_no": picked["round_no"],
             "total": picked["total"], "pick_id": picked["pick_id"]}
+
+
+@router.get("/run/current", summary="当前在途局（页面刷新后恢复用）")
+async def current_run(request: Request):
+    user = get_current_user(request)
+    teacher, grade, cls = _scope_from_request(request, user, dict(request.query_params))
+    session = _load_active_session(teacher, grade, cls)
+    if not session:
+        return {"run": None}
+    playing = execute_query_one(
+        "SELECT * FROM class_ladder_runs WHERE session_id=? AND status='playing' "
+        "ORDER BY id DESC LIMIT 1",
+        (session["id"],),
+    )
+    if not playing:
+        return {"run": None}
+    return {"run": _run_public(playing, session)}
 
 
 @router.get("/run/{run_id}", summary="本局状态（含当前关题面，不含答案）")
@@ -991,7 +1038,14 @@ async def _apply_answer(run_id: int, user: dict, body: dict) -> dict:
 
     selected = str(body.get("selected") or "").strip()
     correct_answer = str(snap.get("correct_answer") or "").strip()
+    # 计时真值在服务器：超时提交/迟到作答一律以 level_served_at 为准（旧版计时全在浏览器，
+    # 刷新即可无限续命，time_spent 也是客户端随口上报）。
+    served = float(run.get("level_served_at") or 0)
+    tlimit = _as_time_limit(session.get("time_limit_sec"))
+    elapsed = round(max(0.0, time.time() - served), 1) if served > 0 else 0.0
     is_timeout = str(body.get("reason") or "") == "timeout"
+    if served > 0 and tlimit > 0 and elapsed > tlimit + 3:
+        is_timeout = True
     from backend.answer_norm import answers_equal  # 统一判分口径（判断题/字母选项）
     ok = (not is_timeout) and bool(selected) and answers_equal(
         selected, correct_answer, snap.get("options"), str(snap.get("question_type") or ""))
@@ -1002,12 +1056,14 @@ async def _apply_answer(run_id: int, user: dict, body: dict) -> dict:
     answers = _decode(run.get("answers"), [])
     answers.append({"level": level, "selected": "" if is_timeout else selected,
                     "correct_answer": correct_answer, "correct": ok, "score": score,
-                    "lifeline": lifelines, "time_spent": int(body.get("time_spent") or 0),
+                    "lifeline": lifelines,
+                    "time_spent": min(elapsed, float(tlimit)) if tlimit > 0 else elapsed,
                     "timeout": is_timeout, "question_id": snap.get("question_id")})
     run["answers"] = answers
     run["reached_level"] = level
 
     if ok and level < MAX_LEVELS:
+        run["level_served_at"] = time.time()
         run["correct_count"] = sum(1 for a in answers if a.get("correct"))
         if run.get("student_name"):
             # 过关回升权重（与点名标对、抽问答对加的是同一份班级权重）

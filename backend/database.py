@@ -596,6 +596,7 @@ def init_db():
             _ensure_column(c, "rollcall_history", "student_username", "TEXT DEFAULT ''")
             _ensure_column(c, "class_drill_records", "student_username", "TEXT DEFAULT ''")
             _ensure_column(c, "class_ladder_runs", "student_username", "TEXT DEFAULT ''")
+            _ensure_column(c, "class_ladder_runs", "level_served_at", "REAL DEFAULT 0")
 
             # ── 任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS tasks (
@@ -1811,6 +1812,10 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # 每题下发时刻（服务端计时真值）与本场解锁的徽章
+            _ensure_column(c, "quest_question_records", "served_at", "REAL DEFAULT 0")
+            _ensure_column(c, "quest_records", "unlocked_json", "TEXT DEFAULT ''")
+
             # ── 闯关徽章计数表（可重复收集） ──
             c.execute("""CREATE TABLE IF NOT EXISTS quest_badge_counts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1934,6 +1939,9 @@ def init_db():
                 c.execute("ALTER TABLE quick_quiz_rooms ADD COLUMN target_users TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+
+            # 公布停留秒数（答案公布到下一题的间隔；0=教师手动推进）
+            _ensure_column(c, "quick_quiz_rooms", "reveal_hold_sec", "INTEGER DEFAULT 5")
 
             # ── 抢答活动参与者表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_players (

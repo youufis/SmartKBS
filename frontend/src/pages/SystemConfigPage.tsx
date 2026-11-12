@@ -63,9 +63,9 @@ interface ConfigField {
   descKey?: string
   /** 完整说明（原理、注意事项、取值范围）。说明行只放一句话，长文进 label 旁的 ⓘ */
   longDescKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate' | 'tags_select' | 'duration' | 'combobox'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'kv' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate' | 'tags_select' | 'duration' | 'combobox'
   /** 字段旁的附加动作按钮（目前只有语音识别自检） */
-  action?: 'asr_check'
+  action?: 'asr_check' | 'news_discover'
   group: string
   /** 面向管理员的常用项，默认可见；未标注 = advanced */
   level?: 'basic' | 'advanced'
@@ -116,7 +116,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'teaching',
     titleKey: 'zone_teaching',
     descKey: 'zone_teaching_desc',
-    sections: ['incentive', 'reward', 'wrongbook', 'portrait', 'classdrill', 'classladder'],
+    sections: ['incentive', 'reward', 'wrongbook', 'portrait', 'classdrill', 'classladder', 'news'],
   },
   {
     id: 'ai',
@@ -158,6 +158,7 @@ const SECTION_TITLES: Record<string, string> = {
   explore: 'group_explore',
   classdrill: 'group_classdrill',
   classladder: 'group_classladder',
+  news: 'group_news',
   portrait: 'group_portrait',
   upload: 'group_upload',
   quota: 'group_quota',
@@ -367,6 +368,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'CLASS_LADDER_AI_ENABLED', labelKey: 'field_CLASS_LADDER_AI_ENABLED', descKey: 'field_CLASS_LADDER_AI_ENABLED_desc', type: 'boolean', group: 'classladder', level: 'basic', required: false },
   { key: 'CLASS_LADDER_SOUND_ENABLED', labelKey: 'field_CLASS_LADDER_SOUND_ENABLED', descKey: 'field_CLASS_LADDER_SOUND_ENABLED_desc', type: 'boolean', group: 'classladder', level: 'basic', required: false },
   { key: 'CLASS_LADDER_DEFAULT_SKIN', labelKey: 'field_CLASS_LADDER_DEFAULT_SKIN', descKey: 'field_CLASS_LADDER_DEFAULT_SKIN_desc', longDescKey: 'field_CLASS_LADDER_DEFAULT_SKIN_tip', type: 'select', group: 'classladder', required: false, options: LADDER_SKIN_OPTIONS },
+  // 热点新闻源清单（后端 news_router 现读现用；留空 = 走内置默认；详见 /api/news/diagnose）
+  { key: 'news_rss_feeds', labelKey: 'field_news_rss_feeds', descKey: 'field_news_rss_feeds_desc', longDescKey: 'field_news_rss_feeds_tip', type: 'kv', group: 'news', level: 'basic', required: false, placeholderKey: 'placeholder_news_rss' },
+  { key: 'news_rss_reserves', labelKey: 'field_news_rss_reserves', descKey: 'field_news_rss_reserves_desc', longDescKey: 'field_news_rss_reserves_tip', type: 'kv', group: 'news', required: false, placeholderKey: 'placeholder_news_rss', action: 'news_discover' },
 
   // ══ ③ AI 能力 ══
   // 服务接入
@@ -526,8 +530,29 @@ const TAG_FIELD_KEYS = GLOBAL_CONFIG_FIELDS.filter((f) => f.type === 'tags').map
 //   csv  -> "3,4,5"（时长档位；后端按 _STR_LIMITS 文本校验）
 // 控件只与表单态交换结构化值，进出库的换算集中在这两个函数里，
 // 以后再把某个字段换一种控件，也不会顺手把提交类型改坏。
-const storageOf = (f: ConfigField): 'list' | 'csv' | 'str' =>
-  f.storage ?? (f.type === 'tags_select' ? 'list' : f.type === 'duration' ? 'csv' : 'str')
+const storageOf = (f: ConfigField): 'list' | 'csv' | 'kv' | 'str' =>
+  f.storage ?? (f.type === 'tags_select' ? 'list' : f.type === 'duration' ? 'csv' : f.type === 'kv' ? 'kv' : 'str')
+
+// kv 字段：{名称: URL} 字典 ↔ 「名称=URL」每行一条的文本
+const kvToText = (raw: unknown): string => {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return Object.entries(raw as Record<string, unknown>)
+      .map(([k, u]) => k + '=' + String(u ?? '').trim())
+      .join('\n')
+  }
+  return typeof raw === 'string' ? raw : ''
+}
+const kvToObject = (text: unknown): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const line of String(text ?? '').split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    const i = t.indexOf('=')
+    if (i <= 0) continue
+    out[t.slice(0, i).trim()] = t.slice(i + 1).trim()
+  }
+  return out
+}
 
 const SPLIT_RE = /[,，、;；\n]+/
 const splitToList = (raw: unknown): string[] =>
@@ -686,6 +711,8 @@ const toFormValues = (raw: Record<string, unknown>): Record<string, unknown> => 
       v[f.key] = Array.isArray(v[f.key])
         ? (v[f.key] as unknown[]).map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0)
         : splitToNumbers(v[f.key])
+    } else if (storage === 'kv') {
+      v[f.key] = kvToText(v[f.key])
     }
   }
   if (Array.isArray(v['QUESTION_TYPES'])) {
@@ -728,6 +755,9 @@ const toApiValues = (raw: Record<string, unknown>): Record<string, unknown> => {
       )).sort((a, b) => a - b)
       // 必须回写成字符串：这两个键在后端 _STR_LIMITS 里，提交数组会被 400 拒
       v[f.key] = nums.join(',')
+    } else if (storage === 'kv') {
+      // kv 提交回对象：后端按 {名称: URL} 字典校验；无名行丢弃
+      v[f.key] = kvToObject(v[f.key])
     }
   }
   if (typeof v['QUESTION_TYPES'] === 'string') {
@@ -792,6 +822,23 @@ const checkValueShapes = (
         const nums = val.split(',').map((x) => Number(x))
         if (nums.some((n) => !Number.isInteger(n) || n < 1 || n > 30)) {
           problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectCsv' })
+        }
+      }
+      continue
+    }
+    if (storage === 'kv') {
+      if (typeof val !== 'string') {
+        problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectKv' })
+      } else {
+        for (const line of val.split('\n')) {
+          const t = line.trim()
+          if (!t) continue
+          const i = t.indexOf('=')
+          const url = i >= 0 ? t.slice(i + 1).trim() : ''
+          if (i <= 0 || (url && !/^https?:\/\//.test(url))) {
+            problems.push({ labelKey: f.labelKey, reasonKey: 'shapeExpectKv' })
+            break
+          }
         }
       }
       continue
@@ -2169,6 +2216,8 @@ const SystemConfigPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const [activeTab, setActiveTab] = useState('global')
   const [config, setConfig] = useState<Record<string, unknown>>({})
+  // NW20: 一键自动寻源的进行中状态（按钮 loading + 防重复触发）
+  const [newsDiscovering, setNewsDiscovering] = useState(false)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [apikeyStatus, setApikeyStatus] = useState<{ status: string; source: string; hint: string; configured: boolean } | null>(null)
@@ -2287,6 +2336,29 @@ const SystemConfigPage: React.FC = () => {
       setLoading(false)
     }
   }, [t, applyConfig, loadApikeyStatus])
+
+  // NW20: 探测候选源 → 可用的写进备用池 → 重新拉配置回填表单（所见即所得）
+  const runNewsDiscover = useCallback(async () => {
+    setNewsDiscovering(true)
+    try {
+      const { data } = await apiClient.post('/api/news/feeds/discover', null, { timeout: 120000 })
+      const added = (data?.added || []) as { name: string }[]
+      const ok = (data?.ok || []) as unknown[]
+      if (added.length) {
+        message.success(t('newsDiscoverAdded', { n: added.length, names: added.map((a) => a.name).join('、') }))
+      } else if (ok.length) {
+        message.info(t('newsDiscoverNoAdd', { n: ok.length }))
+      } else {
+        message.warning(t('newsDiscoverNone', { probed: data?.probed ?? 0 }))
+      }
+      await loadConfig()
+    } catch (e: any) {
+      const d = e?.response?.data?.detail
+      message.error((typeof d === 'string' && d) || t('newsDiscoverFail'))
+    } finally {
+      setNewsDiscovering(false)
+    }
+  }, [t, loadConfig])
 
   // ── 逐项比对快照，统计"几项未保存" ──
   // 用 getFieldsValue(true) 取全部 store 值：搜索或切换小节会让部分 Form.Item 卸载，
@@ -2640,6 +2712,7 @@ const SystemConfigPage: React.FC = () => {
           </Tooltip>
         ) : null}
         {field.action === 'asr_check' ? <AsrCheckButton /> : null}
+
       </span>
     )
     const getRule = (field: ConfigField) =>
@@ -2752,6 +2825,32 @@ const SystemConfigPage: React.FC = () => {
                   getValueFromEvent={(e) => e.target.value}
                 >
                   <Input placeholder={field.placeholderKey ? t(field.placeholderKey) : t('placeholder_extensions')} />
+                </Form.Item>
+              ) : field.type === 'kv' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  extra={
+                    <div>
+                      {descNode(field)}
+                      {field.action === 'news_discover' ? (
+                        <div style={{ marginTop: 6 }}>
+                          <Button size="small" icon={<SearchOutlined />} loading={newsDiscovering}
+                            onClick={(e) => { e.preventDefault(); void runNewsDiscover() }}>
+                            {t('newsDiscoverBtn')}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  }
+                >
+                  <Input.TextArea
+                    autoSize={{ minRows: 4, maxRows: 14 }}
+                    wrap="off"
+                    spellCheck={false}
+                    style={{ fontFamily: 'monospace', fontSize: 12 }}
+                    placeholder={field.placeholderKey ? t(field.placeholderKey) : '名称=https://…/rss.xml'}
+                  />
                 </Form.Item>
               ) : field.type === 'question_types' ? (
                 <Form.Item

@@ -6,7 +6,7 @@ import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Card, Button, Typography, Space, Table, Tag, message, Spin,
-  Progress, Row, Col, Statistic, Modal, Input, Select, Form,
+  Progress, Row, Col, Statistic, Modal, Input, Select, Form, Popconfirm, Tooltip,
 } from 'antd'
 import {
   ThunderboltOutlined, PlayCircleOutlined, StepForwardOutlined,
@@ -59,6 +59,8 @@ const QuickQuizConsole: React.FC = () => {
   const [hasSvg, setHasSvg] = useState(0)
   const [mediaFiles, setMediaFiles] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [answeredUsers, setAnsweredUsers] = useState<string[]>([])
+  const [holdLeft, setHoldLeft] = useState(0)
   const { subjects: subjectOptions } = useSubjectOptions()
   const [bankModalOpen, setBankModalOpen] = useState(false)
   const [bankQuestions, setBankQuestions] = useState<any[]>([])
@@ -80,8 +82,17 @@ const QuickQuizConsole: React.FC = () => {
   useEffect(() => { currentQuestionRef.current = currentQuestion }, [currentQuestion])
   useEffect(() => { totalQuestionsRef.current = totalQuestions }, [totalQuestions])
   useEffect(() => { phaseRef.current = phase }, [phase])
+  // 公布停留倒计时仅作展示；推进由服务端单一时钟负责
+  useEffect(() => {
+    if (holdTimerRef.current) { clearInterval(holdTimerRef.current); holdTimerRef.current = null }
+    if (holdLeft > 0) {
+      holdTimerRef.current = setInterval(() => setHoldLeft((n) => (n > 0 ? n - 1 : 0)), 1000)
+    }
+    return () => { if (holdTimerRef.current) { clearInterval(holdTimerRef.current); holdTimerRef.current = null } }
+  }, [holdLeft])
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     loadRoom()
@@ -97,15 +108,15 @@ const QuickQuizConsole: React.FC = () => {
         if (qRes.data.phase === 'ended') {
           setPhase('ended')
         }
-        // 刷新答题统计和排行
+        // 本轮已答名单以服务端为准（旧口径按整场累计 correct+wrong 估算，第 2 题起几乎恒等于全员已答）
+        if (Array.isArray(qRes.data.answered_usernames)) {
+          setAnsweredUsers(qRes.data.answered_usernames)
+          setAnsweredCount(qRes.data.answered_count ?? qRes.data.answered_usernames.length)
+          if (qRes.data.total_players) setTotalPlayers(qRes.data.total_players)
+        }
         const rRes = await apiClient.get(`/api/quick-quiz/room/${roomId}`)
         if (rRes.data?.players) {
           setPlayers(rRes.data.players)
-          // 计算已作答人数（total_score > 0 或 correct_count + wrong_count > 0）
-          const answered = rRes.data.players.filter(
-            (p: any) => (p.correct_count || 0) + (p.wrong_count || 0) > 0
-          ).length
-          setAnsweredCount(answered)
           setTotalPlayers(rRes.data.players.length)
         }
         // 刷新排行
@@ -180,6 +191,8 @@ const QuickQuizConsole: React.FC = () => {
     wsRef.current = ws
 
     ws.onopen = () => {
+      // 允许下一次断线继续重连（旧实现只重连一次）
+      reconnectRef.current = false
       ws.send(JSON.stringify({
         type: 'register',
         data: { username: user?.username || '' }
@@ -218,6 +231,8 @@ const QuickQuizConsole: React.FC = () => {
         setHasSvg(msg.data.has_svg || 0)
         setMediaFiles(msg.data.media_files || '')
         setAnsweredCount(0)
+        setAnsweredUsers([])
+        setHoldLeft(0)
         setOptionStats({})
         setFirstBlood(null)
         setCorrectAnswer('')
@@ -233,19 +248,9 @@ const QuickQuizConsole: React.FC = () => {
         setOptionStats(msg.data.option_stats || {})
         setFirstBlood(msg.data.first_blood)
         setRanking(msg.data.ranking || [])
-        // 自动推进下一题
-        if (msg.data.next_in && !msg.data.is_last) {
-          if (autoNextRef.current) clearTimeout(autoNextRef.current)
-          autoNextRef.current = setTimeout(() => {
-            if (currentQuestionRef.current < totalQuestionsRef.current) {
-              handleNext()
-            }
-          }, (msg.data.next_in || 3) * 1000)
-        } else if (msg.data.next_in && msg.data.is_last) {
-          // 最后一题，自动结束
-          if (autoNextRef.current) clearTimeout(autoNextRef.current)
-          autoNextRef.current = setTimeout(handleEnd, (msg.data.next_in || 3) * 1000)
-        }
+        // 公布停留：next_in 仅用于展示倒计时；推进/结算由服务端单一时钟负责（旧版自设定时器抢先 /next 会跳题）
+        setHoldLeft(msg.data.next_in || 0)
+        if (msg.data.waiting_teacher) message.info(t('qqManualHold'), 4)
         break
       case 'game_end':
         setPhase('ended')
@@ -253,6 +258,18 @@ const QuickQuizConsole: React.FC = () => {
         message.success(t('quizEnded'))
         break
     }
+  }
+
+  const handleReveal = async () => {
+    if (autoNextRef.current) clearTimeout(autoNextRef.current)
+    setActionLoading(true)
+    try {
+      await apiClient.post(`/api/quick-quiz/room/${roomId}/reveal`)
+      setHoldLeft(0)
+    } catch (err: any) {
+      const d = err.response?.data?.detail
+      message.error((typeof d === 'string' && d) || t('operationFailed'))
+    } finally { setActionLoading(false) }
   }
 
   const handleNext = async () => {
@@ -286,7 +303,11 @@ const QuickQuizConsole: React.FC = () => {
     })
   }
 
-  const handleViewResult = () => {
+  const handleViewResult = async () => {
+    // 末题讲解后教师直接看成绩：顺手结束活动，别把学生晾在讲解页
+    if (room && room.status === 'playing') {
+      try { await apiClient.post(`/api/quick-quiz/room/${roomId}/end`) } catch { /* 已结束/已重置都不挡跳转 */ }
+    }
     navigate(`/quick-quiz/result/${roomId}`)
   }
 
@@ -376,6 +397,22 @@ const QuickQuizConsole: React.FC = () => {
           <Space>
             {phase !== 'ended' ? (
               <>
+                {phase === 'question' && (
+                  <Popconfirm title={t('revealNowConfirm')}
+                    description={t('revealNowHint', { left: Math.max(0, totalPlayers - answeredCount) })}
+                    okText={t('confirmEnd')} cancelText={t('cancel')}
+                    onConfirm={handleReveal}>
+                    <Button type="primary" ghost icon={<CheckCircleOutlined />}
+                      style={{ borderColor: '#fff', color: '#fff' }}>
+                      {t('revealNow')}
+                    </Button>
+                  </Popconfirm>
+                )}
+                <Tooltip title={t('selectFromBank')}>
+                  <Button type="primary" ghost icon={<DatabaseOutlined />}
+                    onClick={() => { void loadBankQuestions(1); setBankModalOpen(true) }}
+                    style={{ borderColor: '#fff', color: '#fff' }} />
+                </Tooltip>
                 {phase === 'reveal' && currentQuestion < totalQuestions && (
                   <Button type="primary" ghost icon={<StepForwardOutlined />}
                     onClick={handleNext} loading={actionLoading}
@@ -527,6 +564,17 @@ const QuickQuizConsole: React.FC = () => {
         </Card>
       )}
 
+      {phase === 'reveal' && holdLeft > 0 && (
+        <div style={{ textAlign: 'center', marginBottom: 8 }}>
+          <Text type="secondary">{t('qqAutoNextIn', { n: holdLeft })}</Text>
+        </div>
+      )}
+      {phase === 'reveal' && holdLeft === 0 && currentQuestion < totalQuestions && (
+        <div style={{ textAlign: 'center', marginBottom: 8 }}>
+          <Text type="secondary">{t('qqManualHold')}</Text>
+        </div>
+      )}
+
       {/* 实时排行榜 */}
       <Card title={<Space><TrophyOutlined /> {t('liveLeaderboard')}</Space>}
         style={{ borderRadius: 12, marginBottom: 16 }}
@@ -572,16 +620,23 @@ const QuickQuizConsole: React.FC = () => {
         />
       </Card>
 
-      {/* 玩家列表 */}
+      {/* 学生列表 */}
       <Card title={<Space><TeamOutlined /> {t('playerListWithCount', { count: players.length })}</Space>}
+        extra={phase === 'question' ? <Text type="secondary" style={{ fontSize: 12 }}>{t('qqAnsweredLegend')}</Text> : undefined}
         style={{ borderRadius: 12 }} size="small">
         <Space wrap>
-          {players.map((p: any, i: number) => (
-            <Tag key={p.student_username} color={['#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#722ed1'][i % 5]}
-              style={{ borderRadius: 12, padding: '2px 10px' }}>
-              {studentLabel(p)}
-            </Tag>
-          ))}
+          {players.map((p: any, i: number) => {
+            const done = answeredUsers.includes(p.student_username)
+            return (
+              <Tag key={p.student_username}
+                color={done ? '#52c41a' : ['#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#722ed1'][i % 5]}
+                icon={done ? <CheckCircleOutlined /> : undefined}
+                style={{ borderRadius: 12, padding: '2px 10px',
+                         opacity: phase === 'question' && !done ? 0.6 : 1 }}>
+                {studentLabel(p)}
+              </Tag>
+            )
+          })}
           {players.length === 0 && <Text type="secondary">{t('noPlayers')}</Text>}
         </Space>
       </Card>

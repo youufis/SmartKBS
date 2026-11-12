@@ -22,8 +22,8 @@ interface NewsStore {
   refreshing: boolean;
   lastFetch: NewsFetchHealth | null;
 
-  loadList: (category?: string, page?: number) => Promise<boolean>;
-  refreshNow: () => Promise<NewsRefreshResult | null>;
+  loadList: (category?: string, page?: number, opts?: { keyword?: string; unreadOnly?: boolean }) => Promise<boolean>;
+  refreshNow: () => Promise<{ res: NewsRefreshResult | null; error: string }>;
   loadCategories: () => Promise<void>;
   loadFavorites: () => Promise<void>;
   getDetail: (newsId: number) => Promise<NewsDetail>;
@@ -41,10 +41,10 @@ export const useNewsStore = create<NewsStore>((set, get) => ({
   lastFetch: null,
   stats: { todayViews: 0, todayPoints: 0, pointsMax: 3, totalViews: 0, totalFavorites: 0 },
 
-  loadList: async (category, page = 1) => {
+  loadList: async (category, page = 1, opts) => {
     set({ loading: true });
     try {
-      const res = await newsApi.getNewsList(category, page);
+      const res = await newsApi.getNewsList(category, page, 20, opts);
       set({
         articles: res.articles,
         total: res.total,
@@ -66,10 +66,11 @@ export const useNewsStore = create<NewsStore>((set, get) => ({
     try {
       const res = await newsApi.refreshNews();
       if (res.last_fetch) set({ lastFetch: res.last_fetch });
-      return res;
+      return { res, error: '' };
     } catch (e) {
+      // 429 等带原因的失败把后端 detail 透出去（"请 X 秒后再试"对学生有用），其余归为网络错误
       console.error('强制刷新热点新闻失败', e);
-      return null;
+      return { res: null, error: newsApi.apiErrorDetail(e) };
     } finally {
       set({ refreshing: false });
     }
@@ -112,6 +113,20 @@ export const useNewsStore = create<NewsStore>((set, get) => ({
     const action = isFav ? 'unfavorite' : 'favorite';
     try {
       await newsApi.toggleFavorite(newsId, action);
+      // 乐观更新：列表与收藏就地改状态，不再整页重读（旧实现收藏一次闪一次屏、丢滚动位置）
+      set((s) => {
+        const articles = s.articles.map((a) => (a.id === newsId ? { ...a, is_favorited: !isFav } : a));
+        let favorites: NewsArticle[];
+        if (isFav) {
+          favorites = s.favorites.filter((a) => a.id !== newsId);
+        } else if (s.favorites.some((a) => a.id === newsId)) {
+          favorites = s.favorites.map((a) => (a.id === newsId ? { ...a, is_favorited: true } : a));
+        } else {
+          const src = articles.find((a) => a.id === newsId);
+          favorites = src ? [{ ...src, is_favorited: true }, ...s.favorites] : s.favorites;
+        }
+        return { articles, favorites };
+      });
     } catch (e) {
       console.error('新闻收藏失败', e);
     }

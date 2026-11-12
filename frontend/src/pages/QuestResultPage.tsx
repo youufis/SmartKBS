@@ -51,14 +51,18 @@ interface QuestResult {
   questions: QuestionReview[]
   badge_count: number
   total_badges: number
+  unlocked?: { id: string; name: string; emoji?: string; kind?: string }[]
   created_at: string
   completed_at: string
 }
 
-const LIFELINE_LABELS: Record<string, string> = {
-  remove_one: '🎯 去伪存真',
-  phone_friend: '📞 远程连线',
-  audience_vote: '👥 群策群力',
+const LIFELINE_KEYS: Record<string, string> = {
+  remove_one: 'lifelineRemoveOne',
+  phone_friend: 'lifelinePhoneFriend',
+  audience_vote: 'lifelineAudienceVote',
+}
+const LIFELINE_EMOJI: Record<string, string> = {
+  remove_one: '🎯', phone_friend: '📞', audience_vote: '👥',
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -84,6 +88,7 @@ const QuestResultPage: React.FC = () => {
   const navigate = useNavigate()
   const [result, setResult] = useState<QuestResult | null>(null)
   const [loading, setLoading] = useState(true)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     loadResult()
@@ -99,6 +104,17 @@ const QuestResultPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handlePlayAgain = async () => {
+    setStarting(true)
+    try {
+      const { data } = await apiClient.post('/api/quest/start', null, { timeout: 90000 })
+      navigate(`/quest/battle/${data.quest_id}`, { state: { initialData: data } })
+    } catch (e: any) {
+      const d = e?.response?.data?.detail
+      message.error((typeof d === 'string' && d) || t('quest.startFailed'))
+    } finally { setStarting(false) }
   }
 
   if (loading) {
@@ -197,7 +213,8 @@ const QuestResultPage: React.FC = () => {
                 title={t('quest.totalScore')}
                 value={result.total_score}
                 suffix={t('quest.points')}
-                color="#ffd700"
+                color={isSuccess ? '#ffd700' : '#d48806'}
+                light={!isSuccess}
               />
             </Col>
             <Col>
@@ -205,7 +222,8 @@ const QuestResultPage: React.FC = () => {
                 title={t('quest.badgeCount')}
                 value={result.badge_count}
                 suffix={t('quest.units')}
-                color="#ffd700"
+                color={isSuccess ? '#ffd700' : '#d48806'}
+                light={!isSuccess}
               />
             </Col>
             <Col>
@@ -213,10 +231,23 @@ const QuestResultPage: React.FC = () => {
                 title={t('quest.totalBadges')}
                 value={result.total_badges}
                 suffix={t('quest.units')}
-                color="#ffd700"
+                color={isSuccess ? '#ffd700' : '#d48806'}
+                light={!isSuccess}
               />
             </Col>
           </Row>
+          {result.unlocked && result.unlocked.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <Text style={{ color: isSuccess ? 'rgba(255,255,255,0.85)' : 'var(--text-secondary)', marginRight: 6 }}>
+                {t('quest.unlockedBadges')}
+              </Text>
+              {result.unlocked.map((b) => (
+                <Tag key={b.kind + '-' + b.id} color="gold" style={{ marginBottom: 4 }}>
+                  {b.emoji} {b.name}
+                </Tag>
+              ))}
+            </div>
+          )}
         </Space>
       </Card>
 
@@ -227,7 +258,8 @@ const QuestResultPage: React.FC = () => {
             type="primary"
             size="large"
             icon={<ReloadOutlined />}
-            onClick={() => navigate('/quest')}
+            loading={starting}
+            onClick={handlePlayAgain}
             style={{ borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
           >
             {t('quest.playAgain')}
@@ -266,7 +298,8 @@ const QuestResultPage: React.FC = () => {
                   )}
                   {q.lifeline_used && (
                     <Tag color="orange">
-                      {q.lifeline_used.split(',').filter(Boolean).map((l) => LIFELINE_LABELS[l] || l).join(', ')}
+                      {q.lifeline_used.split(',').filter(Boolean)
+                        .map((l) => (LIFELINE_KEYS[l] ? LIFELINE_EMOJI[l] + ' ' + t(LIFELINE_KEYS[l]) : l)).join(', ')}
                     </Tag>
                   )}
                 </Space>
@@ -314,12 +347,12 @@ const QuestResultPage: React.FC = () => {
   )
 }
 
-const StatisticItem: React.FC<{ title: string; value: number; suffix?: string; color?: string }> = ({
-  title, value, suffix, color
+const StatisticItem: React.FC<{ title: string; value: number; suffix?: string; color?: string; light?: boolean }> = ({
+  title, value, suffix, color, light
 }) => (
   <div style={{ textAlign: 'center' }}>
-    <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{title}</div>
-    <div style={{ color: color || '#fff', fontSize: 28, fontWeight: 700 }}>
+    <div style={{ color: light ? 'var(--text-tertiary)' : 'rgba(255,255,255,0.7)', fontSize: 13 }}>{title}</div>
+    <div style={{ color: color || (light ? 'var(--text-primary)' : '#fff'), fontSize: 28, fontWeight: 700 }}>
       {value}
       {suffix && <span style={{ fontSize: 14, opacity: 0.8 }}> {suffix}</span>}
     </div>

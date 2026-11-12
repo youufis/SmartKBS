@@ -21,6 +21,8 @@ interface Props {
   onLifeline: (type: string) => void
   busy: boolean
   remaining: number
+  paused?: boolean
+  covered?: { done: number; total: number } | null
   fs: boolean
   onToggleFs: () => void
 }
@@ -50,6 +52,9 @@ export default function LadderBar(p: Props) {
       )}
       {session && <div className="cl-chip gold">{session.topic || session.subject || t('title')}</div>}
       {session && <div className="cl-chip">{classChipLabel(session)}</div>}
+      {p.covered && p.covered.total > 0 && (
+        <div className="cl-chip">{t('coveredChip', { done: p.covered.done, total: p.covered.total })}</div>
+      )}
       {run && <div className="cl-chip">{t('levelOf', { n: p.curLevel || run.reached_level, total: p.maxLevels })}</div>}
       {run && <div className="cl-chip gold">{t('totalScore')} {run.ladder_score}</div>}
       <div className="cl-spacer" />
@@ -70,14 +75,14 @@ export default function LadderBar(p: Props) {
         </div>
       )}
       {run?.status === 'playing' && run.time_limit_sec > 0 && (
-        <div className={`cl-timer${p.remaining <= 10 ? ' hot' : ''}`}>
+        <div className={`cl-timer${p.remaining <= 10 ? ' hot' : ''}${p.paused ? ' paused' : ''}`}>
           <svg width="64" height="64">
             <circle className="track" cx="32" cy="32" r="27" fill="none" strokeWidth="6" />
             <circle className="arc" cx="32" cy="32" r="27" fill="none" strokeWidth="6"
               strokeDasharray={169.6}
               strokeDashoffset={169.6 * (1 - p.remaining / Math.max(1, run.time_limit_sec))} />
           </svg>
-          <b>{p.remaining}</b>
+          <b title={p.paused ? t('timerPaused') : undefined}>{p.paused ? '⏸' : p.remaining}</b>
         </div>
       )}
       <Tooltip title={p.fs ? t('exitFullscreen') : t('fullscreen')}>

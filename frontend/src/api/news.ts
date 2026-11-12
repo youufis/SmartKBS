@@ -13,6 +13,8 @@ export interface NewsArticle {
   fetched_at: string;
   is_viewed: boolean;
   is_favorited: boolean;
+  /** 窗口内被读过的总次数（列表热度） */
+  view_count?: number;
 }
 
 export interface NewsListResponse {
@@ -78,6 +80,9 @@ export interface NewsDetail {
   tags: string[];
   published_at: string;
   points_awarded: number;
+  is_favorited?: boolean;
+  /** AI 摘要在后台生成中：首开为空，稍后再开可见 */
+  ai_generating?: boolean;
 }
 
 export interface NewsBriefing {
@@ -133,9 +138,12 @@ export interface NewsAdminList {
 }
 
 /** 获取新闻列表 */
-export async function getNewsList(category?: string, page = 1, pageSize = 20): Promise<NewsListResponse> {
+export async function getNewsList(category?: string, page = 1, pageSize = 20,
+  opts?: { keyword?: string; unreadOnly?: boolean }): Promise<NewsListResponse> {
   const params: Record<string, any> = { page, page_size: pageSize };
   if (category) params.category = category;
+  if (opts?.keyword) params.keyword = opts.keyword;
+  if (opts?.unreadOnly) params.unread_only = true;
   const { data } = await apiClient.get('/api/news/list', { params });
   return data;
 }

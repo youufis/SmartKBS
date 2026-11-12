@@ -29,6 +29,13 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      // 其余活动 WS（抢答/讨论/提问…）：/api 兜底代理不转发 WebSocket 升级，
+      // 缺这条时开发态 WS 全部静默失败，教师端只能靠轮询兜底
+      '/api/ws': {
+        target: 'ws://localhost:8086',
+        ws: true,
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://localhost:8086',
         changeOrigin: true,

@@ -1,6 +1,6 @@
 /**
  * QuickQuizLobby — 抢答活动等候区
- * 显示玩家列表、房间信息，等待教师开始
+ * 显示学生列表、房间信息，等待教师开始
  */
 import React, { useState, useEffect, useRef } from 'react'
 import {
@@ -31,7 +31,6 @@ const QuickQuizLobby: React.FC = () => {
   const [players, setPlayers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
-  const [countdown, setCountdown] = useState<number | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -39,10 +38,14 @@ const QuickQuizLobby: React.FC = () => {
   useEffect(() => {
     loadRoom()
     connectWebSocket()
-    // 轮询房间状态，防止 WebSocket 消息丢失导致不跳转
+    // 轮询房间状态与学生名单：防止 WebSocket 消息丢失导致不跳转/不刷新
     pollRef.current = setInterval(async () => {
       try {
         const { data } = await apiClient.get(`/api/quick-quiz/room/${roomId}`)
+        if (data.status === 'waiting') {
+          setRoom((prev: any) => ({ ...(prev || {}), ...data }))
+          setPlayers(data.players || [])
+        }
         if (data.status === 'playing') {
           if (pollRef.current) clearInterval(pollRef.current)
           if (isTeacherOrAdmin) {
@@ -118,6 +121,8 @@ const QuickQuizLobby: React.FC = () => {
     wsRef.current = ws
 
     ws.onopen = () => {
+      // 允许下一次断线继续重连（旧实现 reconnectRef 置真后永不复位，只重连一次）
+      reconnectRef.current = false
       // 注册身份
       ws.send(JSON.stringify({
         type: 'register',
@@ -173,7 +178,12 @@ const QuickQuizLobby: React.FC = () => {
       await apiClient.post(`/api/quick-quiz/room/${roomId}/start`)
       navigate(`/quick-quiz/console/${roomId}`, { replace: true })
     } catch (err: any) {
-      message.error(err.response?.data?.detail || t('startFailed'))
+      const d = err.response?.data?.detail
+      if (d && typeof d === 'object' && d.code === 'min_players_not_met') {
+        message.error(t('qqMinPlayersNeeded', { needed: d.needed, current: d.current }))
+      } else {
+        message.error((typeof d === 'string' && d) || t('startFailed'))
+      }
     } finally {
       setStarting(false)
     }
@@ -246,6 +256,7 @@ const QuickQuizLobby: React.FC = () => {
           <Text><ClockCircleOutlined /> {t('timeLimit')}：<Text strong>{room.time_limit}s</Text></Text>
           <Text>📝 {t('totalQuestions')}：<Text strong>{room.question_count}</Text></Text>
           <Text>🎯 {t('scoring')}：<Text strong>{room.scoring_mode === 'speed' ? t('speedScoring') : t('tieredScoring')}</Text></Text>
+          <Text>⏸️ {t('revealHold')}：<Text strong>{room.reveal_hold_sec === 0 ? t('manualAdvance') : t('secondUnitN', { n: room.reveal_hold_sec ?? 5 })}</Text></Text>
           <Text>📚 {t('questionSource')}：<Text strong>
             {room.question_source === 'bank_academic' ? t('bankAcademicLabel') :
              room.question_source === 'bank_general' ? t('bankGeneralLabel') :
@@ -255,7 +266,7 @@ const QuickQuizLobby: React.FC = () => {
         </Space>
       </Card>
 
-      {/* 玩家列表 */}
+      {/* 学生列表 */}
       <Card title={<Space><TeamOutlined /> {t('playerListWithCount', { count: players.length })}</Space>}
         style={{ borderRadius: 12 }} styles={{ body: { padding: players.length === 0 ? '24px' : '12px 24px' } }}>
         {players.length === 0 ? (
@@ -279,37 +290,27 @@ const QuickQuizLobby: React.FC = () => {
         )}
       </Card>
 
-      {/* 倒计时覆盖 */}
-      {countdown !== null && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.7)', display: 'flex',
-          justifyContent: 'center', alignItems: 'center', zIndex: 1000,
-          flexDirection: 'column',
-        }}>
-          <div style={{ fontSize: 120, color: '#fff', fontWeight: 'bold' }}>
-            {countdown > 0 ? countdown : 'GO!'}
-          </div>
-          <div style={{ color: '#fff', fontSize: 24, marginTop: 16 }}>{t('aboutToStart')}</div>
-        </div>
-      )}
-
       {/* 操作区 */}
       {isTeacherOrAdmin && room.status === 'waiting' && (
         <div style={{ marginTop: 16, textAlign: 'center' }}>
           <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-            <Space>
+            <Space orientation="vertical" size={4} align="center">
               <Button
                 type="primary"
                 size="large"
                 icon={<PlayCircleOutlined />}
                 onClick={handleStart}
                 loading={starting}
-                disabled={players.length < 1}
+                disabled={players.length < Math.max(1, room.min_players || 1)}
                 style={{ height: 48, borderRadius: 24, paddingLeft: 32, paddingRight: 32 }}
               >
                 {t('startQuizBattle')}
               </Button>
+              {players.length < Math.max(1, room.min_players || 1) && (
+                <Text type="warning" style={{ fontSize: 13 }}>
+                  {t('qqMinPlayersNeeded', { needed: Math.max(1, room.min_players || 1), current: players.length })}
+                </Text>
+              )}
             </Space>
           </Space>
           <div style={{ marginTop: 8 }}>

@@ -179,7 +179,12 @@ const QuickQuizPage: React.FC = () => {
       await apiClient.post(`/api/quick-quiz/room/${roomId}/start`)
       navigate(`/quick-quiz/console/${roomId}`)
     } catch (err: any) {
-      message.error(err.response?.data?.detail || t('startFailed'))
+      const d = err.response?.data?.detail
+      if (d && typeof d === 'object' && d.code === 'min_players_not_met') {
+        message.error(t('qqMinPlayersNeeded', { needed: d.needed, current: d.current }))
+      } else {
+        message.error((typeof d === 'string' && d) || t('startFailed'))
+      }
     }
   }
 
@@ -235,6 +240,7 @@ const QuickQuizPage: React.FC = () => {
       knowledge_points: record.knowledge_points,
       min_players: record.min_players,
       max_players: record.max_players,
+      reveal_hold_sec: record.reveal_hold_sec ?? 5,
     })
     setEditModal(true)
   }
@@ -527,6 +533,7 @@ const QuickQuizPage: React.FC = () => {
             question_source: 'bank_academic',
             question_count: 10,
             time_limit: 15,
+            reveal_hold_sec: 5,
             scoring_mode: 'speed',
             min_players: 2,
             max_players: 50,
@@ -603,6 +610,9 @@ const QuickQuizPage: React.FC = () => {
             getValueProps={(v) => ({ value: splitKps(v) })}
             normalize={(v) => joinKps(v)}>
             <KnowledgePointSelect subject={createKpSubject || ''} />
+          </Form.Item>
+          <Form.Item name="reveal_hold_sec" label={t('revealHold')} extra={t('revealHoldHint')}>
+            <InputNumber min={0} max={15} style={{ width: 180 }} />
           </Form.Item>
           <Form.Item label={t('activityScope')} style={{ marginBottom: 16 }}>
             <ActivityScopeSelector
@@ -712,6 +722,9 @@ const QuickQuizPage: React.FC = () => {
             getValueProps={(v) => ({ value: splitKps(v) })}
             normalize={(v) => joinKps(v)}>
             <KnowledgePointSelect subject={editKpSubject || ''} />
+          </Form.Item>
+          <Form.Item name="reveal_hold_sec" label={t('revealHold')} extra={t('revealHoldHint')}>
+            <InputNumber min={0} max={15} style={{ width: 180 }} />
           </Form.Item>
           <Form.Item label={t('activityScope')} style={{ marginBottom: 16 }}>
             <ActivityScopeSelector

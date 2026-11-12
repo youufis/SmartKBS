@@ -58,6 +58,7 @@ const QuickQuizPlay: React.FC = () => {
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [showFullRanking, setShowFullRanking] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [endedLast, setEndedLast] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -80,6 +81,8 @@ const QuickQuizPlay: React.FC = () => {
     wsRef.current = ws
 
     ws.onopen = () => {
+      // 允许下一次断线继续重连（旧实现只重连一次）
+      reconnectRef.current = false
       ws.send(JSON.stringify({
         type: 'register',
         data: { username: user?.username || '' }
@@ -107,18 +110,21 @@ const QuickQuizPlay: React.FC = () => {
   const stoppedRef = useRef(false)
   const lastQuestionRef = useRef(0) // 追踪已显示的最新题号，用于轮询检测新题
 
-  const startTimer = useCallback((limit: number) => {
+  const deadlineRef = useRef(0)
+  // 对齐服务端：题目到达时按服务端剩余秒数起表，本地 250ms 只做渲染
+  const startTimer = useCallback((seconds: number) => {
     if (timerRef.current) clearInterval(timerRef.current)
-    setTimer(limit)
+    const sec = Math.max(0, seconds)
+    deadlineRef.current = Date.now() + sec * 1000
+    setTimer(Math.ceil(sec))
     timerRef.current = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current)
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
+      const left = Math.max(0, (deadlineRef.current - Date.now()) / 1000)
+      setTimer(Math.ceil(left))
+      if (left <= 0 && timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+    }, 250)
   }, [])
 
   const doPoll = useCallback(async () => {
@@ -133,12 +139,12 @@ const QuickQuizPlay: React.FC = () => {
       if (data.question && data.current_question !== lastQuestionRef.current) {
         lastQuestionRef.current = data.current_question
         setQuestion(data.question)
-        setTimer(data.question.time_limit || 15)
         setPhase('question')
         setAnswered(false)
         setSelectedAnswer(null)
         setResult(null)
-        startTimer(data.question.time_limit || 15)
+        setEndedLast(false)
+        startTimer(data.remaining ?? data.question.time_limit ?? 15)
       }
     } catch (err: any) {
       // 房间被删除时返回 404，跳回主页
@@ -208,13 +214,13 @@ const QuickQuizPlay: React.FC = () => {
       case 'new_question':
         lastQuestionRef.current = msg.data.sort_order
         setQuestion(msg.data)
-        setTimer(msg.data.time_limit || 15)
         setPhase('question')
         setAnswered(false)
         setSelectedAnswer(null)
         setResult(null)
         setAnsweredCount(0)
-        startTimer(msg.data.time_limit || 15)
+        setEndedLast(false)
+        startTimer(msg.data.remaining ?? msg.data.time_limit ?? 15)
         break
 
       case 'your_answer_result':
@@ -231,16 +237,13 @@ const QuickQuizPlay: React.FC = () => {
         break
 
       case 'answer_reveal':
-        if (timerRef.current) clearInterval(timerRef.current)
-        // 如果是最后一题，直接跳转到结果页
-        if (msg.data.is_last) {
-          navigate(`/quick-quiz/result/${roomId}`, { replace: true })
-          return
-        }
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+        // 公布停留期间留在本页读讲解与排名；末题等效端 game_end 推送后再跳结果页
         setPhase('reveal')
         setRanking(msg.data.ranking || [])
-        // 如果没有答过，显示正确答案
-        if (!answered) {
+        setEndedLast(Boolean(msg.data.is_last))
+        // 未作答的补显示正确答案（用 ref 取实时值，旧闭包会把已作答者的反馈覆写成答错）
+        if (!answeredRef.current) {
           setResult({
             is_correct: false,
             correct_answer: msg.data.correct_answer,
@@ -270,7 +273,7 @@ const QuickQuizPlay: React.FC = () => {
   }
 
   const handleAnswer = useCallback(async (answer: string) => {
-    if (answeredRef.current || phase !== 'question') return
+    if (answeredRef.current || phase !== 'question' || timer <= 0) return
     setSelectedAnswer(answer)
     setAnswered(true)
     if (timerRef.current) clearInterval(timerRef.current)
@@ -287,34 +290,17 @@ const QuickQuizPlay: React.FC = () => {
         correct_answer: data.correct_answer,
       })
       setMyTotalScore(data.total_score)
-      // 如果所有人都答完了，前端主动触发 reveal，直接拿下一题
-      if (data.all_answered) {
-        stoppedRef.current = false
-        try {
-          const res = await apiClient.post(`/api/quick-quiz/room/${roomId}/reveal`)
-          // 如果是最后一题，直接跳转结果页
-          if (res.data?.is_last) {
-            navigate(`/quick-quiz/result/${roomId}`, { replace: true })
-            return
-          }
-          const nq = res.data?.next_question
-          if (nq) {
-            lastQuestionRef.current = nq.sort_order
-            // 直接从响应拿到下一题，立即显示，不等 WebSocket
-            setQuestion(nq)
-            setTimer(nq.time_limit || 15)
-            setPhase('question')
-            setAnswered(false)
-            setSelectedAnswer(null)
-            setResult(null)
-            startTimer(nq.time_limit || 15)
-            stoppedRef.current = true
-          }
-        } catch { /* 可能已被其他客户端触发 */ }
-      }
+      // 全员答完/到时后由服务端自动公布并进入公布停留，学生端只等推送（S2 后学生也无权再触发 reveal）
     } catch (err: any) {
-      message.error(err.response?.data?.detail || t('submitFailed'))
-      setAnswered(false)
+      const d = err.response?.data?.detail
+      if (d && typeof d === 'object' && d.code === 'answer_timeout') {
+        setTimer(0)
+        setAnswered(false)
+        message.warning(t('qqAnswerCutoff'))
+      } else {
+        message.error((typeof d === 'string' && d) || t('submitFailed'))
+        setAnswered(false)
+      }
     }
   }, [roomId, timer, question, phase, startTimer, navigate])
 
@@ -371,7 +357,11 @@ const QuickQuizPlay: React.FC = () => {
           <Space>
             <ThunderboltOutlined style={{ fontSize: 20, color: '#fa8c16' }} />
             <Text strong>
-              {question ? t('qqProgress', { no: question.sort_order, total: question.total_questions }) : t('qqBuzzing')}
+              {phase === 'reveal'
+                ? (endedLast ? t('qqSettling') : t('qqRevealHold'))
+                : question
+                  ? t('qqProgress', { no: question.sort_order, total: question.total_questions })
+                  : t('qqBuzzing')}
             </Text>
           </Space>
           <Space size={16}>
@@ -407,7 +397,7 @@ const QuickQuizPlay: React.FC = () => {
             />
           </div>
           <Text strong style={{ fontSize: 20, color: getTimerColor(), minWidth: 50, textAlign: 'right' }}>
-            {phase === 'question' ? `${timer}s` : '--'}
+            {phase === 'question' ? (timer > 0 ? `${timer}s` : t('qqCutoff')) : '--'}
           </Text>
         </div>
       </Card>
@@ -460,7 +450,7 @@ const QuickQuizPlay: React.FC = () => {
                   key={key}
                   type={btnType}
                   style={btnStyle}
-                  disabled={answered || phase !== 'question'}
+                  disabled={answered || phase !== 'question' || timer <= 0}
                   onClick={() => handleAnswer(key)}
                   icon={
                     phase === 'reveal' && key === result?.correct_answer

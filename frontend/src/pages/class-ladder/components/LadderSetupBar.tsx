@@ -3,6 +3,7 @@ import { DatabaseOutlined, RobotOutlined, RocketOutlined, SettingOutlined, Sound
 import { useTranslation } from 'react-i18next'
 import type { LadderConfig, LadderSession } from '../../../api/classLadder'
 import KnowledgePointSelect from '../../../components/KnowledgePointSelect'
+import { LF_I18N } from '../constants'
 import type { LadderSetupApi } from '../hooks/useLadderSetup'
 
 const { Text } = Typography
@@ -18,6 +19,8 @@ interface Props {
   onToggleSound: () => void
   setupOpen: boolean
   onToggleSetup: () => void
+  autoAdvance?: boolean
+  onToggleAutoAdvance?: () => void
 }
 
 /** 开场设置行：对局中自动收起，只留皮肤/声音/AI/结束与展开入口 */
@@ -53,6 +56,25 @@ export default function LadderSetupBar(p: Props) {
             { label: t('timeLimitNone'), value: 0 }]} />
         <Select value={setup.poolSize} onChange={setup.setPoolSize} style={{ width: 108 }}
           options={[15, 30, 45].map((n) => ({ label: t('poolSizeUnit', { n }), value: n }))} />
+        <Tooltip title={t('safeModeTip')}>
+          <Space size={6}>
+            <Switch checked={setup.safeMode} onChange={setup.setSafeMode} size="small" />
+            <Text style={{ fontSize: 13 }}>{t('safeModeLabel')}</Text>
+          </Space>
+        </Tooltip>
+        <Tooltip title={t('lifelinesTip')}>
+          <Select mode="multiple" allowClear maxTagCount={1} placeholder={t('lifelinesLabel')}
+            value={setup.lifelinesSel} onChange={(v) => setup.setLifelinesSel(v as string[])}
+            style={{ minWidth: 168, maxWidth: 232 }}
+            options={(config?.lifelines || []).map((l) => ({ value: l.type, label: t(LF_I18N[l.type] || 'lifelineRemoveOne') }))}
+          />
+        </Tooltip>
+        <Tooltip title={t('advanceModeTip')}>
+          <Space size={6}>
+            <Switch checked={p.autoAdvance ?? true} onChange={() => p.onToggleAutoAdvance?.()} size="small" />
+            <Text style={{ fontSize: 13 }}>{(p.autoAdvance ?? true) ? t('advanceAuto') : t('advanceManual')}</Text>
+          </Space>
+        </Tooltip>
       </>)}
 
       <Button size="small" type="text" className="cl-setup-toggle" icon={<SettingOutlined />}

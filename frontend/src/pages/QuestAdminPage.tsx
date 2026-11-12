@@ -8,14 +8,17 @@ import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, startTransition } from 'react'
 import {
   Card, Table, Tag, Typography, Space, Input, Select,
-  message, Button, Modal, Tabs, Form, Image, Tooltip,
+  message, Button, Modal, Tabs, Form, Image, Tooltip, DatePicker,
 } from 'antd'
 import {
   TrophyOutlined, SearchOutlined,
   ClockCircleOutlined, DeleteOutlined, ExclamationCircleOutlined,
-  DatabaseOutlined, PlusOutlined, EditOutlined, ReloadOutlined,
+  DatabaseOutlined, PlusOutlined, EditOutlined, ReloadOutlined, FormOutlined,
 } from '@ant-design/icons'
+import { useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
+import { relativeTime, fullTime } from '../utils/relativeTime'
+import { reportLoadError } from '../utils/loadError'
 import FormulaRenderer from '../components/FormulaRenderer'
 import PageHeader from '../components/PageHeader'
 import SVGViewer from '../components/SVGViewer'
@@ -94,6 +97,10 @@ const QuestRecordsTab: React.FC = () => {
   const [gradeFilter, setGradeFilter] = useState('')
   const [classFilter, setClassFilter] = useState('')
   const [nameFilter, setNameFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [summary, setSummary] = useState<{ total: number; success: number; terminated: number; ongoing: number; avg_correct: number } | null>(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   // 动态下拉选项
@@ -149,15 +156,19 @@ const QuestRecordsTab: React.FC = () => {
       if (gradeFilter) params.grade = gradeFilter
       if (classFilter) params.class_name = classFilter
       if (nameFilter) params.student_name = nameFilter
+      if (statusFilter) params.status = statusFilter
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
       const { data } = await apiClient.get('/api/quest/admin/records', { params })
       setRecords(data.records || [])
       setTotal(data.total || 0)
-    } catch {
-      // ignore
+      setSummary(data.summary || null)
+    } catch (e) {
+      reportLoadError(e, { key: 'QuestAdmin.loadRecords' })
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, gradeFilter, classFilter, nameFilter])
+  }, [page, pageSize, gradeFilter, classFilter, nameFilter, statusFilter, dateFrom, dateTo])
 
   useEffect(() => {
     startTransition(() => loadRecords())
@@ -292,7 +303,9 @@ const QuestRecordsTab: React.FC = () => {
       dataIndex: 'created_at',
       key: 'time',
       width: 140,
-      render: (v: string) => v?.slice(0, 16) || '-',
+      render: (v: string) => v ? (
+        <Tooltip title={fullTime(v)}><Text type="secondary" style={{ fontSize: 12 }}>{relativeTime(v)}</Text></Tooltip>
+      ) : '-',
     },
     {
       title: t('actions'),
@@ -444,8 +457,32 @@ const QuestRecordsTab: React.FC = () => {
             disabled={!gradeFilter}
             options={classes.map((c) => ({ label: c, value: c }))}
           />
+          <Select
+            placeholder={t('statusFilter')}
+            style={{ width: 118 }}
+            value={statusFilter || undefined}
+            onChange={(v) => { setStatusFilter(v || ''); setPage(1) }}
+            allowClear
+            options={[
+              { value: 'ongoing', label: t('ongoingFilter') },
+              { value: 'success', label: t('successFilter') },
+              { value: 'terminated', label: t('terminatedFilter') },
+            ]}
+          />
+          <DatePicker placeholder={t('dateFrom')} style={{ width: 132 }}
+            onChange={(_d, ds) => { setDateFrom(String(ds || '')); setPage(1) }} />
+          <DatePicker placeholder={t('dateTo')} style={{ width: 132 }}
+            onChange={(_d, ds) => { setDateTo(String(ds || '')); setPage(1) }} />
           <Button type="primary" icon={<SearchOutlined />} onClick={loadRecords}>{t('search')}</Button>
           <Text type="secondary" style={{ fontSize: 13 }}>{t('totalRecords', { count: total })}</Text>
+          {summary && (
+            <Space size={4} wrap>
+              <Tag color="green">{t('successFilter')} {summary.success}</Tag>
+              <Tag color="red">{t('terminatedFilter')} {summary.terminated}</Tag>
+              <Tag color="blue">{t('ongoingFilter')} {summary.ongoing}</Tag>
+              <Tag>{t('avgCorrect', { n: summary.avg_correct })}</Tag>
+            </Space>
+          )}
           {selectedRowKeys.length > 0 && (
             <>
               <Text strong style={{ fontSize: 13 }}>
@@ -466,7 +503,7 @@ const QuestRecordsTab: React.FC = () => {
           /* 窄屏：闯关记录改卡片，逐题明细与删除记录留在电脑上做 */
           <MobileCardTable
             dataSource={records}
-            columns={columns.filter((c: any) => ['student', 'class', 'status', 'count', 'score', 'wrong', 'time'].includes(String(c.key)))}
+            columns={columns.filter((c: any) => ['student', 'status', 'score_count', 'wrong', 'lifelines', 'time'].includes(String(c.key)))}
             rowKey="id"
             loading={loading}
             pagination={{ current: page, pageSize, total, onChange: (p: number) => setPage(p) }}
@@ -519,6 +556,7 @@ const QuestBankTab: React.FC = () => {
   const [pageSize, setPageSize] = useState(50)
   const [keyword, setKeyword] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [mediaFilter, setMediaFilter] = useState('')
   const [categories, setCategories] = useState<{ name: string; count: number }[]>([])
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
@@ -631,16 +669,17 @@ const QuestBankTab: React.FC = () => {
       const params: any = { page, page_size: pageSize }
       if (keyword) params.keyword = keyword
       if (categoryFilter) params.category = categoryFilter
+      if (mediaFilter) params.media = mediaFilter
       const { data } = await apiClient.get('/api/quest/admin/bank', { params })
       setQuestions(data.questions || [])
       setTotal(data.total || 0)
       if (data.categories) setCategories(data.categories)
-    } catch {
-      // ignore
+    } catch (e) {
+      reportLoadError(e, { key: 'QuestAdmin.loadBank' })
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, keyword, categoryFilter])
+  }, [page, pageSize, keyword, categoryFilter, mediaFilter])
 
   useEffect(() => {
     startTransition(() => loadQuestions())
@@ -715,10 +754,17 @@ const QuestBankTab: React.FC = () => {
     setEditModalOpen(true)
   }
 
+  const openCreate = () => {
+    // 后端 POST /quest/admin/bank 一直有，前端却没有新增入口：老师手写题只能改旧题当模板
+    setEditingQuestion(null)
+    editForm.resetFields()
+    editForm.setFieldsValue({ category: categoryFilter || '' })
+    setEditModalOpen(true)
+  }
+
   const handleEditSave = async () => {
     try {
       const values = await editForm.validateFields()
-      if (!editingQuestion) return
       setSaving(true)
       const options: Record<string, string> = {
         A: values.option_a,
@@ -726,13 +772,16 @@ const QuestBankTab: React.FC = () => {
         C: values.option_c,
         D: values.option_d,
       }
-      await apiClient.put(`/api/quest/admin/bank/${editingQuestion.id}`, {
+      const payload = {
         category: values.category,
         question_text: values.question_text,
         options,
         correct_answer: values.correct_answer,
         explanation: values.explanation,
-      })
+      }
+      if (editingQuestion) await apiClient.put(`/api/quest/admin/bank/${editingQuestion.id}`, payload)
+      else await apiClient.post('/api/quest/admin/bank', payload)
+      message.success(editingQuestion ? t('updateSuccess') : t('createSuccess'))
       setEditModalOpen(false)
       loadQuestions()
     } catch (e: any) {
@@ -905,6 +954,7 @@ const QuestBankTab: React.FC = () => {
       {/* ── 操作栏 ── */}
       <Card style={{ marginBottom: 8, borderRadius: 8 }} size="small">
         <Space wrap>
+          <Button icon={<FormOutlined />} onClick={openCreate}>{t('addQuestQuestion')}</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAiGenerate} loading={aiGenerating}>
             {t('aiGenerateQuest')}{aiGenerating ? t('generatingQuest') : t('questionCount', { count: aiCount })}
           </Button>
@@ -931,6 +981,19 @@ const QuestBankTab: React.FC = () => {
             onChange={(v) => setCategoryFilter(v || '')}
             allowClear
             options={categories.map((c) => ({ label: t('categoryOption', { name: c.name, count: c.count }), value: c.name }))}
+          />
+          <Select
+            placeholder={t('mediaFilter')}
+            style={{ width: 128 }}
+            value={mediaFilter || undefined}
+            onChange={(v) => { setMediaFilter(v || ''); setPage(1) }}
+            allowClear
+            options={[
+              { value: 'svg', label: t('mediaSvg') },
+              { value: 'image', label: t('mediaImage') },
+              { value: 'placeholder', label: t('mediaPlaceholderFilter') },
+              { value: 'none', label: t('mediaNone') },
+            ]}
           />
           <Button icon={<ReloadOutlined />} onClick={loadQuestions}>{t('refresh')}</Button>
           <Text type="secondary" style={{ fontSize: 13 }}>{t('totalQuestions', { count: total })}</Text>
@@ -982,7 +1045,7 @@ const QuestBankTab: React.FC = () => {
 
       {/* ── 编辑弹窗 ── */}
       <Modal mask={{ closable: false }}
-        title={t('editQuestTitle')}
+        title={editingQuestion ? t('editQuestTitle') : t('createQuestTitle')}
         open={editModalOpen}
         onOk={handleEditSave}
         onCancel={() => setEditModalOpen(false)}
@@ -1065,8 +1128,9 @@ const QuestBankTab: React.FC = () => {
 const QuestAdminPage: React.FC = () => {
   const { t } = useTranslation('questions')
   const isMobile = useIsMobile()
-  // 根据 URL 路径自动切换默认标签
-  const [activeTab, setActiveTab] = useState('records')
+  // URL 深链：/quest-records?tab=bank 直达题库管理；切标签同步回写地址
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') === 'bank' ? 'bank' : 'records')
 
   const tabItems = [
     {
@@ -1096,7 +1160,9 @@ const QuestAdminPage: React.FC = () => {
         subtitle={t('questManageSubtitle')}
       />
       <Card style={{ borderRadius: 8 }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
+        <Tabs activeKey={activeTab}
+          onChange={(k) => { setActiveTab(k); setSearchParams(k === 'bank' ? { tab: 'bank' } : {}, { replace: true }) }}
+          items={tabItems} />
       </Card>
     </div>
   )

@@ -4,11 +4,12 @@ import { useTranslation } from 'react-i18next'
 import apiClient from '../../../api/client'
 import { runAiTaskJob } from '../../../api/aiTask'
 import {
-  getLadderSession, openLadderSession, endSession,
+  getLadderSession, openLadderSession, endSession, getSessionReport,
 } from '../../../api/classLadder'
 import type { LadderConfig, LadderSession } from '../../../api/classLadder'
 import useSubjectOptions from '../../../hooks/useSubjectOptions'
 import { reportLoadError } from '../../../utils/loadError'
+import { SCOPE_LS_KEY } from '../constants'
 
 type MsgApi = ReturnType<typeof App.useApp>['message']
 
@@ -43,6 +44,9 @@ export function useLadderSetup(a: Args) {
   const [timeLimit, setTimeLimit] = useState(0)
   const [poolSize, setPoolSize] = useState(30)
   const [allowAi, setAllowAi] = useState(false)
+  const [safeMode, setSafeMode] = useState(false)
+  const [lifelinesSel, setLifelinesSel] = useState<string[]>([])
+  const [report, setReport] = useState<Awaited<ReturnType<typeof getSessionReport>> | null>(null)
   const [ttsEnabled, setTtsEnabled] = useState(false)
   const [poolProgress, setPoolProgress] = useState<{ done: number; total: number } | null>(null)
   const [opening, setOpening] = useState(false)
@@ -56,7 +60,7 @@ export function useLadderSetup(a: Args) {
     setPoolSize(config.default_pool_size || 30)
   }, [config])
 
-  // 初始化：名单年级列表 + 语音合成可用性
+  // 初始化：名单年级列表 + 语音合成可用性 + 恢复上次场次（投屏页误刷新不再丢现场）
   useEffect(() => {
     apiClient.get('/api/rollcall/speech-status')
       .then(({ data }) => setTtsEnabled(!!data?.enabled))
@@ -74,11 +78,30 @@ export function useLadderSetup(a: Args) {
     } catch (e) { setClasses([]); reportLoadError(e, { key: 'classladder-classes' }) }
   }, [])
 
+  // 刷新/重进页面：恢复上次场次与红榜（投屏页被 F5 后不再丢现场）
+  useEffect(() => {
+    let raw: string
+    try { raw = localStorage.getItem(SCOPE_LS_KEY) || '' } catch { return }
+    if (!raw) return
+    try {
+      const saved = JSON.parse(raw) as { grade?: string; cls?: string }
+      if (!saved.grade || !saved.cls) return
+      setGrade(saved.grade); setCls(saved.cls)
+      void loadClasses(saved.grade)
+      getLadderSession(saved.grade, saved.cls)
+        .then(({ session: s }) => {
+          if (s) { setSession(s); refreshBoard(saved.grade as string, saved.cls as string) }
+        })
+        .catch(() => { /* 恢复失败保持手动选择 */ })
+    } catch { /* 坏数据忽略 */ }
+  }, [loadClasses, refreshBoard, setSession])
+
   const handleGradeChange = (v: string) => {
     setGrade(v); setCls(''); setClasses([]); setSession(null); clearBoard(); loadClasses(v)
   }
   const handleClassChange = (v: string) => {
     setCls(v); setSession(null); clearBoard(); refreshBoard(grade, v)
+    if (grade && v) localStorage.setItem(SCOPE_LS_KEY, JSON.stringify({ grade, cls: v }))
   }
 
   // ── 建池 / 开场（建池在前：openSession 会调用它）──
@@ -119,6 +142,8 @@ export function useLadderSetup(a: Args) {
         grade, class: cls, subject, topic,
         allow_ai: allowAi && Boolean(topic), question_type: questionType,
         time_limit_sec: timeLimit, pool_size: poolSize, skin: activeSkin,
+        safe_mode: safeMode ? 1 : 0,
+        lifelines: lifelinesSel.length ? lifelinesSel : undefined,
       })
       setSession(s)
       clearBoard()
@@ -128,15 +153,18 @@ export function useLadderSetup(a: Args) {
     } catch (e: any) {
       message.error(String(e?.response?.data?.detail || t('openFailed')), 6)
     } finally { setOpening(false) }
-  }, [ready, grade, cls, subject, topic, allowAi, questionType, timeLimit, poolSize,
+  }, [ready, grade, cls, subject, topic, allowAi, safeMode, lifelinesSel, questionType, timeLimit, poolSize,
       activeSkin, t, doBuildPool, message, setSession, clearBoard, onSessionReset])
 
   const doEndSession = useCallback(async () => {
     try {
+      let rep: Awaited<ReturnType<typeof getSessionReport>> | null = null
+      try { rep = await getSessionReport(grade, cls) } catch { /* 战报拉不到不挡结束本场 */ }
       await endSession(grade, cls)
       setSession(null)
       clearBoard()
       onSessionReset()
+      if (rep && ((rep.board && rep.board.length) || (rep.runs && rep.runs.length))) setReport(rep)
       message.success(t('endSession'))
     } catch (e: any) {
       message.error(String(e?.response?.data?.detail || t('openFailed')))
@@ -145,8 +173,9 @@ export function useLadderSetup(a: Args) {
 
   return {
     subjects, grades, classes, grade, cls, subject, courseKp, questionType,
-    timeLimit, poolSize, allowAi, ttsEnabled, poolProgress, opening, building,
+    timeLimit, poolSize, allowAi, safeMode, lifelinesSel, report, ttsEnabled, poolProgress, opening, building,
     setSubject, setCourseKp, setQuestionType, setTimeLimit, setPoolSize, setAllowAi, setTtsEnabled,
+    setSafeMode, setLifelinesSel, clearReport: () => setReport(null),
     handleGradeChange, handleClassChange, doBuildPool, doOpenSession, doEndSession,
     ready, topic,
   }

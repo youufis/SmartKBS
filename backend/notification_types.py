@@ -21,7 +21,7 @@ CATALOG: tuple[tuple[str, str, bool], ...] = (
     ("score", "成绩通知", False),
     ("rollcall", "点名通知", False),
     ("share", "资源分享", False),
-    ("system", "系统通知", False),
+    ("system", "系统通知", True),
     ("care", "关怀提醒（安全类·不可关闭）", True),
 )
 

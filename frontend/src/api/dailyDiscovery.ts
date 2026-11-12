@@ -13,6 +13,10 @@ export interface DiscoveryCard {
   related_subject: string;
   tags: string[];
   is_favorited: boolean;
+  /** 今日已点开过详情（已读标记） */
+  viewed_today?: boolean;
+  /** 收藏时间（收藏列表按它倒序） */
+  favorited_at?: string;
 }
 
 export interface DiscoveryResponse {
@@ -76,6 +80,12 @@ export async function getFavorites(): Promise<{ cards: DiscoveryCard[] }> {
 /** 获取今日统计 */
 export async function getStats(): Promise<DiscoveryStats> {
   const { data } = await apiClient.get('/api/discovery/stats');
+  return data;
+}
+
+/** 卡片分享海报（PNG Blob，前端触发下载） */
+export async function getPosterBlob(cardId: number): Promise<Blob> {
+  const { data } = await apiClient.get(`/api/discovery/cards/${cardId}/poster`, { responseType: 'blob', timeout: 30000 });
   return data;
 }
 

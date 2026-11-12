@@ -1754,5 +1754,22 @@
   "field_EXAM_ANTI_COPY_tip": "Raises the cost of lifting questions but cannot stop OS screenshots, phone photos or DevTools. Answering and pasting answers keep working. Off by default — enable only for formal exams.",
   "field_EXAM_WATERMARK": "Answer-page personal watermark",
   "field_EXAM_WATERMARK_desc": "Tiles a faint “name · student ID · time” watermark so leaked screenshots can be traced",
-  "field_EXAM_WATERMARK_tip": "The overlay never blocks clicks or scrolling and appears in print. It contains personal data — use it only for leak tracing and tell students."
+  "field_EXAM_WATERMARK_tip": "The overlay never blocks clicks or scrolling and appears in print. It contains personal data — use it only for leak tracing and tell students.",
+  "group_news": "News Feeds",
+  "field_news_rss_feeds": "News main feeds",
+  "field_news_rss_feeds_desc": "What you see is what gets fetched — this list is exactly what the next fetch uses. Delete a row to disable a feed, edit the URL to replace it. An empty list does NOT mean no feeds: it falls back to built-in defaults (safety net against accidental wipes).",
+  "field_news_rss_feeds_tip": "Built-ins: Chinanews ×2 / IT之家 / SSPai. Auto-promoted reserve feeds appear here; delete a promoted row and save to demote it back.\nSaving makes this list explicit — no redeploy or restart needed.\nBefore swapping feeds, click Auto-discover feeds below, or validate with: python scripts/check_news_feeds.py --url <RSS>. A feed failing 2 rounds in a row is circuit-broken for 30 minutes and admins are notified.",
+  "field_news_rss_reserves": "Reserve feed pool",
+  "field_news_rss_reserves_desc": "One feed per row; idle normally, auto-rescues when all main feeds fail, and auto-probes candidates if the reserve pool fails too. Empty = built-in reserve (Solidot) only",
+  "field_news_rss_reserves_tip": "A reserve feed rescuing 2 consecutive rounds with pubDate is auto-promoted into the main list; a promoted feed broken for 24h+ is auto-demoted.\nWhen both main and reserve feeds fail, the fetch pipeline auto-probes the candidate list (max once per 6h) and appends working feeds here — no manual step needed; the Auto-discover feeds button triggers the same probe on demand.\nBreakers / outage / auto-discovery / promote / demote all send admin notifications.",
+  "placeholder_news_rss": "Name=https://example.com/rss.xml (one per line; delete a line to disable)",
+  "shapeExpectKv": "Each line must look like Name=https://… (delete a line to disable; an empty list falls back to built-ins, never zero feeds)",
+  "newsDiscoverBtn": "Auto-discover feeds",
+  "newsDiscoverAdded": "Added {n} verified feeds to the reserve pool: {names}",
+  "newsDiscoverNoAdd": "Found {n} working feeds — all already listed",
+  "newsDiscoverNone": "Probed {probed} candidates; no new working feeds found",
+  "newsDiscoverFail": "Auto-discovery failed, please retry later",
+  "kvNamePh": "Feed name",
+  "kvAddRow": "Add row",
+  "kvEmptyHint": "Empty list = built-in defaults"
 }

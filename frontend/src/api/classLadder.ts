@@ -113,6 +113,8 @@ export interface LadderRun {
   lifelines_used: string[]
   current_level: number
   time_limit_sec: number
+  /** 服务端按发题时刻算好的剩余秒数（刷新/重连接续计时用） */
+  remaining?: number
   answered: LadderAnswer[]
   question?: LadderQuestion
 }
@@ -211,9 +213,19 @@ export async function endSession(
 }
 
 export async function openRun(
+  grade: string, cls: string, force = false,
+): Promise<{ run: LadderRun; covered: number; total: number; round_no?: number }> {
+  const { data } = await apiClient.post('/api/class-ladder/run',
+    { grade, class: cls, ...(force ? { force: true } : {}) })
+  return data
+}
+
+/** 当前班级是否有在途局（页面刷新后把对局接回来） */
+export async function getCurrentRun(
   grade: string, cls: string,
-): Promise<{ run: LadderRun; covered: number; total: number }> {
-  const { data } = await apiClient.post('/api/class-ladder/run', { grade, class: cls })
+): Promise<{ run: LadderRun | null }> {
+  const { data } = await apiClient.get('/api/class-ladder/run/current',
+    { params: { grade, class: cls } })
   return data
 }
 

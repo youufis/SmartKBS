@@ -7,6 +7,10 @@ interface DiscoveryStore {
   cards: DiscoveryCard[];
   favorites: DiscoveryCard[];
   loading: boolean;
+  /** 首次加载失败（与"真的没内容"区分，页面给重试入口） */
+  error: boolean;
+  /** 换一批进行中：保留旧卡片 + 覆盖层提示，不再整页掀成 Spin */
+  refreshing: boolean;
   stats: {
     viewCount: number;
     refreshRemaining: number;
@@ -26,6 +30,8 @@ export const useDiscoveryStore = create<DiscoveryStore>((set, get) => ({
   cards: [],
   favorites: [],
   loading: false,
+  error: false,
+  refreshing: false,
   stats: { viewCount: 0, refreshRemaining: 3, pointsEarned: 0, pointsMax: 5 },
   poolSize: 0,
 
@@ -34,6 +40,7 @@ export const useDiscoveryStore = create<DiscoveryStore>((set, get) => ({
     try {
       const res = await discoveryApi.getFeed();
       set({
+        error: false,
         cards: res.cards,
         poolSize: res.pool_size,
         stats: {
@@ -45,13 +52,14 @@ export const useDiscoveryStore = create<DiscoveryStore>((set, get) => ({
       });
     } catch (e) {
       console.error('加载每日精选失败', e);
+      set({ error: true });
     } finally {
       set({ loading: false });
     }
   },
 
   refreshCards: async () => {
-    set({ loading: true });
+    set({ refreshing: true });
     try {
       const res = await discoveryApi.refreshFeed();
       set({
@@ -64,10 +72,8 @@ export const useDiscoveryStore = create<DiscoveryStore>((set, get) => ({
           pointsMax: res.today_points_max,
         },
       });
-    } catch (e: any) {
-      throw e;
     } finally {
-      set({ loading: false });
+      set({ refreshing: false });
     }
   },
 
@@ -79,6 +85,9 @@ export const useDiscoveryStore = create<DiscoveryStore>((set, get) => ({
         cards: s.cards.map((c) =>
           c.id === cardId ? { ...c, is_favorited: !isFav } : c
         ),
+        favorites: isFav
+          ? s.favorites.filter((c) => c.id !== cardId)
+          : s.favorites.map((c) => (c.id === cardId ? { ...c, is_favorited: true } : c)),
       }));
     } catch (e) {
       console.error('收藏操作失败', e);

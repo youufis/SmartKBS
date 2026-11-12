@@ -7,6 +7,7 @@ import asyncio
 import json
 import random
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -58,6 +59,9 @@ def _schedule_bg(coro) -> asyncio.Task:
 
 # ── 常量 ──
 MAX_QUEST_QUESTIONS = 15
+
+#: 每题限时（秒）：计时真值改由服务端维护（旧版只在浏览器里倒数，刷新即续命）
+QUEST_TIME_LIMIT = 30
 LIFELINE_TYPES = {"remove_one", "phone_friend", "audience_vote"}
 
 # 各题号基础分
@@ -575,12 +579,13 @@ async def start_quest(request: Request):
             """INSERT INTO quest_question_records
                (quest_id, sort_order, category, question_text, options, correct_answer,
                 student_answer, is_correct, lifeline_used, time_spent, score, explanation,
-                svg_content, has_svg, media_files, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?)""",
+                svg_content, has_svg, media_files, media_placeholders, served_at)
+               VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?, ?)""",
             (quest_id, i + 1, cat, q_data["question"], options_json,
              q_data["answer"], q_data.get("explanation", ""),
              q_data.get("svg_content", ""), q_data.get("has_svg", 0),
-             q_data.get("media_files", ""), q_data.get("media_placeholders", "")),
+             q_data.get("media_files", ""), q_data.get("media_placeholders", ""),
+             time.time()),
         )
 
     execute_insert_update(
@@ -601,7 +606,7 @@ async def start_quest(request: Request):
             "category": first.get("category", "综合"),
             "question_text": first["question"],
             "options": first["options"],
-            "explanation": first.get("explanation", ""),
+            "remaining": QUEST_TIME_LIMIT,
             "svg_content": first.get("svg_content", ""),
             "has_svg": first.get("has_svg", 0),
             "media_files": first.get("media_files", ""),
@@ -633,7 +638,7 @@ async def get_current_question(quest_id: int, request: Request):
     question = execute_query_one(
         """SELECT id, sort_order, category, question_text, options, correct_answer,
                   explanation, lifeline_used,
-                  svg_content, has_svg, media_files, media_placeholders
+                  svg_content, has_svg, media_files, media_placeholders, served_at
            FROM quest_question_records
            WHERE quest_id=? AND sort_order=?""",
         (quest_id, current_idx),
@@ -660,7 +665,7 @@ async def get_current_question(quest_id: int, request: Request):
             question = execute_query_one(
                 """SELECT id, sort_order, category, question_text, options, correct_answer,
                           explanation, lifeline_used,
-                          svg_content, has_svg, media_files, media_placeholders
+                          svg_content, has_svg, media_files, media_placeholders, served_at
                    FROM quest_question_records
                    WHERE quest_id=? AND sort_order=?""",
                 (quest_id, current_idx),
@@ -671,18 +676,36 @@ async def get_current_question(quest_id: int, request: Request):
     # 如果该题已使用锦囊，返回锦囊效果信息
     lifeline_used = question["lifeline_used"] or ""
 
+    # 首次下发（含刷新重取）才起表；已记时的题保持原到期时刻，刷新不再续命
+    _served = float(question.get("served_at") or 0)
+    if _served <= 0:
+        _served = time.time()
+        execute_insert_update(
+            "UPDATE quest_question_records SET served_at=? WHERE id=?",
+            (_served, question["id"]))
     result = {
         "sort_order": question["sort_order"],
         "category": question["category"],
         "question_text": question["question_text"],
         "options": json.loads(question["options"]),
-        "explanation": question["explanation"],
+        # 解析不再随题面下发（等于提前泄题）；作答后由 /answer 返回
         "lifeline_used": lifeline_used,
         "lifeline_data": None,
+        "remaining": max(0.0, round(QUEST_TIME_LIMIT - (time.time() - _served), 1)),
         "svg_content": question.get("svg_content", ""),
         "has_svg": question.get("has_svg", 0),
         "media_files": question.get("media_files", ""),
         "media_placeholders": question.get("media_placeholders", ""),
+        # 刷新恢复：旧版只回题面，前端拿不到比分/锦囊状态，直接"加载失败"丢局
+        "quest_info": {
+            "answered_count": quest["answered_count"],
+            "correct_count": quest["correct_count"],
+            "score": quest["score"],
+            "current_question_index": quest["current_question_index"],
+            "total_questions": MAX_QUEST_QUESTIONS,
+            "lifelines_used": json.loads(quest["lifelines_used"] or "[]"),
+            "completed": quest["completed"],
+        },
     }
 
     # 如果使用过去伪存真，返回剩余选项
@@ -700,7 +723,6 @@ async def submit_answer(quest_id: int, request: Request):
     username = user["username"]
     body = await request.json()
     answer = body.get("answer", "").strip().upper()
-    time_spent = body.get("time_spent", 0)
 
     quest = _get_quest(quest_id, username)
     if quest["completed"] != 0:
@@ -711,7 +733,7 @@ async def submit_answer(quest_id: int, request: Request):
 
     # 获取当前题目
     question = execute_query_one(
-        """SELECT id, correct_answer, lifeline_used, options
+        """SELECT id, correct_answer, lifeline_used, options, explanation, served_at
            FROM quest_question_records
            WHERE quest_id=? AND sort_order=?""",
         (quest_id, current_idx),
@@ -726,6 +748,28 @@ async def submit_answer(quest_id: int, request: Request):
     except (json.JSONDecodeError, TypeError):
         _q_opts = None
     is_correct = 1 if answers_equal(answer, correct_answer, _q_opts, "") else 0
+    # 服务端计时已截止：迟到答案直接按超时结算（旧版刷新即可无限续命）
+    _served = float(question.get("served_at") or 0)
+    _elapsed = round(max(0.0, time.time() - _served), 1) if _served > 0 else 0.0
+    if _served > 0 and _elapsed > QUEST_TIME_LIMIT + 3:
+        execute_insert_update(
+            "UPDATE quest_question_records SET student_answer='__timeout__', is_correct=0, "
+            "time_spent=?, score=0 WHERE id=?",
+            (min(_elapsed, float(QUEST_TIME_LIMIT)), question["id"]))
+        execute_insert_update(
+            "UPDATE quest_records SET answered_count=?, wrong_question_index=?, completed=-1, "
+            "completed_at=? WHERE id=?",
+            (quest["answered_count"] + 1, current_idx, _now(), quest_id))
+        _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"])
+        return {
+            "is_correct": False, "terminated": True, "reason": "timeout",
+            "correct_answer": correct_answer,
+            "correct_answer_text": (_q_opts.get(correct_answer, "") if isinstance(_q_opts, dict) else ""),
+            "explanation": question.get("explanation") or "",
+            "total_correct": quest["correct_count"],
+            "total_score": quest["score"],
+        }
+    time_spent = round(min(_elapsed, QUEST_TIME_LIMIT), 1) if _served > 0 else 0
     lifeline_used = question["lifeline_used"] or ""
     lifelines_on_this = [l.strip() for l in lifeline_used.split(",") if l.strip()]
 
@@ -764,6 +808,8 @@ async def submit_answer(quest_id: int, request: Request):
                 "total_score": total_score,
                 "terminated": False,
                 "completed": True,
+                "correct_answer": correct_answer,
+                "explanation": question.get("explanation") or "",
                 "message": "🎉 恭喜你完成了全部 15 题！通关成功！",
             }
         else:
@@ -805,16 +851,22 @@ async def submit_answer(quest_id: int, request: Request):
                         quest_id, api_key, used_categories, next_idx + 1, use_bank
                     ))
 
+                execute_insert_update(
+                    "UPDATE quest_question_records SET served_at=? WHERE id=?",
+                    (time.time(), buffered["id"]))
                 return {
                     "is_correct": True, "score": score, "total_score": total_score,
                     "terminated": False, "completed": False,
-                    "explanation": buffered["explanation"],
+                    # 只返回刚答这题的讲解；下一题解析不再提前下发
+                    "correct_answer": correct_answer,
+                    "correct_answer_text": (_q_opts.get(correct_answer, "") if isinstance(_q_opts, dict) else ""),
+                    "explanation": question.get("explanation") or "",
+                    "remaining": QUEST_TIME_LIMIT,
                     "next_question": {
                         "sort_order": buffered["sort_order"],
                         "category": buffered["category"],
                         "question_text": buffered["question_text"],
                         "options": json.loads(buffered["options"]),
-                        "explanation": buffered["explanation"],
                         "svg_content": buffered.get("svg_content", "") or "",
                         "has_svg": buffered.get("has_svg", 0) or 0,
                         "media_files": buffered.get("media_files", "") or "",
@@ -833,12 +885,13 @@ async def submit_answer(quest_id: int, request: Request):
                     """INSERT OR IGNORE INTO quest_question_records
                        (quest_id, sort_order, category, question_text, options, correct_answer,
                         student_answer, is_correct, lifeline_used, time_spent, score, explanation,
-                        svg_content, has_svg, media_files, media_placeholders)
-                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?)""",
+                        svg_content, has_svg, media_files, media_placeholders, served_at)
+                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?, ?)""",
                     (quest_id, next_idx, new_category, question_data["question"],
                      options_json, question_data["answer"], question_data.get("explanation", ""),
                      question_data.get("svg_content", ""), question_data.get("has_svg", 0),
-                     question_data.get("media_files", ""), question_data.get("media_placeholders", "")),
+                     question_data.get("media_files", ""), question_data.get("media_placeholders", ""),
+                     time.time()),
                 )
                 # 与后台补货竞态时 OR IGNORE 可能未插入，取已存在的行兜底
                 exist = execute_query_one(
@@ -872,13 +925,15 @@ async def submit_answer(quest_id: int, request: Request):
                 return {
                     "is_correct": True, "score": score, "total_score": total_score,
                     "terminated": False, "completed": False,
-                    "explanation": question_data.get("explanation", ""),
+                    "correct_answer": correct_answer,
+                    "correct_answer_text": (_q_opts.get(correct_answer, "") if isinstance(_q_opts, dict) else ""),
+                    "explanation": question.get("explanation") or "",
+                    "remaining": QUEST_TIME_LIMIT,
                     "next_question": {
                         "sort_order": next_idx,
                         "category": new_category,
                         "question_text": question_data["question"],
                         "options": question_data["options"],
-                        "explanation": question_data.get("explanation", ""),
                         "svg_content": question_data.get("svg_content", ""),
                         "has_svg": question_data.get("has_svg", 0),
                         "media_files": question_data.get("media_files", ""),
@@ -905,6 +960,7 @@ async def submit_answer(quest_id: int, request: Request):
             "terminated": True,
             "correct_answer": correct_answer,
             "correct_answer_text": options.get(correct_answer, ""),
+            "explanation": question.get("explanation") or "",
             "total_correct": quest["correct_count"],
             "total_score": quest["score"],
         }
@@ -922,12 +978,19 @@ async def timeout_question(quest_id: int, request: Request):
 
     current_idx = quest["current_question_index"]
 
-    # 更新题目记录
+    # 用时按服务端计时（旧版写死 20 秒，和 30 秒规则对不上）
+    _row = execute_query_one(
+        "SELECT explanation, correct_answer, options, served_at FROM quest_question_records "
+        "WHERE quest_id=? AND sort_order=?", (quest_id, current_idx))
+    _spent = float(QUEST_TIME_LIMIT)
+    if _row and float(_row.get("served_at") or 0) > 0:
+        _spent = round(min(float(QUEST_TIME_LIMIT),
+                           max(0.0, time.time() - float(_row["served_at"]))), 1)
     execute_insert_update(
         """UPDATE quest_question_records
-           SET student_answer='__timeout__', is_correct=0, time_spent=20, score=0
+           SET student_answer='__timeout__', is_correct=0, time_spent=?, score=0
            WHERE quest_id=? AND sort_order=?""",
-        (quest_id, current_idx),
+        (_spent, quest_id, current_idx),
     )
 
     # 终止闯关
@@ -940,10 +1003,19 @@ async def timeout_question(quest_id: int, request: Request):
     )
     _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"])
 
+    _topts = {}
+    try:
+        _topts = json.loads(_row["options"]) if _row and _row.get("options") else {}
+    except Exception:
+        _topts = {}
+    _tca = (_row.get("correct_answer") if _row else "") or ""
     return {
         "is_correct": False,
         "terminated": True,
         "reason": "timeout",
+        "correct_answer": _tca,
+        "correct_answer_text": _topts.get(_tca, "") if isinstance(_topts, dict) else "",
+        "explanation": (_row.get("explanation") if _row else "") or "",
         "total_correct": quest["correct_count"],
         "total_score": quest["score"],
     }
@@ -1000,7 +1072,10 @@ async def use_lifeline(quest_id: int, request: Request):
         (json.dumps(lifelines_used, ensure_ascii=False), quest_id),
     )
 
-    result = {"type": lifeline_type, "success": True}
+    result = {
+        "type": lifeline_type, "success": True,
+        "discount": LIFELINE_DISCOUNT.get(lifeline_type, 1.0),
+    }
 
     if lifeline_type == "remove_one":
         # 去掉一个错误答案
@@ -1088,6 +1163,7 @@ async def get_quest_result(quest_id: int, request: Request):
         "questions": questions_list,
         "badge_count": badge_count,
         "total_badges": total_badges,
+        "unlocked": json.loads(quest.get("unlocked_json") or "[]"),
         "created_at": quest["created_at"],
         "completed_at": quest["completed_at"],
     }
@@ -1221,6 +1297,10 @@ async def get_quest_config():
     from backend.api.config_router import get_config_value
     return {
         "use_bank": bool(get_config_value("QUEST_USE_BANK", False)),
+        "time_limit_sec": QUEST_TIME_LIMIT,
+        "max_questions": MAX_QUEST_QUESTIONS,
+        "base_scores": [SCORE_TABLE.get(i, 10) for i in range(1, MAX_QUEST_QUESTIONS + 1)],
+        "lifeline_discounts": LIFELINE_DISCOUNT,
     }
 
 
@@ -1277,6 +1357,9 @@ async def get_admin_quest_records(
     grade: str = Query("", description="年级筛选"),
     class_name: str = Query("", description="班级筛选"),
     student_name: str = Query("", description="学生姓名搜索"),
+    status: str = Query("", description="结果筛选: ongoing/success/terminated"),
+    date_from: str = Query("", description="开始日期 YYYY-MM-DD"),
+    date_to: str = Query("", description="结束日期 YYYY-MM-DD"),
 ):
     """教师/管理员查看学生闯关记录（自动按教师任课班级过滤）"""
     user = get_current_user(request)
@@ -1308,6 +1391,18 @@ async def get_admin_quest_records(
     if student_name:
         conditions.append("u.name LIKE ?")
         params.append(f"%{student_name}%")
+    if status == "ongoing":
+        conditions.append("qr.completed=0")
+    elif status == "success":
+        conditions.append("qr.completed=1")
+    elif status == "terminated":
+        conditions.append("qr.completed=-1")
+    if date_from:
+        conditions.append("qr.created_at>=?")
+        params.append(f"{date_from} 00:00:00")
+    if date_to:
+        conditions.append("qr.created_at<=?")
+        params.append(f"{date_to} 23:59:59")
 
     where_clause = " AND ".join(conditions)
 
@@ -1316,6 +1411,27 @@ async def get_admin_quest_records(
         tuple(params),
     )
     total_count = count_row["cnt"] if count_row else 0
+
+    # 同筛选口径的结果分布与平均答对（前端顶部统计条）
+    agg_rows = execute_query_dict(
+        f"SELECT qr.completed AS completed, COUNT(*) AS cnt, AVG(qr.correct_count) AS avg_correct "
+        f"FROM quest_records qr, users u WHERE {where_clause} GROUP BY qr.completed",
+        tuple(params),
+    )
+    summary = {"total": total_count, "success": 0, "terminated": 0, "ongoing": 0, "avg_correct": 0}
+    _wsum = 0.0
+    for a in agg_rows:
+        _c = int(a["cnt"] or 0)
+        _k = int(a["completed"] or 0)
+        if _k == 1:
+            summary["success"] += _c
+        elif _k == -1:
+            summary["terminated"] += _c
+        else:
+            summary["ongoing"] += _c
+        _wsum += float(a.get("avg_correct") or 0) * _c
+    if total_count:
+        summary["avg_correct"] = round(_wsum / total_count, 1)
 
     offset = (page - 1) * page_size
 
@@ -1383,6 +1499,7 @@ async def get_admin_quest_records(
         "total": total_count,
         "page": page,
         "page_size": page_size,
+        "summary": summary,
     }
 
 
@@ -1560,6 +1677,7 @@ async def list_quest_bank(
     request: Request,
     category: str = Query("", description="分类筛选"),
     keyword: str = Query("", description="关键词搜索(题目)"),
+    media: str = Query("", description="配图筛选: svg/image/placeholder/none"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ):
@@ -1578,6 +1696,16 @@ async def list_quest_bank(
     if keyword:
         conditions.append("question_text LIKE ?")
         params.append(f"%{keyword}%")
+    if media == "svg":
+        conditions.append("has_svg=1")
+    elif media == "image":
+        conditions.append("(media_files IS NOT NULL AND media_files NOT IN ('', '[]'))")
+    elif media == "placeholder":
+        conditions.append("(media_placeholders IS NOT NULL AND media_placeholders NOT IN ('', '[]'))")
+    elif media == "none":
+        conditions.append("has_svg=0")
+        conditions.append("(media_files IS NULL OR media_files IN ('', '[]'))")
+        conditions.append("(media_placeholders IS NULL OR media_placeholders IN ('', '[]'))")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -2209,20 +2337,29 @@ def _award_quest_rewards(student_username: str, quest_id: int,
         except Exception as e:
             logger.warning(f"发放闯关成绩奖励失败: {e}")
 
-    # 3. 闯关徽章（答对≥1题算成功）
+    # 3/4. 徽章检测：新解锁的记进本场明细，结算页直接展示"刚解锁了什么"
+    unlocked: list[dict[str, Any]] = []
     if correct_count >= 1:
         try:
             new_count = _increment_badge_count(student_username)
-            # 检测里程碑徽章
-            _check_milestone_badges(student_username, new_count)
+            for b in _check_milestone_badges(student_username, new_count):
+                unlocked.append({"id": b.get("id"), "name": b.get("name"),
+                                 "emoji": b.get("emoji", "🏅"), "kind": "milestone"})
         except Exception as e:
             logger.warning(f"发放闯关徽章失败: {e}")
 
-    # 4. 荣誉徽章检测
     try:
-        _check_honor_badges(student_username, correct_count)
+        for b in _check_honor_badges(student_username, correct_count):
+            unlocked.append({"id": b.get("id"), "name": b.get("name"),
+                             "emoji": "🏅", "kind": "honor"})
     except Exception as e:
         logger.warning(f"检测荣誉徽章失败: {e}")
+    if unlocked:
+        try:
+            execute_insert_update("UPDATE quest_records SET unlocked_json=? WHERE id=?",
+                                  (json.dumps(unlocked, ensure_ascii=False), quest_id))
+        except Exception as e:
+            logger.warning(f"记录本场解锁徽章失败: {e}")
 
     # 5. 称号升级检测（由 reward_engine 自动触发）
     try:

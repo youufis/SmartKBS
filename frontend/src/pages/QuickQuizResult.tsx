@@ -5,7 +5,7 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect } from 'react'
 import {
-  Card, Button, Typography, Space, Row, Col, Tag, Table,
+  Card, Button, Typography, Space, Row, Col, Tag,
   Spin, message, Collapse, Divider, Empty, Progress, Pagination,
 } from 'antd'
 import {
@@ -20,6 +20,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import NarrowTable from '../components/NarrowTable'
 import { toPercentInt, percentColor } from '../utils/score'
 
 const { Title, Text } = Typography
@@ -84,8 +85,8 @@ const QuickQuizResult: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <ThunderboltOutlined style={{ fontSize: 32, color: '#fff' }} />
             <Title level={4} style={{ color: '#fff', margin: 0 }}>{room.title}</Title>
-            <Tag color={room.status === 'ended' ? 'default' : 'success'}>
-              {room.status === 'ended' ? t('ended') : room.status}
+            <Tag color={room.status === 'ended' ? 'default' : room.status === 'playing' ? 'success' : 'processing'}>
+              {room.status === 'ended' ? t('ended') : room.status === 'playing' ? t('playing') : t('waiting')}
             </Tag>
           </div>
           <div className="qq-result-meta" style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
@@ -153,9 +154,10 @@ const QuickQuizResult: React.FC = () => {
       {/* 排行榜 */}
       <Card title={<Space><TrophyOutlined /> {t('leaderboard')}</Space>}
         style={{ borderRadius: 12, marginBottom: 16 }}>
-        <Table
+        <NarrowTable
           dataSource={ranking}
           rowKey="student_username"
+          cardTitleKey="name"
           pagination={{ pageSize: 10, showTotal: (total) => t('totalPeople', { count: total }), showSizeChanger: false }}
           size="small"
           columns={[

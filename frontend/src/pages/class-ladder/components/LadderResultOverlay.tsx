@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AimOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import FormulaRenderer from '../../../components/FormulaRenderer'
@@ -13,6 +14,7 @@ interface Props {
 
 /** 结算遮罩：通关撒彩带；四张数据卡 + 最后一题解析 + 抽下一人/看红榜 */
 export default function LadderResultOverlay({ result, mode, onNewRun, onClose }: Props) {
+  const [showReview, setShowReview] = useState(false)
   const { t } = useTranslation('classLadder')
   return (
     <div className={`cl-overlay${mode === 'light' ? ' light' : ''}`}>
@@ -49,6 +51,31 @@ export default function LadderResultOverlay({ result, mode, onNewRun, onClose }:
                 </>
               )
             })()}
+          </div>
+        )}
+        {result.detail.length > 0 && (
+          <div style={{ width: '100%' }}>
+            <div className="cl-btn ghost" style={{ width: '100%', marginBottom: 10 }}
+              onClick={() => setShowReview((v) => !v)}>
+              {showReview ? t('reviewCollapse') : t('reviewExpand', { n: result.detail.length })}
+            </div>
+            {showReview && (
+              <div className="cl-ovreview">
+                {result.detail.map((d: any) => (
+                  <div key={d.level} className="cl-ovreview-row">
+                    <b>{t('levelLabel', { n: d.level })}</b>
+                    <span style={{ color: d.correct ? 'var(--cl-ok)' : 'var(--cl-no, #ff8a80)' }}>
+                      {d.correct ? t('correctTxt') : (d.timeout ? t('timeoutTxt') : t('incorrectTxt'))}
+                    </span>
+                    <span>{t('answerIs')}：{d.correct_answer || '—'}</span>
+                    {d.selected ? <span>· {t('yourPick')}：{d.selected}</span> : null}
+                    {d.explanation
+                      ? <div className="exp"><FormulaRenderer content={d.explanation} /></div>
+                      : null}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <div className="cl-ovbtns">

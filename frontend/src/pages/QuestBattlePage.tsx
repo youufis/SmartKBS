@@ -88,6 +88,12 @@ const QuestBattlePage: React.FC = () => {
   const [lifelineModal, setLifelineModal] = useState(false)
   const [usedLifelines, setUsedLifelines] = useState<string[]>([])
   const [removedOption, setRemovedOption] = useState<string | null>(null)
+  // 判后讲解：/answer 才返回正确项与解析（题面不再提前携带，防作答前偷看）
+  const [revealInfo, setRevealInfo] = useState<{ correctAnswer: string; correctAnswerText: string; explanation: string } | null>(null)
+  // 限时秒数以服务端 /quest/config 为准（旧版前端硬编码 30 秒）
+  const [limitSec, setLimitSec] = useState(TIMER_SECONDS)
+  const [baseScores, setBaseScores] = useState<number[]>([])
+  const deadlineRef = useRef(0)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isMountedRef = useRef(true)
@@ -104,19 +110,21 @@ const QuestBattlePage: React.FC = () => {
     }
   }, [])
 
-  const startTimer = useCallback(() => {
-    setTimer(TIMER_SECONDS)
+  // 计时以服务端 remaining 起表（旧版每次都在本地重放 30 秒，刷新即续命）
+  const startTimer = useCallback((seconds?: number) => {
     stopTimer()
+    const sec = Math.max(0, seconds ?? limitSec)
+    setTimer(Math.ceil(sec))
+    deadlineRef.current = Date.now() + sec * 1000
     timerRef.current = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          stopTimer()
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-  }, [stopTimer])
+      const left = Math.max(0, (deadlineRef.current - Date.now()) / 1000)
+      setTimer(Math.ceil(left))
+      if (left <= 0 && timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+    }, 250)
+  }, [stopTimer, limitSec])
 
   const handleTimeout = useCallback(async () => {
     if (answeringRef.current || terminatedRef.current) return
@@ -127,9 +135,14 @@ const QuestBattlePage: React.FC = () => {
         setTerminated(true)
         setShowResult(true)
         setIsCorrect(false)
+        setRevealInfo({
+          correctAnswer: data.correct_answer || '',
+          correctAnswerText: data.correct_answer_text || '',
+          explanation: data.explanation || '',
+        })
         setTimeout(() => {
           if (isMountedRef.current) navigate(`/quest/result/${questId}`)
-        }, 1500)
+        }, 3500)
       }
     } catch (err) { reportLoadError(err, { key: 'quest.timeout' }) } finally {
       setAnswering(false)
@@ -147,12 +160,15 @@ const QuestBattlePage: React.FC = () => {
     try {
       const { data } = await apiClient.get(`/api/quest/${questId}/question`, { timeout: 60000 })
       setQuestion(data)
-      setTimer(TIMER_SECONDS)
+      // 刷新恢复：服务端随题面带回比分/已用锦囊（旧版刷新后 questInfo 缺失直接丢局）
+      if (data.quest_info) setQuestInfo(data.quest_info)
+      if (Array.isArray(data.quest_info?.lifelines_used)) setUsedLifelines(data.quest_info.lifelines_used)
       setSelectedAnswer(null)
       setShowResult(false)
+      setRevealInfo(null)
       setLifelineData(null)
       setRemovedOption(null)
-      startTimer()
+      startTimer(typeof data.remaining === 'number' ? data.remaining : undefined)
     } catch {
       navigate('/quest')
     } finally {
@@ -161,7 +177,7 @@ const QuestBattlePage: React.FC = () => {
   }, [questId, navigate, startTimer])
 
   const handleAnswer = useCallback(async (answer: string) => {
-    if (answeringRef.current || showResult || terminatedRef.current) return
+    if (answeringRef.current || showResult || terminatedRef.current || timer <= 0) return
     setAnswering(true)
     setSelectedAnswer(answer)
     stopTimer()
@@ -169,18 +185,23 @@ const QuestBattlePage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/quest/${questId}/answer`, {
         answer,
-        time_spent: TIMER_SECONDS - timer,
       }, { timeout: 90000 })
 
       setIsCorrect(data.is_correct)
       setShowResult(true)
+      // 判后讲解改为取 /answer 返回值：题面已不带解析（旧版在下一题载荷里提前泄露）
+      setRevealInfo({
+        correctAnswer: data.correct_answer || '',
+        correctAnswerText: data.correct_answer_text || '',
+        explanation: data.explanation || '',
+      })
 
-      if (data.terminated) {
+      if (data.terminated || data.reason === 'timeout') {
         setTerminated(true)
         setQuestInfo((prev) => prev ? { ...prev, score: data.total_score || 0 } : prev)
         setTimeout(() => {
           if (isMountedRef.current) navigate(`/quest/result/${questId}`)
-        }, 2000)
+        }, 3500)
       } else if (data.next_question) {
         setQuestInfo((prev) => prev ? {
           ...prev,
@@ -194,16 +215,17 @@ const QuestBattlePage: React.FC = () => {
             setQuestion(data.next_question)
             setSelectedAnswer(null)
             setShowResult(false)
+            setRevealInfo(null)
             setLifelineData(null)
             setRemovedOption(null)
-            startTimer()
+            startTimer(typeof data.remaining === 'number' ? data.remaining : undefined)
           }
-        }, 1500)
+        }, 2500)
       } else if (data.completed) {
         setTerminated(true)
         setTimeout(() => {
           if (isMountedRef.current) navigate(`/quest/result/${questId}`)
-        }, 2000)
+        }, 3500)
       }
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('quest.submitFailed'))
@@ -222,6 +244,9 @@ const QuestBattlePage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/quest/${questId}/lifeline`, { type }, { timeout: 60000 })
       setUsedLifelines((prev) => [...prev, type])
+      if (typeof data.discount === 'number' && data.discount < 1) {
+        message.info(t('quest.lifelineDiscountMsg', { name: lifelineNames[type], pct: Math.round(data.discount * 100) }), 4)
+      }
       if (type === 'remove_one') {
         setRemovedOption(data.removed_option)
         if (question) {
@@ -243,11 +268,17 @@ const QuestBattlePage: React.FC = () => {
 
   useEffect(() => {
     isMountedRef.current = true
+    apiClient.get('/quest/config')
+      .then(({ data }) => {
+        if (typeof data?.time_limit_sec === 'number') setLimitSec(data.time_limit_sec)
+        if (Array.isArray(data?.base_scores)) setBaseScores(data.base_scores)
+      })
+      .catch(() => {})
     if (initialData) {
       setQuestion(initialData.question)
       setQuestInfo(initialData.quest_info)
-      setUsedLifelines([])
-      startTimer()
+      setUsedLifelines(Array.isArray(initialData.quest_info?.lifelines_used) ? initialData.quest_info.lifelines_used : [])
+      startTimer(typeof initialData.question?.remaining === 'number' ? initialData.question.remaining : undefined)
       setLoading(false)
     } else if (questId) {
       loadQuestion()
@@ -260,14 +291,35 @@ const QuestBattlePage: React.FC = () => {
   }, [questId])
 
   const getTimerColor = () => {
-    if (timer > 12) return '#52c41a'
-    if (timer > 6) return '#faad14'
+    if (limitSec <= 0) return '#52c41a'
+    const ratio = timer / limitSec
+    if (ratio > 0.4) return '#52c41a'
+    if (ratio > 0.2) return '#faad14'
     return '#ff4d4f'
   }
+
+  // 键盘作答：数字 1-9 直接选答案提交（与大屏闯关同一手感）
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag && ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
+      const opts = question?.options ? Object.keys(question.options) : []
+      if (/^[1-9]$/.test(e.key)) {
+        const pick = opts[Number(e.key) - 1]
+        if (pick && !showResult && !terminatedRef.current && !answeringRef.current) {
+          void handleAnswer(pick)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [question, showResult, handleAnswer])
 
   const getScoreForCurrent = () => {
     if (!questInfo) return 0
     const idx = questInfo.current_question_index || 1
+    // 分值阶梯以服务端配置为真值，本地数组仅作兜底
+    if (baseScores.length >= idx) return baseScores[idx - 1]
     const baseScore = [0, 10, 15, 15, 20, 20, 20, 25, 25, 25, 30, 30, 30, 50, 50, 50]
     return baseScore[idx] || 10
   }
@@ -291,7 +343,7 @@ const QuestBattlePage: React.FC = () => {
 
   const options = question.options || {}
   const currentIdx = questInfo.current_question_index || 1
-  const timerPercent = (timer / TIMER_SECONDS) * 100
+  const timerPercent = (timer / (limitSec || TIMER_SECONDS)) * 100
 
   return (
     // 本页挂在 AppLayout 之外：没有内容区那层 padding，窄屏必须自己给，
@@ -413,7 +465,7 @@ const QuestBattlePage: React.FC = () => {
             }
 
             if (showResult) {
-              if (key === question.correct_answer) {
+              if (key === revealInfo?.correctAnswer) {
                 btnType = 'primary'
                 btnStyle.background = '#52c41a'
                 btnStyle.borderColor = '#52c41a'
@@ -438,7 +490,7 @@ const QuestBattlePage: React.FC = () => {
                 disabled={showResult || terminated || answering}
                 onClick={() => handleAnswer(key)}
                 icon={
-                  showResult && key === question.correct_answer
+                  showResult && key === revealInfo?.correctAnswer
                     ? <CheckCircleOutlined />
                     : showResult && isSelected && !isCorrect
                       ? <CloseCircleOutlined />
@@ -471,18 +523,18 @@ const QuestBattlePage: React.FC = () => {
                 <Text strong style={{ fontSize: 16, color: isCorrect ? '#52c41a' : '#ff4d4f' }}>
                   {isCorrect ? t('quest.answerCorrect') : t('quest.answerWrong')}
                 </Text>
-                {!isCorrect && question.correct_answer && (
+                {!isCorrect && revealInfo?.correctAnswer && (
                   <div>
-                    <Text>{t('quest.correctAnswerText', { answer: question.correct_answer })}. </Text>
-                    <FormulaRenderer content={options[question.correct_answer] as string} inline />
+                    <Text>{t('quest.correctAnswerText', { answer: revealInfo.correctAnswer })}. </Text>
+                    <FormulaRenderer content={revealInfo.correctAnswerText || (options[revealInfo.correctAnswer] as string) || ''} inline />
                   </div>
                 )}
               </div>
             </div>
-            {question?.explanation && (
+            {showResult && revealInfo?.explanation && (
               <div style={{ marginTop: 8, marginBottom: 0, color: 'var(--text-secondary)' }}>
                 <Text type="secondary">💡 </Text>
-                <FormulaRenderer content={question.explanation} />
+                <FormulaRenderer content={revealInfo.explanation} />
               </div>
             )}
           </Card>

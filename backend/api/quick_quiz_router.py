@@ -214,6 +214,7 @@ def _room_to_dict(room: dict[str, Any]) -> dict[str, Any]:
         "time_limit": room["time_limit"],
         "scoring_mode": room["scoring_mode"],
         "min_players": room["min_players"],
+        "reveal_hold_sec": int(room.get("reveal_hold_sec") if room.get("reveal_hold_sec") is not None else 5),
         "max_players": room["max_players"],
         "target_scope": room.get("target_scope", "teacher_classes") or "teacher_classes",
         "target_grade": room["target_grade"] or "",
@@ -647,7 +648,7 @@ class QuickQuizGameManager:
         #   "player_connections": dict,     # {username: WebSocket}
         # }}
 
-    def create_room_state(self, room_id: int, time_limit: int = 15):
+    def create_room_state(self, room_id: int, time_limit: int = 15, reveal_hold: int = 5):
         old_state = self.rooms.get(room_id, {})
         old_connections = old_state.get("connections", [])
         old_player_connections = old_state.get("player_connections", {})
@@ -660,8 +661,10 @@ class QuickQuizGameManager:
             "first_blood": None,
             "answered_in_round": {},
             "time_limit": time_limit,
+            "reveal_hold": reveal_hold,
             "timer_task": None,
             "auto_reveal_task": None,
+            "reveal_hold_task": None,
             "connections": old_connections,
             "player_connections": old_player_connections,
         }
@@ -671,8 +674,11 @@ class QuickQuizGameManager:
 
     def remove_room(self, room_id: int):
         state = self.rooms.pop(room_id, None)
-        if state and state["timer_task"]:
-            state["timer_task"].cancel()
+        if state:
+            for _key in ("timer_task", "auto_reveal_task", "reveal_hold_task"):
+                _task = state.get(_key)
+                if _task:
+                    _task.cancel()
 
     async def add_connection(self, room_id: int, ws: WebSocket):
         await ws.accept()
@@ -775,6 +781,11 @@ async def create_room(request: Request):
     subject = body.get("subject", "")
     knowledge_points = body.get("knowledge_points", "")
     difficulty = body.get("difficulty", "medium")
+    try:
+        reveal_hold = int(body.get("reveal_hold_sec", 5))
+    except (TypeError, ValueError):
+        reveal_hold = 5
+    reveal_hold = max(0, min(15, reveal_hold))
 
     room_code = _generate_room_code()
     now = _now()
@@ -782,13 +793,13 @@ async def create_room(request: Request):
     room_id = execute_insert_update(
         """INSERT INTO quick_quiz_rooms
            (room_code, title, creator_username, status, question_source, question_count,
-            time_limit, scoring_mode, min_players, max_players,
+            time_limit, scoring_mode, min_players, max_players, reveal_hold_sec,
             target_scope, target_grade, target_class, target_users,
             subject, knowledge_points, difficulty,
             created_at)
-           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (room_code, title, username, question_source, question_count,
-         time_limit, scoring_mode, min_players, max_players,
+         time_limit, scoring_mode, min_players, max_players, reveal_hold,
          target_scope, target_grade, target_class, target_users,
          subject, knowledge_points, difficulty,
          now),
@@ -796,7 +807,7 @@ async def create_room(request: Request):
 
     # 初始化内存状态
     assert room_id is not None
-    game_manager.create_room_state(room_id, time_limit)
+    game_manager.create_room_state(room_id, time_limit, reveal_hold)
 
     room = execute_query_one(
         "SELECT * FROM quick_quiz_rooms WHERE id=?",
@@ -931,7 +942,7 @@ async def update_room(room_id: int, request: Request):
     upd_params = []
 
     for field in ["title", "question_source", "question_count", "time_limit",
-                   "scoring_mode", "min_players", "max_players",
+                   "scoring_mode", "min_players", "max_players", "reveal_hold_sec",
                    "target_scope", "target_grade", "target_class", "target_users",
                    "subject", "knowledge_points", "difficulty"]:
         if field in body:
@@ -1014,13 +1025,14 @@ async def restart_quiz(room_id: int, request: Request):
     new_id = execute_insert_update(
         """INSERT INTO quick_quiz_rooms
            (room_code, title, creator_username, status, question_source, question_count,
-            time_limit, scoring_mode, min_players, max_players,
+            time_limit, scoring_mode, min_players, max_players, reveal_hold_sec,
             target_scope, target_grade, target_class, target_users,
             subject, knowledge_points, difficulty,
             created_at)
-           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (room_code, room["title"], username, room["question_source"], room["question_count"],
          room["time_limit"], room["scoring_mode"], room["min_players"], room["max_players"],
+         room.get("reveal_hold_sec") if room.get("reveal_hold_sec") is not None else 5,
          room["target_scope"], room["target_grade"], room["target_class"], room["target_users"],
          room["subject"], room["knowledge_points"], room["difficulty"],
          now),
@@ -1048,7 +1060,11 @@ async def restart_quiz(room_id: int, request: Request):
             copied += 1
 
     # 新房间只建内存态，等教师点「开始」再出题/推送（与新建房间一致）
-    game_manager.create_room_state(new_id, int(room["time_limit"] or DEFAULT_TIME_LIMIT))
+    game_manager.create_room_state(
+        new_id,
+        int(room["time_limit"] or DEFAULT_TIME_LIMIT),
+        int(room.get("reveal_hold_sec") if room.get("reveal_hold_sec") is not None else 5),
+    )
 
     return {
         "room_id": new_id,
@@ -1138,7 +1154,16 @@ async def start_quiz(room_id: int, request: Request):
         (room_id,),
     )
     if not player_count or player_count["cnt"] < 1:
-        raise HTTPException(status_code=400, detail=f"至少需要1名玩家才能开始")
+        raise HTTPException(status_code=400, detail="至少需要1名学生才能开始")
+    min_players = int(room.get("min_players") or 1)
+    if min_players > 1 and player_count["cnt"] < min_players:
+        # 结构化错误：前端按 code 渲染「还需 N 人」
+        raise HTTPException(status_code=400, detail={
+            "code": "min_players_not_met",
+            "needed": min_players,
+            "current": player_count["cnt"],
+            "message": f"至少需要 {min_players} 名学生才能开始，当前 {player_count['cnt']} 名",
+        })
 
     # 先准备题目（幂等，可能耗时/抛错），成功后才把房间置为 playing；
     # 旧实现先置 playing 再备题，备题一抛 500 房间就卡在 playing，
@@ -1152,8 +1177,9 @@ async def start_quiz(room_id: int, request: Request):
     )
 
     try:
-        # 重置内存状态
-        game_manager.create_room_state(room_id, room["time_limit"])
+        # 重置内存状态（含公布停留秒数）
+        reveal_hold = int(room.get("reveal_hold_sec") if room.get("reveal_hold_sec") is not None else 5)
+        game_manager.create_room_state(room_id, room["time_limit"], reveal_hold)
 
         # 广播游戏开始
         await game_manager.broadcast(room_id, {
@@ -1540,8 +1566,16 @@ async def submit_answer(room_id: int, request: Request):
     if not answer:
         raise HTTPException(status_code=400, detail="请选择答案")
 
-    # 计算用时
+    # 计算用时（服务端时钟为准）
     time_spent = round(time.time() - state["question_start_time"], 1)
+    _limit = state.get("time_limit") or 15
+    if time_spent > _limit + 3:
+        # 手动推进模式下教师未点公布、或计时/推送存在秒级错位时，拒收迟到答案，
+        # 给前端明确的「已截止」而不是按拖时间刷速度分。
+        raise HTTPException(status_code=400, detail={
+            "code": "answer_timeout",
+            "message": "本题答题时间已结束，请等待公布或下一题",
+        })
 
     # 获取当前题目
     current_q = state["current_question"]
@@ -1719,15 +1753,26 @@ async def get_current_question(room_id: int, request: Request):
             phase = "question"
             current_idx = first_q["sort_order"]
 
+    answered_usernames = sorted(state["answered_players"]) if state else []
+    total_players_row = execute_query_one(
+        "SELECT COUNT(*) as cnt FROM quick_quiz_players WHERE room_id=?", (room_id,))
+    total_players = total_players_row["cnt"] if total_players_row else 0
+
     if phase not in ("question",):
-        return {"phase": phase, "question": None, "current_question": current_idx, "total_questions": room.get("question_count", 0)}
+        return {"phase": phase, "question": None, "current_question": current_idx,
+                "total_questions": room.get("question_count", 0),
+                "answered_usernames": answered_usernames, "answered_count": len(answered_usernames),
+                "total_players": total_players}
 
     question = execute_query_one(
         "SELECT * FROM quick_quiz_questions WHERE room_id=? AND sort_order=?",
         (room_id, current_idx),
     )
     if not question:
-        return {"phase": phase, "question": None, "current_question": current_idx, "total_questions": room.get("question_count", 0)}
+        return {"phase": phase, "question": None, "current_question": current_idx,
+                "total_questions": room.get("question_count", 0),
+                "answered_usernames": answered_usernames, "answered_count": len(answered_usernames),
+                "total_players": total_players}
 
     options = json.loads(question["options"]) if isinstance(question["options"], str) else question["options"]
     total_q = execute_query_one(
@@ -1737,10 +1782,17 @@ async def get_current_question(room_id: int, request: Request):
 
     time_limit = state["time_limit"] if state else 15
 
+    remaining = time_limit
+    if state and state.get("question_start_time"):
+        remaining = max(0.0, round(time_limit - (time.time() - state["question_start_time"]), 1))
     return {
         "phase": phase,
         "current_question": current_idx,
         "total_questions": total_q["cnt"] if total_q else room.get("question_count", 0),
+        "remaining": remaining,
+        "answered_usernames": answered_usernames,
+        "answered_count": len(answered_usernames),
+        "total_players": total_players,
         "question": {
             "sort_order": question["sort_order"],
             "question_text": question["question_text"],
@@ -1963,6 +2015,10 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
     # 取消旧的定时器（如果正在被该函数调用则不取消，避免自我取消）
     if state["timer_task"] and not skip_cancel:
         state["timer_task"].cancel()
+    for _tk in ("auto_reveal_task", "reveal_hold_task"):
+        if state.get(_tk):
+            state[_tk].cancel()
+            state[_tk] = None
 
     # 广播题目（不包含答案）
     await game_manager.broadcast(room_id, {
@@ -1972,6 +2028,7 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
             "question_text": question["question_text"],
             "options": options,
             "time_limit": state["time_limit"],
+            "remaining": state["time_limit"],
             "total_questions": execute_query_one(
                 "SELECT COUNT(*) as cnt FROM quick_quiz_questions WHERE room_id=?",
                 (room_id,),
@@ -2005,6 +2062,32 @@ async def _auto_reveal_after(room_id: int, delay: float, for_question: int):
         st = game_manager.get_room(room_id)
         if st:
             st["auto_reveal_task"] = None
+
+
+async def _auto_advance_after(room_id: int, delay: float, for_question: int):
+    """公布停留结束后推进下一题或结算；仍是该题的 reveal 阶段才生效。"""
+    try:
+        await asyncio.sleep(delay)
+        state = game_manager.get_room(room_id)
+        if not state or state["phase"] != "reveal" or state["current_question"] != for_question:
+            return
+        total_q = execute_query_one(
+            "SELECT COUNT(*) as cnt FROM quick_quiz_questions WHERE room_id=?",
+            (room_id,),
+        )
+        total = total_q["cnt"] if total_q else 0
+        if for_question >= total:
+            await _do_end_game(room_id)
+        else:
+            await _push_question(room_id, for_question + 1)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error(f"抢答自动推进下一题失败 (room={room_id}): {e}")
+    finally:
+        st = game_manager.get_room(room_id)
+        if st:
+            st["reveal_hold_task"] = None
 
 
 async def _do_reveal(room_id: int, push_next: bool = True) -> dict[str, Any] | None:
@@ -2076,32 +2159,28 @@ async def _do_reveal(room_id: int, push_next: bool = True) -> dict[str, Any] | N
 
     reveal_data["is_last"] = is_last
 
+    # 公布停留：不再"公布即下一题"。hold>0 由服务端定时推进下一题/结算
+    # （next_in 供教师端显示倒计时）；hold=0 停在公布页等教师手动推进。
+    # 注意：必须在广播之前写入 reveal_data —— send_json 即刻序列化，
+    # 广播后再补字段只有 REST 调用方看得到，WS 帧里会缺 next_in。
+    hold = int(state.get("reveal_hold") or 0)
+    if push_next:
+        if not is_last and hold > 0:
+            reveal_data["next_in"] = hold
+        elif is_last and hold == 0:
+            reveal_data["waiting_teacher"] = True
+
     await game_manager.broadcast(room_id, {
         "type": "answer_reveal",
         "data": reveal_data,
     })
 
-    # 如果不是强制结束（push_next=True），推送下一题或结束
-    if is_last:
-        await _do_end_game(room_id)
-        reveal_data["ended"] = True
-    elif push_next:
-        await _push_question(room_id, current_q + 1)
-        # 在 reveal_data 中附带下一题信息，前端可直接使用
-        nq = execute_query_one(
-            "SELECT * FROM quick_quiz_questions WHERE room_id=? AND sort_order=?",
-            (room_id, current_q + 1),
-        )
-        if nq:
-            n_opts = json.loads(nq["options"]) if isinstance(nq["options"], str) else nq["options"]
-            reveal_data["next_question"] = {
-                "sort_order": nq["sort_order"],
-                "question_text": nq["question_text"],
-                "options": n_opts,
-                "time_limit": state["time_limit"],
-                "total_questions": total,
-            }
-    # else: push_next=False 即教师提前结束，仅公布答案不推送下一题
+    if push_next and hold > 0:
+        if state.get("reveal_hold_task"):
+            state["reveal_hold_task"].cancel()
+        state["reveal_hold_task"] = asyncio.create_task(
+            _auto_advance_after(room_id, hold, current_q))
+    # else: push_next=False 即结束活动时提前公布末题，仅公布不推进
 
     return reveal_data
 

@@ -88,9 +88,17 @@
 > - 📢 Announcements: search & priority filters, batch delete, read counts and reader lists
 > - 🎨 Student pages share one header style and relative timestamps; quest / poll / quiz copy fully localized
 >
+> **Classroom & knowledge modules overhaul (this build refresh)**
+> - 🎪 Quick-Answer Competition: the reveal can hold or go fully teacher-paced; one server-side clock advances rounds and locks late answers; lock-answers-and-reveal, live roster of who answered, mid-session question adding, live student list
+> - 📺 Class Ladder: refresh resumes the in-flight run with server-side timing; auto/manual advance; the timer pauses while lifeline votes are entered; safe-level fallback and per-session lifeline picks; per-level review and an end-of-session report
+> - 🎯 Knowledge Quest & management: explanations are only released after answering, server-side timing, a refresh can resume the run; rules and score ladder served from one source; record filters with summary, manual question adding, media filter in the bank
+> - 📰 Trending News: favorites tab, keyword search, unread-only filter, time grouping, thumbnails and read counts, prev/next article, daily briefing now open to students
+> - 📖 Daily Picks: retryable error state, batch refresh keeps the old cards on screen, read markers, Markdown detail, shareable poster
+> - 🔄 Fully automatic news feeds: failing feeds are skipped, a total main outage falls back to the standby pool and then auto-probes candidates; dependable reserves auto-promote and demote after 24h; WYSIWYG source list with one-click discovery; every event notifies admins
+>
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds can be **installed over the top** (data stays); new Explore Canvas tables are created automatically at startup; Git deployments use the usual in-app incremental upgrade. Formal bump 9.0.0 → 9.1.0.
+> 🔄 **Upgrade notes**: desktop builds can be **installed over the top** (data stays); new Explore Canvas tables are created automatically at startup; Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (feature hardening + a new desktop build).
 ---
 
 <a id="intro"></a>
@@ -605,11 +613,11 @@ Automatically collects student wrong answers for AI-assisted review:
 Dual knowledge expansion modules, allowing students to easily broaden their horizons beyond regular study:
 
 - **📖 Daily Picks**: AI fun knowledge card pool; each person randomly draws 6 cards,
-  7-day deduplication window, supports favorites and manual refresh. Smart knowledge pool replenishes on demand,
+  7-day deduplication window, favorites, batch refresh that keeps the old cards on screen, read markers and a shareable poster. Smart knowledge pool replenishes on demand,
   no consumption when unused, browsing earns points and badges.
 - **📰 Trending News**: RSS aggregation of mainstream news feeds (Chinanews, IT Home, etc.),
-  AI on-demand summaries + subject association, supports daily briefing, favorites and paginated browsing (no longer capped at the first 20 items).
-  2h cache lazy loading, 72h rolling cleanup, zero fetching when no one is accessing; the source list is editable in system config, with a per-source circuit breaker and a standby pool.
+  AI on-demand summaries + subject association, supports the daily briefing (now for students too), a favorites tab, search, unread-only filtering and paginated browsing.
+  2h cache lazy loading, 72h rolling cleanup, zero fetching when no one is accessing. The source list is WYSIWYG in System Configuration with one-click auto-discovery: failing feeds are circuit-broken and skipped, a total main outage falls back to the standby pool, and a full outage auto-probes candidates to keep publishing; dependable reserves are promoted to main automatically and demoted after 24h of failure. Every such event notifies administrators.
 
 > **Available to all users**
 
@@ -691,18 +699,18 @@ Real-time multiplayer online quick-answer competition system:
 - **Teacher Side**:
   - Create competition rooms (set time limit, question count, subject)
   - Question sources: the bank comes first, AI generates the shortfall and stores it; built-in questions are a last resort when AI cannot deliver, and never repeat
-  - Control competition process (start/next question/end)
+  - Control the flow: reveal hold (0–15s) or fully teacher-paced, lock answers and reveal early, next question on demand
+  - Live roster of who answered this round, add bank questions mid-session, minimum-players check
   - View real-time leaderboard
 - **Student Side**:
   - Enter 6-digit room code to join
-  - Timed answering (speed-based decreasing scoring)
-  - Combo bonus (5 consecutive correct answers = 2x score)
+  - Timed answering on a server-side clock; late answers are rejected
+  - Best streak tracked and shown
   - Real-time ranking
 - **Scoring Rules**:
-  - Speed scoring: 0-3s = 100 pts, 3-7s = 70 pts, 7-11s = 40 pts, 11+s = 20 pts
-  - Combo multiplier: 2 consecutive = 1.2x, 3 = 1.5x, 4 = 1.8x, 5+ = 2.0x
-  - 3 consecutive wrong answers: -10 pts
-  - All correct: additional 1.2x bonus
+  - Speed scoring: starts at 100 and decays linearly with time spent (floor 10); tiered scoring optional
+  - Wrong answers deduct (the total never goes negative); best streak shown
+  - Reveal hold 0–15s; 0 = teacher-paced
 - 📊 **Activity Review**: Leaderboard, per-question accuracy statistics
 
 > **Admin/Teacher can create and manage; Students can participate**
@@ -792,7 +800,8 @@ A **single-player ladder** for the projector — one session can run all lesson 
 - **📊 Session board and settle screen**: a wrong answer or timeout triggers a full-screen result with the explanation; the board refreshes live and the next student starts a new run
 - **🎨 7 big-screen skins**: defaults to the light "Cloud" theme; Sunrise / Mint (light) and Star / Cyber / Academy / Classic (dark) are also available
 - **🔊 One sound switch**: covers both big-screen effects and the name announcement
-- **⌨️ Keyboard friendly**: `Space` draw, `1-4` pick, `Enter` submit, `0` skip
+- **⌨️ Keyboard friendly**: `Space` draw, `1-4` pick, `Enter` submit, `0` abandon (confirmed), `N` next level (manual mode)
+- **🔄 Refresh-safe**: reopening the page resumes the session and the in-flight run with server-side timing; the timer pauses while lifeline votes are entered; safe-level fallback, per-session lifelines, per-level review and an end-of-session report
 - **🖥 Built for the projector**: students never use their own devices
 
 > **Teachers and admins (limited to their own classes); points are awarded by levels cleared**
@@ -842,7 +851,7 @@ One entry, two submission types: **chat transcript** (students work it out with 
 
 AI instant-question knowledge challenge:
 
-- **🎯 Challenge Rules**: Timed answering (30 seconds per question), game over on wrong answer, max 15 questions
+- **🎯 Challenge Rules**: Timed answering (30s per question, server-side clock), game over on wrong answer, max 15 questions; explanations are only released after answering and a refresh can resume the run
 - **🤖 AI Questioning**: AI instantly generates encyclopedia questions (supports question bank mode)
 - **💡 Three Power-Ups** (one use per game):
   - 🎯 **Remove One**: Eliminates one wrong option
@@ -1312,6 +1321,16 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - 🏷️ Question management and bank analytics can both show only questions without knowledge-point tags, combined with other filters, and the analytics figure jumps straight into that filter
 - 📛 An untagged badge on the bank page for admins: the number is the backlog — one click to filter, click again to clear, and it drops after AI tagging writes
 - 🧩 A single shared definition of "untagged" across list, analytics and badge, so separator-only dirty tags count as untagged too
+
+**Classroom & knowledge modules overhaul (9.1.0 build refresh)**
+
+- 🎪 Quick-Answer Competition: reveal hold 0–15s or fully teacher-paced; one server-side clock advances rounds and rejects late answers; lock-answers-and-reveal, live roster of who answered this round, add bank questions mid-session, minimum-players check, live student list
+- 📺 Class Ladder (big screen): refresh auto-resumes the session and the in-flight run with server-side remaining time; auto/manual advance; timer pauses while votes are entered; abandon needs confirmation; safe-level fallback and per-session lifelines; per-level review and end-of-session report
+- 🎯 Knowledge Quest & management: explanations only after answering (no pre-leak), server-side timing, refresh can resume the run; rules and score ladder from one source; discount hints and badge unlocks surfaced; mobile record columns fixed, manual question adding, status/date filters with summary, bank media filter
+- 📰 Trending News: favorites tab, keyword search, unread-only filter, time grouping, thumbnails and read counts, prev/next article, daily briefing now open to students, optimistic favoriting
+- 📖 Daily Picks: retryable error state, batch refresh keeps cards on screen, read markers, Markdown detail with paging, shareable poster
+- 🔄 Fully automatic news feeds: failing feeds circuit-broken and skipped, total main outage falls back to the standby pool, a full outage auto-probes candidates to keep publishing; dependable reserves are auto-promoted and demoted after 24h; WYSIWYG source list with one-click auto-discovery; every event notifies administrators
+- 🩹 Engineering fixes: dev proxy dropped WebSocket upgrades, WS reconnected only once, system notifications were silently disabled, quiz/ladder timing and scoring idempotency
 
 ### v7.x – v9.0.0
 

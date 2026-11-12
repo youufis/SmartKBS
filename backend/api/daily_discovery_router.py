@@ -14,7 +14,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, Response
 from pydantic import BaseModel
 
 from starlette.concurrency import run_in_threadpool
@@ -774,13 +774,18 @@ class DiscoveryService:
         """获取该学生的收藏列表"""
         rows = execute_query(
             "SELECT p.id, p.emoji, p.category, p.title, p.summary, p.detail, "
-            "p.source, p.fun_level, p.related_subject, p.tags "
+            "p.source, p.fun_level, p.related_subject, p.tags, f.created_at "
             "FROM discovery_favorites f "
             "JOIN discovery_pool p ON f.pool_card_id = p.id "
             "WHERE f.username=? ORDER BY f.created_at DESC",
             (username,)
         )
-        return [_row_to_card(r) for r in rows]
+        out = []
+        for r in rows:
+            card = _row_to_card(r)
+            card["favorited_at"] = str(r[10] or "")
+            out.append(card)
+        return out
 
     # ── 辅助 ──
 
@@ -846,9 +851,15 @@ class DiscoveryService:
         today_str = _today()
         stats = DiscoveryService._get_daily_stats(username, today_str)
         fav_ids = DiscoveryService._get_favorite_card_ids(username)
+        # 今日已点开详情（view_log 按天幂等）→ 卡片"已读"标记
+        viewed_ids = {r[0] for r in execute_query(
+            "SELECT pool_card_id FROM discovery_view_log WHERE username=? AND date(created_at)=?",
+            (username, today_str),
+        )}
 
         for card in cards:
             card["is_favorited"] = card.get("id", 0) in fav_ids
+            card["viewed_today"] = card.get("id", 0) in viewed_ids
 
         return {
             "date": today_str,
@@ -953,6 +964,108 @@ async def record_view(req: ViewRequest, request: Request):
     role = user.get("role", 2)
     points = DiscoveryService.record_view(user["username"], req.card_id, role)
     return {"points_awarded": points}
+
+
+
+@router.get("/discovery/cards/{card_id}/poster", summary="[学生] 知识卡片分享海报（PNG）")
+async def card_poster(card_id: int, request: Request):
+    """把卡片渲染成适合分享/打印的竖版海报。PIL 纯本地绘制，无网络依赖；
+    字体走 Windows/DejaVu 兜底链，缺字库时 503 而不是拖垮请求。"""
+    get_current_user(request)
+
+    def _render() -> bytes:
+        import io as _io
+        import os as _os
+        from PIL import Image, ImageDraw, ImageFont
+
+        row = execute_query(
+            "SELECT category, title, summary, fun_level FROM discovery_pool "
+            "WHERE id=? AND pool_status='active'",
+            (card_id,),
+        )
+        if not row:
+            raise HTTPException(404, "卡片不存在")
+        category = str(row[0][0] or "知识")
+        title = str(row[0][1] or "")
+        summary = str(row[0][2] or "")
+        fun_level = max(1, min(5, int(row[0][3] or 3)))
+
+        W, H = 720, 960
+        img = Image.new("RGB", (W, H), "#f7f8fb")
+        d = ImageDraw.Draw(img)
+
+        def _font(size, bold=False):
+            cands = (
+                r"C:\Windows\Fonts\msyhbd.ttc" if bold else r"C:\Windows\Fonts\msyh.ttc",
+                r"C:\Windows\Fonts\simhei.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
+                else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            )
+            for fp in cands:
+                try:
+                    if _os.path.exists(fp):
+                        return ImageFont.truetype(fp, size)
+                except Exception:
+                    continue
+            return ImageFont.load_default()
+
+        def wrap(text, font, max_w, max_lines):
+            lines = []
+            cur = ""
+            for ch in text:
+                if ch == "\n":
+                    if cur:
+                        lines.append(cur); cur = ""
+                    continue
+                t = cur + ch
+                if d.textlength(t, font=font) > max_w and cur:
+                    lines.append(cur); cur = ch
+                else:
+                    cur = t
+                if len(lines) >= max_lines:
+                        break
+            if cur and len(lines) < max_lines:
+                lines.append(cur)
+            if len(lines) == max_lines and lines:
+                last = lines[-1]
+                while last and d.textlength(last + "…", font=font) > max_w:
+                    last = last[:-1]
+                lines[-1] = last + "…"
+            return lines
+
+        f_t = _font(40, bold=True)
+        f_s = _font(26)
+        d.rectangle([0, 0, W, 190], fill="#6a5cff")
+        d.rectangle([0, 186, W, 192], fill="#ffd54f")
+        d.text((48, 58), "每日精选 · Daily Discovery", font=_font(26, bold=True), fill="#ffffff")
+        d.text((48, 112), category + " 知识卡", font=_font(22), fill="#e6e2ff")
+
+        y = 240
+        for ln in wrap(title, f_t, W - 96, 3):
+            d.text((48, y), ln, font=f_t, fill="#1f2430")
+            y += 56
+        y += 16
+        for ln in wrap(summary, f_s, W - 96, 13):
+            d.text((48, y), ln, font=f_s, fill="#4a5063")
+            y += 40
+
+        d.text((48, H - 150), "趣味指数", font=_font(24), fill="#8a90a0")
+        d.text((48, H - 116), "★" * fun_level + "☆" * (5 - fun_level), font=_font(34), fill="#ffb400")
+        d.line([48, H - 80, W - 48, H - 80], fill="#dfe3ec", width=2)
+        d.text((48, H - 62), "SmartKBS 知识平台", font=_font(20), fill="#aab0be")
+
+        buf = _io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+    try:
+        data = await run_in_threadpool(_render)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[每日精选] 海报生成失败 card={card_id}: {e}")
+        raise HTTPException(503, "海报生成不可用")
+    return Response(content=data, media_type="image/png")
 
 
 @router.get("/discovery/pool-status")

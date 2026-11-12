@@ -59,6 +59,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "APPID": "",  # 留空则直接调用大模型(MODEL_NAME)；填写后调用百炼智能体应用。注意：APPID 必须与 DASHSCOPE_API_KEY 归属于同一个阿里云账号，否则无法调用
     "AGENT_ENABLED": False,  # 智能体启用闸门：勾选且 APPID 已填才走智能体；默认关，需显式开启（知识库就绪时优先走知识库，不受此项影响）
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    # 热点新闻 RSS 源（NW20 所见即所得）：{名称: URL}。非空即最终生效清单
+    # （删行=停用、改址=换源）；整键留空 = 回落到 news_router 内置默认。
+    # GET /api/config 会把两键回填为"当前生效清单"，页面里看到什么就抓什么。
+    "news_rss_feeds": {},
+    "news_rss_reserves": {},
     # ── 文件提交类作业（上传 + AI 批改）──
     "HOMEWORK_MAX_FILE_MB": 10,        # 单文件上限，同时是教师可设值的天花板
     "HOMEWORK_MAX_FILES": 3,           # 一次提交最多几个文件（教师未按作业设时）
@@ -845,6 +850,21 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(item, dict) or not str(item.get("key", "")).strip() or not str(item.get("label", "")).strip():
                     raise HTTPException(status_code=400, detail=f"QUESTION_TYPES 第 {i + 1} 项需包含 key 与 label")
             out[key] = value
+        elif key in ("news_rss_feeds", "news_rss_reserves"):
+            # NW20: 名称→URL 字典（所见即所得）；停用=删行，空 URL 行读取时会被忽略
+            if not isinstance(value, dict):
+                raise HTTPException(status_code=400, detail=f"{key} 必须是 {{名称: URL}} 字典")
+            _clean: dict[str, str] = {}
+            for _name, _url in value.items():
+                _name = str(_name).strip()
+                _url = str(_url).strip()
+                if not _name:
+                    raise HTTPException(status_code=400, detail=f"{key} 存在名称为空的条目")
+                if _url and not _url.startswith(("http://", "https://")):
+                    raise HTTPException(status_code=400,
+                        detail=f"{key} 的 [{_name}] 不是 http(s) 地址；停用请直接删掉那一行")
+                _clean[_name] = _url
+            out[key] = _clean
         elif key in _TITLE_LIST_KEYS:
             _validate_title_config(key, value)
             out[key] = value
@@ -934,7 +954,16 @@ async def get_config(request: Request):
     """获取全部系统配置（管理员；C3: 密钥类字段掩码回显，不回传明文）"""
     user = get_current_user(request)
     require_admin(user)
-    return _mask_config(load_config())
+    cfg = _mask_config(load_config())
+    # NW20: 新闻源两键回填"当前生效清单"（内置兜底与自动转正合并后的真实抓取列表），
+    # 系统配置页所见即所得；保存后本键即成为显式清单
+    try:
+        from backend.api.news_router import _get_rss_feeds, _get_reserve_feeds
+        cfg["news_rss_feeds"] = _get_rss_feeds()
+        cfg["news_rss_reserves"] = _get_reserve_feeds()
+    except Exception as e:
+        logger.warning(f"[配置] 新闻源生效清单回填失败: {e}")
+    return cfg
 
 
 # ── 配置备份与恢复（管理员在页面上操作，不必登服务器） ──
@@ -1287,6 +1316,22 @@ async def update_config(req: ConfigUpdate, request: Request):
     current.update(known)
     save_config(current)
     logger.info(f"管理员 {user['username']} 更新了系统配置 ({len(known)} 项)")
+
+    # NW20: 主源清单所见即所得——管理员删掉的转正源同步降级，避免"删了行还在抓"
+    if "news_rss_feeds" in known:
+        try:
+            from backend.api.news_router import _get_promoted_feeds, _save_promoted_feeds
+            kept_names = set((known["news_rss_feeds"] or {}).keys())
+            if kept_names:
+                promoted = _get_promoted_feeds()
+                removed = [n for n in promoted if n not in kept_names]
+                if removed:
+                    for n in removed:
+                        promoted.pop(n, None)
+                    _save_promoted_feeds(promoted)
+                    logger.info(f"[新闻] 主源清单已删除自动转正源，同步降级: {removed}")
+        except Exception as e:
+            logger.warning(f"[新闻] 转正源同步降级失败: {e}")
 
     # 更新 API Key 后清除聊天模块的缓存，使新 key 即时生效
     if any(k in ('dashscope_api_key', 'deepseek_api_key') for k in req.config):

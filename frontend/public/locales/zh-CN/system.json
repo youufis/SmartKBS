@@ -1754,5 +1754,19 @@
   "field_EXAM_ANTI_COPY_tip": "只提高搬运成本，拦不住系统截屏、手机拍照和开发者工具。开启后学生复制题目会被提示，正常作答与粘贴答案不受影响。默认关闭，建议只在正式考试时临时开启。",
   "field_EXAM_WATERMARK": "作答页个人水印",
   "field_EXAM_WATERMARK_desc": "作答页平铺「姓名 · 学号 · 时间」浅色水印，截图外传后可追溯到人",
-  "field_EXAM_WATERMARK_tip": "水印层不拦截点击、不影响答题与滚动，打印时也会带上。含学生个人信息，仅用于泄题追溯，请在考试说明里告知学生。"
+  "field_EXAM_WATERMARK_tip": "水印层不拦截点击、不影响答题与滚动，打印时也会带上。含学生个人信息，仅用于泄题追溯，请在考试说明里告知学生。",
+  "group_news": "热点新闻源",
+  "field_news_rss_feeds": "新闻主源清单",
+  "field_news_rss_feeds_desc": "所见即所得：这一栏就是下一次抓取实际使用的源清单。删一行=停用该源，改地址=换源。整栏留空≠没有源——系统自动回落到内置默认清单（防误删导致新闻停摆的安全网）",
+  "field_news_rss_feeds_tip": "内置默认：中国新闻网×2 / IT之家 / 少数派。自动转正的备用源会并进来显示；删掉转正源那一行并保存=同步降级回备用池。\n保存后本栏成为显式清单，改源不必发版、不必重启。\n换源前先点备用池的「自动寻找可用源」，或跑 python scripts/check_news_feeds.py --url 候选RSS 验证。连续 2 轮取不到内容的源会自动熔断 30 分钟并通知管理员。",
+  "field_news_rss_reserves": "新闻备用源池",
+  "field_news_rss_reserves_desc": "一行一个源；平时不抓取，主源全部失效时自动顶替救场，备用池也失效还会自动探测候选源。整栏留空=只保留内置备用（Solidot）",
+  "field_news_rss_reserves_tip": "备用源连续救场 2 轮且有 pubDate 时会自动转正为主源（出现在主源清单里）；转正源持续失效超过 24 小时会自动降回备用池。\n主源与备用池全部失效时，抓取链路会自动探测候选清单（6 小时内最多一次）并把可用源写进本栏续报，无需人工处理；「自动寻找可用源」按钮是随时手动触发一次。\n熔断/全灭/自动寻源/转正/降级都会给管理员发站内通知。",
+  "placeholder_news_rss": "名称=https://example.com/rss.xml（一行一个；删一行=停用该源）",
+  "shapeExpectKv": "每行需形如 名称=https://…（删一行=停用该源；整栏清空会回落内置默认，不会变成没有源）",
+  "newsDiscoverBtn": "自动寻找可用源",
+  "newsDiscoverAdded": "已把 {n} 个实测可用源写入备用池：{names}",
+  "newsDiscoverNoAdd": "找到 {n} 个可用源，但都已在清单中",
+  "newsDiscoverNone": "探测了 {probed} 个候选，暂无新的可用源",
+  "newsDiscoverFail": "自动寻源失败，请稍后重试"
 }

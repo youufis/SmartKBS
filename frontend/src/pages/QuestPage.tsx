@@ -16,7 +16,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import { useTranslation, Trans } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 import { relativeTime, fullTime } from '../utils/relativeTime'
 import NarrowTable from '../components/NarrowTable'
 
@@ -55,7 +55,7 @@ const QuestPage: React.FC = () => {
   const [tableLoading, setTableLoading] = useState(false)
   const [starting, setStarting] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [questConfig, setQuestConfig] = useState<{ use_bank: boolean; bank_full?: boolean } | null>(null)
+  const [questConfig, setQuestConfig] = useState<{ use_bank: boolean; bank_full?: boolean; time_limit_sec?: number; max_questions?: number; base_scores?: number[]; lifeline_discounts?: Record<string, number> } | null>(null)
   const [bankStats, setBankStats] = useState<{ total_questions: number; by_category: any[] } | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -207,8 +207,18 @@ const QuestPage: React.FC = () => {
       render: (id: number) => `#${id}`,
     },
     {
-      title: t('result'), key: 'status', width: 70,
-      render: (_: any, r: QuestRecord) => getStatusTag(r),
+      title: t('result'), key: 'status', width: 150,
+      render: (_: any, r: QuestRecord) => (
+        <Space size={4}>
+          {getStatusTag(r)}
+          {r.completed === 0 && (
+            <Button size="small" type="primary" icon={<ThunderboltOutlined />}
+              onClick={(e) => { e.stopPropagation(); navigate(`/quest/battle/${r.id}`) }}>
+              {t('quest.continueBtn')}
+            </Button>
+          )}
+        </Space>
+      ),
     },
     {
       title: t('correctTotal'), key: 'count', width: 100,
@@ -345,7 +355,7 @@ const QuestPage: React.FC = () => {
             title={t('quest.bestRecord')}
             value={stats?.best_correct || 0}
             prefix={<StarOutlined style={{ color: '#1677ff' }} />}
-            suffix={t('quest.bestSuffix', { max: 15 })}
+            suffix={t('quest.bestSuffix', { max: questConfig?.max_questions || 15 })}
             styles={{ content: { color: getScoreColor(stats?.best_correct || 0) } }}
           />
         </Card>
@@ -413,46 +423,33 @@ const QuestPage: React.FC = () => {
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <div>
             <Title level={5}>{t('quest.rules.gameTitle')}</Title>
-            <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.gameDesc" components={{ s: <Text strong />, br: <br /> }}>
-                AI 即时生成百科单选题，涵盖 12 大知识领域。每轮最多 15 题，<Text strong>答错一题即终止</Text>！
-              </Trans>
-            </Paragraph>
+            <Paragraph>{t('quest.rules.gameDesc', { max: questConfig?.max_questions || 15 })}</Paragraph>
           </div>
           <div>
             <Title level={5}>{t('quest.rules.timerTitle')}</Title>
-            <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.timerDesc" components={{ s: <Text strong />, br: <br /> }}>
-                每题限时 <Text strong>30 秒</Text>，超时视为答错。
-              </Trans>
-            </Paragraph>
+            <Paragraph>{t('quest.rules.timerDesc', { n: questConfig?.time_limit_sec || 30 })}</Paragraph>
           </div>
           <div>
             <Title level={5}>{t('quest.rules.lifelineTitle')}</Title>
-            <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.lifelineDesc" components={{ s: <Text strong />, br: <br /> }}>
-                <Text strong>去伪存真</Text>：去掉一个错误选项，变 3 选 1（得分 ×85%）<br />
-                <Text strong>远程连线</Text>：AI 朋友给提示线索（得分 ×70%）<br />
-                <Text strong>群策群力</Text>：100 位观众投票分布（得分 ×70%）
-              </Trans>
+            <Paragraph style={{ whiteSpace: 'pre-line' }}>
+              {t('quest.rules.lifelineDesc', {
+                p1: Math.round((questConfig?.lifeline_discounts?.remove_one ?? 0.85) * 100),
+                p2: Math.round((questConfig?.lifeline_discounts?.phone_friend ?? 0.7) * 100),
+                p3: Math.round((questConfig?.lifeline_discounts?.audience_vote ?? 0.7) * 100),
+              })}
             </Paragraph>
           </div>
           <div>
             <Title level={5}>{t('quest.rules.scoreTitle')}</Title>
-            <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.scoreDesc" components={{ s: <Text strong />, br: <br /> }}>
-                第 1 题：10 分 → 2-3 题：15 分 → 4-6 题：20 分 →<br />
-                7-9 题：25 分 → 10-12 题：30 分 → 13-15 题：<Text strong>50 分</Text>
-              </Trans>
+            <Paragraph style={{ whiteSpace: 'pre-line' }}>
+              {t('quest.rules.scoreDesc', { line: (questConfig?.base_scores && questConfig.base_scores.length)
+                ? questConfig.base_scores.map((s, i) => (i + 1) + ':' + s).join('  ') : '' })}
             </Paragraph>
           </div>
           <div>
             <Title level={5}>{t('quest.rules.badgeTitle')}</Title>
-            <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.badgeDesc" components={{ s: <Text strong />, br: <br /> }}>
-                每次闯关答对1题即可积累积分，全部通关获得 <Text strong>🏅 闯关徽章 ×1</Text>，可无限累积！<br />
-                集齐里程碑还可解锁专属称号：🥉初出茅庐 → 🥈闯关新秀 → 🥇闯关达人 → 💎闯关大师 → 👑闯关传奇
-              </Trans>
+            <Paragraph style={{ whiteSpace: 'pre-line' }}>
+              {t('quest.rules.badgeDesc')}
             </Paragraph>
           </div>
         </Space>

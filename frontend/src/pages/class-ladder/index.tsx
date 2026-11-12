@@ -31,12 +31,13 @@ import LadderFooter from './components/LadderFooter'
 import LadderRecords from './components/LadderRecords'
 import LadderResultOverlay from './components/LadderResultOverlay'
 import LadderLifelineModals from './components/LadderLifelineModals'
+import LadderReportModal from './components/LadderReportModal'
 import './ladder.css'
 
 const ClassLadder: React.FC = () => {
   const { t } = useTranslation('classLadder')
   // message 走 App 上下文（静态方法吃不到主题，控制台也会告警）
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const isMobile = useIsMobile()
 
   const config = useLadderConfig()
@@ -67,7 +68,7 @@ const ClassLadder: React.FC = () => {
   })
 
   const run = useLadderRun({
-    session, message, soundOn, speech,
+    session, message, modal, soundOn, speech,
     refreshBoard: board.refreshBoard,
     patchBoard: board.patchBoard,
     onRunStarted: () => setSetupOpen(false),
@@ -103,6 +104,7 @@ const ClassLadder: React.FC = () => {
             speechFailure={speech.failure} onRetrySpeech={() => { void speech.retry() }}
             lifelines={activeLifelines} onLifeline={(tp) => void run.doLifeline(tp)}
             busy={run.busy} remaining={run.remaining}
+            paused={run.timerPaused} covered={run.covered}
             fs={fs} onToggleFs={toggleFs}
           />
 
@@ -112,6 +114,7 @@ const ClassLadder: React.FC = () => {
             soundOn={soundOn} soundAvailable={soundAvailable}
             onToggleSound={() => setSoundOn((v) => { localStorage.setItem(SOUND_PREF_KEY, v ? '0' : '1'); return !v })}
             setupOpen={setupOpen} onToggleSetup={() => setSetupOpen((v) => !v)}
+            autoAdvance={run.autoAdvance} onToggleAutoAdvance={run.toggleAutoAdvance}
           />
 
           {/* ── 主区：阶梯 / 舞台 / 红榜 ── */}
@@ -127,9 +130,14 @@ const ClassLadder: React.FC = () => {
           <LadderFooter
             session={session} currentQ={run.currentQ} selected={run.selected}
             revealed={Boolean(run.reveal)} drawing={run.busy && run.rolling}
+            pending={Boolean(run.pending)}
+            timedOut={Boolean(run.run) && (run.run!.time_limit_sec || 0) > 0
+              && run.remaining === 0 && Boolean(run.currentQ) && !run.reveal && !run.busy}
             onDraw={() => void run.doOpenRun()}
             onSubmit={() => void run.doSubmit(false)}
-            onSkip={() => void run.doSubmit(true)}
+            onSkip={run.confirmSkip}
+            onNext={run.advanceNow}
+            onTimeout={() => void run.doTimeout()}
           />
 
           <LadderRecords records={board.records} />
@@ -152,6 +160,8 @@ const ClassLadder: React.FC = () => {
           onVoteChange={run.setVotePanel}
           onVoteSubmit={() => void run.submitClassVote()}
         />
+
+        <LadderReportModal report={setup.report} onClose={() => setup.clearReport()} />
       </div>
     </ConfigProvider>
   )

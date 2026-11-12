@@ -1,6 +1,10 @@
 /** 皮肤 / 音效 / 播报偏好记本地（与页面其它偏好分开记） */
 export const SKIN_PREF_KEY = 'class_ladder_skin'
 export const SOUND_PREF_KEY = 'class_ladder_sound_on'
+/** 上一场的年级班级（刷新/重进页面自动恢复现场） */
+export const SCOPE_LS_KEY = 'class_ladder_scope'
+/** 答对后推进方式：auto=1.9s 自动下一关 / manual=停在讲解等教师 */
+export const AUTO_PREF_KEY = 'class_ladder_auto_advance'
 
 /** 每套皮肤的强调色 a2（与 ladder.css 的 --cl-a2 对齐），用作局部主题主色 */
 export const SKIN_ACCENT: Record<string, string> = {

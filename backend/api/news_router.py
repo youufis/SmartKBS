@@ -11,6 +11,8 @@
    对 404 与非 XML 响应不抛异常，旧实现因此静默失败，日志里一行错误都没有）
 6. 已存在的 URL 按批次续期(fetched_at)而不是 INSERT OR IGNORE 丢弃；过期清理带保底，
    绝不允许把唯一还能看的一批删成空表
+7. NW19: 备用源连续救场自动转正（持久化在 news_rss_promoted.json，不碰管理员配置），
+   转正源长期熔断自动降级；熔断/全灭/顶替/转正/降级都会给管理员发站内通知（同类 24h 一次）
 """
 import calendar
 import json
@@ -95,7 +97,42 @@ RSS_FEEDS = DEFAULT_RSS_FEEDS  # 兼容历史引用
 # NW18: 备用源池 —— 平时不参与抓取；主源全部拿不到内容时自动顶替一轮，
 # 并在日志里提示"哪个备用源可用"，验证稳定后再搬进 news_rss_feeds 固化。
 # 候选源先用 scripts/check_news_feeds.py --url <候选RSS> 体检，别直接上主源。
-RESERVE_RSS_FEEDS: dict[str, str] = {}
+RESERVE_RSS_FEEDS: dict[str, str] = {
+    # NW19: 2026-11 实测可用（200/15 条在时效内、有 pubDate）；其余候选见
+    # scripts/check_news_feeds.py --discover（人民日报/央视/36氪等实测已死，别回填）
+    "Solidot": "https://www.solidot.org/index.rss",
+}
+
+# ── NW19: 备用源自动转正/降级（“智能换可用源”的闭环部分）──
+# NW20: 自动寻源候选清单 —— POST /api/news/feeds/discover 逐个实测（判据与体检一致），
+# 把"可用且有在时效内条目"的源写进备用池。2026-11 实测已死的（人民日报/央视/环球网/
+# 36氪/cnbeta/新华社旧地址）不列，避免每次探测白等一轮超时。
+DISCOVER_CANDIDATES: dict[str, str] = {
+    "Solidot": "https://www.solidot.org/index.rss",
+    "新华网时政": "http://www.xinhuanet.com/politics/news_politics.xml",
+    "新浪国内焦点": "https://rss.sina.com.cn/news/china/focus15.xml",
+    "新浪国际热点": "https://rss.sina.com.cn/news/world/gjrdzx.xml",
+    "新浪滚动": "https://rss.sina.com.cn/news/marquee/ddt.xml",
+    "中国新闻网·国内": "https://www.chinanews.com.cn/rss/china.xml",
+    "中国新闻网·国际": "https://www.chinanews.com.cn/rss/world.xml",
+    "中国新闻网·社会": "https://www.chinanews.com.cn/rss/society.xml",
+    "中国新闻网·科技": "https://www.chinanews.com.cn/rss/sci-tech.xml",
+}
+
+# NW19: 备用源连续救场 N 轮且有 pubDate → 自动转正为主源（无需人工搬配置）
+RESERVE_PROMOTE_ROUNDS = 2
+#: 转正源持续熔断超过 N 小时 → 自动降回备用池
+PROMOTED_UNPROMOTE_HOURS = 24
+#: 救场计数（内存即可：转正要求“连续”，主源恢复即清零）
+_reserve_rescue: dict[str, int] = {}
+#: 熔断起始时刻（判定“长期不可用”用于降级）
+_breaker_opened_at: dict[str, float] = {}
+#: 同类事件通知最小间隔（秒），防通知轰炸
+_NOTIFY_INTERVAL_SECONDS = 24 * 3600
+_notify_seen: dict[str, float] = {}
+#: NW21: 主源+备用池全灭时自动寻源的节流间隔（进程内，重启即重置）
+AUTO_DISCOVER_INTERVAL_SECONDS = 6 * 3600
+_last_auto_discover = {"at": 0.0}
 
 
 def _read_config_section(key: str) -> dict[str, str]:
@@ -110,30 +147,160 @@ def _read_config_section(key: str) -> dict[str, str]:
     return {}
 
 
-def _apply_feed_overrides(base: dict[str, str], overrides: dict[str, str]) -> dict[str, str]:
-    """同名覆盖 URL；值置空 = 禁用该内置源"""
-    for k, v in overrides.items():
-        if v == "":
-            base.pop(k, None)
-        else:
-            base[k] = v
-    return base
+def _usable_urls(raw: dict[str, str]) -> dict[str, str]:
+    """只保留像 http(s) 的条目（空值/坏值视为删除该行）"""
+    return {k: v for k, v in raw.items()
+            if k and isinstance(v, str) and v.strip().startswith(("http://", "https://"))}
 
 
 def _get_rss_feeds() -> dict[str, str]:
-    """新闻源清单 — 允许 system_config.json 的 news_rss_feeds 覆盖（改源不必发版、不必重启）。
+    """新闻主源清单 —— 系统配置页所见即所得（NW20）。
 
-    覆盖语义：同名 key 改写 URL；把值写成 "" 表示禁用该内置源；新 key 即为新增源。
+    news_rss_feeds 非空时，这一栏就是最终生效清单：删一行=停用该源、改地址=换源；
+    整栏留空才回落到代码内置 DEFAULT_RSS_FEEDS。自动转正的备用源始终并入
+    （管理员在页面上删掉转正源那一行时，配置保存路径会同步把它降级，见 config_router）。
     """
-    return {k: v for k, v in _apply_feed_overrides(
-        dict(DEFAULT_RSS_FEEDS), _read_config_section("news_rss_feeds")).items() if v}
+    overrides = _read_config_section("news_rss_feeds")
+    feeds = _usable_urls(overrides) if overrides else dict(DEFAULT_RSS_FEEDS)
+    for _name, _url in _get_promoted_feeds().items():
+        if _name not in feeds and _usable_urls({ _name: _url }):
+            feeds[_name] = _url
+    return feeds
 
 
 def _get_reserve_feeds() -> dict[str, str]:
-    """备用源清单（内置 + system_config.json 的 news_rss_reserves）"""
-    reserves = dict(RESERVE_RSS_FEEDS)
-    return {k: v for k, v in
-            _apply_feed_overrides(reserves, _read_config_section("news_rss_reserves")).items() if v}
+    """备用源清单 —— 同样所见即所得；整栏留空才用内置 RESERVE_RSS_FEEDS。"""
+    overrides = _read_config_section("news_rss_reserves")
+    return _usable_urls(overrides) if overrides else _usable_urls(dict(RESERVE_RSS_FEEDS))
+
+
+# ── NW19: 转正源持久化（独立文件，不碰管理员的 system_config.json）──
+
+def _promoted_file():
+    from pathlib import Path as _P
+    return _P(_database.DB_PATH).parent / "news_rss_promoted.json"
+
+
+def _get_promoted_feeds() -> dict[str, str]:
+    try:
+        f = _promoted_file()
+        if f.is_file():
+            raw = json.loads(f.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                return {str(k): str(v).strip() for k, v in raw.items()
+                        if k and str(v).strip()}
+    except Exception as e:
+        logger.warning(f"[新闻] 读取自动转正源失败: {e}")
+    return {}
+
+
+def _save_promoted_feeds(feeds: dict[str, str]) -> None:
+    try:
+        f = _promoted_file()
+        tmp = f.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(feeds, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(f)
+    except Exception as e:
+        logger.warning(f"[新闻] 保存自动转正源失败: {e}")
+
+
+def _notify_admins(event: str, title: str, content: str) -> None:
+    """新闻源健康事件 → 管理员站内通知；同一事件 24h 只发一次。"""
+    now_ts = time.time()
+    if now_ts - _notify_seen.get(event, 0.0) < _NOTIFY_INTERVAL_SECONDS:
+        return
+    _notify_seen[event] = now_ts
+    try:
+        rows = execute_query("SELECT username FROM users WHERE role=0")
+        admins = [str(r[0]) for r in rows] if rows else []
+        if not admins:
+            return
+        from backend.api.notification_router import notify_users
+        notify_users(usernames=admins, type_="system", title=title, content=content,
+                     related_link="/news-hub", source_type="news_feeds", source_id=event)
+    except Exception as e:
+        logger.warning(f"[新闻] 管理员通知失败: {e}")
+
+
+def _discover_candidates(cands: dict[str, str]) -> tuple[list[dict], dict]:
+    """探测候选源，返回 (可用清单[有 pubDate 优先、按 kept 降序], 原始结果)。判据与体检一致。"""
+    results = NewsService._probe_sources(cands)
+    ok_items = []
+    for name, (it, arts) in results.items():
+        if it.get("ok") and arts:
+            ok_items.append({"name": name, "url": cands[name],
+                             "kept": int(it.get("kept") or 0),
+                             "pubdate": bool(it.get("latest"))})
+    ok_items.sort(key=lambda x: (not x["pubdate"], -x["kept"]))
+    return ok_items, results
+
+
+def _add_reserves_to_config(ok_items: list[dict], max_add: int = 6) -> list[dict]:
+    """把可用候选写进 system_config 的 news_rss_reserves：只增不删、去重、限量。"""
+    if not ok_items:
+        return []
+    from backend.api.config_router import load_config, save_config
+    cur = load_config()
+    reserves = dict(cur.get("news_rss_reserves") or _get_reserve_feeds())
+    added = []
+    for item in ok_items:
+        if len(added) >= max_add or item["name"] in reserves or item["url"] in set(reserves.values()):
+            continue
+        reserves[item["name"]] = item["url"]
+        added.append(item)
+    if added:
+        cur["news_rss_reserves"] = reserves
+        save_config(cur)
+    return added
+
+
+def _rescue_promotion(results_map: dict, feeds: dict[str, str]) -> None:
+    """NW19: 救场计数 → 连续达标自动转正（只转有 pubDate 的源；无 pubDate 只救场不固化）。"""
+    for name, (it, arts) in results_map.items():
+        if not it.get("ok") or not arts or not it.get("latest"):
+            continue
+        _reserve_rescue[name] = _reserve_rescue.get(name, 0) + 1
+        if (_reserve_rescue[name] >= RESERVE_PROMOTE_ROUNDS
+                and name not in feeds
+                and name not in _get_promoted_feeds()):
+            promoted = _get_promoted_feeds()
+            promoted[name] = str(it.get("url") or "")
+            _save_promoted_feeds(promoted)
+            _reserve_rescue.pop(name, None)
+            logger.info(f"[新闻] 备用源 [{name}] 连续顶替 {RESERVE_PROMOTE_ROUNDS} 轮，已自动转正为主源")
+            _notify_admins(
+                "promote:" + name,
+                "✅ 新闻源自动转正：" + name,
+                f"备用源 [{name}] 已连续救场 {RESERVE_PROMOTE_ROUNDS} 轮且有 pubDate，"
+                "已自动转正为主源（会出现在系统配置的主源清单里；"
+                "想停用就在主源清单删掉它那一行并保存，会同步降级）。",
+            )
+
+
+def _auto_discover_on_outage() -> tuple[list[dict], dict]:
+    """NW21: 主源+备用池全灭时自动寻源（6h 节流），无需人工点按钮。
+
+    返回 (写入备用池的新源, 候选探测原始结果)——原始结果可直接用于本轮续报。"""
+    now_ts = time.time()
+    if now_ts - _last_auto_discover["at"] < AUTO_DISCOVER_INTERVAL_SECONDS:
+        return [], {}
+    _last_auto_discover["at"] = now_ts
+    known = set(_get_rss_feeds().values()) | set(_get_reserve_feeds().values())
+    cands = {n: u for n, u in DISCOVER_CANDIDATES.items() if u not in known}
+    if not cands:
+        return [], {}
+    ok_items, results = _discover_candidates(cands)
+    added = _add_reserves_to_config(ok_items)
+    if added:
+        logger.info(f"[新闻] 全灭自动寻源：新增备用源 {[a['name'] for a in added]}")
+        _notify_admins(
+            "auto_discover",
+            "🔎 新闻源全部失效，已自动寻源续报",
+            f"主源与备用池都取不到内容，已自动探测 {len(cands)} 个候选并新增 "
+            f"{len(added)} 个可用备用源：{', '.join(a['name'] for a in added)}。\n"
+            "本轮已用可用候选的内容续报；连续救场 2 轮且有 pubDate 的会自动转正为主源。",
+        )
+    return added, results
 
 # 源默认分类：标题没命中任何关键词时使用，避免科技源整体落进"国内"
 SOURCE_DEFAULT_CATEGORY = {
@@ -376,21 +543,50 @@ def _prune_refresh_gate():
 _feed_breaker: dict[str, dict[str, float]] = {}
 
 
-def _breaker_mark(source: str, ok: bool) -> None:
+def _breaker_mark(source: str, ok: bool, error: str = "") -> None:
     st = _feed_breaker.setdefault(source, {"fails": 0.0, "until": 0.0})
     if ok:
         if st["fails"] or st["until"]:
             logger.info(f"[新闻] 源 [{source}] 已恢复，解除熔断")
         st["fails"], st["until"] = 0.0, 0.0
+        _breaker_opened_at.pop(source, None)
         return
     st["fails"] += 1
     if st["fails"] >= SOURCE_FAIL_THRESHOLD:
-        st["until"] = time.time() + SOURCE_COOLDOWN_MINUTES * 60
+        now_ts = time.time()
+        opened = _breaker_opened_at.setdefault(source, now_ts)
+        first_open = st["until"] <= 0
+        st["until"] = now_ts + SOURCE_COOLDOWN_MINUTES * 60
         logger.warning(
             f"[新闻] 源 [{source}] 连续 {int(st['fails'])} 轮无可用内容，"
             f"熔断 {SOURCE_COOLDOWN_MINUTES} 分钟后自动重试；"
             f"若长期如此，请更新 system_config.json 的 news_rss_feeds"
         )
+        if first_open:
+            _notify_admins(
+                "breaker:" + source,
+                "⚠️ 新闻源已熔断：" + source,
+                f"源 [{source}] 连续 {int(st['fails'])} 轮取不到可用内容，"
+                f"已自动跳过 {SOURCE_COOLDOWN_MINUTES} 分钟（其余源不受影响，重试恢复后自动回归）。\n"
+                f"最近原因：{error or '未知'}\n"
+                "可运行 python scripts/check_news_feeds.py --discover 找替换源，"
+                "或到系统配置更新 news_rss_feeds。",
+            )
+        # NW19: 转正源长期不可用 → 自动降回备用池
+        if now_ts - opened > PROMOTED_UNPROMOTE_HOURS * 3600:
+            promoted = _get_promoted_feeds()
+            if source in promoted:
+                promoted.pop(source)
+                _save_promoted_feeds(promoted)
+                _reserve_rescue.pop(source, None)
+                _breaker_opened_at.pop(source, None)
+                logger.warning(f"[新闻] 转正源 [{source}] 持续不可用超过 {PROMOTED_UNPROMOTE_HOURS} 小时，已自动降级回备用池")
+                _notify_admins(
+                    "unpromote:" + source,
+                    "↩️ 新闻源自动降级：" + source,
+                    f"此前自动转正的源 [{source}] 已连续不可用超过 {PROMOTED_UNPROMOTE_HOURS} 小时，"
+                    "已自动降回备用池（不再参与主抓取，恢复后可再次积累转正）。",
+                )
 
 
 def _breaker_open_until(source: str) -> float:
@@ -426,7 +622,8 @@ class NewsService:
 
     @staticmethod
     def get_news_list(category: str = "", page: int = 1,
-                      page_size: int = 20, username: str = "") -> dict:
+                      page_size: int = 20, username: str = "",
+                      keyword: str = "", unread_only: bool = False) -> dict:
         """获取新闻列表 — 页面访问入口"""
         NewsService._trigger_fetch_if_needed()
 
@@ -436,11 +633,19 @@ class NewsService:
         if category:
             where += " AND category=?"
             params.append(category)
+        if keyword:
+            where += " AND (title LIKE ? OR summary LIKE ?)"
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        if unread_only and username:
+            where += (" AND NOT EXISTS (SELECT 1 FROM news_view_log v0 "
+                      "WHERE v0.news_id=news_articles.id AND v0.username=?)")
+            params.append(username)
 
         rows = execute_query(
             f"SELECT id, title, url, source_name, "
             f"CASE WHEN is_ai_summarized=1 THEN COALESCE(ai_one_liner, '') ELSE '' END as display_summary, "
-            f"category, image_url, published_at, fetched_at "
+            f"category, image_url, published_at, fetched_at, "
+            f"(SELECT COUNT(*) FROM news_view_log v1 WHERE v1.news_id=news_articles.id) AS view_count "
             f"FROM news_articles {where} "
             f"ORDER BY COALESCE(published_at, fetched_at) DESC "
             f"LIMIT ? OFFSET ?",
@@ -451,12 +656,13 @@ class NewsService:
             f"SELECT COUNT(*) FROM news_articles {where}", tuple(params)
         )
         total = count_row[0][0] if count_row else 0
-        if total == 0 and not category:
+        if total == 0 and not category and not keyword and not unread_only:
             # NW5: 抓取长期失败时不让新闻页整页空白, 回退展示最近一批
             rows = execute_query(
                 f"""SELECT id, title, url, source_name,
                           CASE WHEN is_ai_summarized=1 THEN COALESCE(ai_one_liner, '') ELSE '' END as display_summary,
-                          category, image_url, published_at, fetched_at
+                          category, image_url, published_at, fetched_at,
+                          (SELECT COUNT(*) FROM news_view_log v3 WHERE v3.news_id=news_articles.id) AS view_count
                    FROM news_articles
                    WHERE status='active'
                      AND fetched_at = (SELECT MAX(fetched_at) FROM news_articles WHERE status='active')
@@ -491,6 +697,7 @@ class NewsService:
                 "published_at": r[7] or "", "fetched_at": r[8] or "",
                 "is_viewed": r[0] in viewed_ids,
                 "is_favorited": r[0] in fav_ids,
+                "view_count": int(r[9] or 0),
             })
 
         return {
@@ -535,6 +742,11 @@ class NewsService:
             "tags": _safe_json_loads(r[10], []),
             "published_at": r[11] or "",
             "points_awarded": points,
+            # 前端收藏按钮回显 + "AI 摘要生成中"提示（摘要已改后台生成，首开为空）
+            "is_favorited": bool(execute_query(
+                "SELECT id FROM news_favorites WHERE username=? AND news_id=?",
+                (username, news_id))),
+            "ai_generating": bool(need_ai),
         }
 
     # ── 抓取状态与按需触发 ──
@@ -869,7 +1081,7 @@ class NewsService:
         if to_probe:
             results = NewsService._probe_sources(to_probe)
             for name, (item, _arts) in results.items():
-                _breaker_mark(name, ok=bool(item.get("ok")))
+                _breaker_mark(name, ok=bool(item.get("ok")), error=str(item.get("error") or ""))
                 health.append(item)
 
         for name, left in cooling.items():
@@ -880,20 +1092,44 @@ class NewsService:
 
         unique = NewsService._collect(results, list(feeds.keys()))
 
-        # NW18: 主源全军覆没 → 备用源自动顶替一轮（不计入熔断统计，只做临时续命）
+        # NW18/NW21: 主源全军覆没 → 备用池顶替；仍空则自动寻源（6h 节流），全程零人工。
         if not unique:
-            reserves = _get_reserve_feeds()
+            reserves = {n: u for n, u in _get_reserve_feeds().items() if n not in feeds}
             if reserves:
                 res_results = NewsService._probe_sources(reserves)
                 res_ok = [n for n, (it, _a) in res_results.items() if it.get("ok")]
                 health.extend(it for it, _a in res_results.values())
                 unique = NewsService._collect(res_results, list(reserves.keys()))
+                _rescue_promotion(res_results, feeds)
                 if unique:
-                    logger.info(f"[新闻] 主源全部失效，备用源顶替成功: {res_ok} —— "
-                                f"验证稳定后请把备用源搬进 news_rss_feeds 固化")
+                    logger.info(f"[新闻] 主源全部失效，备用源顶替成功: {res_ok}")
+            # NW21: 备用池也没救回来 → 自动寻源，可用候选直接续报本轮
+            if not unique:
+                _added, disc_results = _auto_discover_on_outage()
+                if disc_results:
+                    health.extend(it for it, _a in disc_results.values())
+                    unique = NewsService._collect(disc_results, list(disc_results.keys()))
+                    _rescue_promotion(disc_results, feeds)
+            if unique:
+                _notify_admins(
+                    "all_main_down",
+                    "🚨 新闻主源全部失效（已自动续报）",
+                    f"{len(feeds)} 个主源本轮全部取不到内容，已由备用源/自动寻源续报。\n"
+                    "连续救场 2 轮且有 pubDate 的备用源会自动转正为主源，无需人工搬配置。",
+                )
             else:
-                logger.error("[新闻] 主源全部失效且未配置备用源(news_rss_reserves) —— "
-                             "执行 python scripts/check_news_feeds.py 找新源")
+                logger.error("[新闻] 主源、备用池与自动寻源本轮都拿不到内容")
+                _notify_admins(
+                    "all_sources_dead",
+                    "🚨 新闻源全部失效（含自动寻源）",
+                    "主源、备用池与候选清单本轮都取不到内容，"
+                    "新闻页会持续展示最后一批可用数据直到源恢复。\n"
+                    "请运行 python scripts/check_news_feeds.py --discover 排查新源，"
+                    "验证后写入系统配置 news_rss_reserves（备用池）或 news_rss_feeds（主源清单）。",
+                )
+        elif _reserve_rescue:
+            # 主源够用 → 清零救场计数：转正要求"连续"顶替，防止偶发全灭混进转正
+            _reserve_rescue.clear()
 
         ok_n = sum(1 for h in health if h.get("ok"))
         logger.info(f"[新闻] RSS源 {ok_n}/{len(health)} 可用"
@@ -942,6 +1178,7 @@ class NewsService:
         return {
             "checked_at": _now(),
             "verdict": verdict,
+            "promoted": sorted(_get_promoted_feeds()),
             "usable_sources": sum(1 for it in sources if it.get("ok")),
             "window_hours": NEWS_WINDOW_HOURS,
             "stored_total": NewsService._stored_article_count(),
@@ -1112,17 +1349,23 @@ class NewsService:
 
     @staticmethod
     def get_favorites(username: str) -> list[dict]:
+        # 收藏 tab 与推荐流共用同一行渲染：字段必须齐全，
+        # 否则 is_favorited 缺失会把"取消收藏"点成静默重复收藏（INSERT OR IGNORE 不报错）
         rows = execute_query(
             "SELECT n.id, n.title, n.url, n.source_name, "
-            "n.ai_one_liner, n.category, n.image_url, n.published_at "
+            "n.ai_one_liner, n.category, n.image_url, n.published_at, n.fetched_at, "
+            "(SELECT COUNT(*) FROM news_view_log v1 WHERE v1.news_id=n.id) AS view_count, "
+            "EXISTS (SELECT 1 FROM news_view_log v2 WHERE v2.news_id=n.id AND v2.username=?) AS viewed "
              "FROM news_favorites f JOIN news_articles n ON f.news_id = n.id "
              "WHERE f.username=? AND n.status='active' ORDER BY f.created_at DESC",
-            (username,)
+            (username, username)
         )
         return [
             {"id": r[0], "title": r[1], "url": r[2], "source_name": r[3],
              "summary": r[4] or "", "category": r[5], "image_url": r[6] or "",
-             "published_at": r[7] or ""}
+             "published_at": r[7] or "", "fetched_at": r[8] or "",
+             "view_count": int(r[9] or 0), "is_viewed": bool(r[10]),
+             "is_favorited": True}
             for r in rows
         ]
 
@@ -1351,13 +1594,16 @@ class NewsService:
 async def get_news_list(
     request: Request,
     category: str = Query("", description="分类筛选"),
+    keyword: str = Query("", description="标题/摘要关键词"),
+    unread_only: bool = Query(False, description="仅未读"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
 ):
     """获取新闻列表"""
     user = get_current_user(request)
     try:
-        return NewsService.get_news_list(category, page, page_size, user["username"])
+        return NewsService.get_news_list(category, page, page_size, user["username"],
+                                         keyword=keyword, unread_only=unread_only)
     except Exception as e:
         logger.warning(f"获取新闻列表异常: {e}")
         return {"articles": [], "total": 0, "page": page, "page_size": page_size, "cache_fresh": False}
@@ -1450,6 +1696,37 @@ async def get_today_briefing(request: Request):
     user = get_current_user(request)
     # NW3: 简报每天首次访问会同步调 AI, 必须放线程池, 否则整站卡住几十秒
     return await run_in_threadpool(NewsService.get_daily_briefing, user["username"])
+
+
+@router.post("/news/feeds/discover", summary="[管理员] 自动寻找可用新闻源并写入备用池")
+async def discover_news_feeds(request: Request):
+    """NW20: 一键探测候选源，把实测可用的写进 news_rss_reserves。
+
+    判据与体检完全一致（_probe_sources：HTTP 200 + 有在时效内的条目）；
+    已在主源/备用池里的 URL 不重复加；有 pubDate 的排前面；单次最多新增 6 个，
+    只增不删（要停用请在系统配置页删行）。
+    注：主源+备用池全灭时抓取链路会自动调用同一套寻源（NW21，6h 节流），
+    本端点只是给管理员"现在就试一次"的手动入口。"""
+    user = get_current_user(request)
+    if user.get("role") != 0:
+        raise HTTPException(403, "仅管理员可执行自动寻源")
+
+    def _run() -> dict:
+        feeds_now = _get_rss_feeds()
+        reserves_now = _get_reserve_feeds()
+        known_urls = set(feeds_now.values()) | set(reserves_now.values())
+        cands = {n: u for n, u in DISCOVER_CANDIDATES.items() if u not in known_urls}
+        skipped = len(DISCOVER_CANDIDATES) - len(cands)
+        if not cands:
+            return {"probed": 0, "skipped_known": skipped, "ok": [], "added": []}
+        ok_items, _results = _discover_candidates(cands)
+        added = _add_reserves_to_config(ok_items)
+        if added:
+            logger.info(f"[新闻] 手动寻源写入备用池: {[a['name'] for a in added]}")
+        return {"probed": len(cands), "skipped_known": skipped,
+                "ok": ok_items, "added": added}
+
+    return await run_in_threadpool(_run)
 
 
 @router.get("/news/stats")
