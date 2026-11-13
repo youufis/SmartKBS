@@ -1,3 +1,4 @@
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout, Input, Button, Space, Checkbox, Modal, Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag, Empty, theme, Dropdown, Popover } from 'antd'
@@ -829,12 +830,7 @@ const ChatPage: React.FC = () => {
       }
       if (action === 'download') {
         const blob = new Blob([file.content || ''], { type: 'text/markdown;charset=utf-8' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = file.filename || node.filename || 'history.md'
-        a.click()
-        URL.revokeObjectURL(url)
+        downloadBlob(blob, file.filename || node.filename || 'history.md')
         return
       }
     } catch (e: unknown) {

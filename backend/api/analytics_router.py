@@ -19,6 +19,7 @@ from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PR
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 from backend.prompts import build_ai_role
 # E1: 考试判分/统计的唯一实现（成绩弹窗 / 本页 / Excel 导出共用）
+from backend.question_labels import question_type_label
 from backend.exam_stats import (
     exam_graded,
     question_stats as exam_question_stats,
@@ -639,8 +640,9 @@ async def export_class_overview_docx(
     total_students = meta.get("total_students", 0)
 
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
-    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
@@ -704,8 +706,9 @@ async def export_teaching_suggestions_docx(
     total_students = meta.get("total_students", 0)
 
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
-    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
@@ -768,8 +771,9 @@ async def export_exam_report_docx(
 
     content = report.get("content") or ""
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
-    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
@@ -813,7 +817,7 @@ async def export_exam_report_docx(
                             f"（及格线 {exam['pass_score']} 分）"],
             ]},
             {"heading": "附录二：每题正确率", "columns": ["题号", "题型", "正确率%", "答对/已判", "知识点"],
-             "rows": [[i + 1, q["type"], q["correct_rate"],
+             "rows": [[i + 1, question_type_label(q["type"]), q["correct_rate"],
                        f"{q['correct_count']}/{q['total_count']}",
                        str(q.get("knowledge_points") or "")[:40]] for i, q in enumerate(qs)]},
         ]

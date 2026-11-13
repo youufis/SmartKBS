@@ -1,3 +1,4 @@
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Card, Table, Button, Space, Typography, Modal, Tag, Spin, Empty, Descriptions, Divider, Tooltip, Statistic, Row, Col, Select, Tabs, Input, DatePicker, Switch } from 'antd'
 import { message, modalApi } from '../utils/feedback'
@@ -1012,13 +1013,7 @@ const AttendanceStats: React.FC = () => {
       const blob = new Blob([resp.data], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       })
-      const link = document.createElement('a')
-      link.href = URL.createObjectURL(blob)
-      link.download = name
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(link.href)
+      downloadBlob(blob, name)
       message.success(t('exportStarted'))
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('exportFailed'))
@@ -1761,12 +1756,7 @@ const PickLedgerManager: React.FC = () => {
       const blob = new Blob([resp.data], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = name
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadBlob(blob, name)
     } catch (err: any) {
       // 404 = 这批筛选没有记录；400 = 超上限，后端给的原因要原样说清楚
       const detail = err?.response?.data

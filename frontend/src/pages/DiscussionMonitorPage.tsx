@@ -1,3 +1,4 @@
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useRef } from 'react'
 import { Card, Button, Space, Typography, Tag, Spin, Row, Col, Statistic, Progress, Modal, Rate } from 'antd'
 import { message } from '../utils/feedback'
@@ -295,12 +296,7 @@ const DiscussionMonitorPage: React.FC = () => {
                   `/api/interaction/groups/${activeGroupId}/summary/export`,
                   { responseType: 'blob', timeout: 180000 },
                 )
-                const href = URL.createObjectURL(res.data)
-                const a = document.createElement('a')
-                a.href = href
-                a.download = `讨论总结_${data?.groups.find(g => g.id === activeGroupId)?.name || activeGroupId}.docx`
-                a.click()
-                URL.revokeObjectURL(href)
+                downloadBlob(res.data, `讨论总结_${data?.groups.find(g => g.id === activeGroupId)?.name || activeGroupId}.docx`)
               } catch (e: any) {
                 message.error(e?.response?.data?.detail || t('exportFailed'))
               } finally {

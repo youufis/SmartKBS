@@ -2733,8 +2733,9 @@ async def export_board_summary(room_id: int, request: Request):
     from datetime import datetime
 
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles['Normal']
-    style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5
 

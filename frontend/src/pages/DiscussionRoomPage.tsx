@@ -1,3 +1,4 @@
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Card, Button, Space, Typography, Input, Tag, Spin, Empty, Tooltip, Modal, Rate, Collapse, Drawer, List, Avatar } from 'antd'
 import { message } from '../utils/feedback'
@@ -29,12 +30,7 @@ interface Message {
 
 async function downloadWord(url: string, filename: string) {
   const { data } = await apiClient.get(url, { responseType: 'blob', timeout: 180000 })
-  const href = URL.createObjectURL(data)
-  const a = document.createElement('a')
-  a.href = href
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(href)
+  downloadBlob(data, filename)
 }
 
 const DiscussionRoomPage: React.FC = () => {

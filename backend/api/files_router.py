@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from backend.api.auth_guard import unauthorized
 from backend.api.dependencies import get_current_user
@@ -403,6 +403,16 @@ async def serve_static_file(path: str, request: Request):
             filename=os.path.basename(requested_path),
             content_disposition_type="attachment",
         )
+    # 预览桥：html 目录的 inline HTML 注入 token 桥 + 存储 shim（沙箱 iframe 内 API 鉴权自愈）
+    if requested_path.lower().endswith((".html", ".htm")):
+        from backend.html_preview_bridge import inject_preview_bridge
+        try:
+            html_text = Path(requested_path).read_text(encoding="utf-8", errors="replace")
+            # no-store: 旧 FileResponse 带 Last-Modified 无 cache-control，浏览器启发式缓存
+            # 会让 iframe 一直用修复前的旧 HTML（桥注入不生效）
+            return HTMLResponse(inject_preview_bridge(html_text), headers={"Cache-Control": "no-store"})
+        except OSError:
+            return FileResponse(requested_path)
     return FileResponse(requested_path)
 
 

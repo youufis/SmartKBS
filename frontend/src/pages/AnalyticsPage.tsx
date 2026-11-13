@@ -1,3 +1,4 @@
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useRef } from 'react'
 import { Alert, Card, Row, Col, Typography, Spin, Select, Button, Space, Empty, Tabs, Statistic, Tag, Tooltip } from 'antd'
 import { message } from '../utils/feedback'
@@ -91,12 +92,7 @@ async function downloadWord(url: string, filename: string) {
   const blob = new Blob([data], {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   })
-  const href = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = href
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(href)
+  downloadBlob(blob, filename)
 }
 
 async function exportError(e: any, fallback: string): Promise<string> {
@@ -412,12 +408,7 @@ const AnalyticsPage: React.FC = () => {
   const exportReportAsMarkdown = () => {
     if (!report) return
     const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = t('analytics.reportFilename', { grade, cls })
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(blob, t('analytics.reportFilename', { grade, cls }))
   }
 
   const exportExamExcel = () => {

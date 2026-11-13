@@ -390,5 +390,12 @@
   "discRefreshTomorrow": "今日刷新次数已用完，明日恢复",
   "discPointsRule": "每点开 1 张卡片 +1 分，每日上限 {{max}} 分",
   "discFavAt": "收藏于 {{time}}",
-  "listNoMatch": "没有匹配的内容"
+  "listNoMatch": "没有匹配的内容",
+  "previewWinDragHint": "按住标题拖移窗口",
+  "previewWin70": "窗口宽度 70%",
+  "previewWin90": "窗口宽度 90%",
+  "previewWinFull": "全屏",
+  "previewWinExitFull": "退出全屏",
+  "previewWinReset": "恢复默认大小与位置",
+  "previewWinResizeHint": "拖动调整窗口大小"
 }

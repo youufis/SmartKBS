@@ -27,6 +27,7 @@ from backend.auth import is_admin
 from backend.database import execute_query as user_query, execute_insert_update as db_update
 from backend.logger import logger
 from backend.ai_report_cache import save_report
+from backend.question_labels import question_type_label
 from backend.api.ai_service import call_ai_async
 from backend.prompts import apply_skills, build_ai_role
 from backend.async_utils import spawn_bg
@@ -3002,7 +3003,7 @@ def _explain_markdown(exam_title: str, explanations: list[dict[str, Any]]) -> tu
         if e.get("error"):
             parts.append(f"- 第{i + 1}题：{e['error']}")
             continue
-        parts.append(f"## 第{i + 1}题（{e.get('question_type') or ''}）")
+        parts.append(f"## 第{i + 1}题（{question_type_label(e.get('question_type'))}）")
         parts.append(f"**题目**：{str(e.get('question_text') or '')[:200]}")
         parts.append(f"**我的答案**：{str(e.get('student_answer') or '（空白）')[:80]}"
                      f"　**正确答案**：{str(e.get('correct_answer') or '')[:80]}")
@@ -3011,7 +3012,7 @@ def _explain_markdown(exam_title: str, explanations: list[dict[str, Any]]) -> tu
         parts.append("")
         parts.append(str(e.get("explanation") or ""))
         parts.append("")
-        rows.append([i + 1, e.get("question_type") or "",
+        rows.append([i + 1, question_type_label(e.get("question_type")),
                      str(e.get("student_answer") or "（空白）")[:40],
                      str(e.get("correct_answer") or "")[:40]])
     return "\n".join(parts), rows
@@ -3030,6 +3031,8 @@ async def export_wrong_explain(exam_id: int, request: Request):
     meta = report.get("meta") or {}
     exam_title = meta.get("exam_title") or f"考试 #{exam_id}"
     rows = meta.get("rows") or []
+    # 旧缓存可能仍存原始题型 key：导出时统一转标签，历史文档不再漏 single/true_false
+    rows = [[r[0], question_type_label(r[1]), *r[2:]] if isinstance(r, (list, tuple)) and len(r) >= 2 else r for r in rows]
     tables = [{"heading": "附录：错题一览",
                "columns": ["题号", "题型", "我的答案", "正确答案"], "rows": rows}] if rows else []
     return docx_response(
@@ -3193,7 +3196,7 @@ async def export_wrong_analysis(exam_id: int, request: Request):
             tables = [{
                 "heading": "附录：错因数据表",
                 "columns": ["题号", "题型", "正确率%", "答错/已判", "正确答案", "典型错答"],
-                "rows": [[int(q["index"]) + 1, q["type"], q["correct_rate"],
+                "rows": [[int(q["index"]) + 1, question_type_label(q["type"]), q["correct_rate"],
                           f"{q['total_count'] - q['correct_count']}/{q['total_count']}",
                           str(q["correct_answer"])[:30],
                           "；".join(f"{w['answer']}×{w['count']}" for w in q["wrong_answers"])[:70]]

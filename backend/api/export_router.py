@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from backend.docx_fonts import docx_font_body, docx_font_heading
 from openpyxl.utils import get_column_letter
 
 from backend.api.dependencies import get_current_user
@@ -36,6 +37,7 @@ from backend.quiz_stats import (
     quiz_graded, answer_index_map, is_question_correct, pending_keys, quiz_total,
 )
 # E1: 考试成绩口径的唯一实现（成绩弹窗 / 学情分析 / 本导出共用）
+from backend.question_labels import question_type_label
 from backend.exam_stats import (
     exam_graded,
     pending_keys as exam_pending_keys,
@@ -50,7 +52,9 @@ router = APIRouter()
 MAX_EXPORT_ROWS = 50000
 
 # ── 样式常量 ──
-HEADER_FONT = Font(name="微软雅黑", bold=True, size=11, color="FFFFFF")
+# 字体单一真值：系统配置 DOCX_FONT_BODY/DOCX_FONT_HEADING（Word/Excel 同口径）
+def _header_font():
+    return Font(name=docx_font_heading(), bold=True, size=11, color="FFFFFF")
 HEADER_FILL = PatternFill(start_color="1677FF", end_color="1677FF", fill_type="solid")
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 CELL_ALIGNMENT = Alignment(horizontal="center", vertical="center")
@@ -60,7 +64,8 @@ BORDER = Border(
     top=Side(style="thin"),
     bottom=Side(style="thin"),
 )
-TITLE_FONT = Font(name="微软雅黑", bold=True, size=14)
+def _title_font():
+    return Font(name=docx_font_heading(), bold=True, size=14)
 
 
 def _guard_row_count(total: int, what: str = "导出") -> None:
@@ -110,7 +115,7 @@ def _style_header(ws, row: int, cols: int):
     """给表头行设置样式"""
     for col in range(1, cols + 1):
         cell = ws.cell(row=row, column=col)
-        cell.font = HEADER_FONT
+        cell.font = _header_font()
         cell.fill = HEADER_FILL
         cell.alignment = HEADER_ALIGNMENT
         cell.border = BORDER
@@ -145,6 +150,17 @@ def _excel_response(wb, filename: str) -> StreamingResponse:
                 cv = cell.value
                 if isinstance(cv, str) and cv and cv[0] in _FORMULA_PREFIXES:
                     cell.value = "'" + cv
+    # S2: 正文字体跟随配置——只替换仍为默认 Calibri 的单元格，保留加粗/字号/颜色
+    body_name = docx_font_body()
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                f = cell.font
+                if f is None or f.name in (None, "Calibri"):
+                    cell.font = Font(name=body_name, size=(f.size if f and f.size else 11),
+                                     bold=bool(f and f.bold), italic=bool(f and f.italic),
+                                     underline=(f.underline if f else None),
+                                     color=(f.color if f else None))
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -253,7 +269,7 @@ def export_scores(
     if cls:
         title += f" - {cls}班"
     ws.merge_cells("A1:G1")
-    ws.cell(1, 1, title).font = TITLE_FONT
+    ws.cell(1, 1, title).font = _title_font()
 
     headers = ["年级", "班级", "学号", "学生姓名", "积分", "排名", "最后更新"]
     for i, h in enumerate(headers, 1):
@@ -334,7 +350,7 @@ def export_exam_result(exam_id: int, request: Request):
 
     title = f"考试报告 - {exam['title']}"
     ws1.merge_cells("A1:H1")
-    ws1.cell(1, 1, title).font = TITLE_FONT
+    ws1.cell(1, 1, title).font = _title_font()
 
     # 考试信息
     info = [
@@ -395,15 +411,12 @@ def export_exam_result(exam_id: int, request: Request):
     if questions:
         ws2 = wb.create_sheet("逐题分析")
         ws2.merge_cells("A1:F1")
-        ws2.cell(1, 1, f"逐题分析 - {exam['title']}").font = TITLE_FONT
+        ws2.cell(1, 1, f"逐题分析 - {exam['title']}").font = _title_font()
 
         headers2 = ["题号", "题型", "题目内容", "正确答案", "分值", "正确率", "已判/提交"]
         for i, h in enumerate(headers2, 1):
             ws2.cell(3, i, h)
         _style_header(ws2, 3, len(headers2))
-
-        type_map = {"single": "单选", "multiple": "多选", "true_false": "判断", "short": "简答",
-                     "fill": "填空", "essay": "作文", "subjective": "主观题"}
 
         # E1: 正确率改由 backend.exam_stats 统一计算 —— 旧实现拿 answers.get(qid) 与正确答案
         #     做字符串比较，而 answers 里存的是判分对象（dict），比较恒为 False，正确率永远是 0%。
@@ -417,7 +430,7 @@ def export_exam_result(exam_id: int, request: Request):
             row = 4 + idx
             qs = q_stat_list[idx]
             ws2.cell(row, 1, idx + 1)
-            ws2.cell(row, 2, type_map.get(q["type"], q["type"]))
+            ws2.cell(row, 2, question_type_label(q["type"]))
             # 截取题目内容
             q_text = q["question_text"]
             if len(q_text) > 80:
@@ -502,7 +515,7 @@ def export_rollcall(
     if cls:
         title += f" - {cls}班"
     ws.merge_cells("A1:H1")
-    ws.cell(1, 1, title).font = TITLE_FONT
+    ws.cell(1, 1, title).font = _title_font()
 
     # 学号紧跟姓名：同名学生在导出的 Excel 里也能分清是谁
     headers = ["教师", "年级", "班级", "学生姓名", "学号", "回答结果", "积分变动", "时间"]
@@ -618,7 +631,7 @@ def export_pick_ledger(
     if cls:
         title += f" - {cls}"
     ws.merge_cells(f"A1:{get_column_letter(12)}1")
-    ws.cell(1, 1, title).font = TITLE_FONT
+    ws.cell(1, 1, title).font = _title_font()
     headers = ["时间", "活动", "年级", "班级", "学号", "姓名", "本轮", "结果",
                "积分", "操作人", "明细来源", "备注"]
     for i, h in enumerate(headers, 1):
@@ -758,7 +771,7 @@ def export_tasks(
 
         # 标题
         ws.merge_cells("A1:E1")
-        ws.cell(1, 1, f"任务提交记录 - {t[2]}").font = TITLE_FONT
+        ws.cell(1, 1, f"任务提交记录 - {t[2]}").font = _title_font()
         ws.cell(2, 1, f"描述: {t[3] or ''}")
         ws.cell(2, 2, f"状态: {t[4]}")
         ws.cell(2, 4, f"创建时间: {t[5] or ''}")
@@ -855,7 +868,7 @@ def export_progress(
     if class_name:
         title += f" - {class_name}班"
     ws.merge_cells("A1:H1")
-    ws.cell(1, 1, title).font = TITLE_FONT
+    ws.cell(1, 1, title).font = _title_font()
 
     headers = ["姓名", "年级", "班级", "课程", "知识点总数", "已完成", "完成率", "状态"]
     for i, h in enumerate(headers, 1):
@@ -1462,7 +1475,7 @@ def export_summary_excel(
         ws = wb.create_sheet(_safe_sheet_name(name))
         ncol = max(len(headers), 1)
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
-        ws.cell(1, 1, f"学生活动汇总 - {scope}{period}").font = TITLE_FONT
+        ws.cell(1, 1, f"学生活动汇总 - {scope}{period}").font = _title_font()
         for i, h in enumerate(headers, 1):
             ws.cell(3, i, h)
         _style_header(ws, 3, len(headers))

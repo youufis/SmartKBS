@@ -43,12 +43,12 @@
 > - 🏷 **Question bank**: import & edit share one validation (malformed questions rejected) · cross-creator dedupe admin-only · extraction size caps & image magic-byte checks · generation dedupe · field length limits
 > - 📊 **Analytics & summaries**: scores student-ID migration (same-name separation, auto at startup) · ID-first aggregation · student analytics daily cap · class-summary prompt data isolation
 > - 🔗 **Resource lifecycle**: delete auto-clears bindings · rename auto-updates names (incl. re-share rows) · dead links hidden instantly · exact same-name matching · chat history sidebar & archived attachments
-> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save) · task-list failure retry & semantic score colors · live pulse & softer suggestions
+> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save) · task-list failure retry & semantic score colors · live pulse & softer suggestions · unified Chinese type labels in exports · configurable export fonts (Word/Excel same criterion)
 > - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
 > - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
 > - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled · route-level code splitting (first-load -79%) · hand-drawn SVG radar
-> - 🎨 **Interface experience**: home/task-list skeletons · refresh entry & updated-at · visible-period revalidation & ticking countdowns · quick-action tiles · semantic tags dark-consistent · mobile wrap/overflow fixes · row-level keyboard access · unified icon language
-> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · post-auth catalog loading · themed feedback consolidation · 146 new regression tests
+> - 🎨 **Interface experience**: home/task-list skeletons · refresh entry & updated-at · visible-period revalidation & ticking countdowns · quick-action tiles · semantic tags dark-consistent · mobile wrap/overflow fixes · row-level keyboard access · unified icon language · draggable/resizable/fullscreen preview window · sandbox preview token-bridge self-healing
+> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · post-auth catalog loading · themed feedback consolidation · 146 new regression tests · unified blob download utility · missing i18n keys zeroed
 >
 > - ⚠️ **Breaking changes**: none
 >
@@ -409,6 +409,7 @@ Displays HTML teaching resource files in a card grid:
 - **🔗 Direct positioning**: opening a task-list or share notification lands straight on the right tab instead of the default one
 - **🤖 AI Generation**: 5 resource types (Animation Explanation, Interactive Quiz, Chapter Exercise, Lab Interaction, Custom HTML)
 - **👁️ Resource View Tracking**: Automatically records student viewing behavior
+- **🖥️ Preview window**: drag / resize / fullscreen with remembered size & position; sandboxed preview auto-auth (interactive courseware class/rollcall usable)
 
 > **Available to all logged-in users; Students can only view shared resources**
 
@@ -1249,6 +1250,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Class-wide error review (high-error picks + Word export); exam / practice / quiz AI analytics export to Word (per-question accuracy tables)
 - Score dialog button tiers; cached exports (no re-billing); history preview renders tables & math
 - Configurable multiple-choice scoring: default no points for partial/wrong; optional 50% of full score for partial, 0 for wrong (exam/practice/quiz, proportional to full score; takes effect on save)
+- Unified Chinese question-type labels in Word/Excel exports; configurable export fonts (body/heading, Word/Excel same criterion, applies on re-export)
 - Task list: failure retry (no longer disguised as empty) · semantic score colors · live pulse · softer suggestions
 
 **🎪 Classroom interaction**
@@ -1276,6 +1278,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Home/task-list skeletons; refresh entry & updated-at; visible-period revalidation, ticking countdowns
 - Quick-action tiles; semantic tags (scores/focus/counts) dark-consistent; unified icon language
 - Mobile: stat-title wrapping, category-strip wrap separators, quick-switch overflow fade; row-level click & keyboard access
+- Preview window drag/resize/fullscreen with remembered size & position; sandbox preview token-bridge self-healing (interactive courseware class/rollcall/scores usable)
 
 **⚙️ Engineering & data**
 
@@ -1283,6 +1286,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - WS proxy & reconnect fixes; silent notification-type loss fixed; timing/scoring idempotency corrected
 - 146 new regression tests (curriculum 27 + sharing 31 + question bank 18 + analytics 7 + summary 6 + monitor/export 14 + score/honor/portrait 11 + users 9 + MC scoring 23); zero new ruff / tsc warnings
 - Post-auth catalog loading (no login-page 401s); message/confirm themed consolidation
+- Unified blob download utility (Electron-safe); missing resource-preview i18n keys zeroed
 
 ### v7.x – v9.0.0
 

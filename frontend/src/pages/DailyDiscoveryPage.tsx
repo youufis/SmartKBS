@@ -1,4 +1,5 @@
 /** 每日精选 - 独立页面 */
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useEffect, useState } from 'react';
 import { Card, Row, Col, Tag, Button, Space, Typography, Spin, Modal, Tooltip, Empty, Result } from 'antd'
 import { message } from '../utils/feedback';
@@ -81,12 +82,7 @@ const DailyDiscoveryPage: React.FC = () => {
     setPosterBusy(true);
     try {
       const blob = await getPosterBlob(card.id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'discovery_' + card.id + '.png';
-      a.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+      downloadBlob(blob, 'discovery_' + card.id + '.png');
     } catch {
       message.error(t('discPosterFail'));
     } finally {

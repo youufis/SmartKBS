@@ -4,6 +4,7 @@
  * 题型 / 难度 / 学科 / 知识点 / 创建者 / 质量检查。
  * 所有图表和表格共用同一套筛选条件，点击统计项可回到题目明细。
  */
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Col, DatePicker, Empty, Input, Row, Select, Space, Spin, Statistic, Table, Tag, Tooltip, Typography, Modal } from 'antd'
 import { message, modalApi } from '../utils/feedback'
@@ -166,12 +167,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
       ...data.by_creator.map(x => [x.name || x.username, String(x.count)]),
     ]
     const csv = '\ufeff' + lines.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-    const a = document.createElement('a')
-    a.href = href
-    a.download = `题库统计_${dayjs().format('YYYYMMDD_HHmm')}.csv`
-    a.click()
-    URL.revokeObjectURL(href)
+    downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `题库统计_${dayjs().format('YYYYMMDD_HHmm')}.csv`)
   }
 
   const reset = () => {

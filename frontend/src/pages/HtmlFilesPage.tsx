@@ -14,6 +14,8 @@ import { subKindLabel } from '../utils/resourceType'
 import KindTag from '../components/KindTag'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import ResizableModal from '../components/ResizableModal'
+import { previewSrc } from '../api/files'
 
 const HtmlFilesPage: React.FC = () => {
   const { t } = useTranslation(['menu', 'curriculum'])
@@ -848,30 +850,29 @@ const HtmlFilesPage: React.FC = () => {
 
       {/* H2: HTML 资源沙箱预览 —— 无 allow-same-origin, 页面脚本无法读取主站 localStorage/令牌;
           练习页通过 URL ?token= 取令牌提交（getToken 已兼容） */}
-      <Modal
+      <ResizableModal
         title={previewRes?.name || ''}
         open={!!previewRes}
-        onCancel={() => setPreviewRes(null)}
-        width="90%"
-        destroyOnHidden
+        onClose={() => setPreviewRes(null)}
+        storageKey="smartkb_preview_html"
         footer={
           <Space>
             <a href={previewRes?.url} download style={{ textDecoration: 'none' }}>
-              <Button icon={<DownloadOutlined />}>{t('cyDownloadCourseware')}</Button>
+              <Button icon={<DownloadOutlined />}>{t('curriculum:cyDownloadCourseware')}</Button>
             </a>
-            <Button onClick={() => setPreviewRes(null)}>{t('cyClose')}</Button>
+            <Button onClick={() => setPreviewRes(null)}>{t('curriculum:cyClose')}</Button>
           </Space>
         }
       >
         {previewRes && (
           <iframe
-            src={previewRes.url}
+            src={previewSrc(previewRes.url)}
             sandbox="allow-scripts allow-forms allow-popups allow-modals"
-            style={{ width: '100%', height: '70vh', border: 'none' }}
+            style={{ width: '100%', height: '100%', border: 'none' }}
             title={previewRes.name}
           />
         )}
-      </Modal>
+      </ResizableModal>
     </Layout>
   )
 }

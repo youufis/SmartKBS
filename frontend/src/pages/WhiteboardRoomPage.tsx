@@ -1,6 +1,7 @@
 /**
  * 白板房间页面 — 教师演示/学生观看的交互界面
  */
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Button, Space, Typography, Tag, Drawer, Tooltip, Badge, Segmented, Alert } from 'antd'
 import { message, modalApi as Modal } from '../utils/feedback'
@@ -278,12 +279,7 @@ const WhiteboardRoomPage: React.FC = () => {
         throw new Error(err.detail || `HTTP ${response.status}`)
       }
       const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${t('wbBoardSummary')}_${roomTitle}.docx`
-      a.click()
-      window.URL.revokeObjectURL(url)
+      downloadBlob(blob, `${t('wbBoardSummary')}_${roomTitle}.docx`)
       message.success({ content: t('boardExported'), key: 'exportBoard' })
     } catch (err: any) {
       message.error({ content: err.message || t('exportFailed'), key: 'exportBoard' })

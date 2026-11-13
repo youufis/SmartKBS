@@ -19,6 +19,7 @@ from backend.question_db import execute_insert, execute_query, execute_query_one
 from backend.database import execute_query as db_execute_query, execute_insert_update as db_execute_update
 from backend.api.chat_router import get_api_keys
 from backend.ai_report_cache import get_latest_report, save_report
+from backend.question_labels import question_type_label
 from backend.api.ai_service import call_ai_async
 from backend.utils import extract_json_from_text
 from backend.api.config_router import get_config_value
@@ -1005,7 +1006,7 @@ async def export_practice_ai_analysis(session_id: int, request: Request):
     if qs:
         tables.append({"heading": "附录二：每题正确率",
                        "columns": ["题号", "题型", "分值", "正确率%", "答对/已判", "本题批改中"],
-                       "rows": [[i + 1, q.get("type"), q.get("score"), q.get("correct_rate"),
+                       "rows": [[i + 1, question_type_label(q.get("type")), q.get("score"), q.get("correct_rate"),
                                  f"{q.get('correct_count')}/{q.get('total_count')}",
                                  q.get("pending_count")] for i, q in enumerate(qs)]})
     return docx_response(

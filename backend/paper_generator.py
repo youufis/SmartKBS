@@ -17,6 +17,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn
+from backend.docx_fonts import docx_font_body, docx_font_heading
 from docx.oxml import OxmlElement, parse_xml
 
 from backend.logger import logger
@@ -53,9 +54,8 @@ except ImportError:
 # 样式常量
 # ═══════════════════════════════════════════════════════════════
 
-FONT_TITLE = "黑体"
-FONT_BODY = "宋体"
-FONT_HEADING = "黑体"
+# 字体单一真值：系统配置 DOCX_FONT_BODY/DOCX_FONT_HEADING（默认宋体/黑体）。
+# 默认参数置 None 于调用期解析；显式传参在调用期取配置值，改配置后重导即生效。
 
 SIZE_TITLE = Pt(22)
 SIZE_SUBTITLE = Pt(14)
@@ -568,9 +568,10 @@ def _set_line_spacing(paragraph, spacing=1.5):
     pf.line_spacing = spacing
 
 
-def _add_run(paragraph, text, font_name=FONT_BODY, size=SIZE_QUESTION,
+def _add_run(paragraph, text, font_name=None, size=SIZE_QUESTION,
              bold=False, color=None, underline=False):
     """添加文本片段"""
+    font_name = font_name or docx_font_body()
     run = paragraph.add_run(text)
     run.font.name = font_name
     run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
@@ -583,7 +584,7 @@ def _add_run(paragraph, text, font_name=FONT_BODY, size=SIZE_QUESTION,
     return run
 
 
-def _add_paragraph(doc, text="", font_name=FONT_BODY, size=SIZE_QUESTION,
+def _add_paragraph(doc, text="", font_name=None, size=SIZE_QUESTION,
                    bold=False, alignment=None, space_before=0, space_after=0,
                    color=None, first_line_indent=None):
     """添加段落"""
@@ -605,10 +606,10 @@ def _create_student_info_table(doc, school_name, exam_title, subject,
                                 grade, semester, exam_desc):
     """创建考生信息栏（使用无边框表格实现对齐）"""
     # 学校名称 + 试卷标题
-    p_school = _add_paragraph(doc, school_name, FONT_HEADING, SIZE_SUBTITLE,
+    p_school = _add_paragraph(doc, school_name, docx_font_heading(), SIZE_SUBTITLE,
                               bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER,
                               space_after=2)
-    p_title = _add_paragraph(doc, exam_title, FONT_TITLE, SIZE_TITLE,
+    p_title = _add_paragraph(doc, exam_title, docx_font_heading(), SIZE_TITLE,
                              bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER,
                              space_after=2)
 
@@ -621,7 +622,7 @@ def _create_student_info_table(doc, school_name, exam_title, subject,
     if grade:
         subtitle_parts.append(grade)
     if subtitle_parts:
-        _add_paragraph(doc, "  ".join(subtitle_parts), FONT_BODY, SIZE_STUDENT_INFO,
+        _add_paragraph(doc, "  ".join(subtitle_parts), docx_font_body(), SIZE_STUDENT_INFO,
                        alignment=WD_ALIGN_PARAGRAPH.CENTER, space_after=6)
 
     # 考生信息表格（无边框）
@@ -646,20 +647,20 @@ def _create_student_info_table(doc, school_name, exam_title, subject,
 
     for i, (label, underline) in enumerate(info_items):
         p = cells[i * 2].paragraphs[0]
-        _add_run(p, label, FONT_BODY, SIZE_STUDENT_INFO)
+        _add_run(p, label, docx_font_body(), SIZE_STUDENT_INFO)
         cells[i * 2].width = Cm(2.5)
 
         p2 = cells[i * 2 + 1].paragraphs[0]
-        _add_run(p2, underline, FONT_BODY, SIZE_STUDENT_INFO)
+        _add_run(p2, underline, docx_font_body(), SIZE_STUDENT_INFO)
         cells[i * 2 + 1].width = Cm(5)
 
     # 考试说明
     if exam_desc:
-        _add_paragraph(doc, f"说明：{exam_desc}", FONT_BODY, Pt(10),
+        _add_paragraph(doc, f"说明：{exam_desc}", docx_font_body(), Pt(10),
                        color=COLOR_LIGHT_GRAY, space_before=4, space_after=2)
 
     # 总分提示行
-    _add_paragraph(doc, "", FONT_BODY, Pt(6), space_after=2)
+    _add_paragraph(doc, "", docx_font_body(), Pt(6), space_after=2)
 
     return doc
 
@@ -686,21 +687,21 @@ def _render_options(paragraph, options_dict: dict[str, str] | None, doc=None):
                     # 渲染选项标签
                     _add_run(paragraph, f"{k}. ")
                     # 渲染选项文本（含公式）
-                    _render_latex_inline_inner(paragraph, opt_text, FONT_BODY, SIZE_OPTION)
+                    _render_latex_inline_inner(paragraph, opt_text, docx_font_body(), SIZE_OPTION)
                 else:
                     line_text += f"{k}. {_plain_text(opt_text)}    "
         if line_text:
             run = paragraph.add_run("\n" + line_text.strip())
-            run.font.name = FONT_BODY
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), FONT_BODY)
+            run.font.name = docx_font_body()
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), docx_font_body())
             run.font.size = SIZE_OPTION
 
 
 def _render_true_false_options(paragraph):
     """判断题选项：在题号后加（  ）"""
     run = paragraph.add_run("\n（  ）")
-    run.font.name = FONT_BODY
-    run._element.rPr.rFonts.set(qn('w:eastAsia'), FONT_BODY)
+    run.font.name = docx_font_body()
+    run._element.rPr.rFonts.set(qn('w:eastAsia'), docx_font_body())
     run.font.size = SIZE_OPTION
 
 
@@ -708,14 +709,14 @@ def _render_short_answer_lines(doc, line_count=6):
     """简答题留空行"""
     for _ in range(line_count):
         _add_paragraph(doc, "_______________________________________________",
-                       FONT_BODY, Pt(11), color=COLOR_LIGHT_GRAY, space_before=0, space_after=0)
+                       docx_font_body(), Pt(11), color=COLOR_LIGHT_GRAY, space_before=0, space_after=0)
 
 
 def _add_section_title(doc, title: str, label: str, total_score: float):
     """添加题型标题行"""
     p = _add_paragraph(doc, "", space_before=8, space_after=4)
-    _add_run(p, label, FONT_HEADING, SIZE_SECTION, bold=True)
-    _add_run(p, f"（共 {total_score:.0f} 分）", FONT_BODY, Pt(11), color=COLOR_LIGHT_GRAY)
+    _add_run(p, label, docx_font_heading(), SIZE_SECTION, bold=True)
+    _add_run(p, f"（共 {total_score:.0f} 分）", docx_font_body(), Pt(11), color=COLOR_LIGHT_GRAY)
     return p
 
 
@@ -800,16 +801,16 @@ def _render_question_text(paragraph, q_text: str, doc=None, color=None,
         # 代码段已经在上面走掉，bash 提示符里的 $ 不会再被误当公式
         has_math = ('$' in seg) or bool(re.search(r"\\[a-zA-Z]{2,}", seg))
         if has_math and _HAS_MPL:
-            _render_latex_inline(paragraph, seg, FONT_BODY, font_size, doc, color, bold)
+            _render_latex_inline(paragraph, seg, docx_font_body(), font_size, doc, color, bold)
             continue
         parts = re.split(r'(\*\*.*?\*\*)', seg)
         for part in parts:
             if not part:
                 continue
             if part.startswith('**') and part.endswith('**'):
-                _add_run(paragraph, part[2:-2], FONT_BODY, font_size, True, color, bold)
+                _add_run(paragraph, part[2:-2], docx_font_body(), font_size, True, color, bold)
             else:
-                _add_run(paragraph, part, FONT_BODY, font_size, bold, color)
+                _add_run(paragraph, part, docx_font_body(), font_size, bold, color)
 
 
 def _plain_text(text: str) -> str:
@@ -859,9 +860,9 @@ def generate_exam_paper(
 
     # ── 默认样式 ──
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = FONT_BODY
+    style.font.name = docx_font_body()
     style.font.size = SIZE_QUESTION
-    style._element.rPr.rFonts.set(qn('w:eastAsia'), FONT_BODY)
+    style._element.rPr.rFonts.set(qn('w:eastAsia'), docx_font_body())
 
     title = _sanitize_text(exam_info.get("title", "试卷"))
     subject = _sanitize_text(exam_info.get("subject", ""))
@@ -882,14 +883,14 @@ def generate_exam_paper(
     )
 
     if show_answer_key:
-        _add_paragraph(doc, "【机密·教师专用】", FONT_HEADING, Pt(10),
+        _add_paragraph(doc, "【机密·教师专用】", docx_font_heading(), Pt(10),
                        bold=True, color=COLOR_ANSWER,
                        alignment=WD_ALIGN_PARAGRAPH.CENTER, space_after=6)
     else:
         # 考试须知
         notice = f"注意事项：1. 本试卷满分 {total_score:.0f} 分，考试时间 {duration} 分钟。"
         notice += " 2. 选择题请将答案填涂在答题卡上，简答题请在答题纸上作答。"
-        _add_paragraph(doc, notice, FONT_BODY, Pt(10), color=COLOR_LIGHT_GRAY,
+        _add_paragraph(doc, notice, docx_font_body(), Pt(10), color=COLOR_LIGHT_GRAY,
                        space_before=4, space_after=6)
 
     # ── 按题型分组 ──
@@ -936,17 +937,17 @@ def generate_exam_paper(
             if show_answer_key:
                 # 答案卷：题号后标注答案
                 correct = _sanitize_text(q.get("correct_answer", ""))
-                _add_run(p_q, f"{question_number}. ", FONT_BODY, SIZE_QUESTION, bold=True)
+                _add_run(p_q, f"{question_number}. ", docx_font_body(), SIZE_QUESTION, bold=True)
                 _render_question_text(p_q, q_text)
-                _add_run(p_q, "  【答案】", FONT_BODY, Pt(11), bold=True, color=COLOR_ANSWER)
+                _add_run(p_q, "  【答案】", docx_font_body(), Pt(11), bold=True, color=COLOR_ANSWER)
                 # 答案本身也可能带公式（填空尤其常见），不能再走纯文本 run
                 _render_question_text(p_q, correct, color=COLOR_ANSWER, size=Pt(11), bold=True)
-                _add_run(p_q, f"  ({q_score:.0f}分)", FONT_BODY, Pt(10),
+                _add_run(p_q, f"  ({q_score:.0f}分)", docx_font_body(), Pt(10),
                          color=COLOR_LIGHT_GRAY)
             else:
-                _add_run(p_q, f"{question_number}. ", FONT_BODY, SIZE_QUESTION, bold=True)
+                _add_run(p_q, f"{question_number}. ", docx_font_body(), SIZE_QUESTION, bold=True)
                 _render_question_text(p_q, q_text)
-                _add_run(p_q, f"  ({q_score:.0f}分)", FONT_BODY, Pt(10),
+                _add_run(p_q, f"  ({q_score:.0f}分)", docx_font_body(), Pt(10),
                          color=COLOR_LIGHT_GRAY)
 
             # 选项渲染
@@ -981,7 +982,7 @@ def generate_exam_paper(
                 explanation = _sanitize_text(q.get("explanation", ""))
                 if explanation:
                     p_exp = _add_paragraph(doc, "", space_before=1, space_after=2)
-                    _add_run(p_exp, "【解析】", FONT_BODY, Pt(10),
+                    _add_run(p_exp, "【解析】", docx_font_body(), Pt(10),
                              bold=True, color=COLOR_EXPLANATION)
                     # 旧写法用 _add_run 直接塞纯文本，解析里的 $...$ 公式整串原样印在
                     # 答案卷上（题干和选项都走公式渲染，只有解析漏了）
@@ -991,9 +992,9 @@ def generate_exam_paper(
                 kp = _sanitize_text(q.get("knowledge_points", ""))
                 if kp:
                     p_kp = _add_paragraph(doc, "", space_before=0, space_after=2)
-                    _add_run(p_kp, "【知识点】", FONT_BODY, Pt(9),
+                    _add_run(p_kp, "【知识点】", docx_font_body(), Pt(9),
                              bold=True, color=COLOR_LIGHT_GRAY)
-                    _add_run(p_kp, kp, FONT_BODY, Pt(9),
+                    _add_run(p_kp, kp, docx_font_body(), Pt(9),
                              color=COLOR_LIGHT_GRAY)
 
     # ── 页脚：页码 ──
@@ -1073,14 +1074,15 @@ def generate_answer_sheet(
     section.right_margin = Cm(2.0)
 
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = FONT_BODY
+    style.font.name = docx_font_body()
     style.font.size = Pt(11)
+    style._element.rPr.rFonts.set(qn('w:eastAsia'), docx_font_body())
 
     title = _sanitize_text(exam_info.get("title", "试卷"))
 
     _head = "  ".join(x for x in (_sanitize_text(school_name or ""), title,
                                   _sanitize_text(semester or "")) if x)
-    _add_paragraph(doc, f"{_head} — 答题卡", FONT_TITLE, SIZE_SUBTITLE,
+    _add_paragraph(doc, f"{_head} — 答题卡", docx_font_heading(), SIZE_SUBTITLE,
                    bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER, space_after=6)
 
     # 考生信息
@@ -1115,7 +1117,7 @@ def generate_answer_sheet(
         label = TYPE_LABELS.get(type_key, type_key)
 
         if type_key in ("single", "multiple"):
-            _add_paragraph(doc, label, FONT_HEADING, SIZE_SECTION, bold=True, space_before=6, space_after=4)
+            _add_paragraph(doc, label, docx_font_heading(), SIZE_SECTION, bold=True, space_before=6, space_after=4)
 
             # 创建填涂表格（每行 5 题）
             cols = 5
@@ -1149,7 +1151,7 @@ def generate_answer_sheet(
                         idx += 1
 
         elif type_key == "true_false":
-            _add_paragraph(doc, label, FONT_HEADING, SIZE_SECTION, bold=True, space_before=6, space_after=4)
+            _add_paragraph(doc, label, docx_font_heading(), SIZE_SECTION, bold=True, space_before=6, space_after=4)
 
             # 判断题每行 8 题
             p_tf = _add_paragraph(doc, "", space_after=4)
@@ -1158,12 +1160,12 @@ def generate_answer_sheet(
                 _add_run(p_tf, f"{question_number}. [对] [错]    ")
 
         elif type_key == "short":
-            _add_paragraph(doc, label, FONT_HEADING, SIZE_SECTION, bold=True, space_before=6, space_after=4)
+            _add_paragraph(doc, label, docx_font_heading(), SIZE_SECTION, bold=True, space_before=6, space_after=4)
             for q in group:
                 question_number += 1
                 # 答题卡格子里放不下公式图片，而且截断会把 $...$ 切成半边 —— 先转可读文本再截
                 q_text = _plain_text(q.get("question_text", ""))[:40]
-                _add_paragraph(doc, f"{question_number}. {q_text}", FONT_BODY, Pt(10),
+                _add_paragraph(doc, f"{question_number}. {q_text}", docx_font_body(), Pt(10),
                                space_before=2, space_after=1)
                 _render_short_answer_lines(doc, 4)
 

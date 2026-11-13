@@ -287,7 +287,9 @@ async def _handle_auth_error(request, exc: AuthError):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # 跨域只走 Bearer/query token（沙箱 iframe 为 null origin 且不带 cookie）；
+    # credentials=True + "*" 会让 starlette 对 null origin 预检不下发 ACAO，POST 全被浏览器拦
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     # 滑动续期的新令牌放在自定义头里，跨域时浏览器默认读不到，必须显式 expose

@@ -1,3 +1,4 @@
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
@@ -517,12 +518,7 @@ const CodePracticePage: React.FC = () => {
       lines.push(vals.join(','))
     }
     const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${statsTitle || 'code'}_roster.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(blob, `${statsTitle || 'code'}_roster.csv`)
   }
 
   const renderSubmissionDetail = (data: any) => {

@@ -1,4 +1,5 @@
 /** 用户管理 API */
+import { downloadBlob } from '../utils/downloadBlob'
 import apiClient from './client';
 import type { UserItem } from '../types';
 
@@ -346,13 +347,7 @@ export async function exportUsersCsv(keyword?: string): Promise<void> {
   const match = disp.match(/filename\*?=(?:UTF-8'')?([^;\s]+)/i);
   const filename = match ? decodeURIComponent(match[1]) : 'users_export.csv';
   const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8-sig' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(link.href);
+  downloadBlob(blob, filename);
 }
 
 // ── 批量升年级 ──

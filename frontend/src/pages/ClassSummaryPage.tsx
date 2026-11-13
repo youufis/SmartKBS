@@ -5,6 +5,7 @@
  * 页面先展示数据快照，再按需生成 AI 报告；AI 失败/超时有明确提示；
  * 导出复用已生成报告，不再第二次调用模型。
  */
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Col, Collapse, DatePicker, Empty, List, Row, Select, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import { message } from '../utils/feedback'
@@ -48,12 +49,7 @@ async function downloadWord(url: string, filename: string) {
   const blob = new Blob([data], {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   })
-  const href = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = href
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(href)
+  downloadBlob(blob, filename)
 }
 
 async function exportError(e: any, fallback: string): Promise<string> {

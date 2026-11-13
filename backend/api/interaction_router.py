@@ -27,6 +27,7 @@ from backend.database import (
 from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
 from backend.grading_rules import keyword_fallback
 # P0-2: 测验判分/统计口径收敛到 backend.quiz_stats (唯一实现), 本模块只保留别名
+from backend.question_labels import question_type_label
 from backend.quiz_stats import (
     quiz_graded as _quiz_graded,
     quiz_questions as _quiz_questions,
@@ -3501,7 +3502,7 @@ async def export_quiz_ai_analysis(quiz_id: int, request: Request):
             tables = [{
                 "heading": "附录：每题正确率与错选分布",
                 "columns": ["题号", "题型", "正确率%", "答对/已答", "错选分布"],
-                "rows": [[s["index"] + 1, s["type"], s["correct_rate"],
+                "rows": [[s["index"] + 1, question_type_label(s["type"]), s["correct_rate"],
                           f"{s['correct_count']}/{s['total_count']}",
                           "、".join(f"{k}({v}人)" for k, v in (s.get("wrong_options") or []))[:70]]
                          for s in st_rows],
@@ -3703,8 +3704,9 @@ async def export_class_summary_docx(
     window_label = meta.get("window_label", "") or window["label"]
 
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 

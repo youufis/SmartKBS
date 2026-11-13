@@ -22,6 +22,9 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // 沙箱预览 iframe 的 origin 为 null：Vite 默认 cors 白名单只认 localhost，
+    // 预检(OPTIONS)会被它拒掉（后端 CORS 管不到这层），导致 iframe 内 POST 全失败
+    cors: { origin: true },
     proxy: {
       // 白板 WebSocket 优先匹配，避免 WS 断开影响 HTTP 代理
       '/api/whiteboard/ws': {

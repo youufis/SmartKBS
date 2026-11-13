@@ -83,8 +83,9 @@ def build_docx_bytes(title: str, subtitle: str, markdown_text: str,
     from backend.api.analytics_router import _markdown_to_docx
 
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles["Normal"]  # type: ignore[union-attr, attr-defined]
-    style.font.name = "Microsoft YaHei"  # type: ignore[attr-defined]
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 

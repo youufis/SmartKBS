@@ -394,5 +394,12 @@
   "discRefreshTomorrow": "Daily refresh quota used up — resets tomorrow",
   "discPointsRule": "+1 point per card opened, daily cap {{max}}",
   "discFavAt": "Saved {{time}}",
-  "listNoMatch": "No matches"
+  "listNoMatch": "No matches",
+  "previewWinDragHint": "Drag the title to move the window",
+  "previewWin70": "Window width 70%",
+  "previewWin90": "Window width 90%",
+  "previewWinFull": "Fullscreen",
+  "previewWinExitFull": "Exit fullscreen",
+  "previewWinReset": "Reset size & position",
+  "previewWinResizeHint": "Drag to resize the window"
 }

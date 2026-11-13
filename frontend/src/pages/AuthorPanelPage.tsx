@@ -1,3 +1,4 @@
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useCallback } from 'react'
 import { Typography, Table, Card, Row, Col, Statistic, Tag, Button, Modal, Popconfirm, Space, Tooltip } from 'antd'
 import { message } from '../utils/feedback'
@@ -116,12 +117,7 @@ const AuthorPanelPage: React.FC = () => {
     try {
       const { data } = await apiClient.get('/api/config-sync/export')
       const blob = new Blob([JSON.stringify(data.nodes, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `sync-logs-${new Date().toISOString().slice(0, 10)}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadBlob(blob, `sync-logs-${new Date().toISOString().slice(0, 10)}.json`)
     } catch {
     }
   }

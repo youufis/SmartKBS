@@ -924,8 +924,9 @@ async def export_review_plan_docx(
 
     # 生成 Word 文档
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
     style.font.size = Pt(11)  # type: ignore[attr-defined]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
@@ -1793,8 +1794,9 @@ async def export_wrong_book_docx(request: Request, status: str = Query("pending"
     status_label = _STATUS_LABELS.get(status, status)
 
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     normal = doc.styles["Normal"]
-    normal.font.name = "Microsoft YaHei"
     normal.font.size = Pt(11)
     normal.paragraph_format.line_spacing = 1.4
 

@@ -2922,8 +2922,9 @@ async def export_lesson_plan_docx(
             raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
 
     doc = Document()
+    from backend.docx_fonts import apply_docx_fonts
+    apply_docx_fonts(doc)
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'  # type: ignore[union-attr]
     style.font.size = Pt(11)  # type: ignore[union-attr]
     style.paragraph_format.line_spacing = 1.5  # type: ignore[union-attr]
 

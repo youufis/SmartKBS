@@ -5,6 +5,7 @@
  * 下拉级联: 年级来自后端主数据 → 选年级后加载班级 → 年级+班级确定后加载学生。
  * 权限: 管理员全量; 教师仅自己创建的活动 × 任教年级班级学生 (后端强制)。
  */
+import { downloadBlob } from '../utils/downloadBlob'
 import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button, Card, DatePicker, Dropdown, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd'
@@ -173,12 +174,7 @@ const SummaryExportPage: React.FC = () => {
       const match = /filename\*=UTF-8''([^;]+)/i.exec(dispo)
       const fallback = kind === 'excel' ? '学生活动汇总.xlsx' : '学生活动汇总.csv'
       const filename = match ? decodeURIComponent(match[1]) : fallback
-      const href = URL.createObjectURL(res.data)
-      const a = document.createElement('a')
-      a.href = href
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(href)
+      downloadBlob(res.data, filename)
     } catch (e: any) {
       message.error(await blobError(e))
     } finally {

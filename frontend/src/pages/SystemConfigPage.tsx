@@ -119,7 +119,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'ai',
     titleKey: 'zone_ai',
     descKey: 'zone_ai_desc',
-    sections: ['credentials', 'models', 'vision', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'asr', 'explore'],
+    sections: ['credentials', 'models', 'vision', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'asr', 'explore', 'docx'],
   },
   {
     id: 'storage',
@@ -149,6 +149,7 @@ const SECTION_TITLES: Record<string, string> = {
   aioutput: 'group_aioutput',
   memory: 'group_memory',
   grading: 'group_grading',
+  docx: 'group_docx',
   imagegen: 'group_imagegen',
   tts: 'group_tts',
   asr: 'group_asr',
@@ -236,6 +237,15 @@ const RANK_MODE_OPTIONS: FieldOption[] = [
 const MC_SCORING_OPTIONS: FieldOption[] = [
   { value: 'strict', labelKey: 'optMcStrict' },
   { value: 'partial', labelKey: 'optMcPartial' },
+]
+
+const DOCX_FONT_OPTIONS: FieldOption[] = [
+  { value: '宋体', labelKey: 'optFontSong' },
+  { value: '黑体', labelKey: 'optFontHei' },
+  { value: '楷体', labelKey: 'optFontKai' },
+  { value: '仿宋', labelKey: 'optFontFang' },
+  { value: '微软雅黑', labelKey: 'optFontYaHei' },
+  { value: '等线', labelKey: 'optFontDeng' },
 ]
 const SKILL_SEGMENT_OPTIONS: FieldOption[] = [
   { value: 'system', labelKey: 'optSegmentSystem' },
@@ -434,6 +444,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AI_GRADING_CONCURRENCY', labelKey: 'field_AI_GRADING_CONCURRENCY', descKey: 'field_AI_GRADING_CONCURRENCY_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitThread', scope: 'nextRound' },
   { key: 'AI_GRADING_MAX_ITEMS_PER_ROUND', labelKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND', descKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitItem', scope: 'nextRound' },
   { key: 'MULTIPLE_CHOICE_SCORING', labelKey: 'field_MULTIPLE_CHOICE_SCORING', descKey: 'field_MULTIPLE_CHOICE_SCORING_desc', type: 'select', group: 'grading', required: false, options: MC_SCORING_OPTIONS },
+  // 文档导出
+  { key: 'DOCX_FONT_BODY', labelKey: 'field_DOCX_FONT_BODY', descKey: 'field_DOCX_FONT_BODY_desc', type: 'select', group: 'docx', required: false, options: DOCX_FONT_OPTIONS },
+  { key: 'DOCX_FONT_HEADING', labelKey: 'field_DOCX_FONT_HEADING', descKey: 'field_DOCX_FONT_HEADING_desc', type: 'select', group: 'docx', required: false, options: DOCX_FONT_OPTIONS },
   // 图片生成
   { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen', level: 'basic' },
   { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', longDescKey: 'field_IMAGE_GEN_MODEL_tip', type: 'model_select', optionsKind: 'image', group: 'imagegen', level: 'basic' },
