@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
@@ -706,6 +706,11 @@ _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_ski
                  "HOMEWORK_ALLOWED_EXTS": 60,
                  "wrong_book_sources": 20}
 _TITLE_LIST_KEYS = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG"}
+# 枚举型配置键：只认登记过的取值（大小写/空白归一化）。DEFAULT_CONFIG 新增枚举键必须在此登记，
+# 否则保存时会被 _validate_config_updates 静默丢弃（页面永远停在默认值）。
+_ENUM_KEYS: dict[str, tuple[str, ...]] = {
+    "MULTIPLE_CHOICE_SCORING": ("strict", "partial"),
+}
 _EXT_RE = None
 
 
@@ -846,6 +851,11 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(value, list) or not all(isinstance(x, int) and x in (0, 1, 2) for x in value):
                 raise HTTPException(status_code=400, detail="ENABLE_AI_CHAT_FOR_ROLES 需为角色编号列表(1=教师, 2=学生)")
             out[key] = list(value)
+        elif key in _ENUM_KEYS:
+            val = str(value).strip().lower()
+            if val not in _ENUM_KEYS[key]:
+                raise HTTPException(status_code=400, detail=f"{key} 只能是 {' / '.join(_ENUM_KEYS[key])}")
+            out[key] = val
         elif key == "QUESTION_TYPES":
             if not isinstance(value, list) or not value:
                 raise HTTPException(status_code=400, detail="QUESTION_TYPES 必须是非空列表")
@@ -878,7 +888,7 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
     dropped = [k for k in updates if k not in out]
     if dropped:
         # 走到这里说明该键在 DEFAULT_CONFIG 里但没有登记任何校验规则 —— 保存会被丢弃。
-        # 补进 _NUM_RANGES/_BOOL_KEYS/_STR_LIMITS/_STRLIST_KEYS 即可。
+        # 补进 _NUM_RANGES/_BOOL_KEYS/_STR_LIMITS/_STRLIST_KEYS/_ENUM_KEYS 即可。
         logger.warning(f"[config] 以下配置键无校验规则, 已被忽略: {dropped}")
     return out
 
@@ -1405,7 +1415,6 @@ async def get_apikey_status(request: Request):
 async def get_multimodal_status(request: Request):
     """获取多模态模型启用状态（需登录，无需管理员权限）"""
     get_current_user(request)
-    cfg = load_config()
     # 多模态不再可关：对话模型按约定必须支持图片，读不到键也按 True 返回
     return {"multimodal_enabled": True}
 
