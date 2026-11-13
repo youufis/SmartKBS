@@ -5,10 +5,8 @@
  * 所有图表和表格共用同一套筛选条件，点击统计项可回到题目明细。
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import {
-  Alert, Button, Card, Col, DatePicker, Empty, Input, Row, Select,
-  Space, Spin, Statistic, Table, Tag, Tooltip, Typography, message, Modal,
-} from 'antd'
+import { Alert, Button, Card, Col, DatePicker, Empty, Input, Row, Select, Space, Spin, Statistic, Table, Tag, Tooltip, Typography, Modal } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   ArrowLeftOutlined, BarChartOutlined, DownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons'
@@ -234,7 +232,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
       message.warning(t('analyticsSelectQuestions'))
       return
     }
-    Modal.confirm({
+    modalApi.confirm({
       title: t('analyticsConfirmArchive'),
       okType: 'danger',
       okText: t('analyticsArchive'),

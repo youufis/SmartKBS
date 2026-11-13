@@ -1,9 +1,7 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import {
-  Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox, Alert, Radio,
-  Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select, Empty,
-} from 'antd'
+import { Card, Table, Button, Modal, Input, Tag, Space, Checkbox, Alert, Radio, Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select, Empty } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
   CheckCircleOutlined, EyeOutlined, UndoOutlined,
@@ -415,7 +413,7 @@ const TaskPage: React.FC = () => {
     // 「绑定即授权」只读预览：他人作业绑在课程知识点里，提交/批改数据仍归创建者，
     // 不去拉 403 的提交列表，直接展示作业信息
     if ((task as any).is_owner === false) {
-      Modal.info({
+      modalApi.info({
         title: task.name,
         width: 520,
         content: (

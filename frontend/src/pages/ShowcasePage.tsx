@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { Card, Typography, Button, Spin, Empty, Pagination, message, Space, Switch, Select } from 'antd'
+import { Card, Typography, Button, Spin, Empty, Pagination, Space, Switch, Select } from 'antd'
+import { message } from '../utils/feedback'
 import { CrownOutlined, ReloadOutlined, FullscreenOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'

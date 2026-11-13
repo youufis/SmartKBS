@@ -1,14 +1,17 @@
 /** 学生端首页看板 */
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Col, Empty, Row } from 'antd'
+import { Button, Col, Empty, Row } from 'antd'
 import {
   BookOutlined, CheckCircleOutlined, FileAddOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import { getTaskTodo, type TaskTodoResponse } from '../../api/taskTodo'
 import { useCompanionStore } from '../../stores/companionStore'
 import { useDashboardData } from './useDashboardData'
+import { useAutoRefresh } from './useAutoRefresh'
+import { useNow } from './useNow'
+import RefreshHint from './RefreshHint'
 import WelcomeBanner from './WelcomeBanner'
 import TodoFocusCard from './TodoFocusCard'
 import TrendCard from './TrendCard'
@@ -31,41 +34,54 @@ const StudentDashboard: React.FC = () => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
-  const { summary, activities, announcements, loading, activityLoading, activityError, fetchActivities } = useDashboardData()
+  const { summary, activities, announcements, loading, activityLoading, activityError, fetchActivities, refresh, refreshing, updatedAt } = useDashboardData()
   const [todo, setTodo] = useState<TaskTodoResponse | null>(null)
   const [todoLoading, setTodoLoading] = useState(true)
-  const [urgentStats, setUrgentStats] = useState({ overdue: 0, urgent: 0 })
+
+  const fetchTodo = useCallback(() => {
+    getTaskTodo().then((d) => {
+      setTodo(d)
+      setTodoLoading(false)
+    }).catch((err) => {
+      reportLoadError(err, { key: 'dashboard.StudentTodo' })
+      setTodoLoading(false)
+    })
+  }, [])
 
   useEffect(() => {
-    let cancelled = false
-    getTaskTodo().then((d) => {
-      if (cancelled) return
-      setTodo(d)
-      // 在数据回调里计算（避免渲染期调用 impure 的 Date.now）
-      const now = Date.now()
-      const withDl = d.items.filter((i) => i.status !== 'completed' && i.deadline)
-        .map((i) => ({ diff: new Date(i.deadline!.replace(' ', 'T')).getTime() - now }))
-      const overdue = withDl.filter((x) => x.diff < 0).length
-      const urgent = withDl.filter((x) => x.diff >= 0 && x.diff < 24 * 3600000).length
-      setUrgentStats({ overdue, urgent })
-    }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.StudentTodo' }) }).finally(() => {
-      if (!cancelled) setTodoLoading(false)
-    })
+    fetchTodo()
     // 学伴初始化（问候推送 + 留言列表）
     const companionStore = useCompanionStore.getState()
     companionStore.checkMorningPush()
     companionStore.loadPushes()
-    return () => { cancelled = true }
-  }, [])
+  }, [fetchTodo])
+  useAutoRefresh(fetchTodo)
 
-  if (loading) return <DashboardSkeleton />
-  if (!summary) return <Empty description={t('loadFailed')} />
+  // 逾期/紧急随时间走动（原来在数据回调里算一次，长开页面冻结）
+  const now = useNow()
+  const urgentStats = useMemo(() => {
+    if (!todo) return { overdue: 0, urgent: 0 }
+    const withDl = todo.items.filter((i) => i.status !== 'completed' && i.deadline)
+      .map((i) => ({ diff: new Date(i.deadline!.replace(' ', 'T')).getTime() - now }))
+    return {
+      overdue: withDl.filter((x) => x.diff < 0).length,
+      urgent: withDl.filter((x) => x.diff >= 0 && x.diff < 24 * 3600000).length,
+    }
+  }, [todo, now])
+
+  if (loading) return <DashboardSkeleton isStudent />
+  if (!summary) return (
+    <Empty description={t('loadFailed')}>
+      <Button type="primary" onClick={refresh}>{t('retry')}</Button>
+    </Empty>
+  )
 
   const todoTotal = todo ? Object.values(todo.counts ?? {}).reduce((a, b) => a + b, 0) : 0
 
   return (
     <div>
       <WelcomeBanner summary={summary} todoTotal={todoTotal} isStudent isTeacher={false} isAdmin={false} />
+      <RefreshHint updatedAt={updatedAt} refreshing={refreshing} onRefresh={refresh} />
 
       {/* 今日要事 + 成长档案：两列各自高度，不互相拉齐（原来左卡被右卡撑高，4 条待办下方留了 100px 空白） */}
       <Row gutter={[16, 16]} align="top" className="dash-stagger" style={{ marginBottom: 16 }}>

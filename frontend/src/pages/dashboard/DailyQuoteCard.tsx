@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button, Card, Space, Typography } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { BulbOutlined, ReloadOutlined } from '@ant-design/icons'
 import { getQuotes } from '../../constants/loginQuotes'
 import { useChartTheme } from './chartTheme'
 
@@ -46,7 +46,7 @@ const DailyQuoteCard: React.FC = () => {
       styles={{ body: { padding: '10px 14px 12px' } }}
       title={
         <Space size={6}>
-          <span style={{ fontSize: 15 }}>💡</span>
+          <BulbOutlined style={{ color: ct.gold, fontSize: 15 }} />
           <span style={{ fontSize: 14, fontWeight: 500 }}>{t('quote.title')}</span>
         </Space>
       }

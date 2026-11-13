@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import {
-  Card, Tabs, Form, Input, InputNumber, Button, message, Switch, Radio,
-  Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip,
-  Collapse,
-} from 'antd'
+import { Card, Tabs, Form, Input, InputNumber, Button, Switch, Radio, Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip, Collapse } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
@@ -1546,7 +1543,7 @@ const UpgradePanel: React.FC = () => {
 
   const handleUpgrade = () => {
     const isPrefetched = verInfo?.prefetched
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmUpgrade'),
       icon: <WarningOutlined />,
       content: (
@@ -1605,7 +1602,7 @@ const UpgradePanel: React.FC = () => {
   }
 
   const handleRollback = () => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmRollback'),
       icon: <ExclamationCircleOutlined />,
       content: (
@@ -1644,7 +1641,7 @@ const UpgradePanel: React.FC = () => {
   }
 
   const handleBackup = () => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmBackup'),
       icon: <ExclamationCircleOutlined />,
       content: t('backupContent'),
@@ -1687,7 +1684,7 @@ const UpgradePanel: React.FC = () => {
   }, [t])
 
   const handleDeleteHistory = (task_id: string) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDeleteHistory'),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmDeleteHistoryContent'),
@@ -1709,7 +1706,7 @@ const UpgradePanel: React.FC = () => {
   const handleDeleteHistoryBatch = () => {
     const ids = [...histSel]
     if (!ids.length) return
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDeleteHistoryBatch'),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmDeleteHistoryBatchContent', { count: ids.length }),
@@ -2115,7 +2112,7 @@ const UpgradePanel: React.FC = () => {
                     onClick={() => {
                       const fileList = r.changed_files
                       const isError = r.status === 'failed' && r.error
-                      Modal.info({
+                      modalApi.info({
                         title: t('upgradeDetailTitle', { from: r.from_version || '', to: r.to_version || '' }),
                         width: 560,
                         content: (
@@ -2384,7 +2381,7 @@ const SystemConfigPage: React.FC = () => {
   // ── 重新读取：有脏值时先确认，避免一点就丢掉改动 ──
   const handleReload = () => {
     if (!dirty.length) { loadConfig(); return }
-    Modal.confirm({
+    modalApi.confirm({
       title: t('reloadConfirmTitle'),
       content: t('reloadConfirmContent', { n: dirty.length }),
       okText: t('reload'),
@@ -2396,7 +2393,7 @@ const SystemConfigPage: React.FC = () => {
 
   // ── 清理临时缓存（本页右上角的图标按钮与运维页共用同一处逻辑） ──
   const handleCleanupCache = () => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmCleanup'),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmCleanupContent'),
@@ -2418,7 +2415,7 @@ const SystemConfigPage: React.FC = () => {
   // ── 改动清单：按「哪个小节改了什么」列出来，点条目直接跳过去 ──
   const showDirtyList = () => {
     const dirtyFields = GLOBAL_CONFIG_FIELDS.filter((f) => dirty.includes(f.key))
-    Modal.info({
+    modalApi.info({
       title: t('dirtyListTitle', { n: dirtyFields.length }),
       width: 520,
       okText: t('close'),
@@ -2496,7 +2493,7 @@ const SystemConfigPage: React.FC = () => {
     // 涉及安全面/难以回退的项（关防护、改 IP 黑名单、开自动同步）改动后要求二次确认
     const risky = GLOBAL_CONFIG_FIELDS.filter((f) => f.danger && dirty.includes(f.key))
     if (risky.length) {
-      Modal.confirm({
+      modalApi.confirm({
         title: t('dangerConfirmTitle'),
         icon: <ExclamationCircleOutlined />,
         content: (

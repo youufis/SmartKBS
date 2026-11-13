@@ -3,7 +3,8 @@
  * 流程：输入用户名 → 回答问题① → 回答问题② → 设置新密码 → 完成
  */
 import React, { useState, useRef } from 'react'
-import { Modal, Steps, Form, Input, Button, message, Typography, Alert } from 'antd'
+import { Modal, Steps, Form, Input, Button, Typography, Alert } from 'antd'
+import { message } from '../utils/feedback'
 import {
   UserOutlined, QuestionCircleOutlined, LockOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'

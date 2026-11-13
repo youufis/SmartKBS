@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
-import {
-  Card, Typography, Button, Space, Tag, Modal, Spin, message, Tabs, Empty, Select,
-  Table, Descriptions, Input, Alert, InputNumber, Pagination, Grid, Switch, Tooltip,
-  Row, Col, Statistic, Segmented, Progress,
-} from 'antd'
+import { Card, Typography, Button, Space, Tag, Modal, Spin, Tabs, Empty, Select, Table, Descriptions, Input, Alert, InputNumber, Pagination, Grid, Switch, Tooltip, Row, Col, Statistic, Segmented, Progress } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   PlayCircleOutlined, RobotOutlined, FileTextOutlined, BarChartOutlined,
   EditOutlined, DeleteOutlined, PlusSquareOutlined, MinusSquareOutlined,
@@ -253,7 +250,6 @@ const CodePracticePage: React.FC = () => {
     setPage(1)
   }
 
-
   // ── 创建题目 ──
   const handleCreateProblem = async () => {
     try {
@@ -372,7 +368,7 @@ const CodePracticePage: React.FC = () => {
   }
 
   const handleDeleteProblem = (problemId: number) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDelete'),
       content: t('confirmDeleteContent'),
       okText: t('confirmDeleteOk'),
@@ -528,7 +524,6 @@ const CodePracticePage: React.FC = () => {
     a.click()
     URL.revokeObjectURL(url)
   }
-
 
   const renderSubmissionDetail = (data: any) => {
     if (!data) return <div style={{ padding: 16, textAlign: 'center' }}><Spin /></div>
@@ -867,7 +862,6 @@ const CodePracticePage: React.FC = () => {
       </div>
     </>
   )
-
 
   // ── 教师统计弹窗 ──
   const statsModal = (
@@ -1253,7 +1247,6 @@ const CodePracticePage: React.FC = () => {
       },
     ]} />
   )
-
 
   return (
     <div>

@@ -12,7 +12,6 @@
 import React from 'react'
 import { Card, Col } from 'antd'
 import { useCountUp } from './useCountUp'
-import { joinParts } from './fmt'
 
 export interface StatCardProps {
   title: string
@@ -27,7 +26,9 @@ export interface StatCardProps {
 }
 
 const StatCard: React.FC<StatCardProps> = ({ title, value, color, icon, parts, emptyText, onGo }) => {
-  const suffix = joinParts(parts ?? []) || emptyText || ''
+  // 片段内 nowrap：窄屏换行只发生在片段之间，不再出现「考试 / 2」孤行
+  const validParts = (parts ?? []).filter((x) => x !== false && x !== null && x !== undefined && x !== '') as string[]
+  const suffix = validParts.join(' · ') || emptyText || ''
   const shown = useCountUp(Number(value) || 0)
   return (
     <Col xs={12} md={6}>
@@ -77,7 +78,16 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, color, icon, parts, e
                 {Math.round(shown).toLocaleString()}
               </span>
               {suffix && (
-                <span style={{ fontSize: 11, color: 'rgba(128,128,128,0.95)' }}>{suffix}</span>
+                <span style={{ fontSize: 11, color: 'rgba(128,128,128,0.95)', display: 'inline-flex', flexWrap: 'wrap', gap: '0 4px' }}>
+                  {validParts.length > 0
+                    ? validParts.map((p, i) => (
+                      <React.Fragment key={i}>
+                        {i > 0 && <span aria-hidden>·</span>}
+                        <span style={{ whiteSpace: 'nowrap' }}>{p}</span>
+                      </React.Fragment>
+                    ))
+                    : emptyText}
+                </span>
               )}
             </div>
           </div>

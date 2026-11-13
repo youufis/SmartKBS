@@ -3,7 +3,8 @@
  * 使用 Web Speech API (SpeechRecognition) 将语音转为文字
  */
 import React, { useRef, useState, useCallback, useEffect } from 'react'
-import { Button, Tooltip, message } from 'antd'
+import { Button, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import { AudioOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 

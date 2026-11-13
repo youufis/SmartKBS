@@ -1,16 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import {
-  Layout,
-  Typography,
-  Spin,
-  Button,
-  Dropdown,
-  message,
-  Modal,
-  Space,
-  Tag,
-} from 'antd'
+import { Layout, Typography, Spin, Button, Dropdown, Modal, Space, Tag } from 'antd'
+import { message } from '../utils/feedback'
 import { ArrowLeftOutlined, RobotOutlined, DownloadOutlined } from '@ant-design/icons'
 import ComposeWizard from '../components/ComposeWizard'
 import * as examsApi from '../api/exams'

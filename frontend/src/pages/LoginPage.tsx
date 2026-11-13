@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Dropdown, Form, Input, Button, Typography, message, Row, Col, Tooltip } from 'antd'
+import { Dropdown, Form, Input, Button, Typography, Row, Col, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   UserOutlined, LockOutlined, SkinOutlined,
 } from '@ant-design/icons'

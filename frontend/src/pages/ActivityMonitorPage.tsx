@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Card, Table, Select, Input, Tag, Space, Typography, Row, Col,
-  Statistic, message, Button, Radio, Empty, Spin, Tabs, Tooltip, Pagination, Modal,
-} from 'antd';
+import { Card, Table, Select, Input, Tag, Space, Typography, Row, Col, Statistic, Button, Radio, Empty, Spin, Tabs, Tooltip, Pagination, Modal } from 'antd'
+import { message } from '../utils/feedback';
 import {
   ReloadOutlined, FileTextOutlined,
   CheckCircleOutlined, CloseCircleOutlined, BarChartOutlined,
@@ -223,7 +221,6 @@ const ActivityMonitorPage: React.FC = () => {
     setPage(1);
     if (selectedActivity) loadStatusData(selectedActivity, selectedGradeId, classId);
   };
-
 
 
   // ── 切换状态筛选 ──

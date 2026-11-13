@@ -16,7 +16,8 @@
  */
 import { useTranslation } from 'react-i18next'
 import React, { useCallback, useMemo, useState } from 'react'
-import { Card, Button, Upload, Space, Tag, Spin, Image, Empty, Alert, message } from 'antd'
+import { Card, Button, Upload, Space, Tag, Spin, Image, Empty, Alert } from 'antd'
+import { message } from '../utils/feedback'
 import { UploadOutlined, ReloadOutlined, DeleteOutlined, PictureOutlined } from '@ant-design/icons'
 import SVGViewer from './SVGViewer'
 import { buildMediaEntries, type MediaEntry } from '../utils/mediaEntries'

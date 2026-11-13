@@ -1,9 +1,7 @@
 /** 热点新闻 - 独立页面 */
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Card, Tag, Button, Space, Typography, Pagination,
-  message, Spin, Modal, Drawer, Empty, Tooltip, Result, Input,
-} from 'antd';
+import { Card, Tag, Button, Space, Typography, Pagination, Spin, Modal, Drawer, Empty, Tooltip, Result, Input } from 'antd'
+import { message } from '../utils/feedback';
 import {
   GlobalOutlined, ReloadOutlined, HeartOutlined, HeartFilled,
   EyeOutlined, BookOutlined, SyncOutlined, LeftOutlined, RightOutlined,

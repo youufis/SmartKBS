@@ -4,10 +4,8 @@
  */
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useRef } from 'react'
-import {
-  Card, Button, Typography, Space, Table, Tag, message, Spin,
-  Progress, Row, Col, Statistic, Modal, Input, Select, Form, Popconfirm, Tooltip,
-} from 'antd'
+import { Card, Button, Typography, Space, Table, Tag, Spin, Progress, Row, Col, Statistic, Modal, Input, Select, Form, Popconfirm, Tooltip } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   ThunderboltOutlined, PlayCircleOutlined, StepForwardOutlined,
   TrophyOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -286,7 +284,7 @@ const QuickQuizConsole: React.FC = () => {
 
   const handleEnd = () => {
     if (autoNextRef.current) clearTimeout(autoNextRef.current)
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmEndQuiz'),
       content: t('endQuizHint'),
       okText: t('confirmEnd'),

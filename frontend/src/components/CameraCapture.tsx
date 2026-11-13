@@ -3,7 +3,8 @@
  * 调用设备摄像头拍照，生成 File 对象供对话上传
  */
 import React, { useRef, useState, useEffect, useCallback } from 'react'
-import { Modal, Button, Space, Typography, message } from 'antd'
+import { Modal, Button, Space, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import { CameraOutlined, ReloadOutlined, CheckOutlined, PictureOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 

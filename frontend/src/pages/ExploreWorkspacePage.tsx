@@ -1,7 +1,8 @@
 /** 探索画布 · 工作台：页签 + 画布 + 保存状态 + 连续使用提醒（40 分钟） */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { Editor } from 'tldraw'
-import { Button, Drawer, Dropdown, Empty, Input, Modal, Popconfirm, Space, Tabs, Tag, Tooltip, message } from 'antd'
+import { Button, Drawer, Dropdown, Empty, Input, Modal, Popconfirm, Space, Tabs, Tag, Tooltip } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import { AppstoreOutlined, ArrowLeftOutlined, CustomerServiceOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, HistoryOutlined, MoreOutlined, PlusSquareOutlined, RestOutlined, SendOutlined } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -122,7 +123,7 @@ const ExploreWorkspacePage: React.FC = () => {
       else sessionMsRef.current = 0
       if (sessionMsRef.current >= remindMin * 60000) {
         sessionMsRef.current = 0
-        Modal.warning({
+        modalApi.warning({
           title: t('breakTitle'),
           content: t('breakBody', { n: remindMin }),
         })
@@ -166,7 +167,7 @@ const ExploreWorkspacePage: React.FC = () => {
       .map((s) => ({ s, b: ed.getShapePageBounds(s.id) }))
       .filter((x) => !!x.b)
     if (movable.length < 3) { message.info(t('tooFewCards')); return }
-    Modal.confirm({
+    modalApi.confirm({
       title: t('organizeTitle'),
       content: t('organizeBody'),
       okText: t('organizeOk'),
@@ -194,7 +195,7 @@ const ExploreWorkspacePage: React.FC = () => {
     const ed = editorRef.current
     if (!ed) { message.warning(t('canvasNotReady')); return }
     if (ed.getCurrentPageShapes().length === 0) { message.info(t('pageEmpty')); return }
-    Modal.confirm({
+    modalApi.confirm({
       title: t('clearTitle'),
       content: t('clearBody'),
       okText: t('clearOk'),
@@ -318,7 +319,7 @@ const ExploreWorkspacePage: React.FC = () => {
   }
 
   const doDeletePage = (pn: number) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('delPageTitle'),
       content: t('delPageBody'),
       okButtonProps: { danger: true },

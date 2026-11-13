@@ -4,10 +4,8 @@
  */
 import { useTranslation } from 'react-i18next'
 import React, { useState, useEffect, useCallback } from 'react'
-import {
-  Layout, Table, Tag, Space, Typography, Button, Empty, message,
-  Select, Input, Popconfirm, Tooltip, Image, Divider,
-} from 'antd'
+import { Layout, Table, Tag, Space, Typography, Button, Empty, Select, Input, Popconfirm, Tooltip, Image, Divider } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ReloadOutlined, RobotOutlined, ImportOutlined,
   DeleteOutlined,

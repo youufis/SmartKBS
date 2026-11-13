@@ -5,10 +5,8 @@
  * 多选可限项、结果排序与自动刷新、投屏大屏、匿名与截止时间。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  Button, Card, Checkbox, Divider, Empty, Form, Input, Modal, Pagination, Segmented,
-  Select, Slider, Space, Spin, Switch, Tag, Tooltip, Typography, message,
-} from 'antd'
+import { Button, Card, Checkbox, Divider, Empty, Form, Input, Modal, Pagination, Segmented, Select, Slider, Space, Spin, Switch, Tag, Tooltip, Typography } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   BarChartOutlined, CheckCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined,
   FullscreenOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, RobotOutlined,
@@ -93,7 +91,7 @@ const DeletePollButton: React.FC<{ onConfirm: () => void }> = ({ onConfirm }) =>
         icon={<DeleteOutlined />}
         onClick={(e) => {
           e.stopPropagation()
-          Modal.confirm({
+          modalApi.confirm({
             title: t('confirmDeletePoll'),
             okText: t('confirm'),
             okType: 'danger',
@@ -478,7 +476,7 @@ const QuickPollPage: React.FC = () => {
                                     icon={poll.ended ? <PlayCircleOutlined /> : <StopOutlined />}
                                     onClick={() => {
                                       if (poll.ended) { void setPollStatus(poll, 'active'); return }
-                                      Modal.confirm({
+                                      modalApi.confirm({
                                         title: t('pollEnd'),
                                         content: t('pollEndConfirm'),
                                         okText: t('confirm'),

@@ -5,10 +5,8 @@
  * 口径：一次提交=一个批次(seq)，批改只看最后一次；AI 分默认待复核，教师点发布学生才可见。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  Alert, Button, Card, Col, Empty, Image, Input, InputNumber, Modal, Progress, Radio, Row,
-  DatePicker, Select, Space, Switch, Tag, Tooltip, Typography, Upload, message,
-} from 'antd'
+import { Alert, Button, Card, Col, Empty, Image, Input, InputNumber, Modal, Progress, Radio, Row, DatePicker, Select, Space, Switch, Tag, Tooltip, Typography, Upload } from 'antd'
+import { message, modalApi } from '../../utils/feedback'
 import {
   CameraOutlined, CheckCircleOutlined, CloudUploadOutlined, DeleteOutlined, DownloadOutlined,
   FileTextOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined,
@@ -483,7 +481,7 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
     setBusy('sim')
     try {
       const res = await tasksApi.getTaskSimilarity(task.id)
-      Modal.info({ title: t('hwSimilarity'), content: res.message, description: res.pairs.map(
+      modalApi.info({ title: t('hwSimilarity'), content: res.message, description: res.pairs.map(
         (p) => `${p.a} ↔ ${p.b}（${Math.round(p.ratio * 100)}%）`).join('；') || t('hwSimNone'),
       mask: { closable: false } })
       await load()

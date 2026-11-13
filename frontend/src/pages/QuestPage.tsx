@@ -3,10 +3,8 @@
  * 学生入口：开始闯关 + 历史记录 + 统计
  */
 import React, { useState, useEffect, startTransition, useRef } from 'react'
-import {
-  Card, Button, Typography, Space, Statistic,
-  Tag, message, Spin, Modal, Tooltip,
-} from 'antd'
+import { Card, Button, Typography, Space, Statistic, Tag, Spin, Modal, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ThunderboltOutlined, HistoryOutlined,
   FireOutlined, CrownOutlined, StarOutlined,

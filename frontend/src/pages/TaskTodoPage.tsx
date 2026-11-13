@@ -1,9 +1,11 @@
-/** 学生任务清单：降噪分组 + 今日聚焦 + 搜索排序 + 已完成回看（深色主题自适应） */
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+/** 学生任务清单：降噪分组 + 今日聚焦 + 搜索排序 + 已完成回看（深色主题自适应）
+ * 本轮加固：失败态与空态分离（可重试）、可见期轮询（课堂 live 即时）、骨架首载、
+ * 成绩/聚焦/计数标签语义色随主题、整行可点 + 键盘可达、live 脉冲、推荐降权、移动端快切渐隐提示。 */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  Button, Card, Col, Empty, Input, Progress, Row, Segmented, Select, Space, Spin, Tabs, Tag, Tooltip, Typography, Collapse,
+  Button, Card, Col, Empty, Input, Progress, Row, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, Collapse,
 } from 'antd'
 import {
   AlertOutlined, AppstoreOutlined, BarChartOutlined, BellOutlined, BookOutlined, CalendarOutlined, CheckCircleOutlined,
@@ -13,8 +15,12 @@ import {
 } from '@ant-design/icons'
 import { getTaskTodo, type DoneRecord, type TaskTodoItem, type TaskTodoResponse } from '../api/taskTodo'
 import { deadlineInfo, friendlyTime } from './dashboard/fmt'
-import { useChartTheme } from './dashboard/chartTheme'
+import { useChartTheme, withAlpha, type ChartColorToken } from './dashboard/chartTheme'
+import { useAutoRefresh } from './dashboard/useAutoRefresh'
+import { message } from '../utils/feedback'
 import PageHeader from '../components/PageHeader'
+import TaskTodoSkeleton from './TaskTodoSkeleton'
+import './dashboard/dashboard.css'
 
 const { Text, Paragraph } = Typography
 
@@ -54,19 +60,44 @@ const TaskTodoPage: React.FC = () => {
   const [doneMore, setDoneMore] = useState(false)
   /** 时间基准放在 state 里（渲染期不取时间，避免 purity 告警，同时让倒计时随刷新推进） */
   const [nowMs, setNowMs] = useState(() => Date.parse(new Date().toISOString()))
+  /** 快切横滑右缘渐隐提示：还有未露出的选项时才显示 */
+  const quickRef = useRef<HTMLDivElement | null>(null)
+  const [quickFade, setQuickFade] = useState(false)
+  const hasDataRef = useRef(false)
+  hasDataRef.current = data !== null
+  const failNotifiedRef = useRef(false)
+
+  /** 语义色令牌 → 实际色（tick 为中性灰） */
+  const tone = (k: ChartColorToken | 'tick'): string => (k === 'tick' ? ct.tick : ct[k])
+  /** 标签语义底：深色/浅色都用令牌透明度，不再用预设色（深色下预设色呈浅底 pill） */
+  const toneTag = (k: ChartColorToken): React.CSSProperties => ({
+    color: ct[k],
+    background: withAlpha(ct[k], ct.isDark ? 0.16 : 0.10),
+    borderColor: withAlpha(ct[k], 0.4),
+    marginInlineEnd: 0,
+  })
 
   const fetchSilent = useCallback(async () => {
     try {
       const res = await getTaskTodo()
       setData(res)
+      failNotifiedRef.current = false
       setNowMs(Date.now())
     } catch {
-      setData({ items: [], counts: {}, stats: { course_progress: 0, completion_rate: 0, accuracy_rate: 0, streak_days: 0 }, recent_done: [] })
+      // 失败≠没作业：首载失败进错误态（可重试）；已有数据时保留旧值 + 一次性提示
+      if (hasDataRef.current) {
+        if (!failNotifiedRef.current) {
+          failNotifiedRef.current = true
+          message.warning(t('todo.refreshFailed'))
+        }
+      } else {
+        setData(null)
+      }
       setNowMs(Date.now())
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   const fetchManual = useCallback(async () => {
     setLoading(true)
@@ -86,20 +117,26 @@ const TaskTodoPage: React.FC = () => {
     } catch { /* 忽略隐私模式 */ }
   }, [fetchSilent])
 
-  // 从答题/练习页返回时自动核对，避免最长 30s 缓存造成的“做完了还挂着”
+  // 可见期轮询：课堂 live 条目不用等切 tab/手动刷新（后端缓存 30s，45s 轮询对齐）
+  useAutoRefresh(fetchSilent, 45_000)
+
+  // 倒计时走动
   useEffect(() => {
-    const onBack = () => {
-      if (document.visibilityState === 'visible') fetchSilent()
-    }
-    window.addEventListener('focus', onBack)
-    document.addEventListener('visibilitychange', onBack)
     const timer = window.setInterval(() => setNowMs(Date.now()), 60_000)
-    return () => {
-      window.removeEventListener('focus', onBack)
-      document.removeEventListener('visibilitychange', onBack)
-      window.clearInterval(timer)
-    }
-  }, [fetchSilent])
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const updateQuickFade = useCallback(() => {
+    const el = quickRef.current
+    if (!el) return
+    setQuickFade(el.scrollWidth - el.clientWidth - el.scrollLeft > 4)
+  }, [])
+
+  useEffect(() => {
+    updateQuickFade()
+    window.addEventListener('resize', updateQuickFade)
+    return () => window.removeEventListener('resize', updateQuickFade)
+  }, [updateQuickFade, data, quick, tab])
 
   useEffect(() => {
     try {
@@ -109,31 +146,31 @@ const TaskTodoPage: React.FC = () => {
     } catch { /* 忽略 */ }
   }, [cat, quick, sort])
 
-  const CATEGORY_LABELS = useMemo<Record<string, { label: string; color: string; icon: React.ReactNode }>>(() => ({
-    exam: { label: t('todo.category.exam'), color: '#1677ff', icon: <FileAddOutlined /> },
-    curriculum: { label: t('todo.category.curriculum'), color: '#13c2c2', icon: <BookOutlined /> },
-    interactive: { label: t('todo.category.interactive'), color: '#ff4d4f', icon: <ThunderboltOutlined /> },
-    challenge: { label: t('todo.category.challenge'), color: '#52c41a', icon: <FolderOutlined /> },
-    service: { label: t('todo.category.service'), color: 'var(--text-tertiary)', icon: <BellOutlined /> },
+  const CATEGORY_LABELS = useMemo<Record<string, { label: string; color: ChartColorToken | 'tick'; icon: React.ReactNode }>>(() => ({
+    exam: { label: t('todo.category.exam'), color: 'primary', icon: <FileAddOutlined /> },
+    curriculum: { label: t('todo.category.curriculum'), color: 'cyan', icon: <BookOutlined /> },
+    interactive: { label: t('todo.category.interactive'), color: 'danger', icon: <ThunderboltOutlined /> },
+    challenge: { label: t('todo.category.challenge'), color: 'success', icon: <FolderOutlined /> },
+    service: { label: t('todo.category.service'), color: 'tick', icon: <BellOutlined /> },
   }), [t])
 
-  const TYPE_CONFIG = useMemo<Record<string, { icon: React.ReactNode; color: string }>>(() => ({
-    exam: { icon: <FileAddOutlined />, color: '#1677ff' },
-    task: { icon: <CheckCircleOutlined />, color: '#faad14' },
-    practice: { icon: <ExperimentOutlined />, color: '#52c41a' },
-    code: { icon: <CodeOutlined />, color: '#2f54eb' },
-    course_practice: { icon: <BookOutlined />, color: '#13c2c2' },
-    quiz: { icon: <ThunderboltOutlined />, color: '#ff4d4f' },
-    poll: { icon: <BarChartOutlined />, color: '#722ed1' },
-    discussion: { icon: <TeamOutlined />, color: '#1677ff' },
-    whiteboard: { icon: <EditOutlined />, color: '#eb2f96' },
-    quick_quiz: { icon: <CustomerServiceOutlined />, color: '#fa8c16' },
-    quest: { icon: <FireOutlined />, color: '#ff4d4f' },
-    wrong_book: { icon: <BookOutlined />, color: '#fa8c16' },
-    question_waiting: { icon: <MessageOutlined />, color: '#fa541c' },
-    question_can_answer: { icon: <MessageOutlined />, color: '#52c41a' },
-    shared_resource: { icon: <FolderOutlined />, color: '#52c41a' },
-    notification: { icon: <BellOutlined />, color: '#eb2f96' },
+  const TYPE_CONFIG = useMemo<Record<string, { icon: React.ReactNode; color: ChartColorToken }>>(() => ({
+    exam: { icon: <FileAddOutlined />, color: 'primary' },
+    task: { icon: <CheckCircleOutlined />, color: 'gold' },
+    practice: { icon: <ExperimentOutlined />, color: 'success' },
+    code: { icon: <CodeOutlined />, color: 'purple' },
+    course_practice: { icon: <BookOutlined />, color: 'cyan' },
+    quiz: { icon: <ThunderboltOutlined />, color: 'danger' },
+    poll: { icon: <BarChartOutlined />, color: 'purple' },
+    discussion: { icon: <TeamOutlined />, color: 'primary' },
+    whiteboard: { icon: <EditOutlined />, color: 'magenta' },
+    quick_quiz: { icon: <CustomerServiceOutlined />, color: 'warning' },
+    quest: { icon: <FireOutlined />, color: 'danger' },
+    wrong_book: { icon: <BookOutlined />, color: 'warning' },
+    question_waiting: { icon: <MessageOutlined />, color: 'warning' },
+    question_can_answer: { icon: <MessageOutlined />, color: 'success' },
+    shared_resource: { icon: <FolderOutlined />, color: 'success' },
+    notification: { icon: <BellOutlined />, color: 'magenta' },
   }), [])
 
   const typeLabel = (item: TaskTodoItem) => t(`todo.type.${item.type}`, { defaultValue: item.type })
@@ -216,12 +253,12 @@ const TaskTodoPage: React.FC = () => {
     { value: 'suggest', label: `${t('todo.quick.suggest')} (${suggestCount})` },
   ]
 
-  const GROUP_META: Record<string, { title: string; hint: string; icon: React.ReactNode; color: string }> = {
-    overdue: { title: t('todo.group.overdue'), hint: t('todo.groupHint.overdue'), icon: <AlertOutlined />, color: '#ff4d4f' },
-    urgent: { title: t('todo.group.urgent'), hint: t('todo.groupHint.urgent'), icon: <ClockCircleOutlined />, color: '#fa8c16' },
-    live: { title: t('todo.group.live'), hint: t('todo.groupHint.live'), icon: <ThunderboltOutlined />, color: '#13c2c2' },
-    study: { title: t('todo.group.study'), hint: t('todo.groupHint.study'), icon: <FileAddOutlined />, color: '#1677ff' },
-    suggest: { title: t('todo.group.suggest'), hint: t('todo.groupHint.suggest'), icon: <FolderOutlined />, color: 'var(--text-tertiary)' },
+  const GROUP_META: Record<string, { title: string; hint: string; icon: React.ReactNode; color: ChartColorToken | 'tick' }> = {
+    overdue: { title: t('todo.group.overdue'), hint: t('todo.groupHint.overdue'), icon: <AlertOutlined />, color: 'danger' },
+    urgent: { title: t('todo.group.urgent'), hint: t('todo.groupHint.urgent'), icon: <ClockCircleOutlined />, color: 'warning' },
+    live: { title: t('todo.group.live'), hint: t('todo.groupHint.live'), icon: <ThunderboltOutlined />, color: 'cyan' },
+    study: { title: t('todo.group.study'), hint: t('todo.groupHint.study'), icon: <FileAddOutlined />, color: 'primary' },
+    suggest: { title: t('todo.group.suggest'), hint: t('todo.groupHint.suggest'), icon: <FolderOutlined />, color: 'tick' },
   }
 
   const go = (url: string) => {
@@ -230,35 +267,48 @@ const TaskTodoPage: React.FC = () => {
   }
 
   const renderRow = (item: TaskTodoItem, idx: number) => {
-    const cfg = TYPE_CONFIG[item.type] || { icon: <BellOutlined />, color: 'var(--text-tertiary)' }
+    const cfg = TYPE_CONFIG[item.type] || { icon: <BellOutlined />, color: 'tick' as ChartColorToken }
     const dl = deadlineInfo(item.deadline, now)
     const dlText = item.deadline ? dlLabel(dl) : item.live ? '' : t('todo.noDeadline')
-    const dlColor = !item.deadline ? ct.tick : dl?.level === 'overdue' ? '#ff4d4f' : dl?.level === 'today' ? '#fa8c16' : '#faad14'
+    const dlColor = !item.deadline ? ct.tick : dl?.level === 'overdue' ? ct.danger : dl?.level === 'today' ? ct.warning : ct.gold
+    // 推荐看看是软待办：图标与按钮降权，不与硬待办抢注意力
+    const soft = !!item.suggest
+    const tileColor = soft ? ct.tick : tone(cfg.color)
 
     return (
       <div
         key={`${item.id}-${idx}`}
-        className="todo-row"
+        className="todo-row dash-row"
+        role="button"
+        tabIndex={0}
+        aria-label={item.title}
+        onClick={() => go(item.url)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(item.url) } }}
         style={{
-          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
-          borderBottom: `1px solid ${ct.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
+          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', cursor: 'pointer',
+          borderBottom: `1px solid ${ct.grid}`,
         }}
       >
         <div style={{
           width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-          background: ct.isDark ? 'rgba(255,255,255,0.06)' : `${cfg.color}14`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, color: cfg.color,
+          background: withAlpha(tileColor, ct.isDark ? 0.14 : 0.08),
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, color: tileColor,
         }}>
           {cfg.icon}
         </div>
         <div className="todo-main" style={{ flex: 1, minWidth: 0 }}>
           <Space size={6} wrap style={{ marginBottom: 2 }}>
             <Text strong style={{ fontSize: 14 }}>{item.title}</Text>
-            <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, color: cfg.color, borderColor: cfg.color, background: 'transparent' }}>
+            <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, color: tileColor, borderColor: withAlpha(tileColor, 0.45), background: 'transparent' }}>
               {typeLabel(item)}
             </Tag>
             {item.subject && (
               <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0 }}>{item.subject}</Tag>
+            )}
+            {item.live && (
+              <span className="todo-live" style={{ color: ct.cyan }}>
+                <i className="todo-live-dot" aria-hidden />{t('todo.liveBadge')}
+              </span>
             )}
             {dlText && (
               <Text style={{ fontSize: 12, color: dlColor }}>
@@ -267,11 +317,15 @@ const TaskTodoPage: React.FC = () => {
             )}
           </Space>
           {/* 手机上描述换两行读（窄屏由 .todo-row 把动作按钮挪到第二行，正文才拿得到整幅宽度） */}
-          <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ fontSize: 12, margin: 0 }}>
+          <Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: item.description }} style={{ fontSize: 12, margin: 0 }}>
             {item.description}
           </Paragraph>
         </div>
-        <Button className="todo-action" size="small" type="primary" ghost icon={<RightOutlined />} style={{ flexShrink: 0 }} onClick={() => go(item.url)}>
+        <Button
+          className="todo-action" size="small" type={soft ? 'default' : 'primary'} ghost={!soft}
+          icon={<RightOutlined />} style={{ flexShrink: 0 }}
+          onClick={(e) => { e.stopPropagation(); go(item.url) }}
+        >
           {actionLabel(item)}
         </Button>
       </div>
@@ -296,7 +350,7 @@ const TaskTodoPage: React.FC = () => {
         style={{ marginBottom: 16, borderRadius: 8 }}
         title={
           <Space size={8}>
-            <span style={{ color: meta.color }}>{meta.icon}</span>
+            <span style={{ color: tone(meta.color) }}>{meta.icon}</span>
             <Text strong>{meta.title}</Text>
             <Tag style={{ fontSize: 11, borderRadius: 8, marginInlineEnd: 0 }}>{items.length}</Tag>
             <Text type="secondary" style={{ fontSize: 11, fontWeight: 400 }}>{meta.hint}</Text>
@@ -334,25 +388,34 @@ const TaskTodoPage: React.FC = () => {
         styles={{ body: { padding: '0 16px 8px' } }}
       >
         {shown.map((r) => {
-          const cfg = TYPE_CONFIG[r.type] || { icon: <CheckCircleOutlined />, color: '#52c41a' }
+          const cfg = TYPE_CONFIG[r.type] || { icon: <CheckCircleOutlined />, color: 'success' as ChartColorToken }
+          const color = tone(cfg.color)
           const scoreText = r.score == null
             ? ''
             : r.total
               ? t('todo.done.score', { score: fmtNum(r.score), total: fmtNum(r.total) })
               : t('todo.done.scoreOnly', { score: fmtNum(r.score) })
+          // 成绩语义色：及格绿、临界橙、不及格红（原来 45/100 也挂绿标签）
+          const rate = r.score != null && r.total ? (Number(r.score) / Number(r.total)) * 100 : null
+          const scoreToken: ChartColorToken = rate == null ? 'success' : rate >= 60 ? 'success' : rate >= 40 ? 'warning' : 'danger'
           return (
             <div
               key={r.id}
+              className="dash-row"
+              role="button"
+              tabIndex={0}
+              aria-label={r.title}
               onClick={() => go(r.url)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(r.url) } }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', cursor: 'pointer',
-                borderBottom: `1px solid ${ct.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
+                borderBottom: `1px solid ${ct.grid}`,
               }}
             >
               <div style={{
                 width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                background: ct.isDark ? 'rgba(255,255,255,0.06)' : `${cfg.color}14`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, color: cfg.color,
+                background: withAlpha(color, ct.isDark ? 0.14 : 0.08),
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, color,
               }}>
                 {cfg.icon}
               </div>
@@ -363,7 +426,7 @@ const TaskTodoPage: React.FC = () => {
                 </Space>
                 <div><Text type="secondary" style={{ fontSize: 11 }}>{friendlyTime(r.time, i18n.language)}</Text></div>
               </div>
-              {scoreText && <Tag color="green" style={{ marginInlineEnd: 0, fontSize: 11 }}>{scoreText}</Tag>}
+              {scoreText && <Tag style={{ fontSize: 11, ...toneTag(scoreToken) }}>{scoreText}</Tag>}
             </div>
           )
         })}
@@ -378,14 +441,17 @@ const TaskTodoPage: React.FC = () => {
     )
   }
 
-  if (loading && !data) {
+  if (loading && !data) return <TaskTodoSkeleton />
+  // 失败态（首载接口挂）：明确报错 + 重试，不再伪装成"暂无待办"
+  if (!data) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
-        <Spin size="large" description={t('todo.loading')} />
-      </div>
+      <Card style={{ borderRadius: 8 }}>
+        <Empty description={<Text type="secondary">{t('todo.loadFailed')}</Text>}>
+          <Button type="primary" onClick={fetchManual}>{t('retry')}</Button>
+        </Empty>
+      </Card>
     )
   }
-  if (!data) return <Empty description={t('todo.loadFailed')} />
 
   const hasFilter = cat !== 'all' || quick !== 'all' || !!kw.trim()
 
@@ -397,7 +463,7 @@ const TaskTodoPage: React.FC = () => {
         title={
           <Space size={8} wrap>
             <span>{t('todo.title')}</span>
-            <Tag color="blue" style={{ fontSize: 13, padding: '0 12px', borderRadius: 8 }}>
+            <Tag style={{ fontSize: 13, padding: '0 12px', borderRadius: 8, ...toneTag('primary') }}>
               {t('todo.itemCount', { count: todoCount })}
             </Tag>
             {suggestCount > 0 && (
@@ -435,60 +501,62 @@ const TaskTodoPage: React.FC = () => {
         }
       />
 
-      {/* ─── 分类统计条：一行六格（全部 + 五类），点击即筛选 ─── */}
+      {/* ─── 分类统计条：瓦片格（gap 分隔，换行不再残留行首竖线），点击即筛选 ─── */}
       <Card
         size="small"
         style={{ marginBottom: 14, borderRadius: 8 }}
-        styles={{ body: { padding: '2px 6px' } }}
+        styles={{ body: { padding: '4px 6px' } }}
       >
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch', gap: 4 }}>
           {/* 全部总览格 */}
           <div
             role="button"
             tabIndex={0}
+            className="todo-cat-cell"
             title={t('todo.filter.allCount', { count: todoCount + suggestCount })}
             onClick={() => setCat('all')}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCat('all') } }}
             style={{
-              flex: '1 1 118px', minWidth: 112, cursor: 'pointer',
+              flex: '1 1 118px', minWidth: 112, cursor: 'pointer', borderRadius: 8,
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '8px 10px',
-              background: cat === 'all' ? (ct.isDark ? 'rgba(22,119,255,0.12)' : 'rgba(22,119,255,0.06)') : 'transparent',
-              boxShadow: cat === 'all' ? 'inset 0 0 0 1px #1677ff' : 'none',
+              background: cat === 'all' ? withAlpha(ct.primary, ct.isDark ? 0.14 : 0.07) : undefined,
+              boxShadow: cat === 'all' ? `inset 0 0 0 1px ${ct.primary}` : 'none',
               transition: 'background .2s',
             }}
           >
-            <span style={{ fontSize: 16, color: cat === 'all' ? '#1677ff' : ct.tick, flexShrink: 0 }}><AppstoreOutlined /></span>
+            <span style={{ fontSize: 16, color: cat === 'all' ? ct.primary : ct.tick, flexShrink: 0 }}><AppstoreOutlined /></span>
             <span style={{ minWidth: 0 }}>
               <Text type="secondary" style={{ fontSize: 11.5, display: 'block', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {t('todo.filter.all')}
               </Text>
-              <span style={{ fontSize: 17, fontWeight: 600, color: cat === 'all' ? '#1677ff' : ct.tick }}>{todoCount + suggestCount}</span>
+              <span style={{ fontSize: 17, fontWeight: 600, color: cat === 'all' ? ct.primary : ct.tick }}>{todoCount + suggestCount}</span>
             </span>
           </div>
-          {Object.entries(CATEGORY_LABELS).map(([key, cfg], idx) => {
+          {Object.entries(CATEGORY_LABELS).map(([key, cfg]) => {
             const count = catCounts[key] || 0
             const active = cat === key
+            const color = tone(cfg.color)
             const toggle = () => setCat(active ? 'all' : key)
             return (
               <div
                 key={key}
                 role="button"
                 tabIndex={0}
+                className="todo-cat-cell"
                 title={active ? t('todo.clearedFilter') : cfg.label}
                 onClick={toggle}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
                 style={{
-                  flex: '1 1 118px', minWidth: 112, cursor: 'pointer',
+                  flex: '1 1 118px', minWidth: 112, cursor: 'pointer', borderRadius: 8,
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '8px 10px',
-                  borderInlineStart: idx === 0 ? 'none' : `1px solid ${ct.isDark ? ct.grid : '#f0f0f0'}`,
-                  background: active ? (ct.isDark ? 'rgba(79,140,255,0.12)' : `${cfg.color}12`) : 'transparent',
-                  boxShadow: active ? `inset 0 0 0 1px ${cfg.color}` : 'none',
+                  background: active ? withAlpha(color, ct.isDark ? 0.14 : 0.07) : undefined,
+                  boxShadow: active ? `inset 0 0 0 1px ${color}` : 'none',
                   transition: 'background .2s',
                 }}
               >
-                <span style={{ fontSize: 16, color: count > 0 ? cfg.color : ct.tick, flexShrink: 0 }}>{cfg.icon}</span>
+                <span style={{ fontSize: 16, color: count > 0 ? color : ct.tick, flexShrink: 0 }}>{cfg.icon}</span>
                 <span style={{ minWidth: 0 }}>
                   <Text
                     type="secondary"
@@ -496,7 +564,7 @@ const TaskTodoPage: React.FC = () => {
                   >
                     {cfg.label}
                   </Text>
-                  <span style={{ fontSize: 17, fontWeight: 600, color: count > 0 ? cfg.color : ct.tick }}>{count}</span>
+                  <span style={{ fontSize: 17, fontWeight: 600, color: count > 0 ? color : ct.tick }}>{count}</span>
                 </span>
               </div>
             )
@@ -504,30 +572,39 @@ const TaskTodoPage: React.FC = () => {
         </div>
       </Card>
 
-      {/* ─── 今日必须完成 ─── */}
       {/* ─── 今日必须完成（常驻，两个 tab 都显示） ─── */}
       {focus.length > 0 && (
         <Card
           size="small"
           style={{
             marginBottom: 14, borderRadius: 8,
-            border: `1px solid ${ct.isDark ? 'rgba(250,140,22,0.45)' : '#ffe7ba'}`,
-            background: ct.isDark ? 'rgba(250,140,22,0.10)' : '#fffbe6',
+            border: `1px solid ${withAlpha(ct.warning, ct.isDark ? 0.45 : 0.35)}`,
+            background: withAlpha(ct.warning, ct.isDark ? 0.10 : 0.06),
           }}
           styles={{ body: { padding: '10px 14px' } }}
         >
           <Space size={10} wrap>
-            <Text strong style={{ fontSize: 13 }}><BulbIcon /> {t('todo.focus.title')}</Text>
+            <Text strong style={{ fontSize: 13 }}>
+              <ThunderboltOutlined style={{ color: ct.warning, marginRight: 6 }} />{t('todo.focus.title')}
+            </Text>
             {focus.map((it) => {
               const dl = deadlineInfo(it.deadline, now)
-              const tone = dl?.level === 'overdue' ? 'red' : dl?.level === 'today' ? 'orange' : 'blue'
+              const toneKey: ChartColorToken = dl?.level === 'overdue' ? 'danger' : dl?.level === 'today' ? 'warning' : 'primary'
               return (
-                <Tag key={it.id} color={tone} style={{ cursor: 'pointer', marginInlineEnd: 0, padding: '2px 8px', borderRadius: 8 }} onClick={() => go(it.url)}>
-                  {it.title.length > 14 ? `${it.title.slice(0, 14)}…` : it.title}
-                  {it.deadline && (
-                    <Text style={{ fontSize: 11, marginInlineStart: 4, color: 'inherit' }}>{dlLabel(dl)}</Text>
-                  )}
-                </Tag>
+                <Tooltip key={it.id} title={it.title}>
+                  <Tag
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'pointer', padding: '2px 8px', borderRadius: 8, ...toneTag(toneKey) }}
+                    onClick={() => go(it.url)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(it.url) } }}
+                  >
+                    {it.title.length > 14 ? `${it.title.slice(0, 14)}…` : it.title}
+                    {it.deadline && (
+                      <Text style={{ fontSize: 11, marginInlineStart: 4, color: 'inherit' }}>{dlLabel(dl)}</Text>
+                    )}
+                  </Tag>
+                </Tooltip>
               )
             })}
           </Space>
@@ -545,13 +622,18 @@ const TaskTodoPage: React.FC = () => {
             label: <span><CheckCircleOutlined /> {t('todo.tabs.todo')} ({todoCount})</span>,
             children: (
               <>
-                <Segmented
-                  size="small"
-                  value={quick}
-                  onChange={(v) => setQuick(v as string)}
-                  options={QUICK_OPTIONS}
-                  style={{ marginBottom: 14 }}
-                />
+                {/* 快切横滑 + 右缘渐隐：窄屏选项超出时给出"还有更多"的可见信号 */}
+                <div style={{ position: 'relative', marginBottom: 14 }}>
+                  <div className="todo-quick-scroll" ref={quickRef} onScroll={updateQuickFade}>
+                    <Segmented
+                      size="small"
+                      value={quick}
+                      onChange={(v) => setQuick(v as string)}
+                      options={QUICK_OPTIONS}
+                    />
+                  </div>
+                  {quickFade && <span className="todo-quick-fade" aria-hidden />}
+                </div>
                 {hasFilter && (
                   <div style={{ marginTop: -6, marginBottom: 12 }}>
                     <Button type="link" size="small" style={{ padding: 0 }} onClick={() => { setCat('all'); setQuick('all'); setKw('') }}>
@@ -597,7 +679,7 @@ const TaskTodoPage: React.FC = () => {
               key: 'stats',
               label: (
                 <Space>
-                  <TrophyOutlined style={{ color: '#faad14' }} />
+                  <TrophyOutlined style={{ color: ct.gold }} />
                   <Text strong>{t('todo.stats.title')}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t('todo.stats.brief', {
@@ -612,27 +694,27 @@ const TaskTodoPage: React.FC = () => {
                   <Col xs={12} sm={6}>
                     <div style={{ textAlign: 'center' }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.courseProgress')}</Text>
-                      <Progress type="dashboard" percent={data.stats.course_progress || 0} size={80} strokeColor="#1677ff" />
+                      <Progress type="dashboard" percent={data.stats.course_progress || 0} size={80} strokeColor={ct.primary} />
                     </div>
                   </Col>
                   <Col xs={12} sm={6}>
                     <div style={{ textAlign: 'center' }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.completionRate')}</Text>
-                      <Progress type="dashboard" percent={data.stats.completion_rate || 0} size={80} strokeColor="#52c41a" />
+                      <Progress type="dashboard" percent={data.stats.completion_rate || 0} size={80} strokeColor={ct.success} />
                     </div>
                   </Col>
                   <Col xs={12} sm={6}>
                     <div style={{ textAlign: 'center' }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.accuracyRate')}</Text>
-                      <Progress type="dashboard" percent={data.stats.accuracy_rate || 0} size={80} strokeColor="#722ed1" format={(p) => `${p}%`} />
+                      <Progress type="dashboard" percent={data.stats.accuracy_rate || 0} size={80} strokeColor={ct.purple} format={(p) => `${p}%`} />
                     </div>
                   </Col>
                   <Col xs={12} sm={6}>
                     <div style={{ textAlign: 'center', paddingTop: 8 }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.streakDays')}</Text>
-                      <div style={{ fontSize: 28, fontWeight: 700, color: '#fa8c16' }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: ct.warning }}>
                         {data.stats.streak_days || 0}
-                        <Text style={{ fontSize: 14, color: '#fa8c16', marginLeft: 4 }}>{t('todo.stats.streakDaysUnit')}</Text>
+                        <Text style={{ fontSize: 14, color: ct.warning, marginLeft: 4 }}>{t('todo.stats.streakDaysUnit')}</Text>
                       </div>
                       <Text type="secondary" style={{ fontSize: 11 }}>
                         {data.stats.streak_days > 0 ? t('todo.stats.streakActive') : t('todo.stats.streakInactive')}
@@ -659,10 +741,6 @@ function parseMs(s: string | null | undefined): number {
 function fmtNum(v: number | null | undefined): string {
   const n = Number(v ?? 0)
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
-}
-
-function BulbIcon() {
-  return <span role="img" aria-label="focus">⚡</span>
 }
 
 export default TaskTodoPage

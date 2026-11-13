@@ -1,4 +1,5 @@
 {
+  "refresh": { "updatedAt": "更新于 {{time}}", "label": "刷新" },
   "loading": "加载中...",
   "loadFailed": "无法加载仪表盘数据",
   "welcome": {
@@ -447,6 +448,8 @@
     }
   },
   "todo": {
+    "refreshFailed": "刷新失败，展示的是上次数据",
+    "liveBadge": "进行中",
     "title": "📋 我的任务清单",
     "subtitle": "按截止时间与紧急程度自动整理，帮你优先完成最该做的事",
     "itemCount": "{{count}} 项待办",

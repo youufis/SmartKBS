@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { Tag, Tooltip, Popover, Popconfirm, message } from 'antd'
+import { Tag, Tooltip, Popover, Popconfirm } from 'antd'
+import { message } from '../../utils/feedback'
 import { EyeOutlined, BgColorsOutlined, EyeInvisibleOutlined } from '@ant-design/icons'
 import { updateShowcaseTheme } from '../../api/showcase'
 import { useAuthStore } from '../../stores/authStore'

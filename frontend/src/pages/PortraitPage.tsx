@@ -3,11 +3,8 @@ import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import ScopeTag from '../components/ScopeTag'
-import {
-  Card, Row, Col, Typography, Spin, Button, Tag, Space, Tabs,
-  Select, message, Modal, Empty, Tooltip, Divider,
-  Radio, Badge, Alert, Pagination, Input,
-} from 'antd'
+import { Card, Row, Col, Typography, Spin, Button, Tag, Space, Tabs, Select, Modal, Empty, Tooltip, Divider, Radio, Badge, Alert, Pagination, Input } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   EditOutlined, HeartOutlined, HeartFilled, ShareAltOutlined,
   GlobalOutlined, TeamOutlined, LockOutlined, DeleteOutlined,
@@ -204,7 +201,7 @@ const PortraitPage: React.FC = () => {
   const handleGenerate = async () => {
     if (todayExists) {
       // 本期已生成过 → 学生确认扣积分（价格随配置下发，不再写死 100），教职工确认免积分再生成
-      Modal.confirm({
+      modalApi.confirm({
         title: isStudentUser ? t('confirmRegenerate', { points: extraPoints }) : t('confirmRegenerateStaff'),
         icon: <ExclamationCircleOutlined />,
         content: (
@@ -285,7 +282,7 @@ const PortraitPage: React.FC = () => {
   }
 
   const handleDelete = (portrait: PortraitData) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDelete'),
       content: t('confirmDeletePortrait', { date: portrait.created_date }),
       okText: t('delete'),

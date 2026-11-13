@@ -1,12 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
-import {
-  Card, Tabs, Button, Space, Typography, Tag, Modal,
-  Form, Input, InputNumber, Select, message, Empty, Spin, Radio, Result,
-  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination, Tooltip,
-  Alert, Segmented,
-} from 'antd'
+import { Card, Tabs, Button, Space, Typography, Tag, Modal, Form, Input, InputNumber, Select, Empty, Spin, Radio, Result, Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination, Tooltip, Alert, Segmented } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   ThunderboltOutlined, BarChartOutlined,
   PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined,
@@ -615,7 +611,7 @@ const InteractionPage: React.FC = () => {
                                   style={{ color: '#ff4d4f' }}
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    Modal.confirm({
+                                    modalApi.confirm({
                                       title: t('endQuizConfirm'),
                                       okText: t('endAction'),
                                       cancelText: t('cancel'),
@@ -712,7 +708,7 @@ const InteractionPage: React.FC = () => {
           // A1: 有未提交作答时先确认（草稿已存本机，离开不会真丢）
           const close = () => { setTakingQuiz(null); setQuizResult(null); setQuizDraftInfo(null); setQuizSubmitError(null) }
           if (!quizDone) { close(); return }
-          Modal.confirm({
+          modalApi.confirm({
             title: t('common:leaveTitle'),
             content: t('common:leaveBody', { done: quizDone }),
             okText: t('common:leaveConfirmOk'),
@@ -1254,9 +1250,6 @@ const InteractionPage: React.FC = () => {
           </div>
         )}
       </Modal>
-
-
-
 
 
 

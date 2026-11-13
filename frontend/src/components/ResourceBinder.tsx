@@ -13,10 +13,8 @@
  * 5. 已绑定区改用 KpResourceCard，与知识点详情面板一套 UI（含上移/下移/解绑）。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Button, Checkbox, Empty, Input, Modal, Pagination, Segmented,
-  Space, Spin, Tag, Tooltip, Typography, message,
-} from 'antd'
+import { Button, Checkbox, Empty, Input, Modal, Pagination, Segmented, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   AppstoreOutlined, BarsOutlined, ClearOutlined, MenuUnfoldOutlined,
   PlusOutlined, ReloadOutlined, SearchOutlined, StarFilled,
@@ -55,7 +53,6 @@ const keyOfBound = (r: CurriculumResource) => `${r.resource_type}:${r.resource_i
 const KP_RANK: Record<string, number> = { exact: 0, contains: 1, chapter: 2, none: 3 }
 
 const DAY = 86400000
-
 
 type DimKey = 'kp' | 'kind' | 'subject' | 'grade' | 'owner' | 'time' | 'status' | 'bound' | 'source'
 interface FacetOption { value: string; label: string; n: number }

@@ -6,7 +6,8 @@ import ReactMarkdown from 'react-markdown'
 import { useTranslation } from 'react-i18next'
 import remarkGfm from 'remark-gfm'
 import { Box, type Editor } from 'tldraw'
-import { Button, Input, Modal, Space, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Input, Modal, Space, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../../utils/feedback'
 import {
   AimOutlined, ApartmentOutlined, AudioOutlined, CameraOutlined, CloseOutlined, CustomerServiceOutlined, ExportOutlined, SyncOutlined,
   ClearOutlined, ColumnWidthOutlined, DeploymentUnitOutlined, ExpandAltOutlined, ExpandOutlined, LoadingOutlined, PictureOutlined, ReadOutlined, RocketOutlined, SendOutlined,

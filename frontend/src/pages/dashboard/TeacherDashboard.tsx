@@ -1,14 +1,16 @@
 /** 教师/管理员首页看板：待办驱动 + 班级亮点 */
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Card, Col, Empty, Row, Space, Tag, Typography } from 'antd'
+import { Button, Card, Col, Empty, Row, Space, Tag, Typography } from 'antd'
 import {
   AlignLeftOutlined, AppstoreOutlined, AuditOutlined, FileAddOutlined, FireOutlined,
   PieChartOutlined, TeamOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import { getTeacherTodo, type TeacherTodo } from '../../api/dashboard'
 import { useDashboardData } from './useDashboardData'
+import { useAutoRefresh } from './useAutoRefresh'
+import RefreshHint from './RefreshHint'
 import { useChartTheme } from './chartTheme'
 import { useChartVariant } from './chartVariant'
 import VariantSwitch from './VariantSwitch'
@@ -195,18 +197,23 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
-  const { summary, activities, announcements, loading, activityLoading, activityError, fetchActivities } = useDashboardData()
+  const { summary, activities, announcements, loading, activityLoading, activityError, fetchActivities, refresh, refreshing, updatedAt } = useDashboardData()
   const [todo, setTodo] = useState<TeacherTodo | null>(null)
   const [statusVariant, chooseStatusVariant] = useChartVariant('examStatus', EXAM_STATUS_POOL)
 
-  useEffect(() => {
-    let cancelled = false
-    getTeacherTodo().then((d) => { if (!cancelled) setTodo(d) }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.TeacherTodo' }) })
-    return () => { cancelled = true }
+  const fetchTodo = useCallback(() => {
+    getTeacherTodo().then((d) => setTodo(d)).catch((err) => reportLoadError(err, { key: 'dashboard.TeacherTodo' }))
   }, [])
 
+  useEffect(() => { fetchTodo() }, [fetchTodo])
+  useAutoRefresh(fetchTodo)
+
   if (loading) return <DashboardSkeleton />
-  if (!summary) return <Empty description={t('loadFailed')} />
+  if (!summary) return (
+    <Empty description={t('loadFailed')}>
+      <Button type="primary" onClick={refresh}>{t('retry')}</Button>
+    </Empty>
+  )
 
   const ongoing = (todo?.active_quizzes ?? 0) + (todo?.active_quick_quiz_rooms ?? 0)
     + (todo?.active_discussions ?? 0) + (todo?.active_polls ?? 0) + (todo?.active_tasks ?? 0)
@@ -229,6 +236,7 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
   return (
     <div>
       <WelcomeBanner summary={summary} todoTotal={pendingTotal} isStudent={false} isTeacher={!isAdmin} isAdmin={isAdmin} />
+      <RefreshHint updatedAt={updatedAt} refreshing={refreshing} onRefresh={refresh} />
 
       <TeacherTodoBar data={todo} />
 
@@ -290,9 +298,9 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
               variant={statusVariant}
               emptyText={t('chart.noTeachingData')}
               parts={[
-                { key: 'published', label: t('published'), value: examStats?.published ?? 0, color: '#52c41a' },
-                { key: 'ended', label: t('ended'), value: examStats?.ended ?? 0, color: '#ff7a45' },
-                { key: 'draft', label: t('draft'), value: examStats?.draft ?? 0, color: '#bfbfbf' },
+                { key: 'published', label: t('published'), value: examStats?.published ?? 0, color: ct.success },
+                { key: 'ended', label: t('ended'), value: examStats?.ended ?? 0, color: ct.warning },
+                { key: 'draft', label: t('draft'), value: examStats?.draft ?? 0, color: ct.empty },
               ]}
             />
             {/* 贴顶后底部会空，用一行入口收尾：看到"3 场已结束"的人下一步一定是想去看成绩 */}
@@ -315,7 +323,7 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           {(summary.recent_exams?.length ?? 0) > 0 && (
             <Card size="small"
               style={{ marginBottom: 16 }}
-              title={<span style={{ fontSize: 14, fontWeight: 500 }}><FireOutlined style={{ color: '#fa8c16', marginRight: 6 }} />{t('recentCreatedExams')}</span>}
+              title={<span style={{ fontSize: 14, fontWeight: 500 }}><FireOutlined style={{ color: ct.warning, marginRight: 6 }} />{t('recentCreatedExams')}</span>}
               extra={<a onClick={() => navigate('/exam')}>{t('manage')} →</a>}
               styles={{ body: { padding: '2px 16px 8px' } }}
             >

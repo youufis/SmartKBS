@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons'
 import type { TeacherTodo } from '../../api/dashboard'
 import { friendlyTime } from './fmt'
+import { useChartTheme, type ChartColorToken } from './chartTheme'
 
 const { Text } = Typography
 
@@ -23,22 +24,22 @@ interface ChipDef {
   key: keyof TeacherTodo
   labelKey: string
   icon: React.ReactNode
-  color: string
+  color: ChartColorToken
   route: string
   actionable?: boolean
 }
 
 const CHIPS: ChipDef[] = [
-  { key: 'pending_exam_grading', labelKey: 'teacherTodo.grading', icon: <FormOutlined />, color: '#ff4d4f', route: '/exam?grading=pending', actionable: true },
-  { key: 'pending_task_grades', labelKey: 'teacherTodo.taskGrades', icon: <FileDoneOutlined />, color: '#fa8c16', route: '/tasks?grading=pending', actionable: true },
-  { key: 'pending_questions', labelKey: 'teacherTodo.questions', icon: <QuestionCircleOutlined />, color: '#722ed1', route: '/student-questions', actionable: true },
-  { key: 'pending_answer_reviews', labelKey: 'teacherTodo.answers', icon: <MessageOutlined />, color: '#eb2f96', route: '/student-questions', actionable: true },
-  { key: 'active_quizzes', labelKey: 'teacherTodo.quizzes', icon: <ThunderboltOutlined />, color: '#1677ff', route: '/interaction' },
-  { key: 'active_quick_quiz_rooms', labelKey: 'teacherTodo.quickQuiz', icon: <FireOutlined />, color: '#13c2c2', route: '/quick-quiz' },
-  { key: 'active_discussions', labelKey: 'teacherTodo.discussions', icon: <TeamOutlined />, color: '#2f54eb', route: '/discussion' },
-  { key: 'active_polls', labelKey: 'teacherTodo.polls', icon: <BarChartOutlined />, color: '#52c41a', route: '/quick-poll' },
-  { key: 'active_tasks', labelKey: 'teacherTodo.tasks', icon: <CheckCircleOutlined />, color: '#389e0d', route: '/tasks' },
-  { key: 'in_progress_exam_count', labelKey: 'teacherTodo.exams', icon: <ClockCircleOutlined />, color: '#d48806', route: '/exam' },
+  { key: 'pending_exam_grading', labelKey: 'teacherTodo.grading', icon: <FormOutlined />, color: 'danger', route: '/exam?grading=pending', actionable: true },
+  { key: 'pending_task_grades', labelKey: 'teacherTodo.taskGrades', icon: <FileDoneOutlined />, color: 'warning', route: '/tasks?grading=pending', actionable: true },
+  { key: 'pending_questions', labelKey: 'teacherTodo.questions', icon: <QuestionCircleOutlined />, color: 'purple', route: '/student-questions', actionable: true },
+  { key: 'pending_answer_reviews', labelKey: 'teacherTodo.answers', icon: <MessageOutlined />, color: 'magenta', route: '/student-questions', actionable: true },
+  { key: 'active_quizzes', labelKey: 'teacherTodo.quizzes', icon: <ThunderboltOutlined />, color: 'primary', route: '/interaction' },
+  { key: 'active_quick_quiz_rooms', labelKey: 'teacherTodo.quickQuiz', icon: <FireOutlined />, color: 'cyan', route: '/quick-quiz' },
+  { key: 'active_discussions', labelKey: 'teacherTodo.discussions', icon: <TeamOutlined />, color: 'primary', route: '/discussion' },
+  { key: 'active_polls', labelKey: 'teacherTodo.polls', icon: <BarChartOutlined />, color: 'success', route: '/quick-poll' },
+  { key: 'active_tasks', labelKey: 'teacherTodo.tasks', icon: <CheckCircleOutlined />, color: 'success', route: '/tasks' },
+  { key: 'in_progress_exam_count', labelKey: 'teacherTodo.exams', icon: <ClockCircleOutlined />, color: 'gold', route: '/exam' },
 ]
 
 /** 汇总指标：标签小、数字大，0 值降级成灰 */
@@ -65,7 +66,8 @@ const Metric: React.FC<{ label: string; value: number; color: string; onClick?: 
 
 const TeacherTodoBar: React.FC<{ data: TeacherTodo | null }> = ({ data }) => {
   const navigate = useNavigate()
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const ct = useChartTheme()
   if (!data) return null
 
   const pendingCount =
@@ -94,18 +96,18 @@ const TeacherTodoBar: React.FC<{ data: TeacherTodo | null }> = ({ data }) => {
           paddingBottom: 9, borderBottom: '1px dashed rgba(128,128,128,0.2)',
         }}>
           <Metric
-            label={t('teacherTodo.metricPending')} value={pendingCount} color="#ff4d4f"
+            label={t('teacherTodo.metricPending')} value={pendingCount} color={ct.danger}
             onClick={() => navigate(pendingRoute)}
           />
           <Metric
-            label={t('teacherTodo.metricOngoing')} value={ongoingCount} color="#fa8c16"
+            label={t('teacherTodo.metricOngoing')} value={ongoingCount} color={ct.warning}
             onClick={() => navigate('/activity-monitor')}
           />
-          <span style={{
+          <span className="dash-todo-next" style={{
             marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6,
             fontSize: 12.5, color: 'rgba(128,128,128,0.95)', minWidth: 0,
           }}>
-            <ClockCircleOutlined style={{ color: '#faad14' }} />
+            <ClockCircleOutlined style={{ color: ct.gold }} />
             {t('teacherTodo.metricNextExam')}：
             {nextExam ? (
               <>
@@ -119,7 +121,7 @@ const TeacherTodoBar: React.FC<{ data: TeacherTodo | null }> = ({ data }) => {
                   {nextExam.title}
                 </a>
                 {nextExam.end_time && (
-                  <span style={{ color: 'rgba(128,128,128,0.7)' }}>· {friendlyTime(nextExam.end_time)}</span>
+                  <span style={{ color: 'rgba(128,128,128,0.7)' }}>· {friendlyTime(nextExam.end_time, i18n.language?.startsWith('en') ? 'en-US' : 'zh-CN')}</span>
                 )}
               </>
             ) : (
@@ -141,13 +143,13 @@ const TeacherTodoBar: React.FC<{ data: TeacherTodo | null }> = ({ data }) => {
                   onClick={() => navigate(chip.route)}
                   style={{
                     cursor: 'pointer', margin: 0, padding: '2px 10px', borderRadius: 8, userSelect: 'none',
-                    borderColor: chip.color,
+                    borderColor: ct[chip.color],
                   }}
                 >
-                  <Space size={4} style={{ color: chip.color }}>
+                  <Space size={4} style={{ color: ct[chip.color] }}>
                     {chip.icon}
                     <span>{t(chip.labelKey)}</span>
-                    <Text strong style={{ color: chip.color }}>{n}</Text>
+                    <Text strong style={{ color: ct[chip.color] }}>{n}</Text>
                   </Space>
                 </Tag>
               </Tooltip>

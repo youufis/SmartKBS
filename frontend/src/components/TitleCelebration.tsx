@@ -3,7 +3,8 @@
  * 在 AppLayout 中使用，定期检查新通知并弹出庆祝动画
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Modal, Button, Space, Typography, message } from 'antd'
+import { Modal, Button, Space, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   TrophyOutlined, GiftOutlined, FireOutlined,
   CheckCircleFilled,

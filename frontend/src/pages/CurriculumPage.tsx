@@ -3,11 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { fetchGrades } from '../api/gradeClass'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
-import {
-  Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
-  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
-  Collapse, Segmented, Drawer, Grid, Alert, Switch,
-} from 'antd'
+import { Layout, Card, Tree, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress, Collapse, Segmented, Drawer, Grid, Alert, Switch } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 
 const { Sider, Content } = Layout
 import type { DataNode } from 'antd/es/tree'
@@ -925,7 +922,7 @@ const CurriculumPage: React.FC = () => {
 
   // ── 停用课程（软下架）：改名重建、临时下线都走这里，而不是删掉再重建、留下一堆看不见的孤儿记录 ──
   const handleDisableCourse = (course: Course) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDisableCourse'),
       content: t('confirmDisableCourseDesc', { name: course.name }),
       okText: t('disableCourse'),
@@ -952,7 +949,7 @@ const CurriculumPage: React.FC = () => {
   const handleHardDeleteCourse = (course: Course) => {
     const { chapters, kps, resources } = countCourseNodes(course)
     const vars = { name: course.name, chapters, kps, resources }
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmHardDeleteCourse'),
       // 在用课程额外提示一句"只是不想让学生看到就用停用"，防止把误删当清理
       content: course.status === 'inactive'
@@ -1693,7 +1690,6 @@ const CurriculumPage: React.FC = () => {
   if (unmatchedCourses.length > 0) {
     groupedCourses.push({ subject: t('uncategorized'), courses: unmatchedCourses })
   }
-
 
   // 知识点详情面板的公共 props（宽屏内联 / 窄屏 Drawer 共用一份）
   const kpPanelProps = selectedKp ? {

@@ -43,15 +43,16 @@
 > - 🏷 **Question bank**: import & edit share one validation (malformed questions rejected) · cross-creator dedupe admin-only · extraction size caps & image magic-byte checks · generation dedupe · field length limits
 > - 📊 **Analytics & summaries**: scores student-ID migration (same-name separation, auto at startup) · ID-first aggregation · student analytics daily cap · class-summary prompt data isolation
 > - 🔗 **Resource lifecycle**: delete auto-clears bindings · rename auto-updates names (incl. re-share rows) · dead links hidden instantly · exact same-name matching · chat history sidebar & archived attachments
-> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save)
+> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save) · task-list failure retry & semantic score colors · live pulse & softer suggestions
 > - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
 > - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
-> - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled
-> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · 146 new regression tests
+> - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled · route-level code splitting (first-load -79%) · hand-drawn SVG radar
+> - 🎨 **Interface experience**: home/task-list skeletons · refresh entry & updated-at · visible-period revalidation & ticking countdowns · quick-action tiles · semantic tags dark-consistent · mobile wrap/overflow fixes · row-level keyboard access · unified icon language
+> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · post-auth catalog loading · themed feedback consolidation · 146 new regression tests
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables/fields are created and the scores student-ID migration runs automatically at startup (idempotent); Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + a new desktop build).
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables/fields are created and the scores student-ID migration runs automatically at startup (idempotent); Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + experience/performance optimization + a new desktop build).
 
 ---
 
@@ -166,7 +167,7 @@ What you see first after login — the role-aware dashboard and the student to-d
 
 ### Dashboard (System Home)
 
-After login, the smart dashboard is displayed by default, aggregating key data by role:
+After login, the smart dashboard is displayed by default, aggregating key data by role; manual refresh with updated-at, auto revalidation on return to foreground, skeleton first load:
 
 **Student Side:**
 
@@ -199,10 +200,10 @@ After login, the smart dashboard is displayed by default, aggregating key data b
 
 Student-specific task aggregation board:
 
-- 📊 To-do items grouped by category (Assessments, Course Learning, Interactive Classroom, Shared Resources, System Services)
-- 🔴 Upcoming deadline highlights
-- 🚀 One-click jump to corresponding feature pages
-- 📈 Completion progress statistics
+- 🗂 Five semantic groups: overdue / due soon / live class / after-class / suggested (suggestions excluded from hard to-dos)
+- ⚡ Persistent today-focus bar; live pulse badge; failure retryable, never disguised as empty
+- 🏆 Done review (last 30 days, semantic score colors); collapsible learning progress
+- 🚀 One-click jump to target pages; filter preferences remembered; auto re-check on return to foreground
 
 > **Available to students**
 
@@ -1248,6 +1249,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Class-wide error review (high-error picks + Word export); exam / practice / quiz AI analytics export to Word (per-question accuracy tables)
 - Score dialog button tiers; cached exports (no re-billing); history preview renders tables & math
 - Configurable multiple-choice scoring: default no points for partial/wrong; optional 50% of full score for partial, 0 for wrong (exam/practice/quiz, proportional to full score; takes effect on save)
+- Task list: failure retry (no longer disguised as empty) · semantic score colors · live pulse · softer suggestions
 
 **🎪 Classroom interaction**
 
@@ -1267,12 +1269,20 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 
 - Activity/score/user lists batched + short-TTL cache (invalidated on write); weekly-ranking conditions pushed to SQL + COUNT
 - Portrait role-data cache; batch scoring/reset single transaction; read endpoints thread-pooled (async→def)
+- Route-level code splitting (first-load JS -79%); hand-drawn SVG radar keeps recharts off the first load
+
+**🎨 Interface experience**
+
+- Home/task-list skeletons; refresh entry & updated-at; visible-period revalidation, ticking countdowns
+- Quick-action tiles; semantic tags (scores/focus/counts) dark-consistent; unified icon language
+- Mobile: stat-title wrapping, category-strip wrap separators, quick-switch overflow fade; row-level click & keyboard access
 
 **⚙️ Engineering & data**
 
 - Question bank "tag status" filter + untagged badge (list / stats / badge share one criterion)
 - WS proxy & reconnect fixes; silent notification-type loss fixed; timing/scoring idempotency corrected
 - 146 new regression tests (curriculum 27 + sharing 31 + question bank 18 + analytics 7 + summary 6 + monitor/export 14 + score/honor/portrait 11 + users 9 + MC scoring 23); zero new ruff / tsc warnings
+- Post-auth catalog loading (no login-page 401s); message/confirm themed consolidation
 
 ### v7.x – v9.0.0
 

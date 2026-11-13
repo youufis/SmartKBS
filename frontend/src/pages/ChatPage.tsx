@@ -1,10 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  Layout, Input, Button, Space, Checkbox, message, Modal,
-  Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag,
-  Empty, theme, Dropdown, Popover,
-} from 'antd'
+import { Layout, Input, Button, Space, Checkbox, Modal, Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag, Empty, theme, Dropdown, Popover } from 'antd'
+import { message } from '../utils/feedback'
 import {
   SendOutlined, StopOutlined, PlusOutlined,
   EyeOutlined, UploadOutlined,

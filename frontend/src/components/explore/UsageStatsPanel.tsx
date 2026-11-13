@@ -3,7 +3,8 @@
  * 隐私口径：仅行为计数与时间，不含提问内容/画布内容。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Checkbox, Input, Select, Table, Tag, Tooltip, message } from 'antd'
+import { Button, Checkbox, Input, Select, Table, Tag, Tooltip } from 'antd'
+import { message } from '../../utils/feedback'
 import { ReloadOutlined, SafetyCertificateOutlined, WarningOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { careEvents, usageStats, type CareEventsData, type CareStudentRow, type UsageStudentRow, type UsageStatsData } from '../../api/explore'

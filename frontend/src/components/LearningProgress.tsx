@@ -4,9 +4,8 @@
  */
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Card, Row, Col, Select, Table, Statistic, Typography, Spin, Empty, message, Tag, Space,
-} from 'antd'
+import { Card, Row, Col, Select, Table, Statistic, Typography, Spin, Empty, Tag, Space } from 'antd'
+import { message } from '../utils/feedback'
 import {
   BookOutlined, CheckCircleOutlined, TrophyOutlined, FireOutlined,
   ReloadOutlined, UserOutlined, TeamOutlined,

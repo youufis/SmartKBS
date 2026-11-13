@@ -9,7 +9,8 @@
  */
 import { useTranslation } from 'react-i18next'
 import React, { useEffect, useState } from 'react'
-import { Modal, Tooltip, message, Image } from 'antd'
+import { Modal, Tooltip, Image } from 'antd'
+import { message } from '../utils/feedback'
 
 interface SVGViewerProps {
   /** SVG 代码 */

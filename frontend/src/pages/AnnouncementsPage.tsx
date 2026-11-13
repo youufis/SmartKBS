@@ -2,10 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
-import {
-  Card, Table, Typography, Button, Space, Modal, Form, Input,
-  Select, message, Empty, Tag, Switch, Popconfirm, Pagination, Tooltip,
-} from 'antd'
+import { Card, Table, Typography, Button, Space, Modal, Form, Input, Select, Empty, Tag, Switch, Popconfirm, Pagination, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, PushpinOutlined,
   ReloadOutlined, BulbOutlined, EyeOutlined, SearchOutlined, TeamOutlined,
@@ -100,7 +98,6 @@ const AnnouncementsPage: React.FC = () => {
     fetchAnnouncements(1, pageSize)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
 
       // AI 生成公告
   const handleAiGenerate = async () => {

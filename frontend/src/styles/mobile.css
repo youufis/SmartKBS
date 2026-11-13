@@ -187,9 +187,18 @@
   .like-btn { display: inline-flex; align-items: center; min-height: 32px; }
   /* 英文界面的标签最容易被 nowrap + 窄盒子吃掉：实测 "Course accuracy" 86px 文本 /
      60px 盒子、"Mistakes Mastered" 95px / 60px。窄屏允许换两行，标签必须读得完。 */
-  .dash-mastery-label, .dash-stat-title {
+  .dash-mastery-label {
     width: auto !important; min-width: 60px; max-width: 46%;
     white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
+  }
+  /* 统计卡标题占满剩余宽：46% 会把「进行中的活动」断成「进行中的活/动」 */
+  .dash-stat-title {
+    width: auto !important; min-width: 0; max-width: 100%;
+    white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
+  }
+  /* 待办条「下一场考试」窄屏左对齐独占行，不再右对齐孤行 */
+  .dash-todo-next {
+    margin-left: 0 !important; width: 100%; justify-content: flex-start !important;
   }
   /* 档案横幅的两个标题（📋 档案 + 学生姓名）在 320 被挤成 20–27px 宽、一字一行：
      窄屏各占一行，姓名允许换行 */

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Switch, Pagination, InputNumber } from 'antd'
+import { Layout, Card, Space, Button, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Switch, Pagination, InputNumber } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, BulbOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
@@ -29,7 +30,6 @@ function flattenTree(nodes: TreeNode[], basePath = ''): { name: string; path: st
   }
   return result
 }
-
 
 const ResourceMgmtPage: React.FC = () => {
   const { t } = useTranslation('common')
@@ -109,7 +109,7 @@ const ResourceMgmtPage: React.FC = () => {
   }
 
   const handleDelete = (path: string) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('resource.confirmDeleteTitle'),
       content: t('resource.confirmDeleteContent'),
       onOk: async () => {

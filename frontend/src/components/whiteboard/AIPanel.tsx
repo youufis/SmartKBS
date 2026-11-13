@@ -6,10 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { blobToDataUrl, collectText, detectPenCircles, shapePlainText, smartExcerptInCircle } from '../explore/selectionHelpers'
 import i18n from '../../i18n'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import {
-  Input, Button, Typography, Space, Spin, Tag, Tooltip, Divider,
-  message, Modal, Select,
-} from 'antd'
+import { Input, Button, Typography, Space, Spin, Tag, Tooltip, Divider, Select } from 'antd'
+import { message, modalApi as Modal } from '../../utils/feedback'
 import {
   SendOutlined, RobotOutlined, CloseOutlined,
   PictureOutlined, FileTextOutlined, QuestionCircleOutlined,

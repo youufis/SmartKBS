@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import {
-  Typography, Table, Card, Row, Col, Statistic, Tag, Button, Modal, message, Popconfirm, Space, Tooltip
-} from 'antd'
+import { Typography, Table, Card, Row, Col, Statistic, Tag, Button, Modal, Popconfirm, Space, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   EyeOutlined, GlobalOutlined, ApiOutlined, TeamOutlined,
   LoginOutlined, EnvironmentOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, ClearOutlined,

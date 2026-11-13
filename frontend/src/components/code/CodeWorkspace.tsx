@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Card, Typography, Button, Space, Tag, Modal, Spin, message, Tabs, Empty,
-  Table, Progress, Descriptions, Divider, Input, Alert, Statistic, Row, Col,
-  Grid, Tooltip,
-} from 'antd'
+import { Card, Typography, Button, Space, Tag, Spin, Tabs, Empty, Table, Progress, Descriptions, Divider, Input, Alert, Statistic, Row, Col, Grid, Tooltip } from 'antd'
+import { message, modalApi as Modal } from '../../utils/feedback'
 import {
   PlayCircleOutlined, SendOutlined, RobotOutlined, HistoryOutlined,
   ArrowLeftOutlined, MinusSquareOutlined,
@@ -125,7 +122,6 @@ export const DiffBlock: React.FC<{ expected: string; actual: string; error?: str
     </div>
   )
 }
-
 
 const CodeWorkspace: React.FC<CodeWorkspaceProps> = ({
   problemId,
@@ -441,7 +437,6 @@ const CodeWorkspace: React.FC<CodeWorkspaceProps> = ({
       message.error(t('loadFailed'))
     }
   }
-
 
   const renderSamples = () => {
     const samples = problem?.sample_cases || []
@@ -765,7 +760,6 @@ const CodeWorkspace: React.FC<CodeWorkspaceProps> = ({
       </div>
     )
   }
-
 
   const tabsItems: any[] = []
   if (runResult || runHistory.length) {

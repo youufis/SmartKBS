@@ -4,11 +4,8 @@ import { classText } from '../utils/studentLabel'
 import { useRewardLabels } from '../utils/rewardLabels'
 import { PointsCell } from '../components/PointsCell'
 import { useParams, useNavigate } from 'react-router-dom'
-import {
-  Card, Row, Col, Statistic, Typography, Spin, Tag, Space,
-  Timeline, Empty, Alert, Button, Select, message,
-  Table, Modal,
-} from 'antd'
+import { Card, Row, Col, Statistic, Typography, Spin, Tag, Space, Timeline, Empty, Alert, Button, Select, Table, Modal } from 'antd'
+import { message } from '../utils/feedback'
 import {
   TrophyOutlined, FileAddOutlined, CheckCircleOutlined,
   AuditOutlined, MessageOutlined,

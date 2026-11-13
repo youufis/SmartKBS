@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import {
-  Card, Table, Tabs, Button, Space, Typography, Tag, message,
-  Spin, Empty, Statistic, Row, Col, Select, Tooltip, Progress,
-  Collapse, Modal, Divider, Alert,
-} from 'antd'
+import { Card, Table, Tabs, Button, Space, Typography, Tag, Spin, Empty, Statistic, Row, Col, Select, Tooltip, Progress, Collapse, Modal, Divider, Alert } from 'antd'
+import { message } from '../utils/feedback'
 import {
   TrophyOutlined, HistoryOutlined, TeamOutlined,
   StarOutlined, ThunderboltOutlined, RiseOutlined,

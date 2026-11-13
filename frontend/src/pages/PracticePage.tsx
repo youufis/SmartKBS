@@ -1,12 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import AnswerLine from '../components/AnswerLine'
-import {
-  Card, Button, Input, InputNumber, Select, Tag, message, Spin,
-  Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Pagination, Checkbox,
-  Switch, Tooltip, Tabs, Statistic, Row, Col, Skeleton,
-  Alert, Segmented,
-} from 'antd'
+import { Card, Button, Input, InputNumber, Select, Tag, Spin, Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Pagination, Checkbox, Switch, Tooltip, Tabs, Statistic, Row, Col, Skeleton, Alert, Segmented } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, DeleteOutlined,
@@ -527,7 +523,7 @@ const StudentView: React.FC = () => {
           <Button style={{ marginLeft: 12 }} onClick={() => {
             const leave = () => { setActiveSession(null); setDraftInfo(null); loadSessions() }
             if (!answeredCount) { leave(); return }
-            Modal.confirm({
+            modalApi.confirm({
               title: t('common:leaveTitle'),
               content: t('common:leaveBody', { done: answeredCount }),
               okText: t('common:leaveConfirmOk'),
@@ -1183,7 +1179,7 @@ const TeacherView: React.FC = () => {
                 <Tooltip title={t('endAction')}>
                   <Button size="small" icon={<PauseCircleOutlined />}
                     style={{ color: '#ff4d4f' }}
-                    onClick={() => Modal.confirm({
+                    onClick={() => modalApi.confirm({
                       title: t('endConfirm'), okText: t('endAction'), cancelText: t('cancel'),
                       okButtonProps: { danger: true },
                       onOk: () => endSession(r.id),
@@ -1211,7 +1207,7 @@ const TeacherView: React.FC = () => {
                   onClick={() => window.open(`/api/export/practice/${r.id}`, '_blank')} />
               </Tooltip>
               <Tooltip title={t('delete')}>
-                <Button size="small" danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({
+                <Button size="small" danger icon={<DeleteOutlined />} onClick={() => modalApi.confirm({
                   title: t('deleteConfirm'), okText: t('delete'), okButtonProps: { danger: true },
                   cancelText: t('cancel'), onOk: () => deleteSession(r.id),
                 })} />

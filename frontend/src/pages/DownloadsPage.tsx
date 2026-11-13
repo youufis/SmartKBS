@@ -4,9 +4,8 @@
  * 目录型共享（一个共享指向整个文件夹）在这里点开是浏览文件夹，单个文件点开是下载。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Button, Card, Dropdown, Drawer, Empty, Input, Layout, Modal, Space, Tooltip, Typography, message, theme,
-} from 'antd'
+import { Button, Card, Dropdown, Drawer, Empty, Input, Layout, Space, Tooltip, Typography, theme } from 'antd'
+import { message, modalApi as Modal } from '../utils/feedback'
 import {
   DeleteOutlined, DownloadOutlined, CloudDownloadOutlined, FolderOpenOutlined, FolderOutlined, ReloadOutlined,
   SearchOutlined, ShareAltOutlined, UploadOutlined,
@@ -47,7 +46,6 @@ const DownloadsPage: React.FC = () => {
   const username = user?.username || ''
   const isStudent = user?.role === 'student'
   const isMobile = useIsMobile()
-
 
   // ── 我的文件（教师/管理员） ──
   const [files, setFiles] = useState<DownloadFile[]>([])

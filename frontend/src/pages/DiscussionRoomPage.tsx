@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import {
-  Card, Button, Space, Typography, Input, Tag, message,
-  Spin, Empty, Tooltip, Modal, Rate, Collapse, Drawer, List, Avatar,
-} from 'antd'
+import { Card, Button, Space, Typography, Input, Tag, Spin, Empty, Tooltip, Modal, Rate, Collapse, Drawer, List, Avatar } from 'antd'
+import { message } from '../utils/feedback'
 import {
   SendOutlined, RobotOutlined, ArrowLeftOutlined,
   UserOutlined, BellOutlined, BulbOutlined,

@@ -1,6 +1,7 @@
-import { useEffect, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { Spin, message, Result, Button } from 'antd'
+import { Spin, Result, Button } from 'antd'
+import { message } from './utils/feedback'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from './stores/authStore'
 import { AUTH_UNAUTHORIZED_EVENT, type UnauthorizedDetail } from './api/client'
@@ -41,69 +42,69 @@ const TA = ['admin', 'teacher']
 import AppLayout from './components/AppLayout'
 import MobileGate from './components/MobileGate'
 import DashboardPage from './pages/DashboardPage'
-import ChatPage from './pages/ChatPage'
-import HtmlFilesPage from './pages/HtmlFilesPage'
-import ResourceMgmtPage from './pages/ResourceMgmtPage'
-import DownloadsPage from './pages/DownloadsPage'
-import UserMgmtPage from './pages/UserMgmtPage'
-import TaskPage from './pages/TaskPage'
-import SystemConfigPage from './pages/SystemConfigPage'
-import ScorePage from './pages/ScorePage'
-import RollcallManagePage from './pages/RollcallManagePage'
-import AboutPage from './pages/AboutPage'
-import QuestionBankPage from './pages/QuestionBankPage'
-import QuestionBankAnalyticsPage from './pages/QuestionBankAnalyticsPage'
-import ExamPage from './pages/ExamPage'
-import QuestionExamPage from './pages/QuestionExamPage'
-import ExamTakePage from './pages/ExamTakePage'
-import ExamComposePage from './pages/ExamComposePage'
-import NotificationsPage from './pages/NotificationsPage'
-import AnnouncementsPage from './pages/AnnouncementsPage'
-import PortfolioPage from './pages/PortfolioPage'
-import AnalyticsPage from './pages/AnalyticsPage'
-import SummaryExportPage from './pages/SummaryExportPage'
-import InteractionPage from './pages/InteractionPage'
-import DiscussionPage from './pages/DiscussionPage'
-import DiscussionRoomPage from './pages/DiscussionRoomPage'
-import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
-import CurriculumPage from './pages/CurriculumPage'
-import LessonCastPage from './pages/LessonCastPage'
-import PresenterPage from './pages/PresenterPage'
-import WrongBookPage from './pages/WrongBookPage'
-import SharedCenterPage from './pages/SharedCenterPage'
-import StudentExamTaskPage from './pages/StudentExamTaskPage'
-import RewardPage from './pages/RewardPage'
-import QuestPage from './pages/QuestPage'
-import QuestBattlePage from './pages/QuestBattlePage'
-import QuestResultPage from './pages/QuestResultPage'
-import QuestAdminPage from './pages/QuestAdminPage'
-import QuickQuizPage from './pages/QuickQuizPage'
-import QuickQuizLobby from './pages/QuickQuizLobby'
-import QuickQuizPlay from './pages/QuickQuizPlay'
-import QuickQuizConsole from './pages/QuickQuizConsole'
-import QuickQuizResult from './pages/QuickQuizResult'
-import PracticePage from './pages/PracticePage'
-import CodePracticePage from './pages/CodePracticePage'
-import StudentQuestionsPage from './pages/StudentQuestionsPage'
-import ClassQuestionPage from './pages/ClassQuestionPage'
-import ClassLadderPage from './pages/class-ladder'
-import QuickPollPage from './pages/QuickPollPage'
-import ClassSummaryPage from './pages/ClassSummaryPage'
-import ActivityMonitorPage from './pages/ActivityMonitorPage'
-import AuthorPanelPage from './pages/AuthorPanelPage'
-import CompanionSettings from './pages/CompanionSettings'
-import WhiteboardPage from './pages/WhiteboardPage'
-import WhiteboardRoomPage from './pages/WhiteboardRoomPage'
-import ExploreCanvasPage from './pages/ExploreCanvasPage'
-import ExploreWorkspacePage from './pages/ExploreWorkspacePage'
-import ExploreShareViewPage from './pages/ExploreShareViewPage'
-import TaskTodoPage from './pages/TaskTodoPage'
-import PortraitPage from './pages/PortraitPage'
-import DailyDiscoveryPage from './pages/DailyDiscoveryPage'
-import NewsHubPage from './pages/NewsHubPage'
-import DailyDiscoveryAdminPage from './pages/DailyDiscoveryAdminPage'
-import NewsAdminPage from './pages/NewsAdminPage'
-import ShowcasePage from './pages/ShowcasePage'
+const ChatPage = lazy(() => import('./pages/ChatPage'))
+const HtmlFilesPage = lazy(() => import('./pages/HtmlFilesPage'))
+const ResourceMgmtPage = lazy(() => import('./pages/ResourceMgmtPage'))
+const DownloadsPage = lazy(() => import('./pages/DownloadsPage'))
+const UserMgmtPage = lazy(() => import('./pages/UserMgmtPage'))
+const TaskPage = lazy(() => import('./pages/TaskPage'))
+const SystemConfigPage = lazy(() => import('./pages/SystemConfigPage'))
+const ScorePage = lazy(() => import('./pages/ScorePage'))
+const RollcallManagePage = lazy(() => import('./pages/RollcallManagePage'))
+const AboutPage = lazy(() => import('./pages/AboutPage'))
+const QuestionBankPage = lazy(() => import('./pages/QuestionBankPage'))
+const QuestionBankAnalyticsPage = lazy(() => import('./pages/QuestionBankAnalyticsPage'))
+const ExamPage = lazy(() => import('./pages/ExamPage'))
+const QuestionExamPage = lazy(() => import('./pages/QuestionExamPage'))
+const ExamTakePage = lazy(() => import('./pages/ExamTakePage'))
+const ExamComposePage = lazy(() => import('./pages/ExamComposePage'))
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
+const AnnouncementsPage = lazy(() => import('./pages/AnnouncementsPage'))
+const PortfolioPage = lazy(() => import('./pages/PortfolioPage'))
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
+const SummaryExportPage = lazy(() => import('./pages/SummaryExportPage'))
+const InteractionPage = lazy(() => import('./pages/InteractionPage'))
+const DiscussionPage = lazy(() => import('./pages/DiscussionPage'))
+const DiscussionRoomPage = lazy(() => import('./pages/DiscussionRoomPage'))
+const DiscussionMonitorPage = lazy(() => import('./pages/DiscussionMonitorPage'))
+const CurriculumPage = lazy(() => import('./pages/CurriculumPage'))
+const LessonCastPage = lazy(() => import('./pages/LessonCastPage'))
+const PresenterPage = lazy(() => import('./pages/PresenterPage'))
+const WrongBookPage = lazy(() => import('./pages/WrongBookPage'))
+const SharedCenterPage = lazy(() => import('./pages/SharedCenterPage'))
+const StudentExamTaskPage = lazy(() => import('./pages/StudentExamTaskPage'))
+const RewardPage = lazy(() => import('./pages/RewardPage'))
+const QuestPage = lazy(() => import('./pages/QuestPage'))
+const QuestBattlePage = lazy(() => import('./pages/QuestBattlePage'))
+const QuestResultPage = lazy(() => import('./pages/QuestResultPage'))
+const QuestAdminPage = lazy(() => import('./pages/QuestAdminPage'))
+const QuickQuizPage = lazy(() => import('./pages/QuickQuizPage'))
+const QuickQuizLobby = lazy(() => import('./pages/QuickQuizLobby'))
+const QuickQuizPlay = lazy(() => import('./pages/QuickQuizPlay'))
+const QuickQuizConsole = lazy(() => import('./pages/QuickQuizConsole'))
+const QuickQuizResult = lazy(() => import('./pages/QuickQuizResult'))
+const PracticePage = lazy(() => import('./pages/PracticePage'))
+const CodePracticePage = lazy(() => import('./pages/CodePracticePage'))
+const StudentQuestionsPage = lazy(() => import('./pages/StudentQuestionsPage'))
+const ClassQuestionPage = lazy(() => import('./pages/ClassQuestionPage'))
+const ClassLadderPage = lazy(() => import('./pages/class-ladder'))
+const QuickPollPage = lazy(() => import('./pages/QuickPollPage'))
+const ClassSummaryPage = lazy(() => import('./pages/ClassSummaryPage'))
+const ActivityMonitorPage = lazy(() => import('./pages/ActivityMonitorPage'))
+const AuthorPanelPage = lazy(() => import('./pages/AuthorPanelPage'))
+const CompanionSettings = lazy(() => import('./pages/CompanionSettings'))
+const WhiteboardPage = lazy(() => import('./pages/WhiteboardPage'))
+const WhiteboardRoomPage = lazy(() => import('./pages/WhiteboardRoomPage'))
+const ExploreCanvasPage = lazy(() => import('./pages/ExploreCanvasPage'))
+const ExploreWorkspacePage = lazy(() => import('./pages/ExploreWorkspacePage'))
+const ExploreShareViewPage = lazy(() => import('./pages/ExploreShareViewPage'))
+const TaskTodoPage = lazy(() => import('./pages/TaskTodoPage'))
+const PortraitPage = lazy(() => import('./pages/PortraitPage'))
+const DailyDiscoveryPage = lazy(() => import('./pages/DailyDiscoveryPage'))
+const NewsHubPage = lazy(() => import('./pages/NewsHubPage'))
+const DailyDiscoveryAdminPage = lazy(() => import('./pages/DailyDiscoveryAdminPage'))
+const NewsAdminPage = lazy(() => import('./pages/NewsAdminPage'))
+const ShowcasePage = lazy(() => import('./pages/ShowcasePage'))
 
 function App() {
   const navigate = useNavigate()
@@ -154,6 +155,7 @@ function App() {
           <Spin size="large" description="加载中..." />
         </div>
       ) : (
+        <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}><Spin size="large" /></div>}>
         <Routes>
           <Route path="/login" element={isLoggedIn ? <Navigate to="/dashboard" /> : <LoginPage />} />
           <Route path="/exam-take/:examId" element={isLoggedIn && user?.role === 'student' ? <ExamTakePage /> : <Navigate to={isLoggedIn ? '/chat' : '/login'} />} />
@@ -228,6 +230,7 @@ function App() {
           <Route path="/quest/result/:questId" element={isLoggedIn ? <QuestResultPage /> : <Navigate to="/login" />} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
+        </Suspense>
       )}
     </>
   )

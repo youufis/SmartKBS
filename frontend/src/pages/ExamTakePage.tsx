@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  Layout, Card, Button, message, Modal, Radio, Checkbox, Input, Alert,
-  Typography, Space, Tag, Spin, Result, Progress, Row, Col, Divider, theme,
-} from 'antd'
+import { Layout, Card, Button, Radio, Checkbox, Input, Alert, Typography, Space, Tag, Spin, Result, Progress, Row, Col, Divider, theme } from 'antd'
+import { message, modalApi as Modal } from '../utils/feedback'
 import {
   ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined,
   CloseCircleOutlined, ClockCircleOutlined, SendOutlined,

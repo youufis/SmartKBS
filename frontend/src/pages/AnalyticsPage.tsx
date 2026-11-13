@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
-import {
-  Alert, Card, Row, Col, Typography, Spin, Select, Button, Space, message,
-  Empty, Tabs, Statistic, Tag, Tooltip,
-} from 'antd'
+import { Alert, Card, Row, Col, Typography, Spin, Select, Button, Space, Empty, Tabs, Statistic, Tag, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   RobotOutlined, BarChartOutlined,
   TeamOutlined, ThunderboltOutlined, BookOutlined,

@@ -6,7 +6,8 @@
  * 不占版面（接口仍保留：/storage/trash、/storage/manifest、/storage/restore）。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Tooltip, message } from 'antd'
+import { Alert, Button, Tooltip } from 'antd'
+import { message } from '../../utils/feedback'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { storageStats, type StorageStats } from '../../api/explore'

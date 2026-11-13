@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  Card, Table, Button, message, Space, Typography, Modal, Tag,
-  Spin, Empty, Descriptions, Divider, Tooltip, Statistic, Row, Col,
-  Select, Tabs, Input, DatePicker, Switch,
-} from 'antd'
+import { Card, Table, Button, Space, Typography, Modal, Tag, Spin, Empty, Descriptions, Divider, Tooltip, Statistic, Row, Col, Select, Tabs, Input, DatePicker, Switch } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   ReloadOutlined, DeleteOutlined, HistoryOutlined,
   TeamOutlined, BarChartOutlined, EyeOutlined,
@@ -729,7 +726,7 @@ const SessionsManager: React.FC = () => {
           <Tooltip title={t('resetData')}>
             <Button icon={<DeleteOutlined />} size="small" danger
               onClick={() => {
-                Modal.confirm({
+                modalApi.confirm({
                   title: t('confirmReset'),
                   content: t('confirmResetContent', { grade: record.grade, class: record.class }),
                   onOk: () => handleReset(record),
@@ -814,7 +811,7 @@ const SessionsManager: React.FC = () => {
           <Button key="close" onClick={() => setDetailVisible(false)}>{t('close')}</Button>,
           detail && (
             <Button key="reset" danger onClick={() => {
-              Modal.confirm({
+              modalApi.confirm({
                 title: t('confirmReset'),
                 content: t('confirmResetContent', { grade: detail.grade, class: detail.class }),
                 onOk: () => handleReset(detail),
@@ -1033,7 +1030,7 @@ const AttendanceStats: React.FC = () => {
   // 只按勾选 id 删：不提供"按当前筛选全删"，条件写错就能一键抹掉整段痕迹
   const deleteSelectedLogs = () => {
     if (!logSelected.length) return
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDeleteLogsTitle'),
       content: t('confirmDeleteLogsContent', { count: logSelected.length }),
       okText: t('confirmDelete'), okType: 'danger', cancelText: t('cancel'),
@@ -1616,7 +1613,6 @@ const AttendanceStats: React.FC = () => {
     </>
   )
 }
-
 
 // ============================================================
 // 页面主组件

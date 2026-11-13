@@ -3,9 +3,8 @@
  * 显示学生列表、房间信息，等待教师开始
  */
 import React, { useState, useEffect, useRef } from 'react'
-import {
-  Card, Button, Typography, Space, Tag, Avatar, message, Spin,
-} from 'antd'
+import { Card, Button, Typography, Space, Tag, Avatar, Spin } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ThunderboltOutlined, TeamOutlined, UserOutlined,
   ClockCircleOutlined, SettingOutlined, CopyOutlined,

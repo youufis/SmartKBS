@@ -1,17 +1,16 @@
 import React, { useMemo } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { ConfigProvider } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import zhCN, { Locale } from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
+import AntdFeedbackHolder from './components/AntdFeedbackHolder'
 import './i18n'
 import './index.css'
 import './styles/theme.css'
 import './styles/mobile.css'
-import { loadQuestionTypes } from './constants/questionTypes'
-import { loadResourceKinds } from './constants/resourceKinds'
 import { useThemeStore, initTheme, themeMap } from './stores/themeStore'
 import { useLocaleStore } from './stores/localeStore'
 
@@ -35,11 +34,6 @@ if (import.meta.env.DEV) {
   }
 }
 
-// 启动时从后端加载题型配置（使用默认值 fallback，不阻塞渲染）
-loadQuestionTypes()
-// 网页资源「内容类型」唯一清单（后端为准，失败用兜底）
-loadResourceKinds()
-
 // 初始化主题（从 localStorage 恢复 CSS 变量）
 initTheme()
 
@@ -62,9 +56,12 @@ function ThemedApp() {
       locale={locale}
       theme={themeConfig}
     >
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <AntdApp>
+        <AntdFeedbackHolder />
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </AntdApp>
     </ConfigProvider>
   )
 }

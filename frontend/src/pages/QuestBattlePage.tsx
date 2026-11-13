@@ -3,10 +3,8 @@
  * 倒计时、锦囊、答题、即时反馈（纯 div 布局，避免 antd Col 类型问题）
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import {
-  Card, Button, Typography, Space, Tag, Progress, Modal,
-  Spin, message,
-} from 'antd'
+import { Card, Button, Typography, Space, Tag, Progress, Modal, Spin } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ThunderboltOutlined, CloseCircleOutlined, CheckCircleOutlined,
   ClockCircleOutlined, PhoneOutlined, TeamOutlined,

@@ -6,7 +6,8 @@
  * 换控件不改提交类型，这是"改界面不弄坏配置"的前提。
  */
 import React, { useMemo, useState } from 'react'
-import { AutoComplete, Select, message } from 'antd'
+import { AutoComplete, Select } from 'antd'
+import { message } from '../../utils/feedback'
 
 export interface SuggestionOption {
   value: string

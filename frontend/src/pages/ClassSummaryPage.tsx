@@ -6,10 +6,8 @@
  * 导出复用已生成报告，不再第二次调用模型。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Alert, Button, Card, Col, Collapse, DatePicker, Empty, List,
-  Row, Select, Space, Spin, Statistic, Tag, Typography, message,
-} from 'antd'
+import { Alert, Button, Card, Col, Collapse, DatePicker, Empty, List, Row, Select, Space, Spin, Statistic, Tag, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   BarChartOutlined, DownloadOutlined, RobotOutlined,
 } from '@ant-design/icons'

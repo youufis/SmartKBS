@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Button, Card, Space, Tag, Typography } from 'antd'
 import { BellOutlined, RightOutlined } from '@ant-design/icons'
 import type { AnnouncementItem } from '../../api/notifications'
+import { useChartTheme } from './chartTheme'
 
 const { Text, Paragraph } = Typography
 
@@ -23,6 +24,7 @@ function plainPreview(md: string): string {
 const AnnouncementsCard: React.FC<{ announcements: AnnouncementItem[] }> = ({ announcements }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
+  const ct = useChartTheme()
   // 只留 2 条、正文 1 行：首页公告是"提醒"，不是阅读器；原来 3 条各占两行，把首屏拉长了 180px
   const rows = announcements.slice(0, 2)
   if (rows.length === 0) return null
@@ -30,7 +32,7 @@ const AnnouncementsCard: React.FC<{ announcements: AnnouncementItem[] }> = ({ an
     <Card
       size="small"
       style={{ marginBottom: 16 }}
-      title={<Space><BellOutlined style={{ color: '#fa8c16' }} />{t('announcements')}</Space>}
+      title={<Space><BellOutlined style={{ color: ct.warning }} />{t('announcements')}</Space>}
       extra={<Button type="link" size="small" onClick={() => navigate('/announcements')}>{t('viewAll')} <RightOutlined /></Button>}
       styles={{ body: { padding: '2px 16px 8px' } }}
     >
@@ -38,6 +40,10 @@ const AnnouncementsCard: React.FC<{ announcements: AnnouncementItem[] }> = ({ an
         <div
           key={item.id}
           onClick={() => navigate(`/announcements?id=${item.id}`)}
+          role="button"
+          tabIndex={0}
+          aria-label={item.title}
+          onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); navigate(`/announcements?id=${item.id}`) } }}
           className="dash-row"
           style={{
             cursor: 'pointer', padding: '8px 6px', margin: '0 -6px',
@@ -45,7 +51,7 @@ const AnnouncementsCard: React.FC<{ announcements: AnnouncementItem[] }> = ({ an
           }}
         >
           <Space size={6}>
-            {item.is_pinned && <BellOutlined style={{ color: '#fa8c16', fontSize: 12 }} />}
+            {item.is_pinned && <BellOutlined style={{ color: ct.warning, fontSize: 12 }} />}
             <Text strong style={{ fontSize: 13 }}>{item.title}</Text>
             <Tag
               color={item.priority === 'urgent' ? 'red' : item.priority === 'important' ? 'orange' : 'blue'}

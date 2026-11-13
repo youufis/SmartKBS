@@ -8,10 +8,8 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Alert, Button, Card, Dropdown, Form, Input, Modal, Select, Space, Table,
-  Tag, Typography, message,
-} from 'antd'
+import { Alert, Button, Card, Dropdown, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   CloudUploadOutlined, LockOutlined, MoreOutlined, PlusOutlined, ReloadOutlined,
   UserOutlined,
@@ -393,7 +391,6 @@ const UserLedger: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
             active: filters.status === 'graduated',
           },
       ]} />
-
 
       {total > 0 && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

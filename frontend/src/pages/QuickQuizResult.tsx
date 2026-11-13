@@ -4,10 +4,8 @@
  */
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect } from 'react'
-import {
-  Card, Button, Typography, Space, Row, Col, Tag,
-  Spin, message, Collapse, Divider, Empty, Progress, Pagination,
-} from 'antd'
+import { Card, Button, Typography, Space, Row, Col, Tag, Spin, Collapse, Divider, Empty, Progress, Pagination } from 'antd'
+import { message } from '../utils/feedback'
 import {
   TrophyOutlined, HomeOutlined, ThunderboltOutlined,
   CheckCircleOutlined, CloseCircleOutlined,

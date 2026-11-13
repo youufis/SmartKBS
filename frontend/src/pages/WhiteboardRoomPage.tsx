@@ -2,10 +2,8 @@
  * 白板房间页面 — 教师演示/学生观看的交互界面
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  Button, Space, Typography, Tag, message, Modal, Drawer,
-  Tooltip, Badge, Segmented, Alert,
-} from 'antd'
+import { Button, Space, Typography, Tag, Drawer, Tooltip, Badge, Segmented, Alert } from 'antd'
+import { message, modalApi as Modal } from '../utils/feedback'
 import {
   ArrowLeftOutlined, TeamOutlined,
   StopOutlined, CopyOutlined,

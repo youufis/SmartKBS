@@ -3,10 +3,8 @@
  * 显示战果、每题回顾、奖励信息
  */
 import React, { useState, useEffect } from 'react'
-import {
-  Card, Button, Typography, Space, Row, Col, Tag,
-  Spin, message, Collapse, Divider, Empty, Result,
-} from 'antd'
+import { Card, Button, Typography, Space, Row, Col, Tag, Spin, Collapse, Divider, Empty, Result } from 'antd'
+import { message } from '../utils/feedback'
 import {
   TrophyOutlined, ReloadOutlined, HomeOutlined,
   CheckCircleOutlined, CloseCircleOutlined,

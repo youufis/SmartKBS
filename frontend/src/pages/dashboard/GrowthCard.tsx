@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Button, Card, Progress, Space, Tag, Tooltip, Typography } from 'antd'
-import { RightOutlined } from '@ant-design/icons'
+import { BookOutlined, CheckCircleOutlined, RightOutlined, RiseOutlined } from '@ant-design/icons'
 import { getSubjectTitles, type DashboardSummary, type SubjectTitle } from '../../api/dashboard'
 import { useChartTheme } from './chartTheme'
 import { reportLoadError } from '../../utils/loadError'
@@ -29,11 +29,11 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
   const practiceAll = practiceDone + (summary.pending_practice_count ?? 0)
   const mastery = [
     (summary.wrong_book_total ?? 0) > 0 && {
-      label: t('growth.mWrong'), pct: Math.round(((summary.wrong_book_mastered ?? 0) / (summary.wrong_book_total ?? 1)) * 100), color: '#52c41a',
+      label: t('growth.mWrong'), pct: Math.round(((summary.wrong_book_mastered ?? 0) / (summary.wrong_book_total ?? 1)) * 100), color: ct.success,
     },
-    practiceAll > 0 && { label: t('growth.mPractice'), pct: Math.round((practiceDone / practiceAll) * 100), color: '#1677ff' },
+    practiceAll > 0 && { label: t('growth.mPractice'), pct: Math.round((practiceDone / practiceAll) * 100), color: ct.primary },
     (summary.course_practice_count ?? 0) > 0 && {
-      label: t('growth.mCourse'), pct: Math.max(0, Math.min(100, Math.round(summary.course_practice_avg_accuracy ?? 0))), color: '#722ed1',
+      label: t('growth.mCourse'), pct: Math.max(0, Math.min(100, Math.round(summary.course_practice_avg_accuracy ?? 0))), color: ct.purple,
     },
   ].filter(Boolean) as { label: string; pct: number; color: string }[]
   const questTimes = summary.quest_completed_count ?? 0
@@ -48,7 +48,7 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
       style={{ height: '100%' }}
       title={
         <Space size={6}>
-          <span>🌱</span>
+          <RiseOutlined style={{ color: ct.success }} />
           <span style={{ fontSize: 14, fontWeight: 500 }}>{t('growth.title')}</span>
         </Space>
       }
@@ -136,6 +136,10 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
 
       {/* 错题复习 CTA */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={t('growth.review')}
+        onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); navigate('/wrong-book') } }}
         style={{
           borderRadius: 8, padding: '8px 12px', cursor: 'pointer',
           background: (summary.wrong_book_pending ?? 0) > 0 ? 'rgba(255,77,79,0.08)' : ct.isDark ? 'rgba(255,255,255,0.04)' : '#f6ffed',
@@ -147,8 +151,8 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>
             {(summary.wrong_book_pending ?? 0) > 0
-              ? `📕 ${t('growth.wrongCta', { n: summary.wrong_book_pending })}`
-              : `✅ ${t('growth.wrongClear')}`}
+              ? <><BookOutlined style={{ color: ct.danger, marginRight: 6 }} />{t('growth.wrongCta', { n: summary.wrong_book_pending })}</>
+              : <><CheckCircleOutlined style={{ color: ct.success, marginRight: 6 }} />{t('growth.wrongClear')}</>}
           </div>
           {(summary.wrong_book_mastered ?? 0) > 0 && (
             <Text type="secondary" style={{ fontSize: 11 }}>{t('growth.wrongMastered', { n: summary.wrong_book_mastered })}</Text>

@@ -3,9 +3,8 @@
  * 实时显示题目、倒计时、提交答案、查看结果
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import {
-  Card, Button, Typography, Space, Progress, message, Spin,
-} from 'antd'
+import { Card, Button, Typography, Space, Progress, Spin } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ThunderboltOutlined, ClockCircleOutlined, CheckCircleOutlined,
   CloseCircleOutlined, TrophyOutlined,

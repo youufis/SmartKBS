@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import {
-  Layout, Card, Table, Button, message, Modal, Form, Input, Select,
-  InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col,
-  Divider, Empty, Tabs, Spin, Statistic, Checkbox, Alert,
-  Progress, Radio, Segmented, Pagination,
-} from 'antd'
+import { Layout, Card, Table, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Spin, Statistic, Checkbox, Alert, Progress, Radio, Segmented, Pagination } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined, SafetyCertificateOutlined,
   HolderOutlined,
@@ -792,7 +788,7 @@ const ExamPage: React.FC = () => {
       if (data.notice) message.info(data.notice)      // 题从哪来：兜底/放宽情况要说清楚
       reportImpact(data)
       if (data.reason) {
-        Modal.info({
+        modalApi.info({
           title: t('cwPlanTitle'),
           content: composePlanText(data),
         })

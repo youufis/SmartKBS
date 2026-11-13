@@ -6,10 +6,8 @@
  */
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, startTransition } from 'react'
-import {
-  Card, Table, Tag, Typography, Space, Input, Select,
-  message, Button, Modal, Tabs, Form, Image, Tooltip, DatePicker,
-} from 'antd'
+import { Card, Table, Tag, Typography, Space, Input, Select, Button, Modal, Tabs, Form, Image, Tooltip, DatePicker } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   TrophyOutlined, SearchOutlined,
   ClockCircleOutlined, DeleteOutlined, ExclamationCircleOutlined,
@@ -182,7 +180,7 @@ const QuestRecordsTab: React.FC = () => {
   }, [records])
 
   const handleDelete = (record: QuestRecord) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDelete'),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmDeleteRecord', {
@@ -211,7 +209,7 @@ const QuestRecordsTab: React.FC = () => {
     const affected = new Set(
       records.filter((r) => ids.includes(r.id)).map((r) => r.student_username),
     ).size
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmBulkDeleteRecords', { count: ids.length }),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmBulkDeleteRecordsDesc', { count: ids.length, students: affected }),
@@ -542,7 +540,6 @@ const QuestRecordsTab: React.FC = () => {
   )
 }
 
-
 // ════════════════════════════════════════════
 // 子组件：闯关题库管理标签页
 // ════════════════════════════════════════════
@@ -693,7 +690,7 @@ const QuestBankTab: React.FC = () => {
 
   // ── 删除 ──
   const handleDelete = (q: QuestBankQuestion) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmDelete'),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmDeleteQuestion', { id: q.id, text: q.question_text.slice(0, 50) }),
@@ -714,7 +711,7 @@ const QuestBankTab: React.FC = () => {
   const handleBulkDelete = () => {
     const ids = selectedRowKeys.map(Number)
     if (ids.length === 0) return
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmBulkDeleteBank', { count: ids.length }),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmBulkDeleteBankDesc', { count: ids.length }),
@@ -1089,7 +1086,6 @@ const QuestBankTab: React.FC = () => {
         </Form>
       </Modal>
 
-
       {/* ── 配图管理弹窗 ── */}
       <Modal
         title={t('mediaManageTitle', { id: mediaQuestion?.id })}
@@ -1119,7 +1115,6 @@ const QuestBankTab: React.FC = () => {
     </div>
   )
 }
-
 
 // ════════════════════════════════════════════
 // 主组件：含标签页切换

@@ -4,7 +4,8 @@
  * 安全设置 → 先展示当前密保问题，点击"修改"进入编辑模式
  */
 import React, { useState, useEffect } from 'react'
-import { Modal, Form, Select, Input, Button, message, Typography, Divider, Tag, Space } from 'antd'
+import { Modal, Form, Select, Input, Button, Typography, Divider, Tag, Space } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   QuestionCircleOutlined, SafetyCertificateOutlined, EditOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'
@@ -93,7 +94,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
           else { onClose(); return }
         }
         if (onSkip) {
-          Modal.confirm({
+          modalApi.confirm({
             title: t('ssSkipTitle'),
             content: t('ssSkipContent'),
             okText: t('ssNotNow'),

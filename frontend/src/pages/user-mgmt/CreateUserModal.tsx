@@ -4,7 +4,8 @@
  */
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Col, Form, Input, Modal, Radio, Row, Select, message } from 'antd'
+import { Col, Form, Input, Modal, Radio, Row, Select } from 'antd'
+import { message } from '../../utils/feedback'
 import * as usersApi from '../../api/users'
 import { ROLE_ADMIN, ROLE_STUDENT, ROLE_TEACHER } from './roles'
 import { ClassInput, GradeInput, RoleSelect } from './ScopeFields'

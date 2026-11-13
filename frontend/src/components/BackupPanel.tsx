@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Alert, Button, Card, Checkbox, Descriptions, message, Popconfirm, Segmented, Space, Table, Tag, Typography,
-} from 'antd'
+import { Alert, Button, Card, Checkbox, Descriptions, Popconfirm, Segmented, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   DatabaseOutlined, DeleteOutlined, ReloadOutlined, RollbackOutlined, SaveOutlined,
 } from '@ant-design/icons'

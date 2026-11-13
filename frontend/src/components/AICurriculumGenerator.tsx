@@ -1,8 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
-import {
-  Modal, Form, Input, Select, Button, message, Steps, Tree, Space, Tag,
-  Typography, Spin, Alert, Divider, Upload, Progress,
-} from 'antd'
+import { Modal, Form, Input, Select, Button, Steps, Tree, Space, Tag, Typography, Spin, Alert, Divider, Upload, Progress } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   RobotOutlined, FileTextOutlined, CheckCircleOutlined,
   BookOutlined, NodeIndexOutlined, InboxOutlined,
@@ -308,7 +306,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   // ── 关闭后重置 ──
   const handleClose = () => {
     if (!saveDone && result && !loading) {
-      Modal.confirm({
+      modalApi.confirm({
         title: t('aiGenerator.confirmCloseTitle'),
         content: t('aiGenerator.confirmCloseContent'),
         okText: t('aiGenerator.confirmCloseOk'),

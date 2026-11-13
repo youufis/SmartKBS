@@ -7,9 +7,8 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Button, Card, DatePicker, Dropdown, Select, Space, Table, Tabs, Tag, Tooltip, Typography, message,
-} from 'antd'
+import { Button, Card, DatePicker, Dropdown, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   DownloadOutlined, FileExcelOutlined, FileTextOutlined, ReloadOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'

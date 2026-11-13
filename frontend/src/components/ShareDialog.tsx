@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import React, { useState, useEffect, useMemo } from 'react'
-import { Modal, message, Space, Typography, Button, Radio, Select, Divider, Tag, Checkbox, Popconfirm } from 'antd'
+import { Modal, Space, Typography, Button, Radio, Select, Divider, Tag, Checkbox, Popconfirm } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ShareAltOutlined, StopOutlined, TeamOutlined, GlobalOutlined,
   BookOutlined, UserOutlined, FolderOutlined, CheckCircleFilled,

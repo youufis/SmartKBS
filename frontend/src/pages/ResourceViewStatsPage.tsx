@@ -4,10 +4,8 @@
  */
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Card, Table, Select, Space, Typography, message, Row, Col,
-  Statistic, Tag, Spin, Empty, Button, Modal, Input, Radio,
-} from 'antd'
+import { Card, Table, Select, Space, Typography, Row, Col, Statistic, Tag, Spin, Empty, Button, Modal, Input, Radio } from 'antd'
+import { message } from '../utils/feedback'
 import {
   EyeOutlined, ReloadOutlined, TeamOutlined,
   FileOutlined, DownloadOutlined,

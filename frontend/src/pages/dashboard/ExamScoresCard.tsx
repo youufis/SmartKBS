@@ -203,7 +203,7 @@ const ExamScoresCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) =>
       style={{ height: '100%' }}
       title={
         <Space size={6}>
-          <FileAddOutlined style={{ color: '#1677ff', fontSize: 14 }} />
+          <FileAddOutlined style={{ color: ct.primary, fontSize: 14 }} />
           <Text style={{ fontSize: 14, fontWeight: 500 }}>{t('recentScores')}</Text>
         </Space>
       }

@@ -1,9 +1,7 @@
 /** 新闻管理（教师/管理员） */
 import React, { useEffect, useState } from 'react'
-import {
-  Alert, Button, Card, DatePicker, Form, Input, Modal, Popconfirm,
-  Select, Space, Table, Tag, Typography, message,
-} from 'antd'
+import { Alert, Button, Card, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   DeleteOutlined, EditOutlined, ReloadOutlined, StopOutlined, CheckCircleOutlined, ReadOutlined,
   SafetyCertificateOutlined, SyncOutlined, EyeOutlined,

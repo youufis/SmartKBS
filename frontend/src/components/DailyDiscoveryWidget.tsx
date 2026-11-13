@@ -1,7 +1,8 @@
 /** 每日精选 - 首页Widget */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Card, Tag, Button, Space, Typography, Progress, Modal, message, Spin, Tooltip } from 'antd';
+import { Card, Tag, Button, Space, Typography, Progress, Modal, Spin, Tooltip } from 'antd'
+import { message } from '../utils/feedback';
 import {
   ReloadOutlined, HeartOutlined, HeartFilled,
   EyeOutlined, StarOutlined,

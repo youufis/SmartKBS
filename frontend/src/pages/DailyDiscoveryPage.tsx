@@ -1,9 +1,7 @@
 /** 每日精选 - 独立页面 */
 import React, { useEffect, useState } from 'react';
-import {
-  Card, Row, Col, Tag, Button, Space, Typography,
-  message, Spin, Modal, Tooltip, Empty, Result,
-} from 'antd';
+import { Card, Row, Col, Tag, Button, Space, Typography, Spin, Modal, Tooltip, Empty, Result } from 'antd'
+import { message } from '../utils/feedback';
 import {
   ReloadOutlined, HeartOutlined, HeartFilled,
   EyeOutlined, StarOutlined, DownloadOutlined,

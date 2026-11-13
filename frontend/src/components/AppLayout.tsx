@@ -42,6 +42,8 @@ import ThemeSwitcher from './ThemeSwitcher'
 import LanguageSwitcher from './LanguageSwitcher'
 import SecuritySetupModal from './SecuritySetupModal'
 import { startPoller, stopPoller } from '../utils/poller'
+import { loadQuestionTypes } from '../constants/questionTypes'
+import { loadResourceKinds } from '../constants/resourceKinds'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { isMobileAllowedPath } from '../constants/mobileNav'
 import MobileTabBar from './MobileTabBar'
@@ -203,6 +205,13 @@ const AppLayout: React.FC = () => {
   const isStudent = user?.role === 'student'
   const isTeacher = user?.role === 'teacher'
   const isAdmin = user?.role === 'admin'
+
+  // 目录（题型/资源内容类型）需登录：进入鉴权布局后再加载，
+  // 避免启动时在登录页打两条 401，也避免 SPA 登录不刷新导致目录停留兜底值
+  useEffect(() => {
+    loadQuestionTypes()
+    loadResourceKinds()
+  }, [])
 
   // 获取单位名称
   useEffect(() => {

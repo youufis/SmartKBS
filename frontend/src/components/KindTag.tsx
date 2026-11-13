@@ -10,7 +10,8 @@
  * 不传 onChanged（或不传 path）时退化成只读标签，只显示不能改。
  */
 import React from 'react'
-import { Dropdown, Tag, Tooltip, message } from 'antd'
+import { Dropdown, Tag, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import { useTranslation } from 'react-i18next'
 import * as resourcesApi from '../api/resources'
 import { KIND_LABELS } from '../constants/resourceKinds'

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Layout, Card, Space, Button, Typography, message } from 'antd'
+import { Layout, Card, Space, Button, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import { ReloadOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'

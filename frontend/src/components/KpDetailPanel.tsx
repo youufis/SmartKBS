@@ -17,7 +17,8 @@
  */
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Space, Tag, Tooltip, Typography, Button, Dropdown, Empty, message } from 'antd'
+import { Card, Space, Tag, Tooltip, Typography, Button, Dropdown, Empty } from 'antd'
+import { message } from '../utils/feedback'
 import {
   NodeIndexOutlined, SettingOutlined, FormOutlined, BulbOutlined, DownOutlined,
   CheckCircleOutlined, ClockCircleOutlined, PlusOutlined, EditOutlined, CloseOutlined,

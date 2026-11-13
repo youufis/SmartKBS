@@ -1,0 +1,1 @@
+import{bn as e}from"./index-BAl2okKH.js";function t(t,n,r){if(!t){r();return}e.confirm({title:n(`dirtyCloseTitle`),content:n(`dirtyCloseContent`),okText:n(`dirtyCloseOk`),cancelText:n(`dirtyCloseStay`),okButtonProps:{danger:!0},onOk:r})}export{t};

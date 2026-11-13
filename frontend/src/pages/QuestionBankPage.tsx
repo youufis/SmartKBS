@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import {
-  Layout, Card, Table, Button, message, Modal, Form, Input, Select,
-  InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image,
-  DatePicker, Dropdown, Badge,
-} from 'antd'
+import { Layout, Card, Table, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image, DatePicker, Dropdown, Badge } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
   LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined, TagsOutlined,
@@ -688,7 +685,7 @@ const QuestionBankPage: React.FC = () => {
       message.warning(t('bulkDeleteSelectFirst'))
       return
     }
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmBulkDeleteQuestions', { count: ids.length }),
       icon: <ExclamationCircleOutlined />,
       content: t('confirmBulkDeleteQuestionsDesc'),

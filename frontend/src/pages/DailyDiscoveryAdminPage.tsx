@@ -1,9 +1,7 @@
 /** 每日精选管理（教师/管理员） */
 import React, { useEffect, useState } from 'react'
-import {
-  Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm,
-  Select, Space, Table, Tag, Typography, message,
-} from 'antd'
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../utils/feedback'
 import {
   EditOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, CheckCircleOutlined,
   EyeOutlined, CompassOutlined,

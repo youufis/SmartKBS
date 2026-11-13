@@ -12,7 +12,7 @@ import {
   BarChartOutlined, CrownOutlined, OrderedListOutlined, RightOutlined, TrophyOutlined,
 } from '@ant-design/icons'
 import type { DashboardSummary, TeacherTodo } from '../../api/dashboard'
-import { useChartTheme } from './chartTheme'
+import { useChartTheme, withAlpha } from './chartTheme'
 import { useChartVariant } from './chartVariant'
 import VariantSwitch from './VariantSwitch'
 
@@ -28,13 +28,13 @@ const VARIANT_ICON: Record<StarsVariant, React.ReactNode> = {
 }
 
 const MEDALS = ['🥇', '🥈', '🥉', '4', '5']
-const AVATAR_COLORS = ['#faad14', '#bfbfbf', '#d48806', '#1677ff', '#722ed1']
-const GOLD = '#faad14'
 
 const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | null }> = ({ summary, todo }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
+  const GOLD = ct.gold
+  const AVATAR_COLORS = [ct.gold, ct.tick, ct.warning, ct.primary, ct.purple]
   const [variant, chooseVariant] = useChartVariant('stars', STARS_POOL)
   const stars = todo?.weekly_top_students ?? []
   const maxPts = Math.max(1, ...stars.map((s) => Number(s.points) || 0))
@@ -65,7 +65,7 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
             style={{
               position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 4,
               width: `${((Number(s.points) || 0) / maxPts) * 100}%`,
-              background: idx === 0 ? 'rgba(250,173,20,0.18)' : 'rgba(22,119,255,0.10)',
+              background: idx === 0 ? withAlpha(ct.gold, 0.18) : withAlpha(ct.primary, 0.10),
               pointerEvents: 'none',
             }}
           />
@@ -143,7 +143,7 @@ const ClassStarsCard: React.FC<{ summary: DashboardSummary; todo: TeacherTodo | 
                   style={{
                     width: '74%', height: Math.max(12, (pts / maxPts) * MAX_BAR),
                     borderRadius: '4px 4px 0 0',
-                    background: idx === 0 ? GOLD : idx === 1 ? 'rgba(22,119,255,0.62)' : 'rgba(22,119,255,0.36)',
+                    background: idx === 0 ? GOLD : idx === 1 ? withAlpha(ct.primary, 0.62) : withAlpha(ct.primary, 0.36),
                     transition: 'height 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 />

@@ -20,7 +20,7 @@ const ZH_QUOTES: EduQuote[] = [
   { text: '因材施教。', author: '孔子' },
   { text: '敏而好学，不耻下问。', author: '孔子' },
   { text: '学而不厌，诲人不倦。', author: '孔子' },
-  { text: '授人以鱼不如授人以渔。', author: '《老子》' },
+  { text: '授人以鱼不如授人以渔。', author: '《淮南子》' },
   { text: '千里之行，始于足下。', author: '《老子》' },
   { text: '青，取之于蓝而青于蓝。', author: '荀子' },
   { text: '不积跬步，无以至千里；不积小流，无以成江海。', author: '荀子' },

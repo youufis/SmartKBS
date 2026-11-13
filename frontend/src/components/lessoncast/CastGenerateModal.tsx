@@ -7,7 +7,8 @@
  * 两步分开的唯一理由是成本：TTS 按字符计费，一步到底会让每次修改都白烧一遍音频钱。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Input, Modal, Radio, Select, Spin, message } from 'antd';
+import { Alert, Button, Input, Modal, Radio, Select, Spin } from 'antd'
+import { message, modalApi } from '../../utils/feedback';
 import { BulbOutlined } from '@ant-design/icons';
 import {
   createCastOutline,
@@ -160,7 +161,7 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
       /* 统计拿不到也能删，只是确认框少几行提示 */
     }
     const lastOne = !!stats && !stats.other_exists;
-    Modal.confirm({
+    modalApi.confirm({
       title: '删除这节讲演？',
       okText: '删除',
       okButtonProps: { danger: true },

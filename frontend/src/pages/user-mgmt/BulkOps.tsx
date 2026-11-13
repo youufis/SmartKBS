@@ -4,10 +4,8 @@
  */
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Alert, Button, Card, Checkbox, Input, Modal, Popconfirm, Popover, Progress, Select,
-  Space, Table, Tag, Tooltip, Typography, Upload, message,
-} from 'antd'
+import { Alert, Button, Card, Checkbox, Input, Modal, Popconfirm, Popover, Progress, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd'
+import { message, modalApi } from '../../utils/feedback'
 import {
   CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined, QuestionCircleOutlined,
   ReloadOutlined, RiseOutlined, RollbackOutlined, UploadOutlined, WarningOutlined,
@@ -378,7 +376,7 @@ export const PromoteGradesModal: React.FC<PromoteProps> = ({ open, onClose, isAd
       .map(d => `${d.grade}→${d.next_grade}`).join('，') || t('autoUpgradeByStage')
     const graduateDesc = preview?.grade_details?.filter(d => !d.next_grade && d.count > 0)
       .map(d => t('gradeCountItem', { grade: d.grade, count: d.count })).join('、')
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmBatchUpgradeTitle'),
       icon: <WarningOutlined />,
       width: 520,
@@ -417,7 +415,7 @@ export const PromoteGradesModal: React.FC<PromoteProps> = ({ open, onClose, isAd
   const reverse = () => {
     const reverseDesc = preview?.grade_details?.filter(d => d.next_grade)
       .map(d => `${d.next_grade}→${d.grade}`).join('，') || ''
-    Modal.confirm({
+    modalApi.confirm({
       title: t('confirmBatchDemoteTitle'),
       icon: <WarningOutlined />,
       width: 520,

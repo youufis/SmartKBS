@@ -4,11 +4,8 @@
  * 学生：查看可加入的房间、参与历史
  */
 import React, { useState, useEffect, useMemo } from 'react'
-import {
-  Card, Button, Typography, Space, Tag, message, Spin, Empty, Pagination,
-  Modal, Form, Input, InputNumber, Select, Row, Col, Popconfirm, Tooltip,
-  Checkbox, Alert,
-} from 'antd'
+import { Card, Button, Typography, Space, Tag, Spin, Empty, Pagination, Modal, Form, Input, InputNumber, Select, Row, Col, Popconfirm, Tooltip, Checkbox, Alert } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ThunderboltOutlined, PlusOutlined, PlayCircleOutlined,
   HistoryOutlined, TeamOutlined, ClockCircleOutlined,

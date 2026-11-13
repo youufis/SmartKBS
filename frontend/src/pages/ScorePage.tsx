@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import {
-  Card, Select, Table, Button, message, Statistic, Row, Col,
-  Space, Typography, Divider, Tooltip, Alert, Drawer, Input, InputNumber, Modal,
-  Spin, Empty, Popconfirm, Tag,
-} from 'antd'
+import { Card, Select, Table, Button, Statistic, Row, Col, Space, Typography, Divider, Tooltip, Alert, Drawer, Input, InputNumber, Modal, Spin, Empty, Popconfirm, Tag } from 'antd'
+import { message } from '../utils/feedback'
 import {
   PlusOutlined, MinusOutlined, TrophyOutlined,
   ReloadOutlined, BarChartOutlined, TeamOutlined,
@@ -126,7 +123,6 @@ const ScorePage: React.FC = () => {
     return () => { ignore = true }
   }, [])
 
-
   // 加载当前教师的任教信息
   const [teacherInfo, setTeacherInfo] = useState<string>('')
   useEffect(() => {
@@ -139,7 +135,6 @@ const ScorePage: React.FC = () => {
   const scoreParams = useCallback((extra: Record<string, any> = {}) => ({
     ...extra, teacher: currentTeacher,
   }), [currentTeacher])
-
 
   // ── 加载班级列表（当年级或教师变化时自动加载） ──
   useEffect(() => {

@@ -3,15 +3,17 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Badge, Button, Card, Space, Typography } from 'antd'
-import { RightOutlined } from '@ant-design/icons'
+import { MessageOutlined, RightOutlined, RobotOutlined } from '@ant-design/icons'
 import { useCompanionStore } from '../../stores/companionStore'
 import { friendlyTime } from './fmt'
+import { useChartTheme } from './chartTheme'
 
 const { Text, Paragraph } = Typography
 
 const CompanionCard: React.FC = () => {
   const navigate = useNavigate()
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const ct = useChartTheme()
   const pushes = useCompanionStore((s) => s.pushes)
   const unreadCount = useCompanionStore((s) => s.unreadCount)
 
@@ -22,7 +24,7 @@ const CompanionCard: React.FC = () => {
       size="small"
       title={
         <Space size={6}>
-          <span style={{ fontSize: 16 }}>🧠</span>
+          <RobotOutlined style={{ color: ct.purple, fontSize: 16 }} />
           <span style={{ fontSize: 14, fontWeight: 500 }}>{t('companion.title')}</span>
           {unreadCount > 0 && <Badge count={unreadCount} size="small" />}
         </Space>
@@ -39,7 +41,7 @@ const CompanionCard: React.FC = () => {
       ) : (
         latest.map((p) => (
           <div key={p.id} style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-            <span style={{ fontSize: 16, lineHeight: '20px' }}>💬</span>
+            <MessageOutlined style={{ color: ct.primary, fontSize: 16, lineHeight: '20px' }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <Space size={6}>
                 <Text strong style={{ fontSize: 12.5 }}>{p.title || p.push_type_label}</Text>
@@ -48,7 +50,7 @@ const CompanionCard: React.FC = () => {
               <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ fontSize: 12, margin: 0 }}>
                 {p.content}
               </Paragraph>
-              <Text type="secondary" style={{ fontSize: 11 }}>{friendlyTime(p.created_at)}</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>{friendlyTime(p.created_at, i18n.language?.startsWith('en') ? 'en-US' : 'zh-CN')}</Text>
             </div>
           </div>
         ))

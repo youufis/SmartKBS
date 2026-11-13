@@ -1,10 +1,7 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import {
-  Card, Table, Tabs, Button, Space, Typography, Tag, Modal,
-  Form, Input, Select, InputNumber, message, Empty, Spin,
-  Tooltip, Popconfirm,
-} from 'antd'
+import { Card, Table, Tabs, Button, Space, Typography, Tag, Modal, Form, Input, Select, InputNumber, Empty, Spin, Tooltip, Popconfirm } from 'antd'
+import { message } from '../utils/feedback'
 import {
   TeamOutlined, PlusOutlined, PlayCircleOutlined,
   StopOutlined, MessageOutlined, UserOutlined,

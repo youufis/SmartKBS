@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Layout, Card, Table, Select, Button, message, Tag, Space, Typography,
-  Row, Col, Statistic, Tooltip, Spin, Tabs,
-} from 'antd'
+import { Layout, Card, Table, Select, Button, Tag, Space, Typography, Row, Col, Statistic, Tooltip, Spin, Tabs } from 'antd'
+import { message } from '../utils/feedback'
 import {
   ReloadOutlined, TeamOutlined, BookOutlined, CheckCircleOutlined,
   ClockCircleOutlined, StopOutlined, BarChartOutlined, DownloadOutlined,

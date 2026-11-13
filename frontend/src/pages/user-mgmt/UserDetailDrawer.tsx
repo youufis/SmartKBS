@@ -7,10 +7,8 @@
  */
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Alert, Button, Col, Divider, Drawer, Form, Input, Modal, Popconfirm, Radio, Row, Select,
-  Space, Spin, Tag, Typography, message,
-} from 'antd'
+import { Alert, Button, Col, Divider, Drawer, Form, Input, Modal, Popconfirm, Radio, Row, Select, Space, Spin, Tag, Typography } from 'antd'
+import { message } from '../../utils/feedback'
 import { DeleteOutlined, KeyOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import * as usersApi from '../../api/users'
 import { useIsMobile } from '../../hooks/useIsMobile'

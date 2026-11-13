@@ -8,10 +8,8 @@
  * 学生不使用自己的设备，本页只面向教师投屏；积分落现有积分表（教师积分 / 学生成长档案同源）。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Card, Button, Space, Typography, Select, Switch, Tag, Empty, message,
-  Divider, Popconfirm, Spin, Alert, Collapse, Tooltip,
-} from 'antd'
+import { Card, Button, Space, Typography, Select, Switch, Tag, Empty, Divider, Popconfirm, Spin, Alert, Collapse, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   AimOutlined, ThunderboltOutlined, CheckOutlined, ForwardOutlined,
   SoundOutlined, MutedOutlined, ReloadOutlined, RobotOutlined, DatabaseOutlined,

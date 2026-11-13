@@ -1,76 +1,83 @@
-/** 快捷入口：按角色配置的高频功能九宫格 */
+/** 快捷入口：按角色配置的高频功能瓦片格（图标色块底 + 文字，比_plain 按钮更强的点击 affordance） */
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Button, Card, Col, Row, Space } from 'antd'
+import { Card, Col, Row, Space } from 'antd'
 import {
   AuditOutlined, BarChartOutlined, BookOutlined, BulbOutlined, CheckCircleOutlined,
   DatabaseOutlined, FileAddOutlined, FireOutlined, MessageOutlined, PictureOutlined,
   ProfileOutlined, RobotOutlined, RocketOutlined, TeamOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
+import { useChartTheme, withAlpha, type ChartColorToken } from './chartTheme'
 
 type IconCmp = React.ComponentType<{ style?: React.CSSProperties }>
 
 interface QuickAction {
   key: string
   Icon: IconCmp
-  color: string
+  color: ChartColorToken
   labelKey: string
 }
 
-/**
- * 快捷入口：按角色配置的高频功能
- *
- * 原来两边各 12 个，把左侧菜单已经能点到的东西又平铺一遍，首屏最底反而更乱。
- * 收敛到 8 个真正高频的入口，每格给足宽度，文字不再挤成两行。
- */
+/** 收敛到 8 个真正高频的入口；色表只存主题令牌名，深色自动跟随 */
 const STUDENT_ACTIONS: QuickAction[] = [
-  { key: '/chat', Icon: MessageOutlined, color: '#1677ff', labelKey: 'aiChat' },
-  { key: '/exam', Icon: FileAddOutlined, color: '#13c2c2', labelKey: 'onlineExam' },
-  { key: '/task-todo', Icon: CheckCircleOutlined, color: '#52c41a', labelKey: 'quick.taskTodo' },
-  { key: '/wrong-book', Icon: BookOutlined, color: '#ff4d4f', labelKey: 'quick.wrongBook' },
-  { key: '/quest', Icon: FireOutlined, color: '#fa8c16', labelKey: 'quick.quest' },
-  { key: '/practice', Icon: RocketOutlined, color: '#389e0d', labelKey: 'quick.practice' },
-  { key: '/daily-discovery', Icon: BulbOutlined, color: '#eb2f96', labelKey: 'quick.discovery' },
-  { key: '/portrait', Icon: PictureOutlined, color: '#08979c', labelKey: 'quick.portrait' },
+  { key: '/chat', Icon: MessageOutlined, color: 'primary', labelKey: 'aiChat' },
+  { key: '/exam', Icon: FileAddOutlined, color: 'cyan', labelKey: 'onlineExam' },
+  { key: '/task-todo', Icon: CheckCircleOutlined, color: 'success', labelKey: 'quick.taskTodo' },
+  { key: '/wrong-book', Icon: BookOutlined, color: 'danger', labelKey: 'quick.wrongBook' },
+  { key: '/quest', Icon: FireOutlined, color: 'warning', labelKey: 'quick.quest' },
+  { key: '/practice', Icon: RocketOutlined, color: 'success', labelKey: 'quick.practice' },
+  { key: '/daily-discovery', Icon: BulbOutlined, color: 'magenta', labelKey: 'quick.discovery' },
+  { key: '/portrait', Icon: PictureOutlined, color: 'cyan', labelKey: 'quick.portrait' },
 ]
 
 const TEACHER_ACTIONS: QuickAction[] = [
-  { key: '/exam', Icon: FileAddOutlined, color: '#13c2c2', labelKey: 'examPublish' },
-  { key: '/interaction', Icon: ThunderboltOutlined, color: '#ff4d4f', labelKey: 'quick.quizManage' },
-  { key: '/rollcall', Icon: AuditOutlined, color: '#fa8c16', labelKey: 'smartRollcall' },
-  { key: '/question-bank', Icon: DatabaseOutlined, color: '#722ed1', labelKey: 'quick.questionBank' },
-  { key: '/tasks', Icon: ProfileOutlined, color: '#52c41a', labelKey: 'quick.tasks' },
-  { key: '/analytics', Icon: BarChartOutlined, color: '#08979c', labelKey: 'quick.analytics' },
-  { key: '/class-summary', Icon: RobotOutlined, color: '#d48806', labelKey: 'quick.classSummary' },
-  { key: '/chat', Icon: MessageOutlined, color: '#1677ff', labelKey: 'aiChat' },
+  { key: '/exam', Icon: FileAddOutlined, color: 'cyan', labelKey: 'examPublish' },
+  { key: '/interaction', Icon: ThunderboltOutlined, color: 'danger', labelKey: 'quick.quizManage' },
+  { key: '/rollcall', Icon: AuditOutlined, color: 'warning', labelKey: 'smartRollcall' },
+  { key: '/question-bank', Icon: DatabaseOutlined, color: 'purple', labelKey: 'quick.questionBank' },
+  { key: '/tasks', Icon: ProfileOutlined, color: 'success', labelKey: 'quick.tasks' },
+  { key: '/analytics', Icon: BarChartOutlined, color: 'cyan', labelKey: 'quick.analytics' },
+  { key: '/class-summary', Icon: RobotOutlined, color: 'gold', labelKey: 'quick.classSummary' },
+  { key: '/chat', Icon: MessageOutlined, color: 'primary', labelKey: 'aiChat' },
 ]
 
 const ADMIN_EXTRA: QuickAction[] = [
-  { key: '/user-mgmt', Icon: TeamOutlined, color: '#1677ff', labelKey: 'quick.userMgmt' },
-  { key: '/system-config', Icon: AuditOutlined, color: '#f5222d', labelKey: 'quick.systemConfig' },
+  { key: '/user-mgmt', Icon: TeamOutlined, color: 'primary', labelKey: 'quick.userMgmt' },
+  { key: '/system-config', Icon: AuditOutlined, color: 'danger', labelKey: 'quick.systemConfig' },
 ]
 
 const QuickActionsCard: React.FC<{ isStudent: boolean; isAdmin: boolean }> = ({ isStudent, isAdmin }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
+  const ct = useChartTheme()
   const actions = isStudent ? STUDENT_ACTIONS : [...TEACHER_ACTIONS, ...(isAdmin ? ADMIN_EXTRA : [])]
   return (
-    <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#faad14' }} />{t('quickNav')}</Space>}>
+    <Card size="small" title={<Space><ThunderboltOutlined style={{ color: ct.gold }} />{t('quickNav')}</Space>}>
       <Row gutter={[8, 8]}>
-        {actions.map((a) => (
-          <Col span={8} xl={6} key={a.key}>
-            <Button
-              block
-              size="small"
-              icon={<a.Icon style={{ color: a.color, fontSize: 16 }} />}
-              onClick={() => navigate(a.key)}
-              style={{ height: 44 }}
-            >
-              <span style={{ fontSize: 12 }}>{t(a.labelKey)}</span>
-            </Button>
-          </Col>
-        ))}
+        {actions.map((a) => {
+          const color = ct[a.color]
+          return (
+            <Col span={8} xl={6} key={a.key}>
+              <button
+                type="button"
+                className="dash-quick-tile"
+                onClick={() => navigate(a.key)}
+                style={{
+                  '--qc': color,
+                  '--qc-bg': withAlpha(color, 0.07),
+                  '--qc-border': withAlpha(color, 0.35),
+                  '--qc-tint': withAlpha(color, 0.13),
+                } as React.CSSProperties}
+              >
+                <span className="dash-quick-icon" aria-hidden>
+                  <a.Icon style={{ color, fontSize: 17 }} />
+                </span>
+                <span className="dash-quick-label">{t(a.labelKey)}</span>
+              </button>
+            </Col>
+          )
+        })}
       </Row>
     </Card>
   )

@@ -10,8 +10,9 @@
  * 说在前面的边界：网页端拦不住系统截屏、手机拍照，也拦不住 DevTools 直接读接口。
  * 这一层的作用是「防顺手搬运 + 事后能追到人」，不是绝对防泄题。
  */
+import { message } from '../utils/feedback'
 import React, { useEffect, useRef, useState } from 'react'
-import { message } from 'antd'
+
 import apiClient from '../api/client'
 import i18n from '../i18n'
 import { useAuthStore } from '../stores/authStore'

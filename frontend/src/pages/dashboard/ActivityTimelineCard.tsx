@@ -10,22 +10,23 @@ import {
 } from '@ant-design/icons'
 import type { ActivityItem } from '../../api/dashboard'
 import { friendlyTime } from './fmt'
+import { useChartTheme, type ChartColorToken } from './chartTheme'
 
 const { Text } = Typography
 
-const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
-  exam: { color: '#1677ff', icon: <FileAddOutlined /> },
-  score: { color: '#52c41a', icon: <TrophyOutlined /> },
-  task: { color: '#faad14', icon: <CheckCircleOutlined /> },
-  rollcall: { color: '#722ed1', icon: <AuditOutlined /> },
-  class_drill: { color: '#eb2f96', icon: <AimOutlined /> },
-  quiz: { color: '#ff4d4f', icon: <ThunderboltOutlined /> },
-  poll: { color: '#722ed1', icon: <BarChartOutlined /> },
-  discussion: { color: '#1677ff', icon: <TeamOutlined /> },
-  quest: { color: '#ff4d4f', icon: <FireOutlined /> },
-  quick_quiz: { color: '#722ed1', icon: <CustomerServiceOutlined /> },
-  practice: { color: '#52c41a', icon: <FileAddOutlined /> },
-  resource_view: { color: '#1677ff', icon: <EyeOutlined /> },
+const TYPE_CONFIG: Record<string, { color: ChartColorToken; icon: React.ReactNode }> = {
+  exam: { color: 'primary', icon: <FileAddOutlined /> },
+  score: { color: 'success', icon: <TrophyOutlined /> },
+  task: { color: 'gold', icon: <CheckCircleOutlined /> },
+  rollcall: { color: 'purple', icon: <AuditOutlined /> },
+  class_drill: { color: 'magenta', icon: <AimOutlined /> },
+  quiz: { color: 'danger', icon: <ThunderboltOutlined /> },
+  poll: { color: 'purple', icon: <BarChartOutlined /> },
+  discussion: { color: 'primary', icon: <TeamOutlined /> },
+  quest: { color: 'danger', icon: <FireOutlined /> },
+  quick_quiz: { color: 'purple', icon: <CustomerServiceOutlined /> },
+  practice: { color: 'success', icon: <FileAddOutlined /> },
+  resource_view: { color: 'primary', icon: <EyeOutlined /> },
 }
 
 interface Props {
@@ -36,7 +37,8 @@ interface Props {
 }
 
 const ActivityTimelineCard: React.FC<Props> = ({ activities, loading, error, onRefresh }) => {
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const ct = useChartTheme()
   return (
     <Card
       size="small"
@@ -57,8 +59,10 @@ const ActivityTimelineCard: React.FC<Props> = ({ activities, loading, error, onR
         )
       ) : (
         <Timeline
-          items={activities.slice(0, 30).map((act) => ({
-            color: TYPE_CONFIG[act.type]?.color || '#999',
+          items={activities.slice(0, 30).map((act) => {
+            const cfg = TYPE_CONFIG[act.type]
+            return {
+            color: cfg ? ct[cfg.color] : ct.tick,
             content: (
               <div>
                 <Space>
@@ -68,10 +72,11 @@ const ActivityTimelineCard: React.FC<Props> = ({ activities, loading, error, onR
                 {act.detail && (
                   <div><Text type="secondary" style={{ fontSize: 12 }}>{act.detail}</Text></div>
                 )}
-                <div><Text type="secondary" style={{ fontSize: 11 }}>{friendlyTime(act.time)}</Text></div>
+                <div><Text type="secondary" style={{ fontSize: 11 }}>{friendlyTime(act.time, i18n.language?.startsWith('en') ? 'en-US' : 'zh-CN')}</Text></div>
               </div>
             ),
-          }))}
+            }
+          })}
         />
       )}
     </Card>

@@ -14,14 +14,15 @@
  *
  * 形式切换见 chartVariant.ts：按日期稳定轮换，用户手动选过就一直是那个。
  */
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, Skeleton, Space, Tooltip, Typography } from 'antd'
 import {
   AppstoreOutlined, ArrowDownOutlined, ArrowUpOutlined, BarChartOutlined, LineChartOutlined, RiseOutlined,
 } from '@ant-design/icons'
 import { getLearningTrend, type LearningTrend, type TrendPoint } from '../../api/dashboard'
-import { useChartTheme } from './chartTheme'
+import { useChartTheme, withAlpha } from './chartTheme'
+import { useAutoRefresh } from './useAutoRefresh'
 import { useChartVariant } from './chartVariant'
 import VariantSwitch from './VariantSwitch'
 import ChartEmpty from './ChartEmpty'
@@ -55,11 +56,12 @@ const TrendCard: React.FC = () => {
   const [trend, setTrend] = useState<LearningTrend | null>(null)
   const [variant, chooseVariant] = useChartVariant('trend', TREND_POOL)
 
-  useEffect(() => {
-    let cancelled = false
-    getLearningTrend(7).then((d) => { if (!cancelled) setTrend(d) }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.TrendCard' }) })
-    return () => { cancelled = true }
+  const fetchTrend = useCallback(() => {
+    getLearningTrend(7).then((d) => setTrend(d)).catch((err) => reportLoadError(err, { key: 'dashboard.TrendCard' }))
   }, [])
+
+  useEffect(() => { fetchTrend() }, [fetchTrend])
+  useAutoRefresh(fetchTrend)
 
   const series = trend?.series ?? []
   // 判定与绘制字段一致：只看 points / chats，避免「有课堂活动、没学习记录」也画出一张空图
@@ -172,7 +174,7 @@ const TrendCard: React.FC = () => {
       if (v <= 0) return ct.track
       const r = Math.min(1, v / Math.max(peak, 1))
       // 从浅蓝压到主题蓝：0.18 → 1
-      return `rgba(22, 119, 255, ${(0.18 + 0.82 * r).toFixed(2)})`
+      return withAlpha(ct.primary, 0.18 + 0.82 * r)
     }
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 3, height: '100%' }}>
@@ -206,7 +208,7 @@ const TrendCard: React.FC = () => {
       style={{ height: '100%' }}
       title={
         <Space size={6}>
-          <RiseOutlined style={{ color: '#13c2c2', fontSize: 14 }} />
+          <RiseOutlined style={{ color: ct.cyan, fontSize: 14 }} />
           <Text style={{ fontSize: 14, fontWeight: 500 }}>{t('trend.title')}</Text>
         </Space>
       }
@@ -217,7 +219,8 @@ const TrendCard: React.FC = () => {
               <Text
                 style={{
                   fontSize: 11, fontVariantNumeric: 'tabular-nums', marginRight: 2,
-                  color: delta > 0 ? ct.success : ct.danger,
+                  // 日积分是「今日所得」：减少≠损失，中性色避免误读为退步
+                  color: ct.tick,
                 }}
               >
                 {delta > 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />}{Math.abs(delta)}
@@ -256,7 +259,7 @@ const TrendCard: React.FC = () => {
                     style={{
                       flex: 1, height: 6, borderRadius: 3, cursor: 'default',
                       background: act > 0
-                        ? `rgba(19, 194, 194, ${(0.25 + 0.75 * (act / Math.max(actPeak, 1))).toFixed(2)})`
+                        ? withAlpha(ct.cyan, 0.25 + 0.75 * (act / Math.max(actPeak, 1)))
                         : ct.track,
                     }}
                   />
@@ -278,7 +281,7 @@ const TrendCard: React.FC = () => {
               <i style={{ width: 7, height: 7, borderRadius: 2, background: ct.primary }} />{t('trend.points')}
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <i style={{ width: 7, height: 7, borderRadius: 2, background: '#13c2c2' }} />{t('trend.activity')}
+              <i style={{ width: 7, height: 7, borderRadius: 2, background: ct.cyan }} />{t('trend.activity')}
             </span>
             {/* 「本周积分」原来是标题行的一个 Tag，与环比挤在一起且量纲不同（周累计 vs 日环比），下沉到这里 */}
             <Text style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: ct.primary }}>

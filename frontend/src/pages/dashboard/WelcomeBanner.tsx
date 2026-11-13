@@ -11,6 +11,7 @@ import { authedFileUrl } from '../../api/client'
 import type { AvatarInfo } from '../../api/portrait'
 import TeacherScopeChips from '../../components/TeacherScopeChips'
 import { deadlineInfo } from './fmt'
+import { useNow } from './useNow'
 import type { DashboardSummary } from '../../api/dashboard'
 import { reportLoadError } from '../../utils/loadError'
 
@@ -35,6 +36,7 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
   const [avatar, setAvatar] = useState<AvatarInfo | null>(null)
+  const now = useNow()
 
   // 头像位走 /portrait/avatar：本期画像、用户固定的往期画像都从这一条只读接口出
   // （不复用 /today —— 它每次调用都会给画像浏览量 +1，首页每开一次就涨一次）
@@ -58,7 +60,7 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
 
   // 最近一场待考考试的截止倒计时
   const nextDeadline = isStudent && summary.pending_exams && summary.pending_exams.length > 0
-    ? deadlineInfo(summary.pending_exams[0].end_time)
+    ? deadlineInfo(summary.pending_exams[0].end_time, new Date(now))
     : null
 
   return (
@@ -72,6 +74,10 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
         {/* 头像位：当前头像（本期或固定的往期画像）；没有 → 角色默认头像（管理员 ⚜️ / 其余 🎓），点击进画像页 */}
         <div
           onClick={() => navigate('/portrait')}
+          role="button"
+          tabIndex={0}
+          aria-label={avatarUrl ? t('banner.portraitHint') : t('banner.portraitDefaultHint')}
+          onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); navigate('/portrait') } }}
           title={avatarUrl ? t('banner.portraitHint') : t('banner.portraitDefaultHint')}
           style={{
             width: 44, height: 44, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,

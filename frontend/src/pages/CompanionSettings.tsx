@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  Card, Typography, Switch, Input, Button, Space,
-  message, Spin, Tag, Alert, Radio, Row, Col, Divider,
-} from 'antd'
+import { Card, Typography, Switch, Input, Button, Space, Spin, Tag, Alert, Radio, Row, Col, Divider } from 'antd'
+import { message } from '../utils/feedback'
 import { ArrowLeftOutlined, ReloadOutlined, CheckOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useCompanionStore } from '../stores/companionStore'

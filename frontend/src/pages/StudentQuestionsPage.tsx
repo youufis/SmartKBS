@@ -5,11 +5,8 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useRef } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
-import {
-  Card, Button, Space, Typography, Tag, Modal,
-  Form, Input, Select, message, Empty, Spin, Popconfirm,
-  Checkbox, Pagination, Tooltip,
-} from 'antd'
+import { Card, Button, Space, Typography, Tag, Modal, Form, Input, Select, Empty, Spin, Popconfirm, Checkbox, Pagination, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   QuestionCircleOutlined, PlusOutlined,
   SendOutlined, RobotOutlined,

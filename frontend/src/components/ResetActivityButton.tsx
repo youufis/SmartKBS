@@ -8,9 +8,8 @@
  */
 import React, { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Alert, Button, Checkbox, Descriptions, Divider, Input, Modal, Space, Spin, Table, Tag, Tooltip, Typography, message,
-} from 'antd';
+import { Alert, Button, Checkbox, Descriptions, Divider, Input, Modal, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../utils/feedback';
 import { UndoOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {

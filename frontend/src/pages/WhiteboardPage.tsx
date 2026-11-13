@@ -2,10 +2,8 @@
  * 协作白板主页面 — 教师创建/管理房间
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import {
-  Card, Button, Space, Typography, Tag, Modal, Input, Select, Pagination,
-  message, Popconfirm, Tooltip, Radio, Empty, Spin,
-} from 'antd'
+import { Card, Button, Space, Typography, Tag, Modal, Input, Select, Pagination, Popconfirm, Tooltip, Radio, Empty, Spin } from 'antd'
+import { message } from '../utils/feedback'
 import {
   PlusOutlined, CopyOutlined, PlayCircleOutlined,
   StopOutlined, DeleteOutlined, ReloadOutlined,

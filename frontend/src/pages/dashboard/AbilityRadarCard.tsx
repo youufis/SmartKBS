@@ -11,9 +11,8 @@ import { Card, Space, Tooltip, Typography } from 'antd'
 import {
   AimOutlined, AlignLeftOutlined, QuestionCircleOutlined, RadarChartOutlined,
 } from '@ant-design/icons'
-import { PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ResponsiveContainer } from 'recharts'
 import type { DashboardSummary } from '../../api/dashboard'
-import { useChartTheme } from './chartTheme'
+import { useChartTheme, withAlpha } from './chartTheme'
 import { useChartVariant } from './chartVariant'
 import VariantSwitch from './VariantSwitch'
 import ChartEmpty from './ChartEmpty'
@@ -42,40 +41,60 @@ const AbilityRadarCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) 
 
   const practiceTotal = (summary.completed_practice_count ?? 0) + (summary.pending_practice_count ?? 0)
   const dims = [
-    { d: t('radar.exam'), v: pct(summary.exam_avg_rate), color: '#1677ff' },
-    { d: t('radar.coursePractice'), v: pct(summary.course_practice_avg_accuracy), color: '#13c2c2' },
+    { d: t('radar.exam'), v: pct(summary.exam_avg_rate), color: ct.primary },
+    { d: t('radar.coursePractice'), v: pct(summary.course_practice_avg_accuracy), color: ct.cyan },
     // 这一维算的是 已完成/(已完成+待完成)，语义是「完成度」不是「正确率」。
     // 和另外三个正确率维度共用 0-100 刻度容易误读，所以标签与提示都按完成度表述。
-    { d: t('radar.practice'), v: practiceTotal > 0 ? pct(((summary.completed_practice_count ?? 0) / practiceTotal) * 100) : 0, color: '#722ed1' },
-    { d: t('radar.wrongBook'), v: (summary.wrong_book_total ?? 0) > 0 ? pct(((summary.wrong_book_mastered ?? 0) / (summary.wrong_book_total ?? 1)) * 100) : 0, color: '#52c41a' },
+    { d: t('radar.practice'), v: practiceTotal > 0 ? pct(((summary.completed_practice_count ?? 0) / practiceTotal) * 100) : 0, color: ct.purple },
+    { d: t('radar.wrongBook'), v: (summary.wrong_book_total ?? 0) > 0 ? pct(((summary.wrong_book_mastered ?? 0) / (summary.wrong_book_total ?? 1)) * 100) : 0, color: ct.success },
   ]
   const hasData = dims.some((x) => x.v > 0)
 
-  const renderRadar = () => (
-    <>
-      <ResponsiveContainer width="100%" height={150}>
-        <RadarChart data={dims} outerRadius="66%">
-          <PolarGrid stroke={ct.grid} />
-          <PolarAngleAxis dataKey="d" tick={{ fontSize: 10, fill: ct.tick }} />
-          <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-          <Radar
-            dataKey="v" stroke="#722ed1" fill="#722ed1" fillOpacity={0.25} strokeWidth={1.5}
-            name={t('radar.title')} isAnimationActive animationDuration={600}
-          />
-        </RadarChart>
-      </ResponsiveContainer>
-      {/* 数值行：雷达只给形状，具体多少必须能用文字读到（也是色盲/打印场景的回退） */}
-      <div className="dash-stagger" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', padding: '0 10px 6px', fontSize: 11 }}>
-        {dims.map((x) => (
-          <span key={x.d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <i style={{ width: 6, height: 6, borderRadius: 1, background: x.color }} />
-            <span style={{ color: ct.tick }}>{x.d}</span>
-            <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{x.v}%</strong>
-          </span>
-        ))}
-      </div>
-    </>
-  )
+  /** 手写 SVG 雷达：与他卡同口径（DOM/SVG），不再为一种形式把 recharts 拉进首屏关键路径 */
+  const renderRadar = () => {
+    const C = 95
+    const R = 44
+    const LR = 54
+    const angle = (i: number) => (Math.PI * 2 * i) / dims.length - Math.PI / 2
+    const pt = (i: number, r: number): [number, number] => [C + r * Math.cos(angle(i)), C + r * Math.sin(angle(i))]
+    const poly = (rs: number[]) => rs.map((r, i) => pt(i, r).map((v) => v.toFixed(1)).join(',')).join(' ')
+    const ring = (f: number) => poly(dims.map(() => R * f))
+    const valuePoly = poly(dims.map((x) => (R * Math.max(0, Math.min(100, x.v))) / 100))
+    return (
+      <>
+        <svg viewBox="0 0 190 150" style={{ width: '100%', height: 150, display: 'block' }} aria-hidden>
+          {[0.25, 0.5, 0.75, 1].map((f) => (
+            <polygon key={f} points={ring(f)} fill="none" stroke={ct.grid} strokeWidth={1} />
+          ))}
+          {dims.map((x, i) => {
+            const [x2, y2] = pt(i, R)
+            return <line key={x.d} x1={C} y1={C} x2={x2} y2={y2} stroke={ct.grid} strokeWidth={1} />
+          })}
+          <polygon points={valuePoly} fill={withAlpha(ct.purple, 0.25)} stroke={ct.purple} strokeWidth={1.5} strokeLinejoin="round" />
+          {dims.map((x, i) => {
+            const [px, py] = pt(i, (R * Math.max(0, Math.min(100, x.v))) / 100)
+            return <circle key={x.d} cx={px} cy={py} r={2.5} fill={x.color} />
+          })}
+          {dims.map((x, i) => {
+            const [lx, ly] = pt(i, LR)
+            const anchor = i === 0 ? 'middle' : i === 1 ? 'start' : i === 2 ? 'middle' : 'end'
+            const dy = i === 0 ? -2 : i === 2 ? 8 : 3
+            return <text key={x.d} x={lx} y={ly + dy} textAnchor={anchor} fontSize={10} fill={ct.tick}>{x.d}</text>
+          })}
+        </svg>
+        {/* 数值行：雷达只给形状，具体多少必须能用文字读到（也是色盲/打印场景的回退） */}
+        <div className="dash-stagger" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', padding: '0 10px 6px', fontSize: 11 }}>
+          {dims.map((x) => (
+            <span key={x.d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <i style={{ width: 6, height: 6, borderRadius: 1, background: x.color }} />
+              <span style={{ color: ct.tick }}>{x.d}</span>
+              <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{x.v}%</strong>
+            </span>
+          ))}
+        </div>
+      </>
+    )
+  }
 
   const renderBars = () => (
     <div style={{ padding: '12px 14px 10px', display: 'flex', flexDirection: 'column', gap: 14 }}>

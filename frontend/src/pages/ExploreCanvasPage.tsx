@@ -1,6 +1,7 @@
 /** 探索画布 · 列表页：卡片墙（悬停菜单 / 真实缩略图 / 搜索直达命中页）+ 新建 + 回收站 */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Dropdown, Empty, Input, Modal, Pagination, Popconfirm, Select, Space, Spin, Tabs, Tag, Tooltip, message } from 'antd'
+import { Button, Card, Dropdown, Empty, Input, Modal, Pagination, Popconfirm, Select, Space, Spin, Tabs, Tag, Tooltip } from 'antd'
+import { message, modalApi } from '../utils/feedback'
 import { DeleteOutlined, MoreOutlined, PlusOutlined, PlusSquareOutlined, RestOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -128,7 +129,7 @@ const ExploreCanvasPage: React.FC = () => {
   }
 
   const doArchive = (c: ExploreCanvasMeta) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('moveToTrash'),
       content: t('moveToTrashBody', { title: c.title }),
       okText: t('moveToTrash'),
@@ -209,7 +210,7 @@ const ExploreCanvasPage: React.FC = () => {
   }
 
   const doDeleteTpl = (id: number) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: t('tplDeleteConfirm'),
       okButtonProps: { danger: true },
       onOk: async () => {

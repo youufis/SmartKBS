@@ -1,6 +1,7 @@
+import { message } from '../../utils/feedback'
 import React, { useCallback, useRef } from 'react'
 import { HeartOutlined, HeartFilled } from '@ant-design/icons'
-import { message } from 'antd'
+
 import { toggleLike } from '../../api/showcase'
 import { useAuthStore } from '../../stores/authStore'
 import { useTranslation } from 'react-i18next'

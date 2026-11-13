@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
-import {
-  Card, Tag, Typography, Button, Space, Empty, Spin, Pagination,
-  message, Popconfirm, Segmented, Tabs, Checkbox, theme, Tooltip,
-} from 'antd'
+import { Card, Tag, Typography, Button, Space, Empty, Spin, Pagination, Popconfirm, Segmented, Tabs, Checkbox, theme, Tooltip } from 'antd'
+import { message } from '../utils/feedback'
 import {
   CheckOutlined, DeleteOutlined, ReloadOutlined,
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,

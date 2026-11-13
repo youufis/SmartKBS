@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import {
-  Modal, Form, Input, Button, Space, Select, Radio, Checkbox,
-  Typography, Divider, Tag, message, Empty, Popconfirm, InputNumber, Switch,
-} from 'antd'
+import { Modal, Form, Input, Button, Space, Select, Radio, Checkbox, Typography, Divider, Tag, Empty, Popconfirm, InputNumber, Switch } from 'antd'
+import { message } from '../utils/feedback'
 import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons'
 import FormulaRenderer from './FormulaRenderer'
 import ActivityScopeSelector from './ActivityScopeSelector'

@@ -3,9 +3,10 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Button, Card, Empty, Space, Tag, Tooltip, Typography } from 'antd'
-import { ArrowRightOutlined, FireOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, FireOutlined, PushpinOutlined } from '@ant-design/icons'
 import type { TaskTodoItem, TaskTodoResponse } from '../../api/taskTodo'
 import { deadlineInfo } from './fmt'
+import { useNow } from './useNow'
 import { useChartTheme } from './chartTheme'
 
 const { Text } = Typography
@@ -19,6 +20,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
+  const now = useNow()
 
   const items: TaskTodoItem[] = React.useMemo(() => {
     if (!todo?.items?.length) return []
@@ -57,7 +59,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
       style={{ height: '100%' }}
       title={
         <Space>
-          <span>📌</span>
+          <PushpinOutlined style={{ color: ct.primary }} />
           <span>{t('todoCard.title')}</span>
           {totalActive > 0 && <Tag color="blue" style={{ margin: 0 }}>{t('todoCard.count', { n: totalActive })}</Tag>}
         </Space>
@@ -84,7 +86,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
         />
       ) : (
         items.map((item) => {
-          const dl = deadlineInfo(item.deadline)
+          const dl = deadlineInfo(item.deadline, new Date(now))
           const level = dl?.level ?? 'later'
           const dotColor = level === 'overdue' ? ct.danger : level === 'today' ? ct.gold : ct.primary
           const dlText = dl

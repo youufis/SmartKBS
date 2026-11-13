@@ -8,7 +8,8 @@
  * 次要数据（下拉选项、埋点、剪贴板降级、localStorage 隐私模式）继续静默，
  * 但建议改成 swallowLoadError() 留一行 console.warn，排查时不至于毫无线索。
  */
-import { Button, notification } from 'antd'
+import { Button } from 'antd'
+import { notification } from './feedback'
 import i18n from '../i18n'
 
 const THROTTLE_MS = 60_000

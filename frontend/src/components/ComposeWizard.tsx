@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import React, { useState } from 'react'
-import { Steps, Button, Space, message, Modal, Form, Spin, Typography, Card, Tag } from 'antd'
+import { Steps, Button, Space, Form, Spin, Typography, Card, Tag } from 'antd'
+import { message, modalApi as Modal } from '../utils/feedback'
 import {
   SettingOutlined,
   RobotOutlined,

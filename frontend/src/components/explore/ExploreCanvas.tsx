@@ -4,10 +4,11 @@
  * - 编辑：停止操作 5s 防抖保存；每 30s 给未保存内容写本地草稿
  * - 图片：粘贴/插入先上传成 URL 再进快照（与协作白板同一口径，防快照膨胀）
  */
+import { message, modalApi as Modal } from '../../utils/feedback'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Tldraw, type Editor, type TLAssetStore, type TLComponents, type TLStoreSnapshot } from 'tldraw'
 import 'tldraw/tldraw.css'
-import { Modal, message } from 'antd'
+
 import { useTranslation } from 'react-i18next'
 import { getPage, savePage, uploadAsset, type SaveState } from '../../api/explore'
 import { AskCardUtil } from './AskCardShape'

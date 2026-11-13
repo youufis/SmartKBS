@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Alert, Button, Collapse, message } from 'antd'
+import { Alert, Button, Collapse } from 'antd'
+import { message } from '../utils/feedback'
 import { InfoCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import PageHeader from '../components/PageHeader'
 import { LockOutlined } from '@ant-design/icons'
