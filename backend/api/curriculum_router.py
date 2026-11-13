@@ -5021,11 +5021,15 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
         sa = str(raw.get("student_answer", "") or "").strip()
         ca, ca_opts, ca_type = ans_map.get(qid, ("", None, ""))
         is_ok = answers_equal(sa, ca, ca_opts, ca_type)
-        if is_ok:
-            earned += 10
+        if ca_type == "multiple":
+            from backend.answer_norm import score_multiple_choice
+            q_earned = score_multiple_choice(sa, ca, ca_opts, 10)
+        else:
+            q_earned = 10 if is_ok else 0
+        earned += q_earned
         results_list.append({
             "question_id": qid, "student_answer": sa, "correct_answer": ca,
-            "score": 10 if is_ok else 0, "max_score": 10, "is_correct": is_ok,
+            "score": q_earned, "max_score": 10, "is_correct": is_ok,
         })
 
     if not ans_map:

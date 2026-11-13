@@ -1556,15 +1556,19 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         student_ans = _ans_of(q["id"])
         correct = q["correct_answer"] or ""
         q_score = q["score"] or 10
-        is_correct = _is_correct_objective(
-            student_ans, correct,
-            _opts_of(q.get("options")), str(q.get("type") or ""),
-        )
-        earned += q_score if is_correct else 0
+        _qtype = str(q.get("type") or "")
+        _opts = _opts_of(q.get("options"))
+        is_correct = _is_correct_objective(student_ans, correct, _opts, _qtype)
+        if _qtype == "multiple":
+            from backend.answer_norm import score_multiple_choice
+            q_earned = score_multiple_choice(student_ans, correct, _opts, q_score)
+        else:
+            q_earned = q_score if is_correct else 0
+        earned += q_earned
         total += q_score
         graded[qid] = {
             "student_answer": student_ans, "correct_answer": correct,
-            "score": q_score if is_correct else 0, "max_score": q_score,
+            "score": q_earned, "max_score": q_score,
             "is_correct": is_correct, "graded_by": "exact",
         }
 

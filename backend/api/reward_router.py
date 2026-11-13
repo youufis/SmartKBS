@@ -68,7 +68,7 @@ def _assert_student_visible(user: dict, target: str, what: str = "数据") -> No
 
 
 @router.get("/rewards/my-points", summary="获取我的积分")
-async def my_points(request: Request):
+def my_points(request: Request):
     """获取当前学生用户的积分总和"""
     user = get_current_user(request)
     username = user["username"]
@@ -91,7 +91,7 @@ class QualityAward(BaseModel):
 
 
 @router.get("/rewards/rules", summary="积分规则（学生端唯一数据源）")
-async def reward_rules(request: Request):
+def reward_rules(request: Request):
     """把发分规则原样下发：活动分表、达标线、生效中的每日上限、扣分与消费口径。
 
     学生端「积分规则」弹窗以前在前端手抄了一份数值表（RewardPage 的 RULES 数组），
@@ -104,7 +104,7 @@ async def reward_rules(request: Request):
 
 
 @router.get("/rewards/my-daily-status", summary="今日额度与上限提示")
-async def my_daily_status_endpoint(request: Request):
+def my_daily_status_endpoint(request: Request):
     """今天各池/各活动拿了多少、上限多少、以及最近一次"被上限挡住"的原因。
 
     上限本来就会静默生效：学生做完事积分不动，界面毫无反应，只能靠猜。
@@ -117,7 +117,7 @@ async def my_daily_status_endpoint(request: Request):
 
 
 @router.get("/rewards/my-summary", summary="参与与获奖汇总")
-async def my_summary_endpoint(request: Request):
+def my_summary_endpoint(request: Request):
     """参与场次 / 获奖次数 / 累计得分与消费：由后端一次聚合算准。
 
     前端原来拿流水条数当"参与活动次数"，而流水接口只回 100 条，
@@ -132,7 +132,7 @@ async def my_summary_endpoint(request: Request):
 
 
 @router.post("/rewards/award-quality", summary="教师发放优质认可奖励")
-async def reward_quality_award(req: QualityAward, request: Request):
+def reward_quality_award(req: QualityAward, request: Request):
     """给"答得好"而不是"答过"发分：提问、讨论发言、回答审批之外的通用认可入口。
 
     权限与积分可见范围同源（R3：教师只能给自己任教范围内的学生加分）。
@@ -158,7 +158,7 @@ async def reward_quality_award(req: QualityAward, request: Request):
 
 
 @router.get("/rewards/my-history", summary="获取我的积分流水")
-async def my_reward_history(
+def my_reward_history(
     request: Request,
     limit: int = Query(50, ge=1, le=500, description="返回条数"),
     activity_type: str = Query("", description="筛选活动类型"),
@@ -176,7 +176,7 @@ async def my_reward_history(
 
 
 @router.get("/rewards/ranking", summary="获取班级积分排名")
-async def ranking(
+def ranking(
     request: Request,
     grade: str = Query(..., description="年级"),
     class_name: str = Query("", description="班级，空表示全年级"),
@@ -217,7 +217,7 @@ async def ranking(
 
 
 @router.get("/rewards/weekly-stars", summary="本周之星（学生可访问）")
-async def weekly_stars(
+def weekly_stars(
     request: Request,
     grade: str = Query("", description="仅教师/管理员：指定年级"),
     class_name: str = Query("", description="仅教师/管理员：指定班级"),
@@ -252,20 +252,26 @@ async def weekly_stars(
         scope_grade = (grade or "").strip()
         class_variants = _class_variants(class_name or "")
 
+    # P1: 年级/班级条件下推 SQL（旧实现拉全校本周积分再内存过滤, 学生高频访问偏重）
+    cond = ["u.role = 2", "IFNULL(u.status,'active') = 'active'", "substr(ar.created_at, 1, 10) >= ?"]
+    params: list = [since]
+    if scope_grade:
+        cond.append("u.grade = ?")
+        params.append(scope_grade)
+    if class_variants:
+        cph = ",".join("?" for _ in class_variants)
+        cond.append(f"u.class IN ({cph})")
+        params.extend(class_variants)
     rows = execute_query(
-        """SELECT ar.student_username, u.name, u.grade, u.class,
+        f"""SELECT ar.student_username, u.name, u.grade, u.class,
                   COALESCE(SUM(ar.points), 0) AS pts
            FROM activity_rewards ar
            JOIN users u ON u.username = ar.student_username
-            AND u.role = 2 AND IFNULL(u.status,'active') = 'active'
-           WHERE substr(ar.created_at, 1, 10) >= ?
+           WHERE {' AND '.join(cond)}
            GROUP BY ar.student_username""",
-        (since,),
+        tuple(params),
     ) or []
-    in_scope = [r for r in rows
-                if (not scope_grade or str(r[2] or "") == scope_grade)
-                and (not class_variants or str(r[3] or "") in class_variants)]
-    in_scope.sort(key=lambda r: (-int(r[4] or 0), str(r[1] or r[0])))
+    in_scope = sorted(rows, key=lambda r: (-int(r[4] or 0), str(r[1] or r[0])))
     stars = [
         {"username": r[0], "name": r[1] or r[0], "grade": r[2] or "", "class": r[3] or "",
          "points": int(r[4] or 0)}
@@ -273,13 +279,18 @@ async def weekly_stars(
     ]
 
     # 本班/本年级在册学生数：名次要有分母，否则"第 47 名"毫无意义
-    total_rows = execute_query(
-        """SELECT grade, class FROM users
-           WHERE role = 2 AND IFNULL(status,'active') = 'active'""", ()
-    ) or []
-    total_students = len([r for r in total_rows
-                        if (not scope_grade or str(r[0] or "") == scope_grade)
-                        and (not class_variants or str(r[1] or "") in class_variants)])
+    # P1: 在册学生数改 COUNT（不再拉全校用户内存计数）
+    tcond = ["role = 2", "IFNULL(status,'active') = 'active'"]
+    tparams: list = []
+    if scope_grade:
+        tcond.append("grade = ?")
+        tparams.append(scope_grade)
+    if class_variants:
+        cph = ",".join("?" for _ in class_variants)
+        tcond.append(f"class IN ({cph})")
+        tparams.extend(class_variants)
+    _trow = execute_query(f"SELECT COUNT(*) FROM users WHERE {' AND '.join(tcond)}", tuple(tparams))
+    total_students = int(_trow[0][0]) if _trow else 0
 
     my_week = execute_query(
         """SELECT COALESCE(SUM(points), 0) FROM activity_rewards
@@ -314,7 +325,7 @@ def _class_variants(raw: str) -> list[str]:
 
 
 @router.get("/rewards/statistics", summary="获取积分统计")
-async def statistics(
+def statistics(
     request: Request,
     grade: str = Query("", description="年级"),
     class_name: str = Query("", description="班级"),
@@ -344,7 +355,7 @@ async def statistics(
 
 
 @router.get("/rewards/student/{student_username}", summary="查询指定学生积分")
-async def student_points(student_username: str, request: Request):
+def student_points(student_username: str, request: Request):
     """教师/管理员查询指定学生的积分及流水"""
     user = get_current_user(request)
     role = user.get("role", 2)
@@ -379,7 +390,7 @@ async def student_points(student_username: str, request: Request):
 
 
 @router.get("/rewards/my-title", summary="获取我的完整称号信息")
-async def my_title(request: Request):
+def my_title(request: Request):
     """获取当前学生的完整称号信息（主称号+学科称号+徽章+升级历史）"""
     user = get_current_user(request)
     username = user["username"]
@@ -393,7 +404,7 @@ async def my_title(request: Request):
 
 
 @router.get("/rewards/title-config", summary="获取称号配置列表")
-async def title_config(request: Request):
+def title_config(request: Request):
     """获取全部称号配置（主称号+学科称号+徽章+科目列表）"""
     return {
         "main_titles": get_title_config(),
@@ -404,7 +415,7 @@ async def title_config(request: Request):
 
 
 @router.get("/rewards/title-history", summary="获取称号升级历史")
-async def title_history(
+def title_history(
     request: Request,
     limit: int = Query(20, ge=1, le=200, description="返回条数"),
     student_username: str = Query("", description="指定学生（教师专用）"),
@@ -426,7 +437,7 @@ async def title_history(
 
 
 @router.get("/rewards/my-subject-titles", summary="获取学科称号")
-async def my_subject_titles(request: Request):
+def my_subject_titles(request: Request):
     """获取当前学生的各学科称号"""
     user = get_current_user(request)
     username = user["username"]
@@ -440,7 +451,7 @@ async def my_subject_titles(request: Request):
 
 
 @router.get("/rewards/my-badges", summary="获取成就徽章")
-async def my_badges(request: Request):
+def my_badges(request: Request):
     """获取当前学生的成就徽章（含已解锁/未解锁状态）"""
     user = get_current_user(request)
     username = user["username"]
@@ -455,7 +466,7 @@ async def my_badges(request: Request):
 
 
 @router.post("/rewards/check-badges", summary="重新检测徽章")
-async def check_badges(request: Request):
+def check_badges(request: Request):
     """手动触发徽章检测，返回新解锁的徽章"""
     user = get_current_user(request)
     username = user["username"]
@@ -469,7 +480,7 @@ async def check_badges(request: Request):
 
 
 @router.post("/rewards/update-subject-counts", summary="更新学科答题数")
-async def update_subject_counts(request: Request):
+def update_subject_counts(request: Request):
     """重新统计学生的各学科答题数并更新学科称号"""
     user = get_current_user(request)
     username = user["username"]

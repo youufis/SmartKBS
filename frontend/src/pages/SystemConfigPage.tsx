@@ -236,6 +236,10 @@ const RANK_MODE_OPTIONS: FieldOption[] = [
   { value: 'all', labelKey: 'optRankAll' },
   { value: 'none', labelKey: 'optRankNone' },
 ]
+const MC_SCORING_OPTIONS: FieldOption[] = [
+  { value: 'strict', labelKey: 'optMcStrict' },
+  { value: 'partial', labelKey: 'optMcPartial' },
+]
 const SKILL_SEGMENT_OPTIONS: FieldOption[] = [
   { value: 'system', labelKey: 'optSegmentSystem' },
   { value: 'inline', labelKey: 'optSegmentInline' },
@@ -432,6 +436,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AI_GRADING_BATCH_SIZE', labelKey: 'field_AI_GRADING_BATCH_SIZE', descKey: 'field_AI_GRADING_BATCH_SIZE_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitAnswer', scope: 'nextRound' },
   { key: 'AI_GRADING_CONCURRENCY', labelKey: 'field_AI_GRADING_CONCURRENCY', descKey: 'field_AI_GRADING_CONCURRENCY_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitThread', scope: 'nextRound' },
   { key: 'AI_GRADING_MAX_ITEMS_PER_ROUND', labelKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND', descKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitItem', scope: 'nextRound' },
+  { key: 'MULTIPLE_CHOICE_SCORING', labelKey: 'field_MULTIPLE_CHOICE_SCORING', descKey: 'field_MULTIPLE_CHOICE_SCORING_desc', type: 'select', group: 'grading', required: false, options: MC_SCORING_OPTIONS },
   // 图片生成
   { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen', level: 'basic' },
   { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', longDescKey: 'field_IMAGE_GEN_MODEL_tip', type: 'model_select', optionsKind: 'image', group: 'imagegen', level: 'basic' },

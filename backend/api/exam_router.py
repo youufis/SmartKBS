@@ -2013,15 +2013,18 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         student_answer = req.answers.get(qid, "")
         correct_answer = q["correct_answer"]
         q_score = q["score"] or (total_score / max(len(questions), 1))
-        is_correct = _check_choice_answer(
-            student_answer, correct_answer, q["type"], _exam_opts_of(q.get("options")),
-        )
-        if is_correct:
-            earned_score += q_score
+        _opts = _exam_opts_of(q.get("options"))
+        is_correct = _check_choice_answer(student_answer, correct_answer, q["type"], _opts)
+        if q["type"] == "multiple":
+            from backend.answer_norm import score_multiple_choice
+            q_earned = score_multiple_choice(student_answer, correct_answer, _opts, q_score)
+        else:
+            q_earned = q_score if is_correct else 0
+        earned_score += q_earned
         graded_answers[qid] = {
             "student_answer": student_answer,
             "correct_answer": correct_answer,
-            "score": q_score if is_correct else 0,
+            "score": q_earned,
             "max_score": q_score,
             "is_correct": is_correct,
         }

@@ -5,6 +5,7 @@
 """
 import json
 import re
+import time
 from typing import Optional, Dict, List, Any, Tuple
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -20,6 +21,10 @@ from backend.auth import is_admin
 from backend.logger import logger
 
 router = APIRouter()
+
+# P2: 整班学习进度短 TTL 缓存（监控页频繁刷新, 避免每次重算全班）
+_PROGRESS_CACHE: dict = {}
+_PROGRESS_CACHE_TTL = 60.0
 
 ACTIVITY_TYPE_LABELS = {
     "exam": "考试",
@@ -39,195 +44,180 @@ ACTIVITY_TYPE_LABELS = {
 # 辅助：获取教师创建的所有活动
 # ═══════════════════════════════════════════════════════════
 
-def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
-    """获取教师创建的所有活动"""
-    # 查询教师姓名
-    _name_rows = db_query_dict(
-        "SELECT COALESCE(NULLIF(name,''), username) as display_name FROM users WHERE username=?",
-        (teacher_username,),
-    )
-    _creator_name = _name_rows[0]["display_name"] if _name_rows else teacher_username
+def _group_counts(query_fn, sql_tpl: str, ids: list) -> Dict[Any, int]:
+    """P1: 一次 GROUP BY 取回各活动提交数, 替代逐条 COUNT(N+1)。sql_tpl 含 {ph} 占位。"""
+    if not ids:
+        return {}
+    ph = ",".join("?" for _ in ids)
+    rows = query_fn(sql_tpl.format(ph=ph), tuple(ids))
+    return {r["aid"]: r["cnt"] for r in rows}
+
+
+def _get_teacher_activities(teacher_username: str, creators: Optional[List[str]] = None,
+                            admin_view: bool = False) -> List[Dict[str, Any]]:
+    """获取教师创建的所有活动。
+
+    P1: creators 传入多个创建者(管理员批量)时用 IN 一次查各类, 不再逐教师循环;
+    每类提交数用一条 GROUP BY 聚合, 不再逐活动 COUNT。admin_view=True 时课程练习展示全部。
+    """
+    creators = creators or [teacher_username]
+    cph = ",".join("?" for _ in creators)
+
+    # 创建者姓名映射(批量)
+    name_map: Dict[str, str] = {}
+    _nph = ",".join("?" for _ in creators)
+    for r in db_query_dict(
+        f"SELECT username, COALESCE(NULLIF(name,''), username) AS dn FROM users WHERE username IN ({_nph})",
+        tuple(creators),
+    ):
+        name_map[r["username"]] = r["dn"]
+    _creator_name = name_map.get(teacher_username, teacher_username)
 
     activities = []
 
-    # ── 1. 考试（questions.db）──
+    # ── 1. 考试 ──
     exams = qdb_query(
-        """SELECT e.id, e.title, e.status, e.created_at, e.updated_at,
+        f"""SELECT e.id, e.title, e.status, e.created_at, e.updated_at,
                   e.total_score, e.pass_score, e.duration, e.subject,
                   e.target_scope, e.target_grade, e.target_class, e.target_users,
-                  'exam' as activity_type
-           FROM exams e
-           WHERE e.creator_username = ?
-           ORDER BY e.created_at DESC""",
-        (teacher_username,),
-    )
+                  e.creator_username, 'exam' as activity_type
+           FROM exams e WHERE e.creator_username IN ({cph})
+           ORDER BY e.created_at DESC""", tuple(creators))
+    _c = _group_counts(qdb_query,
+        "SELECT exam_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM exam_attempts "
+        "WHERE status IN ('submitted','graded') AND exam_id IN ({ph}) GROUP BY exam_id",
+        [e["id"] for e in exams])
     for e in exams:
-        sub = qdb_query(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM exam_attempts WHERE exam_id=? AND status IN ('submitted','graded')",
-            (e["id"],),
-        )
-        e["submitted_count"] = sub[0]["cnt"] if sub else 0
+        e["submitted_count"] = _c.get(e["id"], 0)
         activities.append(e)
 
-    # ── 2. 同步练习（questions.db）──
-    # 排除：错题巩固(source=wrong_book)、定向给个别学生的(target_students不为空)
+    # ── 2. 同步练习 ──
     practices = qdb_query(
-        """SELECT ps.id, ps.title, ps.status, ps.created_at, ps.updated_at,
-                  COALESCE(ps.total_score,0) as total_score,
-                  ps.subject, ps.target_grade, ps.target_class, ps.source,
+        f"""SELECT ps.id, ps.title, ps.status, ps.created_at, ps.updated_at,
+                  COALESCE(ps.total_score,0) as total_score, ps.subject,
+                  ps.target_grade, ps.target_class, ps.source,
                   ps.target_scope, ps.target_users, ps.target_students,
-                  'practice' as activity_type
+                  ps.creator_username, 'practice' as activity_type
            FROM practice_sessions ps
-           WHERE ps.creator_username = ?
-             AND COALESCE(ps.status, 'active') != 'draft'   -- 草稿还没发布，不算一场活动
+           WHERE ps.creator_username IN ({cph})
+             AND COALESCE(ps.status, 'active') != 'draft'
              AND (ps.source IS NULL OR ps.source != 'wrong_book')
              AND (ps.target_students IS NULL OR ps.target_students = '')
-           ORDER BY ps.created_at DESC""",
-        (teacher_username,),
-    )
+           ORDER BY ps.created_at DESC""", tuple(creators))
+    _c = _group_counts(qdb_query,
+        "SELECT session_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM practice_attempts "
+        "WHERE status='submitted' AND session_id IN ({ph}) GROUP BY session_id",
+        [p["id"] for p in practices])
     for p in practices:
-        sub = qdb_query(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM practice_attempts WHERE session_id=? AND status='submitted'",
-            (p["id"],),
-        )
-        p["submitted_count"] = sub[0]["cnt"] if sub else 0
+        p["submitted_count"] = _c.get(p["id"], 0)
         p["duration"] = 0
         p["pass_score"] = 0
         activities.append(p)
 
-    # ── 3. 知识抢答（smartkb.db）──
+    # ── 3. 知识抢答 ──
     quick_quiz_rows = db_query_dict(
-        """SELECT qr.id, qr.title, qr.status, qr.created_at,
+        f"""SELECT qr.id, qr.title, qr.status, qr.created_at,
                   COALESCE(qr.started_at, qr.created_at) as updated_at,
                   qr.target_scope, qr.target_grade, qr.target_class, qr.target_users, qr.subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
-                  'quick_quiz' as activity_type
-           FROM quick_quiz_rooms qr
-           WHERE qr.creator_username = ?
-           ORDER BY qr.created_at DESC""",
-        (teacher_username,),
-    )
+                  qr.creator_username, 'quick_quiz' as activity_type
+           FROM quick_quiz_rooms qr WHERE qr.creator_username IN ({cph})
+           ORDER BY qr.created_at DESC""", tuple(creators))
+    _c = _group_counts(db_query_dict,
+        "SELECT room_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM quick_quiz_players "
+        "WHERE room_id IN ({ph}) GROUP BY room_id",
+        [q["id"] for q in quick_quiz_rows])
     for q in quick_quiz_rows:
-        players = db_query_dict(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM quick_quiz_players WHERE room_id=?",
-            (q["id"],),
-        )
-        q["submitted_count"] = players[0]["cnt"] if players else 0
+        q["submitted_count"] = _c.get(q["id"], 0)
         q["status"] = q.get("status") or "ended"
         activities.append(q)
 
-    # ── 4. 在线任务（smartkb.db）──
+    # ── 4. 在线任务 ──
     task_rows = db_query_dict(
-        """SELECT t.id, t.name as title, t.status, t.created_at, t.updated_at,
+        f"""SELECT t.id, t.name as title, t.status, t.created_at, t.updated_at,
                   COALESCE(t.subject, '') as subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
                   t.target_scope, t.target_grade, t.target_class, t.target_users,
-                  'task' as activity_type
-           FROM tasks t
-           WHERE t.creator_username = ?
-           ORDER BY t.created_at DESC""",
-        (teacher_username,),
-    )
+                  t.creator_username, 'task' as activity_type
+           FROM tasks t WHERE t.creator_username IN ({cph})
+           ORDER BY t.created_at DESC""", tuple(creators))
+    _c = _group_counts(db_query_dict,
+        "SELECT task_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM task_submissions "
+        "WHERE task_id IN ({ph}) GROUP BY task_id",
+        [t["id"] for t in task_rows])
     for t in task_rows:
-        sub = db_query_dict(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM task_submissions WHERE task_id=?",
-            (t["id"],),
-        )
-        t["submitted_count"] = sub[0]["cnt"] if sub else 0
+        t["submitted_count"] = _c.get(t["id"], 0)
         activities.append(t)
 
-    # ── 5. 随堂测验（smartkb.db）──
+    # ── 5. 随堂测验 ──
     quiz_rows = db_query_dict(
-        """SELECT iq.id, iq.title, iq.status, iq.created_at, iq.updated_at,
-                  iq.questions,
+        f"""SELECT iq.id, iq.title, iq.status, iq.created_at, iq.updated_at, iq.questions,
                   COALESCE(iq.subject, '') as subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
                   iq.target_scope, iq.target_grade, iq.target_class, iq.target_users,
-                  'quiz' as activity_type
+                  iq.creator_username, 'quiz' as activity_type
            FROM interaction_quizzes iq
-           WHERE iq.creator_username = ?
-             AND COALESCE(iq.status, 'active') != 'draft'   -- 同上：草稿不进活动监控
-           ORDER BY iq.created_at DESC""",
-        (teacher_username,),
-    )
-    # 科目优先用建测验时选的那个（2026-10-16 起随堂测验会落库）；
-    # 老测验（建卷时还没这列）才按题目里带的题库 id 反查；都查不到就留空，前端显示"-"
+           WHERE iq.creator_username IN ({cph}) AND COALESCE(iq.status, 'active') != 'draft'
+           ORDER BY iq.created_at DESC""", tuple(creators))
     _quiz_subj = quiz_stats.quiz_subjects(quiz_rows)
+    _c = _group_counts(db_query_dict,
+        "SELECT quiz_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM interaction_quiz_answers "
+        "WHERE quiz_id IN ({ph}) GROUP BY quiz_id",
+        [qz["id"] for qz in quiz_rows])
     for qz in quiz_rows:
         qz["subject"] = (qz.get("subject") or "").strip() or _quiz_subj.get(qz["id"], "")
-        qz.pop("questions", None)          # 题目正文只在服务端用来反查科目，不必回给列表接口
-        sub = db_query_dict(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM interaction_quiz_answers WHERE quiz_id=?",
-            (qz["id"],),
-        )
-        qz["submitted_count"] = sub[0]["cnt"] if sub else 0
+        qz.pop("questions", None)
+        qz["submitted_count"] = _c.get(qz["id"], 0)
         activities.append(qz)
 
-    # ── 6. 代码练习（questions.db）──
+    # ── 6. 代码练习 ──
     code_rows = qdb_query(
-        """SELECT cp.id, cp.title, cp.status, cp.created_at, cp.updated_at,
-                  cp.subject, 0 as total_score, 0 as pass_score, 0 as duration,
+        f"""SELECT cp.id, cp.title, cp.status, cp.created_at, cp.updated_at, cp.subject,
+                  0 as total_score, 0 as pass_score, 0 as duration,
                   cp.target_scope, cp.target_grade, cp.target_class, cp.target_users,
-                  'code' as activity_type
-           FROM code_problems cp
-           WHERE cp.creator_username = ?
-             AND cp.status = 'active'
-           ORDER BY cp.created_at DESC""",
-        (teacher_username,),
-    )
+                  cp.creator_username, 'code' as activity_type
+           FROM code_problems cp WHERE cp.creator_username IN ({cph}) AND cp.status = 'active'
+           ORDER BY cp.created_at DESC""", tuple(creators))
+    _c = _group_counts(qdb_query,
+        "SELECT problem_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM code_submissions "
+        "WHERE status='submitted' AND problem_id IN ({ph}) GROUP BY problem_id",
+        [c["id"] for c in code_rows])
     for c in code_rows:
-        sub = qdb_query(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM code_submissions WHERE problem_id=? AND status='submitted'",
-            (c["id"],),
-        )
-        c["submitted_count"] = sub[0]["cnt"] if sub else 0
+        c["submitted_count"] = _c.get(c["id"], 0)
         activities.append(c)
 
-    # ── 7. 分组讨论（smartkb.db）──
+    # ── 7. 分组讨论 ──
     disc_rows = db_query_dict(
-        """SELECT d.id, d.title, d.status, d.created_at, d.updated_at,
-                  d.target_scope, d.target_grade, d.target_class, d.target_users,
-                  d.subject, 0 as total_score, 0 as pass_score, 0 as duration,
-                  'discussion' as activity_type
-           FROM discussions d
-           WHERE d.creator_username = ?
-           ORDER BY d.created_at DESC""",
-        (teacher_username,),
-    )
+        f"""SELECT d.id, d.title, d.status, d.created_at, d.updated_at,
+                  d.target_scope, d.target_grade, d.target_class, d.target_users, d.subject,
+                  0 as total_score, 0 as pass_score, 0 as duration,
+                  d.creator_username, 'discussion' as activity_type
+           FROM discussions d WHERE d.creator_username IN ({cph})
+           ORDER BY d.created_at DESC""", tuple(creators))
+    _c = _group_counts(db_query_dict,
+        "SELECT dg.discussion_id AS aid, COUNT(DISTINCT m.username) AS cnt "
+        "FROM discussion_groups dg JOIN discussion_messages m ON m.group_id = dg.id "
+        "WHERE m.username IS NOT NULL AND m.username <> '' AND dg.discussion_id IN ({ph}) "
+        "GROUP BY dg.discussion_id",
+        [d["id"] for d in disc_rows])
     for d in disc_rows:
-        # 讨论完成 = 至少发过一条言（与完成详情同一口径；旧口径"加入小组"会把
-        # 点进去又没说话的学生也算完成，完成率虚高）
-        sub = db_query_dict(
-            """SELECT COUNT(DISTINCT m.username) as cnt
-               FROM discussion_groups dg
-               JOIN discussion_messages m ON m.group_id = dg.id
-               WHERE dg.discussion_id = ? AND m.username IS NOT NULL AND m.username <> ''""",
-            (d["id"],),
-        )
-        d["submitted_count"] = sub[0]["cnt"] if sub else 0
+        d["submitted_count"] = _c.get(d["id"], 0)
         d["status"] = d.get("status") or "pending"
         activities.append(d)
 
-    # ── 9. 课程练习（smartkb.db）──
-    # 参考学生端任务清单(dashboard_router.py) 的统计逻辑：
-    #   按具体练习资源（curriculum_bindings 中 resource_type='html' 且文件名含 _练习.html）细分
-    #   完成数按 ai_practice_results 统计（questions.db）
-    course_grade_set: set[str] = set()
-    for ta in db_query_dict(
-        "SELECT DISTINCT g.name as grade_name FROM teacher_assignments ta JOIN grades g ON ta.grade_id=g.id WHERE ta.teacher_username=?",
-        (teacher_username,),
-    ):
-        gn = ta.get("grade_name", "").strip()
-        if gn:
-            course_grade_set.add(gn)
-
-    # 查询绑定了 _练习.html 的课程练习资源（与 task-todo 逻辑一致）
+    # ── 8. 课程练习（按绑定资源细分, 完成数按 ai_practice_results）──
+    course_grade_set: set = set()
+    if not admin_view:
+        for ta in db_query_dict(
+            "SELECT DISTINCT g.name as grade_name FROM teacher_assignments ta "
+            "JOIN grades g ON ta.grade_id=g.id WHERE ta.teacher_username=?", (teacher_username,)):
+            gn = (ta.get("grade_name") or "").strip()
+            if gn:
+                course_grade_set.add(gn)
     bind_rows = db_query_dict(
         """SELECT cb.id as binding_id, cb.knowledge_point_id,
                   kp.name as kp_name, c.name as course_name, c.id as course_id,
                   c.subject, c.status as course_status, c.grade as course_grade,
-                  -- 时间取"绑定/布置时间"，不再用课程创建时间（那是整门课的建课时间，
-                  -- 与这份练习何时布置给班级无关，实测会出现标题 06-17、卡片 05-30）
                   cb.created_at as binding_at, c.updated_at,
                   COALESCE(sr.file_path, '') as fp, COALESCE(sr.file_name, '') as fn,
                   sr.owner_username
@@ -237,129 +227,111 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
            JOIN courses c ON ch.course_id = c.id
            LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
            WHERE cb.resource_type='html' AND c.status='active'
-           ORDER BY c.sort_order, ch.sort_order, kp.sort_order, cb.id""",
-    )
+           ORDER BY c.sort_order, ch.sort_order, kp.sort_order, cb.id""")
+    kept = []
     for b in bind_rows:
         fn = str(b["fn"] or "")
         fp = str(b["fp"] or "")
-        # 只显示 _练习.html 的资源（参考学生端任务清单）
         if "_练习.html" not in fn and "_练习.html" not in fp:
             continue
-
         course_grade = (b.get("course_grade") or "").strip()
-        # 管理员：显示全部课程练习；教师：只看**自己共享**的练习，且课程年级必须在
-        # 本人任教范围内（权限口径与重置接口 _authorize 一致，不多看一眼别人的活动）
-        if not is_admin(teacher_username):
+        if not admin_view:
             if b.get("owner_username") != teacher_username:
                 continue
             if not course_grade or not course_grade_set or course_grade not in course_grade_set:
                 continue
-
-        # 统计已完成的 Student 数（从 ai_practice_results 查询，与 task-todo 一致）
-        done_count = qdb_query(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM ai_practice_results WHERE kp_id=?",
-            (b["knowledge_point_id"],),
-        )
-
-        # 用练习资源文件名作为活动名称（去掉 _练习.html 后缀更友好）
+        kept.append(b)
+    _done = _group_counts(qdb_query,
+        "SELECT kp_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM ai_practice_results "
+        "WHERE kp_id IN ({ph}) GROUP BY kp_id",
+        [b["knowledge_point_id"] for b in kept])
+    _owners = {b.get("owner_username") for b in kept if b.get("owner_username")}
+    _owner_names: Dict[str, str] = {}
+    if _owners:
+        _oph = ",".join("?" for _ in _owners)
+        for r in db_query_dict(
+            f"SELECT username, COALESCE(NULLIF(name,''), username) AS dn FROM users WHERE username IN ({_oph})",
+            tuple(_owners)):
+            _owner_names[r["username"]] = r["dn"]
+    for b in kept:
         practice_name = b["fn"]
         if practice_name.endswith("_练习.html"):
             practice_name = practice_name[:-len("_练习.html")]
         if not practice_name:
             practice_name = f"{b['course_name']} - {b['kp_name']}"
-
-        # 查询共享资源拥有者的姓名
-        _owner_name = _creator_name
         owner = b.get("owner_username")
-        if owner:
-            owner_rows = db_query_dict(
-                "SELECT COALESCE(NULLIF(name,''), username) as display_name FROM users WHERE username=?",
-                (owner,),
-            )
-            if owner_rows:
-                _owner_name = owner_rows[0]["display_name"]
-
+        course_grade = (b.get("course_grade") or "").strip()
         activities.append({
             "id": b["binding_id"],
             "title": practice_name,
-            "creator_name": _owner_name,
+            "creator_name": _owner_names.get(owner, _creator_name),
             "creator_username": owner or teacher_username,
-            # 课程练习没有开始/结束概念：只表达"课程在启用中 → 可作答 / 课程已停用"
             "status": "available" if (b.get("course_status") or "") == "active" else "inactive",
             "created_at": b.get("binding_at") or b.get("updated_at") or "",
             "updated_at": b["updated_at"],
             "subject": b.get("subject", "") or "",
-            "total_score": 0,
-            "pass_score": 0,
-            "duration": 0,
+            "total_score": 0, "pass_score": 0, "duration": 0,
             "activity_type": "course",
-            "submitted_count": done_count[0]["cnt"] if done_count else 0,
-            # 课程练习的可用范围 = 课程年级（全部班级），显式标成 grade 让范围标签说清楚
+            "submitted_count": _done.get(b["knowledge_point_id"], 0),
             "target_scope": "grade" if course_grade else "",
             "target_grade": course_grade,
             "target_class": "",
         })
 
-    # ── 8. 快速投票（smartkb.db）──
+    # ── 9. 快速投票 ──
     poll_rows = db_query_dict(
-        """SELECT p.id, p.question as title, p.status, p.created_at, p.created_at as updated_at,
+        f"""SELECT p.id, p.question as title, p.status, p.created_at, p.created_at as updated_at,
                   COALESCE(p.subject, '') as subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
                   p.target_scope, p.target_grade, p.target_class, p.target_users,
-                  'poll' as activity_type
-           FROM interaction_polls p
-           WHERE p.creator_username = ?
-           ORDER BY p.created_at DESC""",
-        (teacher_username,),
-    )
+                  p.creator_username, 'poll' as activity_type
+           FROM interaction_polls p WHERE p.creator_username IN ({cph})
+           ORDER BY p.created_at DESC""", tuple(creators))
+    _c = _group_counts(db_query_dict,
+        "SELECT poll_id AS aid, COUNT(DISTINCT student_username) AS cnt FROM interaction_poll_votes "
+        "WHERE poll_id IN ({ph}) GROUP BY poll_id",
+        [p["id"] for p in poll_rows])
     for p in poll_rows:
-        sub = db_query_dict(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM interaction_poll_votes WHERE poll_id=?",
-            (p["id"],),
-        )
-        p["submitted_count"] = sub[0]["cnt"] if sub else 0
+        p["submitted_count"] = _c.get(p["id"], 0)
         activities.append(p)
 
-    # ── 9. 课堂闯关（smartkb.db，大屏版）──
+    # ── 10. 课堂闯关（大屏版）──
     ladder_rows = db_query_dict(
-        """SELECT id,
-                  COALESCE(NULLIF(topic,''), NULLIF(subject,''), '课堂闯关') as title,
+        f"""SELECT id, COALESCE(NULLIF(topic,''), NULLIF(subject,''), '课堂闯关') as title,
                   CASE status WHEN 'ready' THEN 'active' ELSE status END as status,
                   created_at, updated_at, COALESCE(subject,'') as subject,
                   0 as total_score, 0 as pass_score, 0 as duration,
                   'class' as target_scope, grade as target_grade, class_name as target_class,
-                  '' as target_users, 'class_ladder' as activity_type
-           FROM class_ladder_sessions
-           WHERE teacher_username = ?
-           ORDER BY created_at DESC""",
-        (teacher_username,),
-    )
+                  '' as target_users, teacher_username AS creator_username, 'class_ladder' as activity_type
+           FROM class_ladder_sessions WHERE teacher_username IN ({cph})
+           ORDER BY created_at DESC""", tuple(creators))
+    _lids = [p["id"] for p in ladder_rows]
+    _agg: Dict[Any, Any] = {}
+    if _lids:
+        _lph = ",".join("?" for _ in _lids)
+        for r in db_query_dict(
+            f"SELECT session_id AS aid, COUNT(*) AS runs, "
+            f"COUNT(DISTINCT CASE WHEN status != 'playing' THEN student_name END) AS students "
+            f"FROM class_ladder_runs WHERE session_id IN ({_lph}) GROUP BY session_id", tuple(_lids)):
+            _agg[r["aid"]] = r
     for p in ladder_rows:
-        # status != 'playing'：只算打完的局，和「完成情况」详情同一个口径，
-        # 否则列表显示"已提交 1"、点进去已完成 0，两头对不上。
-        agg = db_query_dict(
-            "SELECT COUNT(*) as runs, "
-            "COUNT(DISTINCT CASE WHEN status != 'playing' THEN student_name END) as students "
-            "FROM class_ladder_runs WHERE session_id=?", (p["id"],))
-        p["submitted_count"] = (agg[0]["students"] if agg else 0) or 0
-        p["run_count"] = (agg[0]["runs"] if agg else 0) or 0
+        a = _agg.get(p["id"])
+        p["submitted_count"] = (a["students"] if a else 0) or 0
+        p["run_count"] = (a["runs"] if a else 0) or 0
         activities.append(p)
-    # 统一设置创建者姓名（课程练习已有独立的 creator_name，不覆盖）
-    # 同时兜底范围字段: 课程练习按资源归属(年级来自课程)且非班级定向, 其余活动取各自表值
+
+    # 统一创建者姓名与范围字段兜底（课程练习已有独立 creator_name, 不覆盖）
     for act in activities:
         if act.get("activity_type") != "course":
-            act["creator_name"] = _creator_name
-            act["creator_username"] = teacher_username
+            cu = act.get("creator_username") or teacher_username
+            act["creator_name"] = name_map.get(cu, cu)
+            act["creator_username"] = cu
         act.setdefault("target_scope", "")
         act.setdefault("target_grade", "")
         act.setdefault("target_class", "")
         act.setdefault("target_users", "")
     return activities
 
-
-# ═══════════════════════════════════════════════════════════
-# 辅助：获取学生完成情况
-# ═══════════════════════════════════════════════════════════
 
 def _split_targets(value: Any) -> List[str]:
     """target_users / target_grade / target_class 都是逗号串（可能混中文逗号）"""
@@ -768,7 +740,7 @@ def _get_students_with_completion(
 # ════════════════════════════════════════════
 
 @router.get("/activity-monitor/activities")
-async def list_teacher_activities(
+def list_teacher_activities(
     request: Request,
     activity_type: str = Query("all", description="筛选类型"),
     keyword: str = Query("", description="搜索活动名称关键词"),
@@ -785,21 +757,19 @@ async def list_teacher_activities(
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
 
-    # 管理员可查看全部教师的活动
+    # 管理员可查看全部教师的活动（P1: 批量 IN 一次查各类, 不再逐教师循环扇出）
     if is_admin(username):
-        from backend.database import execute_query as db_query
-        teacher_rows = db_query("SELECT username FROM users WHERE role IN (0, 1)")
-        all_activities = []
+        teacher_rows = db_execute("SELECT username FROM users WHERE role IN (0, 1)")
+        creators = [r[0] for r in teacher_rows if r and r[0]]
+        all_activities = _get_teacher_activities(username, creators=creators, admin_view=True)
         seen: set[tuple[str, int]] = set()
-        for row in teacher_rows:
-            t_uname = row[0] if row else ""
-            if not t_uname:
-                continue
-            for act in _get_teacher_activities(t_uname):
-                key = (act["activity_type"], act["id"])
-                if key not in seen:
-                    seen.add(key)
-                    all_activities.append(act)
+        deduped = []
+        for act in all_activities:
+            key = (act["activity_type"], act["id"])
+            if key not in seen:
+                seen.add(key)
+                deduped.append(act)
+        all_activities = deduped
     else:
         all_activities = _get_teacher_activities(username)
 
@@ -945,7 +915,7 @@ def _lookup_activity(activity_type: str, activity_id: int, username: str):
 
 
 @router.get("/activity-monitor/activities/{activity_type}/{activity_id}/status")
-async def get_activity_completion_status(
+def get_activity_completion_status(
     activity_type: str,
     activity_id: int,
     request: Request,
@@ -1062,7 +1032,7 @@ async def get_activity_completion_status(
 
 
 @router.get("/activity-monitor/grades-classes")
-async def get_teacher_grades_classes(request: Request):
+def get_teacher_grades_classes(request: Request):
     """获取教师管辖范围内有实际学生的年级和班级列表（动态加载）"""
     user = get_current_user(request)
     username = user["username"]
@@ -1108,7 +1078,36 @@ async def get_teacher_grades_classes(request: Request):
     return {"grades": result}
 
 
-def _calc_student_progress(username: str) -> dict[str, Any]:
+def _course_total_for_grade(grade: str) -> int:
+    """P2: 某年级的课程练习总数（同年级学生共用, 避免逐人重算重 JOIN+LIKE）。"""
+    if grade:
+        total_rows = db_execute(
+            """SELECT COUNT(*) FROM curriculum_bindings cb
+               JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+               JOIN chapters ch ON kp.chapter_id = ch.id
+               JOIN courses c ON ch.course_id = c.id
+               LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+               WHERE cb.resource_type='html' AND c.status='active'
+                 AND (c.grade = '' OR INSTR(c.grade, ?) > 0)
+                 AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
+                      OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
+            (grade,),
+        )
+    else:
+        total_rows = db_execute(
+            """SELECT COUNT(*) FROM curriculum_bindings cb
+               JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+               JOIN chapters ch ON kp.chapter_id = ch.id
+               JOIN courses c ON ch.course_id = c.id
+               LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+               WHERE cb.resource_type='html' AND c.status='active' AND c.grade=''
+                 AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
+                      OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
+        )
+    return total_rows[0][0] if total_rows else 0
+
+
+def _calc_student_progress(username: str, precomputed: Optional[dict] = None) -> dict[str, Any]:
     """计算单个学生的学习进度统计（与 dashboard task-todo 一致）"""
     from datetime import datetime, date, timedelta
     stats: dict[str, Any] = {
@@ -1130,59 +1129,51 @@ def _calc_student_progress(username: str) -> dict[str, Any]:
         )
         grade = str(grade_rows[0][0] or "").strip() if grade_rows else ""
 
-        # 课程进度
-        if grade:
-            total_rows = db_execute(
-                """SELECT COUNT(*) FROM curriculum_bindings cb
-                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
-                   JOIN chapters ch ON kp.chapter_id = ch.id
-                   JOIN courses c ON ch.course_id = c.id
-                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
-                   WHERE cb.resource_type='html' AND c.status='active'
-                     AND (c.grade = '' OR INSTR(c.grade, ?) > 0)
-                     AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
-                          OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
-                (grade,),
-            )
+        # 课程进度（P2: 优先用调用方按年级预算的 course_total）
+        _pre = precomputed or {}
+        if "course_total" in _pre:
+            stats["course_total"] = _pre["course_total"]
         else:
-            total_rows = db_execute(
-                """SELECT COUNT(*) FROM curriculum_bindings cb
-                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
-                   JOIN chapters ch ON kp.chapter_id = ch.id
-                   JOIN courses c ON ch.course_id = c.id
-                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
-                   WHERE cb.resource_type='html' AND c.status='active' AND c.grade=''
-                     AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
-                          OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
-            )
-        stats["course_total"] = total_rows[0][0] if total_rows else 0
+            stats["course_total"] = _course_total_for_grade(grade)
 
-        done_rows = qdb_query(
-            "SELECT COUNT(DISTINCT kp_id) as cnt FROM ai_practice_results WHERE student_username=?",
-            (username,),
-        )
-        stats["course_done"] = done_rows[0]["cnt"] if done_rows else 0
+        if "course_done" in _pre:
+            stats["course_done"] = _pre["course_done"]
+        else:
+            done_rows = qdb_query(
+                "SELECT COUNT(DISTINCT kp_id) as cnt FROM ai_practice_results WHERE student_username=?",
+                (username,),
+            )
+            stats["course_done"] = done_rows[0]["cnt"] if done_rows else 0
         stats["course_progress"] = round(stats["course_done"] / stats["course_total"] * 100) if stats["course_total"] > 0 else 0
 
         # 完成率
-        exam_done_rows = qdb_query(
-            "SELECT COUNT(*) as cnt FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
-            (username,),
-        )
-        stats["exam_done"] = exam_done_rows[0]["cnt"] if exam_done_rows else 0
+        if "exam_done" in _pre:
+            stats["exam_done"] = _pre["exam_done"]
+        else:
+            exam_done_rows = qdb_query(
+                "SELECT COUNT(*) as cnt FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
+                (username,),
+            )
+            stats["exam_done"] = exam_done_rows[0]["cnt"] if exam_done_rows else 0
 
-        practice_done_rows = qdb_query(
-            "SELECT COUNT(*) as cnt FROM practice_attempts WHERE student_username=? AND status='submitted'",
-            (username,),
-        )
-        stats["practice_done"] = practice_done_rows[0]["cnt"] if practice_done_rows else 0
+        if "practice_done" in _pre:
+            stats["practice_done"] = _pre["practice_done"]
+        else:
+            practice_done_rows = qdb_query(
+                "SELECT COUNT(*) as cnt FROM practice_attempts WHERE student_username=? AND status='submitted'",
+                (username,),
+            )
+            stats["practice_done"] = practice_done_rows[0]["cnt"] if practice_done_rows else 0
 
         # 已完成代码练习数：统计状态为 accepted 且为最佳提交的题目数
-        code_done_rows = qdb_query(
-            "SELECT COUNT(DISTINCT problem_id) as cnt FROM code_submissions WHERE student_username=? AND status='accepted' AND is_best=1",
-            (username,),
-        )
-        stats["code_done"] = code_done_rows[0]["cnt"] if code_done_rows else 0
+        if "code_done" in _pre:
+            stats["code_done"] = _pre["code_done"]
+        else:
+            code_done_rows = qdb_query(
+                "SELECT COUNT(DISTINCT problem_id) as cnt FROM code_submissions WHERE student_username=? AND status='accepted' AND is_best=1",
+                (username,),
+            )
+            stats["code_done"] = code_done_rows[0]["cnt"] if code_done_rows else 0
 
         completed = stats["exam_done"] + stats["practice_done"] + stats["course_done"] + stats["code_done"]
 
@@ -1291,7 +1282,7 @@ def _calc_student_progress(username: str) -> dict[str, Any]:
 
 
 @router.get("/activity-monitor/learning-progress", summary="获取学习进度统计")
-async def get_learning_progress(
+def get_learning_progress(
     request: Request,
     grade: str = Query(default=""),
     class_name: str = Query(default=""),
@@ -1320,25 +1311,50 @@ async def get_learning_progress(
     if not grade or not class_name:
         raise HTTPException(status_code=400, detail="请指定年级和班级，或指定学生用户名")
 
-    # 获取该班级的学生列表
-    students = db_query_dict(
-        """SELECT u.username, COALESCE(NULLIF(u.name,''), u.username) as name
-           FROM users u
-           WHERE u.role=2 AND u.grade=? AND u.class=?
-           ORDER BY u.name""",
-        (grade, class_name),
-    )
+    # P4: FK 口径解析年级/班级, 复用 get_students_in_scope（教师∩任教范围, 管理员全班）,
+    # 替代旧的 u.grade/u.class 文本匹配（班级显示名变体不再漏学生）
+    from backend.permission_service import get_grade_by_name, _resolve_class_id_flexible
+    _gi = get_grade_by_name(grade)
+    _gid = _gi["id"] if _gi else None
+    _cid = _resolve_class_id_flexible(_gid, class_name) if _gid else None
+    students = get_students_in_scope(current_user, grade_id=_gid, class_id=_cid)
 
-    # 教师只能查看自己班级的学生
-    if role == 1:
-        allowed = get_students_in_scope(current_user)
-        allowed_usernames = {s.get("username") for s in allowed}
-        students = [s for s in students if s["username"] in allowed_usernames]
+    # P2: 整班进度短 TTL 缓存
+    _cache_key = f"{current_user}|{role}|{grade}|{class_name}"
+    _now = time.time()
+    _hit = _PROGRESS_CACHE.get(_cache_key)
+    if _hit and _now - _hit[0] < _PROGRESS_CACHE_TTL:
+        return _hit[1]
+
+    # P2: course_total 按年级算一次 + 四类完成数批量 GROUP BY（替代逐人查询）
+    _grade_totals: dict = {}
+    for _g in {str(s.get("grade") or "") for s in students}:
+        _grade_totals[_g] = _course_total_for_grade(_g)
+    _unames = [s["username"] for s in students]
+    _exam_done = _group_counts(qdb_query,
+        "SELECT student_username AS aid, COUNT(*) AS cnt FROM exam_attempts "
+        "WHERE status IN ('submitted','graded') AND student_username IN ({ph}) GROUP BY student_username", _unames)
+    _practice_done = _group_counts(qdb_query,
+        "SELECT student_username AS aid, COUNT(*) AS cnt FROM practice_attempts "
+        "WHERE status='submitted' AND student_username IN ({ph}) GROUP BY student_username", _unames)
+    _code_done = _group_counts(qdb_query,
+        "SELECT student_username AS aid, COUNT(DISTINCT problem_id) AS cnt FROM code_submissions "
+        "WHERE status='accepted' AND is_best=1 AND student_username IN ({ph}) GROUP BY student_username", _unames)
+    _course_done = _group_counts(qdb_query,
+        "SELECT student_username AS aid, COUNT(DISTINCT kp_id) AS cnt FROM ai_practice_results "
+        "WHERE student_username IN ({ph}) GROUP BY student_username", _unames)
 
     results = []
     for s in students:
-        st = _calc_student_progress(s["username"])
-        st["student_name"] = s["name"]
+        _pre = {
+            "course_total": _grade_totals.get(str(s.get("grade") or ""), 0),
+            "exam_done": _exam_done.get(s["username"], 0),
+            "practice_done": _practice_done.get(s["username"], 0),
+            "code_done": _code_done.get(s["username"], 0),
+            "course_done": _course_done.get(s["username"], 0),
+        }
+        st = _calc_student_progress(s["username"], precomputed=_pre)
+        st["student_name"] = s.get("name") or s["username"]
         results.append(st)
 
     # 班级汇总
@@ -1358,4 +1374,9 @@ async def get_learning_progress(
     else:
         summary = {"total_students": 0}
 
-    return {"summary": summary, "students": results}
+    _result = {"summary": summary, "students": results}
+    _PROGRESS_CACHE[_cache_key] = (_now, _result)
+    if len(_PROGRESS_CACHE) > 64:
+        for k in [k for k, (ts, _) in _PROGRESS_CACHE.items() if _now - ts >= _PROGRESS_CACHE_TTL]:
+            _PROGRESS_CACHE.pop(k, None)
+    return _result

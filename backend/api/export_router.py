@@ -4,6 +4,7 @@
 """
 import csv
 import io
+import time
 from typing import Any
 import json
 import re
@@ -137,6 +138,13 @@ def _auto_width(ws, cols: int, max_width: int = 40):
 
 def _excel_response(wb, filename: str) -> StreamingResponse:
     """将 workbook 转为 StreamingResponse"""
+    # S1: 统一净化公式注入(覆盖所有 Excel 导出路径, 数值单元格不受影响)
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                cv = cell.value
+                if isinstance(cv, str) and cv and cv[0] in _FORMULA_PREFIXES:
+                    cell.value = "'" + cv
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -911,9 +919,9 @@ def _csv_response(rows: list[list[str]], headers: list[str], filename: str) -> S
     # 注意: 下方按 utf-8-sig 编码输出时已自带 BOM, 不要再手写一个
     # (旧实现双 BOM 会让 Excel 在 A1 单元格混入零宽字符, 影响筛选/公式)
     writer = csv.writer(buf)
-    writer.writerow(headers)
+    writer.writerow([_safe_cell(h) for h in headers])
     for row in rows:
-        writer.writerow(row)
+        writer.writerow([_safe_cell(c) for c in row])
     buf.seek(0)
     from urllib.parse import quote
     encoded_name = quote(filename, safe='')
@@ -1138,12 +1146,28 @@ def _summary_request_filters(
     }
 
 
+# P7: 汇总结果短 TTL 缓存 —— 预览后导出/多表导出复用同一份采集, 不重复跑 build_summary。
+# 键含用户与角色(权限口径)+ 全部筛选; 调用方只读不改, 故共享同一 dict 安全。
+_SUMMARY_CACHE: dict[str, tuple[float, dict]] = {}
+_SUMMARY_CACHE_TTL = 60.0
+
+
 def _summary_data(request: Request, filters: dict) -> dict:
     """执行汇总采集并套用导出行数上限 (E5 同口径)"""
     user = get_current_user(request)
     if user.get("role", 2) == 2:
         raise HTTPException(status_code=403, detail="权限不足")
-    data = build_summary(user, **filters)
+    key = f'{user["username"]}|{user.get("role", 2)}|{json.dumps(filters, sort_keys=True, ensure_ascii=False)}'
+    now = time.time()
+    hit = _SUMMARY_CACHE.get(key)
+    if hit and now - hit[0] < _SUMMARY_CACHE_TTL:
+        data = hit[1]
+    else:
+        data = build_summary(user, **filters)
+        _SUMMARY_CACHE[key] = (now, data)
+        if len(_SUMMARY_CACHE) > 64:
+            for k in [k for k, (ts, _) in _SUMMARY_CACHE.items() if now - ts >= _SUMMARY_CACHE_TTL]:
+                _SUMMARY_CACHE.pop(k, None)
     _guard_row_count(len(data["records"]), "学生活动汇总明细")
     return data
 
@@ -1151,6 +1175,18 @@ def _summary_data(request: Request, filters: dict) -> dict:
 def _s(v) -> str:
     """None → 空串, 其余转字符串 (Excel/CSV 单元格通用)"""
     return "" if v is None else str(v)
+
+
+# S1: 防 CSV/Excel 公式注入 —— 用户可控字段(活动标题/学生姓名/积分原因等)
+# 若以 = + - @ 制表符 回车 开头, Excel 打开会当公式执行(如 =HYPERLINK / =cmd|...)。
+# 前置单引号强制按文本处理; 数值与 None 不受影响。CSV 与 Excel 两条路径共用。
+_FORMULA_PREFIXES = "=+-@\t\r"
+
+
+def _safe_cell(v):
+    if isinstance(v, str) and v and v[0] in _FORMULA_PREFIXES:
+        return "'" + v
+    return v
 
 
 def _numeric_header(header: str) -> bool:

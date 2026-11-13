@@ -292,6 +292,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "AI_GRADING_BATCH_SIZE": 8,               # 一次 AI 调用合并评几份答案
     "AI_GRADING_CONCURRENCY": 2,              # 同时进行中的批改调用数（避免挤占对话/出题）
     "AI_GRADING_MAX_ITEMS_PER_ROUND": 60,     # 单轮最多批多少题（防一次跑太久）
+    # 多选题评分标准：strict=少选错选均不得分（默认）；partial=少选给满分50%、错选不得分。
+    # 按题目满分折算，作用于考试/同步练习/课程练习/随堂测验（闯关/抢答保持二元判分）。
+    "MULTIPLE_CHOICE_SCORING": "strict",
     # ── 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）──
     # 开启后聊天页「知识」勾选走 直连大模型 + 百炼知识检索服务；关闭时勾选只启用本地题库/大纲检索（原行为）。
     "KB_ENABLED": False,

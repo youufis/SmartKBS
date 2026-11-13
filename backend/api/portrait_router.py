@@ -226,7 +226,36 @@ def _safe_count(
         return 0
 
 
+# P3: 画像角色数据短 TTL 缓存（_enrich_role_data 每次跑 15+ 聚合查询, 画像数据变化慢）
+_ROLE_DATA_CACHE: dict = {}
+_ROLE_DATA_TTL = 120.0
+_ROLE_DATA_KEYS = ("student_stats", "period_stats", "period_label", "teach_stats", "admin_stats")
+
+
 def _enrich_role_data(profile: dict[str, Any], since: str = "", until: str = "",
+                      period_label: str = "本周") -> None:
+    """P3: 按 (用户, 角色, 周期) 缓存聚合结果, 命中直接回填, 避免每次查看画像重算。"""
+    import time
+    username = profile.get("username", "")
+    role = profile.get("role", 2)
+    since = since or _get_period_range()[0]
+    until = until or _get_period_range()[1]
+    key = (username, role, since, until, period_label)
+    now = time.time()
+    hit = _ROLE_DATA_CACHE.get(key)
+    if hit and now - hit[0] < _ROLE_DATA_TTL:
+        for k, v in hit[1].items():
+            profile[k] = v
+        return
+    _enrich_role_data_impl(profile, since, until, period_label)
+    snap = {k: profile[k] for k in _ROLE_DATA_KEYS if k in profile}
+    _ROLE_DATA_CACHE[key] = (now, snap)
+    if len(_ROLE_DATA_CACHE) > 256:
+        for k in [k for k, (ts, _) in _ROLE_DATA_CACHE.items() if now - ts >= _ROLE_DATA_TTL]:
+            _ROLE_DATA_CACHE.pop(k, None)
+
+
+def _enrich_role_data_impl(profile: dict[str, Any], since: str = "", until: str = "",
                       period_label: str = "本周") -> None:
     """按角色补充数据。
 
@@ -527,7 +556,7 @@ def _get_api_key() -> str:
 
 
 @router.get("/image/{portrait_id}")
-async def serve_portrait_image(portrait_id: int, request: Request):
+def serve_portrait_image(portrait_id: int, request: Request):
     """提供画像图片文件（绕过 files_router 权限限制，使用画像自身的分享逻辑）"""
     from fastapi.responses import FileResponse
 
@@ -551,7 +580,7 @@ async def serve_portrait_image(portrait_id: int, request: Request):
 
 
 @router.get("/today")
-async def get_today_portrait(request: Request):
+def get_today_portrait(request: Request):
     """获取「本期画像」（如果已生成）。
 
     P-3: 旧实现按周取 `rows[0]` 且**没有 ORDER BY**（同一周期用积分多生成过时可能返回更旧的那张），
@@ -597,7 +626,7 @@ async def get_today_portrait(request: Request):
 
 
 @router.get("/styles")
-async def get_portrait_styles():
+def get_portrait_styles():
     """获取所有可用风格"""
     styles = []
     for key, info in PORTRAIT_STYLES.items():
@@ -610,7 +639,7 @@ async def get_portrait_styles():
 
 
 @router.get("/theme")
-async def get_theme(request: Request):
+def get_theme(request: Request):
     """获取当前用户的主题偏好"""
     user = get_current_user(request)
     username = user["username"]
@@ -623,7 +652,7 @@ async def get_theme(request: Request):
 
 
 @router.put("/theme")
-async def set_theme(request: Request, body: ThemeRequest):
+def set_theme(request: Request, body: ThemeRequest):
     """保存当前用户的主题偏好"""
     user = get_current_user(request)
     username = user["username"]
@@ -689,7 +718,7 @@ def _resolve_avatar(username: str) -> dict[str, Any]:
 
 
 @router.get("/avatar")
-async def get_avatar(request: Request):
+def get_avatar(request: Request):
     """当前头像用哪幅画像 —— 轻量、不计数。
 
     首页头像位每次进 /dashboard 都要问一次，绝不能顺手把 view_count +1
@@ -700,7 +729,7 @@ async def get_avatar(request: Request):
 
 
 @router.put("/avatar")
-async def set_avatar(request: Request, body: AvatarRequest):
+def set_avatar(request: Request, body: AvatarRequest):
     """把某幅画像（可以是往期的）设为当前头像，或改回「跟随本期」/「用默认头像」。"""
     user = get_current_user(request)
     username = user["username"]
@@ -1040,7 +1069,7 @@ async def retry_portrait_image(portrait_id: int, request: Request):
 
 
 @router.get("/health")
-async def portrait_health(request: Request, days: int = Query(7, ge=1, le=90)):
+def portrait_health(request: Request, days: int = Query(7, ge=1, le=90)):
     """P-5：画像生成健康度（管理员）—— 近 N 天成功率 / 平均耗时 / 常见失败原因"""
     user = get_current_user(request)
     if user.get("role", 2) != 0:
@@ -1070,7 +1099,7 @@ async def portrait_health(request: Request, days: int = Query(7, ge=1, le=90)):
 
 
 @router.get("/list")
-async def list_portraits(request: Request, include_deleted: bool = Query(False)):
+def list_portraits(request: Request, include_deleted: bool = Query(False)):
     """获取用户的所有画像(默认只列有效记录; include_deleted 可回看已删除的寄语)"""
     user = get_current_user(request)
     username = user["username"]
@@ -1095,7 +1124,7 @@ async def list_portraits(request: Request, include_deleted: bool = Query(False))
 
 
 @router.get("/{portrait_id}")
-async def get_portrait_detail(portrait_id: int, request: Request):
+def get_portrait_detail(portrait_id: int, request: Request):
     """获取单张画像详情"""
     user = get_current_user(request)
     username = user["username"]
@@ -1129,7 +1158,7 @@ async def get_portrait_detail(portrait_id: int, request: Request):
 
 
 @router.post("/{portrait_id}/share")
-async def share_portrait(portrait_id: int, request: Request, body: ShareRequest):
+def share_portrait(portrait_id: int, request: Request, body: ShareRequest):
     """分享画像到平台"""
     user = get_current_user(request)
     username = user["username"]
@@ -1156,7 +1185,7 @@ async def share_portrait(portrait_id: int, request: Request, body: ShareRequest)
 
 
 @router.post("/{portrait_id}/unshare")
-async def unshare_portrait(portrait_id: int, request: Request):
+def unshare_portrait(portrait_id: int, request: Request):
     """取消分享"""
     user = get_current_user(request)
     username = user["username"]
@@ -1183,7 +1212,7 @@ async def unshare_portrait(portrait_id: int, request: Request):
 
 
 @router.post("/{portrait_id}/like")
-async def toggle_like(portrait_id: int, request: Request):
+def toggle_like(portrait_id: int, request: Request):
     """点赞/取消点赞"""
     user = get_current_user(request)
     username = user["username"]
@@ -1234,7 +1263,7 @@ async def toggle_like(portrait_id: int, request: Request):
 
 
 @router.get("/gallery/public")
-async def get_public_gallery(request: Request):
+def get_public_gallery(request: Request):
     """获取公开画廊（全校可见）
 
     教师/管理员分享成公开的画像同样进画廊（2026-10-24 改：教职工画像对学生可见）。
@@ -1269,7 +1298,7 @@ async def get_public_gallery(request: Request):
 
 
 @router.get("/gallery/class")
-async def get_class_gallery(request: Request):
+def get_class_gallery(request: Request):
     """获取班级画廊（同班可见）"""
     user = get_current_user(request)
     username = user["username"]
@@ -1317,7 +1346,7 @@ async def get_class_gallery(request: Request):
 
 
 @router.get("/gallery/hot")
-async def get_hot_gallery(request: Request):
+def get_hot_gallery(request: Request):
     """获取热门画像（点赞最多）"""
     rows = execute_query(
         """SELECT sp.id, sp.username, sp.created_date, sp.style, sp.image_path,
@@ -1348,7 +1377,7 @@ async def get_hot_gallery(request: Request):
 
 
 @router.delete("/{portrait_id}")
-async def delete_portrait(portrait_id: int, request: Request):
+def delete_portrait(portrait_id: int, request: Request):
     """删除画像"""
     user = get_current_user(request)
     username = user["username"]

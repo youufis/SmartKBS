@@ -1223,12 +1223,17 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         mx = float(q.get("score", 1) or 0)
         user_ans = _ans_at(idx)
         correct_ans = str(q.get("answer", "")).strip()
-        ok = _answer_matches(user_ans, correct_ans, q.get("type", "single"))
-        if ok:
-            earned += mx
+        _qtype = q.get("type", "single")
+        ok = _answer_matches(user_ans, correct_ans, _qtype)
+        if _qtype == "multiple":
+            from backend.answer_norm import score_multiple_choice
+            q_earned = score_multiple_choice(user_ans, correct_ans, q.get("options"), mx)
+        else:
+            q_earned = mx if ok else 0
+        earned += q_earned
         graded[str(idx)] = {
             "student_answer": user_ans, "correct_answer": correct_ans,
-            "score": mx if ok else 0, "max_score": mx,
+            "score": q_earned, "max_score": mx,
             "is_correct": ok, "graded_by": "exact",
         }
 

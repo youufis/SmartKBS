@@ -117,3 +117,34 @@ def answers_equal(student: Any, correct: Any, options: Any = None, qtype: str = 
     if not ref or not got:
         return False
     return got == ref
+
+
+def score_multiple_choice(student: Any, correct: Any, options: Any, max_score: Any,
+                          mode: str | None = None) -> float:
+    """多选题评分（系统配置驱动，按题目满分折算）。
+
+    mode:
+      strict（默认）—— 少选、错选均不得分，仅全对给满分；
+      partial      —— 全对满分；少选（所选全对但不全）给满分的 50%；错选（含任一错误选项）不得分。
+    mode 缺省读系统配置 MULTIPLE_CHOICE_SCORING（默认 strict）。非多选题不应调用本函数。
+    is_correct 语义仍由调用方用 answers_equal 判定（全对才算对），本函数只返回分值。
+    """
+    from backend.api.config_router import get_config_value
+    if mode is None:
+        mode = str(get_config_value("MULTIPLE_CHOICE_SCORING", "strict") or "strict").strip().lower()
+    ref = normalize_answer(correct, options, "multiple")
+    got = normalize_answer(student, options, "multiple")
+    try:
+        mx = float(max_score or 0)
+    except (TypeError, ValueError):
+        mx = 0.0
+    if not ref or not got:
+        return 0.0
+    if got == ref:
+        return mx
+    if mode == "partial":
+        ref_set, got_set = set(ref), set(got)
+        # 少选：所选全是正确选项（无错选）、非空、且未选全 → 半分
+        if got_set and got_set <= ref_set and got_set != ref_set:
+            return round(mx * 0.5, 2)
+    return 0.0

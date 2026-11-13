@@ -609,51 +609,39 @@ async def get_showcase_detail(
 
 
 @router.post("/showcase/{showcase_id}/like", summary="点赞/取消点赞")
-async def toggle_like(showcase_id: int, request: Request):
-    """点赞或取消点赞"""
+def toggle_like(showcase_id: int, request: Request):
+    """点赞或取消点赞（L1: 单事务, 点赞/计数/更新同连接一致; 转 def 走线程池）"""
     user = get_current_user(request)
     current_username = user["username"]
 
-    # 检查卡片是否存在且活跃
-    rows = execute_query(
-        "SELECT id, is_active FROM student_showcase WHERE id=?",
-        (showcase_id,),
-    )
-    if not rows:
-        raise HTTPException(status_code=404, detail="展示卡不存在")
-    if not rows[0][1]:
-        raise HTTPException(status_code=400, detail="展示卡已下架")
-
-    # SH5: 表上已有 UNIQUE(showcase_id, username), 旧写法"先查后插"在并发双击时会 500
-    existing = execute_query(
-        "SELECT id FROM showcase_likes WHERE showcase_id=? AND username=?",
-        (showcase_id, current_username),
-    )
-
+    from backend.database import get_connection
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if existing:
-        execute_insert_update(
-            "DELETE FROM showcase_likes WHERE showcase_id=? AND username=?",
-            (showcase_id, current_username),
-        )
-        action = "unliked"
-    else:
-        execute_insert_update(
-            "INSERT OR IGNORE INTO showcase_likes (showcase_id, username, created_at) VALUES (?, ?, ?)",
-            (showcase_id, current_username, now_str),
-        )
-        action = "liked"
+    with get_connection() as conn:
+        c = conn.cursor()
+        rows = c.execute("SELECT id, is_active FROM student_showcase WHERE id=?", (showcase_id,)).fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail="展示卡不存在")
+        if not rows[0][1]:
+            raise HTTPException(status_code=400, detail="展示卡已下架")
 
-    # 更新点赞计数
-    count_row = execute_query(
-        "SELECT COUNT(*) FROM showcase_likes WHERE showcase_id=?",
-        (showcase_id,),
-    )
-    count = count_row[0][0] if count_row else 0
-    execute_insert_update(
-        "UPDATE student_showcase SET like_count=? WHERE id=?",
-        (count, showcase_id),
-    )
+        # SH5: UNIQUE(showcase_id, username) + INSERT OR IGNORE 防并发双击
+        existing = c.execute(
+            "SELECT id FROM showcase_likes WHERE showcase_id=? AND username=?",
+            (showcase_id, current_username),
+        ).fetchall()
+        if existing:
+            c.execute("DELETE FROM showcase_likes WHERE showcase_id=? AND username=?",
+                      (showcase_id, current_username))
+            action = "unliked"
+        else:
+            c.execute("INSERT OR IGNORE INTO showcase_likes (showcase_id, username, created_at) VALUES (?, ?, ?)",
+                      (showcase_id, current_username, now_str))
+            action = "liked"
+
+        count = c.execute("SELECT COUNT(*) FROM showcase_likes WHERE showcase_id=?",
+                          (showcase_id,)).fetchone()[0]
+        c.execute("UPDATE student_showcase SET like_count=? WHERE id=?", (count, showcase_id))
+        conn.commit()
 
     return {"action": action, "count": count}
 

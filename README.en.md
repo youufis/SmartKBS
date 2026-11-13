@@ -38,15 +38,16 @@
 > 📌 **Highlights of V9.1.0** (outline)
 >
 > - 🧭 **Explore Canvas (new)**: personal infinite canvas + floating AI companion (chat / image / read-aloud / voice / camera) + circle-to-ask + granted shares & template library + badges & care alerts; contiguous pages / page trash / timeline thumbnails / portfolio / mobile fit
-> - 🛡 **Security hardening**: share permission checks (forged re-share escalation blocked) · sandboxed HTML preview & attachment downloads · directory-browsing traversal guard · upload role/type/size limits · view-tracking visibility checks · exam anti-copy & watermark
+> - 🛡 **Security hardening**: share permission checks (forged re-share escalation blocked) · sandboxed HTML preview & attachment downloads · directory-browsing traversal guard · upload role/type/size limits · view-tracking visibility checks · exam anti-copy & watermark · export CSV formula-injection sanitization · user/score teaching-scope checks · password minimum length
 > - 📚 **Curriculum & practice**: server-side grading (no forged scores or answer leaks) · escaped question text & server-delivered explanations · same-course reorder check · recursive cascade delete + transactions · AI import unified at 20MB
 > - 🏷 **Question bank**: import & edit share one validation (malformed questions rejected) · cross-creator dedupe admin-only · extraction size caps & image magic-byte checks · generation dedupe · field length limits
 > - 📊 **Analytics & summaries**: scores student-ID migration (same-name separation, auto at startup) · ID-first aggregation · student analytics daily cap · class-summary prompt data isolation
 > - 🔗 **Resource lifecycle**: delete auto-clears bindings · rename auto-updates names (incl. re-share rows) · dead links hidden instantly · exact same-name matching · chat history sidebar & archived attachments
-> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables)
+> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial)
 > - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
 > - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
-> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · 89 new regression tests
+> - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled
+> - ⚙️ **Engineering & data**: asset ledger auto-cleanup · untagged-question filter & badge · AI task dedupe · KaTeX localized (offline math) · 140 new regression tests
 >
 > - ⚠️ **Breaking changes**: none
 >
@@ -1213,6 +1214,8 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Directory-browsing traversal guard; view-tracking visibility checks + server-side lookup; diagnostic endpoint no longer echoes tokens
 - Exam protection: anti-copy + personal watermark (off by default)
 - Score protection: grade clearing limited to practice resources across bind/unbind/unshare/purge/delete; progress scores clamped
+- Export CSV formula-injection sanitization (summary / user exports); user/score read-write teaching-scope checks
+- Password minimum length (configurable); error messages no longer leak internal details
 
 **📚 Curriculum & practice**
 
@@ -1244,6 +1247,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 
 - Class-wide error review (high-error picks + Word export); exam / practice / quiz AI analytics export to Word (per-question accuracy tables)
 - Score dialog button tiers; cached exports (no re-billing); history preview renders tables & math
+- Configurable multiple-choice scoring: default no points for partial/wrong; optional 50% of full score for partial, 0 for wrong (exam/practice/quiz, proportional to full score)
 
 **🎪 Classroom interaction**
 
@@ -1259,11 +1263,16 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Daily picks: retry / refresh keeps old cards / read markers / Markdown detail / share poster
 - Feeds: circuit-breaker / standby fallback / auto-discovery / promotion & demotion / one-click discovery / event notifications
 
+**⚡ Performance**
+
+- Activity/score/user lists batched + short-TTL cache (invalidated on write); weekly-ranking conditions pushed to SQL + COUNT
+- Portrait role-data cache; batch scoring/reset single transaction; read endpoints thread-pooled (async→def)
+
 **⚙️ Engineering & data**
 
 - Question bank "tag status" filter + untagged badge (list / stats / badge share one criterion)
 - WS proxy & reconnect fixes; silent notification-type loss fixed; timing/scoring idempotency corrected
-- 89 new regression tests (curriculum 27 + sharing 31 + question bank 18 + analytics 7 + summary 6); zero new ruff / tsc warnings
+- 140 new regression tests (curriculum 27 + sharing 31 + question bank 18 + analytics 7 + summary 6 + monitor/export 14 + score/honor/portrait 11 + users 9 + MC scoring 17); zero new ruff / tsc warnings
 
 ### v7.x – v9.0.0
 

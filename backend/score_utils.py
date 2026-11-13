@@ -186,7 +186,7 @@ def find_student_username(grade: str, cls_display: str, name: str) -> str:
 
 def apply_score_delta(teacher: str, grade: str, cls_display: str, name: str, delta: int, *,
                       reason: str = "", op_id: str | None = None, student_username: str = "",
-                      log_undone: bool = False, mark_undone_id: int | None = None) -> int:
+                      log_undone: bool = False, mark_undone_id: int | None = None, conn=None) -> int:
     """给某个学生在某班的积分做一次增量（行不存在就建），同时写一条流水。返回新总分。
 
     log_undone=True 用于"撤销"这一步自己产生的流水：写进去但立刻标为已撤销，
@@ -200,8 +200,7 @@ def apply_score_delta(teacher: str, grade: str, cls_display: str, name: str, del
         student_username = find_student_username(grade, cls_display, name)
     gid, cid = student_fk_ids(grade, cls_display)
 
-    with get_connection() as conn:
-        c = conn.cursor()
+    def _work(c):
         # L2: 带学号时按学号定位（同名学生各一行）; 命中无学号老行则认领它。
         # 不带学号（姓名键 UI 流程）保持旧行为: 按姓名取一行更新, 不另起平行行。
         if student_username:
@@ -248,8 +247,29 @@ def apply_score_delta(teacher: str, grade: str, cls_display: str, name: str, del
         )
         if mark_undone_id is not None:
             c.execute("UPDATE score_logs SET undone=1 WHERE id=?", (mark_undone_id,))
-        conn.commit()
+        return total
+
+    # P4: 传入外部 conn 时复用调用方事务（批量加分/重置整组一个事务）; 否则自开自提交。
+    if conn is not None:
+        return _work(conn.cursor())
+    with get_connection() as own_conn:
+        total = _work(own_conn.cursor())
+        own_conn.commit()
     return total
+
+
+def apply_score_delta_batch(teacher: str, grade: str, cls_display: str, names: list, delta: int, *,
+                            reason: str = "", op_id: str | None = None) -> int:
+    """P4: 批量加减分整组共用一个事务（旧实现逐人各开一个事务, N 次 commit）。返回处理人数。"""
+    op_id = op_id or new_op_id()
+    count = 0
+    with get_connection() as conn:
+        for nm in names:
+            apply_score_delta(teacher, grade, cls_display, nm, delta,
+                              reason=reason, op_id=op_id, conn=conn)
+            count += 1
+        conn.commit()
+    return count
 
 
 def load_score_logs(teacher: str, grade: str = "", cls_display: str = "",

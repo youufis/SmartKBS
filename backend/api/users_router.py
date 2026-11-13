@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend.database import execute_query, execute_insert_update, execute_batch, get_transaction
+from backend.database import execute_query, execute_query_dict, execute_insert_update, execute_batch, get_transaction
 from backend.auth import (
     hash_password,
     is_admin,
@@ -180,10 +180,36 @@ def _teacher_visibility_filter(teacher: str) -> tuple[str, list]:
     return "1=1", []
 
 
-def _scoped_usernames_for_teacher(teacher: str) -> set[str]:
-    """教师可见/可管的学生用户名集合"""
-    rows = execute_query("SELECT username FROM users WHERE role=2")
-    return {r[0] for r in rows if is_student_in_teacher_scope(r[0], teacher)}
+def _batch_teacher_subjects(users_roles: list) -> dict:
+    """P1: 批量取任教学科（替代逐教师 get_teacher_subjects 的 N+1）。
+
+    users_roles: [(username, role)]；管理员返回全部学科，教师按 teacher_assignments 一次聚合。
+    """
+    from backend.subject_config import get_subjects
+    out: dict = {}
+    teachers: list = []
+    all_subjects = None
+    for u, role in users_roles:
+        if role == 0:
+            if all_subjects is None:
+                all_subjects = get_subjects()
+            out[u] = list(all_subjects)
+        elif role == 1:
+            teachers.append(u)
+    if teachers:
+        ph = ",".join("?" for _ in teachers)
+        rows = execute_query_dict(
+            f"SELECT teacher_username, subject FROM teacher_assignments "
+            f"WHERE teacher_username IN ({ph}) AND subject!=''",
+            tuple(teachers))
+        subj_map: dict = {}
+        for r in rows:
+            lst = subj_map.setdefault(r["teacher_username"], [])
+            if r["subject"] not in lst:
+                lst.append(r["subject"])
+        for u in teachers:
+            out[u] = subj_map.get(u, [])
+    return out
 
 
 # ── 批量删除：用户名匹配辅助 ──
@@ -445,7 +471,7 @@ def _delete_user_completely(username: str):
 # ── API 端点 ──
 
 @router.post("/register")
-async def register_user(req: RegisterRequest, request: Request):
+def register_user(req: RegisterRequest, request: Request):
     """注册新用户（管理员和教师均可）"""
     current_user = get_current_user(request)
     if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
@@ -456,6 +482,10 @@ async def register_user(req: RegisterRequest, request: Request):
 
     if not username or not password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    from backend.api.config_router import get_config_value
+    _min_len = int(get_config_value("USER_PASSWORD_MIN_LENGTH", 6) or 6)
+    if len(password) < _min_len:
+        raise HTTPException(status_code=400, detail=f"密码长度不能少于 {_min_len} 位")
 
     # 检查用户是否已存在
     existing = execute_query("SELECT username FROM users WHERE username=?", (username,))
@@ -514,11 +544,11 @@ async def register_user(req: RegisterRequest, request: Request):
         return {"message": f"用户 '{username}' 注册成功"}
     except Exception as e:
         logger.error(f"用户注册失败: {e}")
-        raise HTTPException(status_code=500, detail=f"注册失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="注册失败，请稍后重试或联系管理员")
 
 
 @router.put("/update")
-async def update_user_info(req: UpdateUserRequest, request: Request):
+def update_user_info(req: UpdateUserRequest, request: Request):
     """更新用户信息（管理员和教师均可）"""
     current_user = get_current_user(request)
     username = req.username.strip()
@@ -653,7 +683,7 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
 
 
 @router.put("/password")
-async def change_password(req: ChangePasswordRequest, request: Request):
+def change_password(req: ChangePasswordRequest, request: Request):
     """修改密码（管理员可改任何用户；教师可重置任教范围内学生的密码；普通用户仅改自己）"""
     current_user = get_current_user(request)
     current_username = current_user["username"]
@@ -663,6 +693,10 @@ async def change_password(req: ChangePasswordRequest, request: Request):
 
     if not username or not new_password:
         raise HTTPException(status_code=400, detail="用户名和新密码不能为空")
+    from backend.api.config_router import get_config_value
+    _min_len = int(get_config_value("USER_PASSWORD_MIN_LENGTH", 6) or 6)
+    if len(new_password) < _min_len:
+        raise HTTPException(status_code=400, detail=f"密码长度不能少于 {_min_len} 位")
 
     # U-PWD: 以角色判定管理员(旧实现把管理员用户名写死成 "root", 换部署即失效)
     is_admin_caller = _caller_role(current_user) == 0
@@ -686,11 +720,11 @@ async def change_password(req: ChangePasswordRequest, request: Request):
         return {"message": f"用户 '{username}' 密码已修改"}
     except Exception as e:
         logger.error(f"修改密码失败: {e}")
-        raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="修改密码失败，请稍后重试或联系管理员")
 
 
 @router.delete("/{username}")
-async def delete_user(username: str, request: Request):
+def delete_user(username: str, request: Request):
     """彻底删除用户及其所有相关数据（管理员和教师均可）"""
     current_user = get_current_user(request)
 
@@ -716,7 +750,7 @@ async def delete_user(username: str, request: Request):
 
 
 @router.get("/export")
-async def export_users(request: Request, keyword: Optional[str] = None):
+def export_users(request: Request, keyword: Optional[str] = None):
     """导出用户为 CSV 文件"""
     current_user = get_current_user(request)
     if _caller_role(current_user) == 2:
@@ -742,18 +776,22 @@ async def export_users(request: Request, keyword: Optional[str] = None):
     writer = csv.writer(output)
     writer.writerow(["用户名", "姓名", "性别", "角色", "年级", "班级", "任教学科"])
 
+    # P1: 学科批量; M1: 复用 export_router 的公式注入净化
+    from backend.api.export_router import _safe_cell
+    subjects_map = _batch_teacher_subjects([(r[0], r[4]) for r in rows if r[4] in (0, 1)])
     for username, class_val, name_val, gender_val, role_val, grade_val in rows:
         role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
         gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
         subjects_str = ""
         if role_val in (0, 1):
-            from backend.permission_service import get_teacher_subjects
-            subjects = get_teacher_subjects(username)
             if role_val == 0:
                 subjects_str = "全部学科"
-            elif subjects:
-                subjects_str = "、".join(subjects)
-        writer.writerow([username, name_val or "", gender_name, role_name, grade_val or "", class_val or "", subjects_str])
+            else:
+                subjects = subjects_map.get(username, [])
+                if subjects:
+                    subjects_str = "、".join(subjects)
+        writer.writerow([_safe_cell(v) for v in
+                         [username, name_val or "", gender_name, role_name, grade_val or "", class_val or "", subjects_str]])
 
     csv_bytes = output.getvalue().encode('utf-8-sig')
     output.close()
@@ -773,7 +811,7 @@ def _caller_scope(current_user: dict) -> tuple[str, list]:
 
 
 @router.get("/stats", summary="用户概览统计(角色/状态/年级/班级分布)")
-async def user_stats(request: Request):
+def user_stats(request: Request):
     """台账顶部统计条与筛选下拉的数据源。
 
     一次聚合返回：总数、按角色、在校/毕业、年级分布、有学生的班级列表。
@@ -828,7 +866,7 @@ async def user_stats(request: Request):
 
 
 @router.patch("/{username}/role", summary="修改用户角色(仅管理员)")
-async def update_user_role(username: str, req: RoleUpdateRequest, request: Request):
+def update_user_role(username: str, req: RoleUpdateRequest, request: Request):
     """角色变更单独走一个窄接口。
 
     旧实现把「角色」画成编辑表单里的单选，但 PUT /update 的 SQL 根本没有 role 列，
@@ -866,7 +904,7 @@ async def update_user_role(username: str, req: RoleUpdateRequest, request: Reque
 
 
 @router.get("/{username}")
-async def get_user_info(username: str, request: Request):
+def get_user_info(username: str, request: Request):
     """查询用户信息(E-SCOPE: 本人或管理员不限; 教师可查看全部学生, 教师/管理员账号仍受限)"""
     current_user = get_current_user(request)
     if _caller_role(current_user) != 0 and username != current_user.get("username", ""):
@@ -905,7 +943,7 @@ async def get_user_info(username: str, request: Request):
 
 
 @router.post("/{username}/restore")
-async def restore_graduated_user(username: str, request: Request):
+def restore_graduated_user(username: str, request: Request):
     """恢复毕业归档账号（仅管理员）：状态回到在校，恢复登录能力。
 
     归档只关登录入口、不动任何数据，因此恢复同样轻量。
@@ -929,7 +967,7 @@ async def restore_graduated_user(username: str, request: Request):
 
 
 @router.get("")
-async def get_all_users(
+def get_all_users(
     request: Request,
     keyword: Optional[str] = None,
     status: Optional[str] = Query(None, description="学生状态：空=仅在校生，graduated=仅毕业归档，all=全部"),
@@ -988,15 +1026,13 @@ async def get_all_users(
         rows = execute_query(base_sql, tuple(params))
         total = len(rows)
 
+    # P1: 任教学科批量查询（替代逐教师 get_teacher_subjects 的 N+1）
+    subjects_map = _batch_teacher_subjects([(r[0], r[4]) for r in rows if r[4] in (0, 1)])
     users = []
     for username, class_val, name_val, gender_val, role_val, grade_val, status_val, grad_year_val in rows:
         role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
         gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
-        # 获取教师/管理员的任教学科
-        subjects = []
-        if role_val in (0, 1):
-            from backend.permission_service import get_teacher_subjects
-            subjects = get_teacher_subjects(username)
+        subjects = subjects_map.get(username, [])
         users.append({
             "username": username,
             "class": class_val,
@@ -1013,7 +1049,7 @@ async def get_all_users(
 
 
 @router.post("/bulk-delete/preview")
-async def preview_bulk_delete_users(req: BulkDeleteRequest, request: Request):
+def preview_bulk_delete_users(req: BulkDeleteRequest, request: Request):
     """批量删除预览：只统计匹配用户并返回样例，不做任何删除，供前端二次确认"""
     current_user = get_current_user(request)
     # U-SCOPE: 批量删除按用户名模式匹配, 教师一旦可用即可一次抹掉全校学生
@@ -1166,7 +1202,7 @@ def _norm_col(name: Optional[str]) -> str:
 
 
 @router.post("/import")
-async def import_users(file: UploadFile = File(...), request: Request = None):  # type: ignore[assignment]
+async def import_users(request: Request, file: UploadFile = File(...)):
     """CSV 批量导入用户（流式进度返回）
 
     2026-10-28 重构，针对"导入失败只知道数量、不知道为什么"：
@@ -1177,16 +1213,20 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
       每行先卡满 30 秒 busy_timeout 再吐一句 database is locked；
     - 事务整体失败时也会把 done 事件发完（原来流直接断掉，前端只剩"导入中断"）。
     """
-    current_user = {"username": "", "role": 0}
-    if request:
-        current_user = get_current_user(request)
-        if not can_import_users(current_user["username"]):
-            raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以导入用户")
+    current_user = get_current_user(request)
+    if not can_import_users(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以导入用户")
 
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="请上传 CSV 文件（.csv）")
 
-    content = await file.read()
+    # P2: 大小前置拒绝, 不全量读入内存
+    _MAX_IMPORT_BYTES = 10 * 1024 * 1024
+    if file.size is not None and file.size > _MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=400, detail="CSV 文件过大（上限 10MB），请拆分后导入")
+    content = await file.read(_MAX_IMPORT_BYTES + 1)
+    if len(content) > _MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=400, detail="CSV 文件过大（上限 10MB），请拆分后导入")
 
     content_str = None
     for encoding in ["utf-8-sig", "utf-8", "gbk", "gb2312"]:
@@ -1480,7 +1520,7 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
 
 
 @router.get("/import/template")
-async def download_import_template(request: Request):
+def download_import_template(request: Request):
     """下载用户导入 CSV 模板(需登录; 模板含账号结构说明, 不再对匿名开放)"""
     get_current_user(request)
     import tempfile
@@ -1515,7 +1555,7 @@ async def download_import_template(request: Request):
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/promote-grades/preview")
-async def preview_promote_grades(request: Request):
+def preview_promote_grades(request: Request):
     """预览升年级影响范围"""
     current_user = get_current_user(request)
     from backend.auth import is_admin
@@ -1538,7 +1578,7 @@ class GradePromotionRequest(BaseModel):
 
 
 @router.post("/promote-grades")
-async def execute_promote_grades(req: GradePromotionRequest, request: Request):
+def execute_promote_grades(req: GradePromotionRequest, request: Request):
     """执行批量升年级"""
     current_user = get_current_user(request)
     from backend.auth import is_admin
@@ -1560,7 +1600,7 @@ async def execute_promote_grades(req: GradePromotionRequest, request: Request):
         return result
     except Exception as e:
         logger.error(f"执行升年级失败: {e}")
-        raise HTTPException(status_code=500, detail=f"升年级失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="升年级失败，请稍后重试或联系管理员")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1568,7 +1608,7 @@ async def execute_promote_grades(req: GradePromotionRequest, request: Request):
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/promote-grades/reverse")
-async def reverse_promote_grades(req: GradePromotionRequest, request: Request):
+def reverse_promote_grades(req: GradePromotionRequest, request: Request):
     """反向降级：高二→高一、高三→高二（升年级的逆操作）"""
     current_user = get_current_user(request)
     from backend.auth import is_admin
@@ -1593,7 +1633,7 @@ async def reverse_promote_grades(req: GradePromotionRequest, request: Request):
         return result
     except Exception as e:
         logger.error(f"执行降级失败: {e}")
-        raise HTTPException(status_code=500, detail=f"降级失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="降级失败，请稍后重试或联系管理员")
 
 
 # ═════════════════════════════════════════════════════════════
@@ -1632,7 +1672,7 @@ def _count_class_students(class_id: int, grade_name: str, class_name: str) -> in
 
 
 @router.get("/class-mgmt/list", summary="班级列表(含在读/任教人数, 仅管理员)")
-async def class_mgmt_list(request: Request):
+def class_mgmt_list(request: Request):
     user = get_current_user(request)
     _assert_admin_role(user, "查看班级维护")
     rows = execute_query(
@@ -1658,7 +1698,7 @@ async def class_mgmt_list(request: Request):
 
 
 @router.delete("/class-mgmt/{class_id}", summary="删除班级(仅限无学生且无任教的空壳班级, 仅管理员)")
-async def class_mgmt_delete(class_id: int, request: Request):
+def class_mgmt_delete(class_id: int, request: Request):
     user = get_current_user(request)
     _assert_admin_role(user, "删除班级")
     row = execute_query(
