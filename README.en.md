@@ -43,7 +43,7 @@
 > - 🏷 **Question bank**: import & edit share one validation (malformed questions rejected) · cross-creator dedupe admin-only · extraction size caps & image magic-byte checks · generation dedupe · field length limits
 > - 📊 **Analytics & summaries**: scores student-ID migration (same-name separation, auto at startup) · ID-first aggregation · student analytics daily cap · class-summary prompt data isolation
 > - 🔗 **Resource lifecycle**: delete auto-clears bindings · rename auto-updates names (incl. re-share rows) · dead links hidden instantly · exact same-name matching · chat history sidebar & archived attachments
-> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save) · task-list failure retry & semantic score colors · live pulse & softer suggestions · unified Chinese type labels in exports · configurable export fonts (Word/Excel same criterion)
+> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save) · task-list failure retry & semantic score colors · live pulse & softer suggestions · unified Chinese type labels in exports · configurable export fonts (body/heading, Word/Excel same criterion, heading-font fix)
 > - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
 > - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
 > - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled · route-level code splitting (first-load -79%) · hand-drawn SVG radar · courseware external deps localized (offline instant load) · single-port deployment (same-origin preview, configurable port)
@@ -51,7 +51,7 @@
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables/fields are created and the scores student-ID migration runs automatically at startup (idempotent); Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + experience/performance optimization + courseware content-origin isolation & offline localization + a new desktop build).
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables/fields are created and the scores student-ID migration runs automatically at startup (idempotent); Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + experience/performance optimization + courseware content-origin isolation & offline localization + export-font fix + a new desktop build).
 
 ---
 
@@ -296,7 +296,7 @@ Step-by-step guided paper generation wizard supporting smart selection and profe
 - **🔌 Gap filling**: off by default so a shortfall is only reported; tick it and AI generates and stores exactly the missing questions
 - **📊 Rule-Based Selection**: Random extraction by difficulty proportion
 - **📊 Paper Composition Statistics Panel**: Real-time question type/difficulty distribution, total score, supports manual question removal
-- **📄 Word Export** (three documents):
+- **📄 Word Export** (three documents; body/heading fonts follow System Configuration):
   - **Exam Paper**: For students, with answer lines
   - **Answer Key**: Red-annotated answers + blue explanations
   - **Answer Sheet**: Standard answer sheet format
@@ -1119,6 +1119,7 @@ Centralized management of all system configuration parameters:
 - **📁 File Type Whitelist**: Image/document extensions
 - **🎨 Image Generation**: toggle, model (dropdown, endpoint dispatched automatically), size (defaults to auto, options follow the model), per-question auto-image cap, image self-test
 - **⚡ Knowledge Challenge**: Question mode (question bank/AI)
+- **📄 Document export fonts**: Chinese body/heading fonts for Word/Excel (Latin fonts auto-paired; CSV carries no font info; applies on re-export)
 
 > **Admin only**
 
@@ -1250,7 +1251,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Class-wide error review (high-error picks + Word export); exam / practice / quiz AI analytics export to Word (per-question accuracy tables)
 - Score dialog button tiers; cached exports (no re-billing); history preview renders tables & math
 - Configurable multiple-choice scoring: default no points for partial/wrong; optional 50% of full score for partial, 0 for wrong (exam/practice/quiz, proportional to full score; takes effect on save)
-- Unified Chinese question-type labels in Word/Excel exports; configurable export fonts (body/heading, Word/Excel same criterion, applies on re-export)
+- Unified Chinese question-type labels in Word/Excel exports; configurable export fonts (body/heading, Word/Excel same criterion, applies on re-export) — heading fonts were previously overridden by the Word theme font (showing MS Gothic regardless of the setting) and now follow the configuration (headers and legacy style copies included)
 - Task list: failure retry (no longer disguised as empty) · semantic score colors · live pulse · softer suggestions
 
 **🎪 Classroom interaction**
