@@ -177,15 +177,18 @@ def probe_chat_vision(api_key: str, timeout: int = 20) -> dict:
         return out
 
     from backend.config import ai_api_base
+    from backend import llm_provider
+    _pl = {"model": chat, "max_tokens": 1,
+           "messages": [{"role": "user", "content": [
+               {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}},
+               {"type": "text", "text": "这是什么颜色？"},
+           ]}]}
+    _base, _pl = llm_provider.decorate(ai_api_base(), _pl)
     try:
         resp = requests.post(
-            ai_api_base() + "/chat/completions",
+            _base + "/chat/completions",
             headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
-            json={"model": chat, "max_tokens": 1,
-                  "messages": [{"role": "user", "content": [
-                      {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}},
-                      {"type": "text", "text": "这是什么颜色？"},
-                  ]}]},
+            json=_pl,
             timeout=timeout,
         )
     except Exception as e:

@@ -11,14 +11,14 @@
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
-> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration, online incremental upgrade, multi-theme appearance
+> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration (cloud/local dual engine), online incremental upgrade, multi-theme appearance
 >
-> Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang) and DeepSeek. SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
+> Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang), DeepSeek and a local Ollama engine (cloud / hybrid / local tiers). SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/version-9.1.0-blue)
+![Version](https://img.shields.io/badge/version-9.2.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
-![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
+![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek%20%7C%20Ollama-orange)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-red)
 
 ---
@@ -35,24 +35,16 @@
 
 ---
 
-> 📌 **Highlights of V9.1.0** (outline)
+> 📌 **Highlights of V9.2.0** (outline)
 >
-> - 🧭 **Explore Canvas (new)**: personal infinite canvas + floating AI companion (chat / image / read-aloud / voice / camera) + circle-to-ask + granted shares & template library + badges & care alerts; contiguous pages / page trash / timeline thumbnails / portfolio / mobile fit
-> - 🛡 **Security hardening**: share permission checks (forged re-share escalation blocked) · same-origin HTML preview (uploads restricted to teachers/admins) & attachment downloads · directory-browsing traversal guard · upload role/type/size limits · view-tracking visibility checks · exam anti-copy & watermark · export CSV formula-injection sanitization · user/score teaching-scope checks · password minimum length
-> - 📚 **Curriculum & practice**: server-side grading (no forged scores or answer leaks) · escaped question text & server-delivered explanations · same-course reorder check · recursive cascade delete + transactions · AI import unified at 20MB
-> - 🏷 **Question bank**: import & edit share one validation (malformed questions rejected) · cross-creator dedupe admin-only · extraction size caps & image magic-byte checks · generation dedupe · field length limits
-> - 📊 **Analytics & summaries**: scores student-ID migration (same-name separation, auto at startup) · ID-first aggregation · student analytics daily cap · class-summary prompt data isolation
-> - 🔗 **Resource lifecycle**: delete auto-clears bindings · rename auto-updates names (incl. re-share rows) · dead links hidden instantly · exact same-name matching · chat history sidebar & archived attachments
-> - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save) · task-list failure retry & semantic score colors · live pulse & softer suggestions · unified Chinese type labels in exports · configurable export fonts (body/heading, Word/Excel same criterion, heading-font fix)
-> - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
-> - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
-> - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled · route-level code splitting (first-load -79%) · hand-drawn SVG radar · courseware external deps localized (offline instant load) · single-port deployment (same-origin preview, configurable port)
-> - 🎨 **Interface experience**: home/task-list skeletons · refresh entry & updated-at · visible-period revalidation & ticking countdowns · quick-action tiles · semantic tags dark-consistent · mobile wrap/overflow fixes · row-level keyboard access · unified icon language · draggable/resizable/fullscreen preview window · flush edge-to-edge preview & aligned controls
+> - 🖥 **Local model engine (new)**: Ollama integration · cloud / hybrid / local tiers · live model list with resident info · chat engine badge · capability matrix & graded notices · friendly errors
+> - 🧠 **Dual-engine semantics**: hybrid = local generation + cloud KB retrieval · local = fully offline (cloud retrieval/warmup bypassed, local question-bank fallback) · cloud tier passes through unchanged
+> - 🧩 **Settings restructure**: cloud / local model sections · cloud-service attribution labels (KB / TTS / ASR / image gen) · guides collapsed by default · auto-probe on page entry
+> - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new tables/fields are created and the scores student-ID migration runs automatically at startup (idempotent); Git deployments use the usual in-app incremental upgrade. This refresh keeps version 9.1.0 (security & robustness hardening + experience/performance optimization + courseware content-origin isolation & offline localization + export-font fix + a new desktop build).
-
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud) so existing behavior is unchanged; enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; Git deployments use the usual in-app incremental upgrade.
 ---
 
 <a id="intro"></a>
@@ -70,6 +62,8 @@ AI capabilities go through a single invocation service offering three modes, tak
 1. **Retrieval-augmented generation** — once a knowledge base is ready it takes over the whole AI chain: retrieve first (Bailian knowledge base, or the local question bank and syllabus), generate from what was matched, show the cited sources in the UI, and fall back to the next level when retrieval fails
 2. **Bailian agent application** — call a pre-configured agent app directly
 3. **Direct model invocation** — the fallback path, compatible with DashScope and DeepSeek
+
+**Dual engine**: the generation step of the chain above can run on the cloud (DashScope / DeepSeek) or on a local Ollama engine, switched across cloud / hybrid / local tiers; knowledge-base retrieval, TTS, ASR and image generation remain DashScope cloud services (capability matrix in System Settings).
 
 Conversations and their attachments share one lifetime: images and documents uploaded with a question are archived together with it, so reopening a history entry still shows the original image and the file stays downloadable. Attachments are visible to their owner only, and both capacity and idle recycling are managed from System Configuration.
 
@@ -132,7 +126,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 11 |
-| ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration, skills, notifications, upgrade, about, other services | 8 |
+| ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration (cloud/local dual engine), skills, notifications, upgrade, about, other services | 8 |
 
 > The **permission note** at the end of each section states which roles can reach that feature; the full matrix is in the [Permissions Overview](#permissions).
 
@@ -1197,9 +1191,31 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **9.1.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v9.0.0 is merged into one section below.
+Current version **9.2.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v9.1.0 is merged into one section below.
 
-### v9.1.0
+### v9.2.0
+
+**🖥 Local model engine (new)**
+
+- Ollama integration (OpenAI-compatible endpoint): cloud / hybrid / local tiers, effective immediately
+- Live model list (size / quant / resident context), auto-refresh after pull; chat engine badge (cloud / local / local-first)
+- Capability matrix + graded missing-engine notices + install steps; friendly connection/timeout errors
+
+**🧠 Dual-engine semantics**
+
+- Hybrid: local-first generation with cloud fallback on connection failure/timeout; KB retrieval stays on cloud
+- Local: generation and retrieval never leave the machine (cloud retrieval/startup warmup bypassed, local question bank & syllabus fallback); TTS/ASR/image gen use the cloud when a key exists, otherwise fail clearly
+- Cloud: passes through unchanged, zero regression (pass-through assertions + full regression + two live E2E rounds)
+
+**🧩 Settings restructure**
+
+- Cloud Models (DashScope) / Local Models (Ollama) sections; image-understanding routing merged into cloud models
+- Cloud-service attribution labels: KB / TTS / ASR / image gen (DashScope cloud)
+- Guides & capability matrix collapsed by default (auto-expand for the local+unreachable danger combo)
+
+### v7.x – v9.1.0
+
+> Merged section: v9.1.0 and v7.x – v9.0.0 updates (reverse chronological).
 
 **🧭 Explore Canvas (new)**
 
@@ -1282,8 +1298,6 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Quick-action tiles; semantic tags (scores/focus/counts) dark-consistent; unified icon language
 - Mobile: stat-title wrapping, category-strip wrap separators, quick-switch overflow fade; row-level click & keyboard access
 - Preview window edge-to-edge / drag / resize / fullscreen with remembered size & position; aligned controls
-
-### v7.x – v9.0.0
 
 **UI & interaction (refactor)**
 

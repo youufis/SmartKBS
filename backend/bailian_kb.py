@@ -192,6 +192,10 @@ def warmup() -> None:
     """后台预热：首查要付 TLS 握手 + 服务端冷启动（实测 8s+，会撞超时降级）。
     服务启动时先打一发（检索免费），让真实用户请求落在热连接上。"""
     try:
+        # local 模式承诺不出网：预热也旁路（该模式下云端检索本就被 rag 闸门挡住）
+        from backend import llm_provider
+        if llm_provider.ai_mode() == "local":
+            return
         ready, _ = kb_ready()
         if ready:
             kb_search("知识库预热")

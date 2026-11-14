@@ -1937,13 +1937,17 @@ const ChatPage: React.FC = () => {
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   fontSize: 12, padding: '2px 8px', borderRadius: 4,
-                  background: usage.chat_mode === 'kb' ? '#f9f0ff' : usage.chat_mode === 'agent' ? '#e6fffb' : '#f6f6f6',
-                  color: usage.chat_mode === 'kb' ? '#722ed1' : usage.chat_mode === 'agent' ? '#13a8a8' : '#999',
+                  background: usage.chat_mode === 'kb' ? '#f9f0ff' : usage.chat_mode === 'agent' ? '#e6fffb'
+                    : usage.engine === 'local' ? '#f6ffed' : usage.engine === 'hybrid' ? '#fffbe6' : '#f6f6f6',
+                  color: usage.chat_mode === 'kb' ? '#722ed1' : usage.chat_mode === 'agent' ? '#13a8a8'
+                    : usage.engine === 'local' ? '#389e0d' : usage.engine === 'hybrid' ? '#d48806' : '#999',
                   border: '1px solid',
-                  borderColor: usage.chat_mode === 'kb' ? '#d3adf7' : usage.chat_mode === 'agent' ? '#87e8de' : '#e8e8e8',
+                  borderColor: usage.chat_mode === 'kb' ? '#d3adf7' : usage.chat_mode === 'agent' ? '#87e8de'
+                    : usage.engine === 'local' ? '#b7eb8f' : usage.engine === 'hybrid' ? '#ffe58f' : '#e8e8e8',
                   cursor: 'default', whiteSpace: 'nowrap',
                 }}>
-                  {usage.chat_mode === 'kb' ? t('modeKb') : usage.chat_mode === 'agent' ? t('modeAgent') : t('modeLlm')}
+                  {usage.chat_mode === 'kb' ? t('modeKb') : usage.chat_mode === 'agent' ? t('modeAgent')
+                    : usage.engine === 'local' ? t('modeLlmLocal') : usage.engine === 'hybrid' ? t('modeLlmHybrid') : t('modeLlmCloud')}
                 </span>
               </Tooltip>
             )}

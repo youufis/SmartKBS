@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.config import MEDIA_ROOT, ai_api_base
+from backend import llm_provider
 from backend.model_catalog import resolve_vl_model
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
@@ -1779,9 +1780,10 @@ async def _understand_whiteboard_with_vision(
                 "stream": False,
             }
 
+            _wb_base, payload = llm_provider.decorate(api_base, payload)
             try:
                 resp = sync_requests.post(
-                    f"{api_base}/chat/completions",
+                    f"{_wb_base}/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json=payload,
                     timeout=60,
@@ -2080,10 +2082,11 @@ def _vl_read_page(image_path: str, prompt: str, api_key: str) -> str:
     }
 
     def _post(p):
+        _b, _p = llm_provider.decorate(ai_api_base(), p)
         return sync_requests.post(
-            f"{ai_api_base()}/chat/completions",
+            f"{_b}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=p, timeout=90,
+            json=_p, timeout=90,
         )
 
     resp = _post(payload)
@@ -2194,10 +2197,11 @@ def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_pat
     }
 
     def _post(p: dict):
+        _b, _p = llm_provider.decorate(api_base, p)
         return sync_requests.post(
-            f"{api_base}/chat/completions",
+            f"{_b}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=p,
+            json=_p,
             stream=True,
             timeout=120,
         )

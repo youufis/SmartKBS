@@ -28,6 +28,7 @@ from backend.logger import logger
 # 改清单默认模型时这里不会跟着变，升级后配置缺键就补出旧模型名 —— 正是 404 的来源。
 from backend.model_catalog import (
     DEFAULT_CHAT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_LONG_MODEL, DEFAULT_VL_MODEL,
+    DEFAULT_OLLAMA_MODELS,
 )
 # 语音模型/音色同样只有一份清单（tts_voices），配置默认值跟着它走
 from backend.tts_voices import DEFAULT_MODEL as TTS_DEFAULT_MODEL, DEFAULT_VOICE as TTS_DEFAULT_VOICE
@@ -60,6 +61,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "APPID": "",  # 留空则直接调用大模型(MODEL_NAME)；填写后调用百炼智能体应用。注意：APPID 必须与 DASHSCOPE_API_KEY 归属于同一个阿里云账号，否则无法调用
     "AGENT_ENABLED": False,  # 智能体启用闸门：勾选且 APPID 已填才走智能体；默认关，需显式开启（知识库就绪时优先走知识库，不受此项影响）
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    # ── 本地引擎（Ollama，OpenAI 兼容端点）──
+    # AI_MODE：cloud=现状全走百炼；hybrid=本地优先、连不上/超时回落云端；
+    #          local=只走本地、绝不出网（智能体应用与百炼知识库接管一并旁路）。
+    # 默认 cloud：不显式切换就等于没装这个功能，现网行为零变化。
+    "AI_MODE": "cloud",
+    "OLLAMA_API_BASE": "http://localhost:11434/v1",
+    "OLLAMA_CHAT_MODEL": DEFAULT_OLLAMA_MODELS["chat"],
+    "OLLAMA_LONG_MODEL": DEFAULT_OLLAMA_MODELS["long"],
+    "OLLAMA_VL_MODEL": DEFAULT_OLLAMA_MODELS["vl"],
+    # 本地小模型思考档：off=强制关（默认；开着会慢 5~10 倍还可能挤空正文）；on=交给模型默认
+    "OLLAMA_THINKING": "off",
+    "OLLAMA_FALLBACK_TO_CLOUD": True,
     # 热点新闻 RSS 源（NW20 所见即所得）：{名称: URL}。非空即最终生效清单
     # （删行=停用、改址=换源）；整键留空 = 回落到 news_router 内置默认。
     # GET /api/config 会把两键回填为"当前生效清单"，页面里看到什么就抓什么。
@@ -690,6 +703,7 @@ _BOOL_KEYS = {
     "EXAM_ANTI_COPY", "EXAM_WATERMARK",
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
     "HOMEWORK_ENABLE_VL",
+    "OLLAMA_FALLBACK_TO_CLOUD",
 }
 _STR_LIMITS: dict[str, int] = {
     "EXPLORE_ASR_MODEL": 60,
@@ -700,6 +714,8 @@ _STR_LIMITS: dict[str, int] = {
     "CLASS_LADDER_DEFAULT_SKIN": 16,
     "dashscope_api_key": 200, "APPID": 128,
     "KB_API_BASE": 300, "KB_AGENT_ID": 128,
+    "OLLAMA_API_BASE": 300, "AI_MODE": 16, "OLLAMA_THINKING": 8,
+    "OLLAMA_CHAT_MODEL": 80, "OLLAMA_LONG_MODEL": 80, "OLLAMA_VL_MODEL": 80,
     "CHAT_SKILL_SEGMENT_MODE": 16,
     "TTS_MODEL": 80, "TTS_VOICE": 128,
     "PODCAST_VOICE_A": 128, "PODCAST_VOICE_B": 128, "PODCAST_DURATION_OPTIONS": 32,
@@ -713,6 +729,8 @@ _TITLE_LIST_KEYS = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG"}
 # 枚举型配置键：只认登记过的取值（大小写/空白归一化）。DEFAULT_CONFIG 新增枚举键必须在此登记，
 # 否则保存时会被 _validate_config_updates 静默丢弃（页面永远停在默认值）。
 _ENUM_KEYS: dict[str, tuple[str, ...]] = {
+    "AI_MODE": ("cloud", "hybrid", "local"),
+    "OLLAMA_THINKING": ("off", "on"),
     "MULTIPLE_CHOICE_SCORING": ("strict", "partial"),
     "DOCX_FONT_BODY": FONT_CHOICES,
     "DOCX_FONT_HEADING": FONT_CHOICES,
@@ -1407,7 +1425,7 @@ async def get_apikey_status(request: Request):
     else:
         status = "missing"
         source = ""
-        hint = "请设置环境变量 DASHSCOPE_API_KEY，或在下方填写 API Key 并保存"
+        hint = "请设置环境变量 DASHSCOPE_API_KEY，或在下方填写 API Key 并保存（纯本地模式可留空，但 TTS/生图/知识库需云端 Key）"
 
     return {
         "status": status,
@@ -1435,39 +1453,55 @@ APPID_TEST_TIMEOUT_SEC = 90
 async def model_connectivity_test(request: Request):
     """实测「接入地址 + MODEL_NAME + API Key」直连链路是否可用。
 
-    接入地址按「业务空间专属域名 → 普通域名」逐个实测（两个域名通用），返回每个地址的
-    结果与最终生效地址；专属域名连不上而普通域名可用时会明确提示已回落，
+    接入地址按当前 AI_MODE 组链逐个实测：启用本地（hybrid/local）时 Ollama 在最前，
+    其后「业务空间专属域名 → 普通域名」（两个云端域名通用）。返回每个地址的结果与
+    最终生效地址；前面的连不上而后面可用时会明确提示已回落，
     免得管理员对着 getaddrinfo 猜到底是哪个域名的问题。
     """
     user = get_current_user(request)
     require_admin(user)
     import time
     from backend.config import ai_api_bases
+    from backend import llm_provider
 
     cfg = load_config()
-    bases = ai_api_bases()
     model = str(cfg.get("MODEL_NAME", "") or "").strip()
     key = str(cfg.get("dashscope_api_key", "") or "").strip()
     if not key:
         import os
         key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not key:
-        return {"ok": False, "error": "API Key 未配置"}
-    if not model:
+
+    # 探测链：AI_MODE 开着本地时 Ollama 在最前（与 hybrid 的真实优先顺序一致）；
+    # 云端段维持原逻辑（专属域名 → 普通域名）。Ollama 忽略鉴权，Key 允许为空。
+    probes: list[dict] = []
+    if llm_provider.ollama_active():
+        probes.append({"base": llm_provider.ollama_base(), "provider": "ollama",
+                       "model": llm_provider.ollama_model_for("chat"),
+                       "key": key or llm_provider.OLLAMA_PLACEHOLDER_KEY})
+    if key and model:
+        for b in ai_api_bases():
+            probes.append({"base": b, "provider": "dashscope", "model": model, "key": key})
+    if not probes:
+        if not key:
+            return {"ok": False, "error": "API Key 未配置（本地引擎也未启用）"}
         return {"ok": False, "error": "未填写 MODEL_NAME（模型与端点 → 对话模型）"}
 
     import httpx
     results = []
     winner = None
-    for i, base in enumerate(bases):
+    for i, probe in enumerate(probes):
+        base, model, key = probe["base"], probe["model"], probe["key"]
         host = base.split("//")[-1].split("/")[0]
-        item = {"base": base, "host": host, "primary": i == 0, "ok": False}
+        item = {"base": base, "host": host, "provider": probe["provider"],
+                "model": model, "primary": i == 0, "ok": False}
         t0 = time.time()
         try:
             resp = httpx.post(
                 f"{base}/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": model, "messages": [{"role": "user", "content": "回复OK"}], "max_tokens": 16},
+                json={"model": model, "messages": [{"role": "user", "content": "回复OK"}],
+                      "max_tokens": 16,
+                      **({"reasoning_effort": "none"} if probe["provider"] == "ollama" else {})},
                 timeout=MODEL_TEST_TIMEOUT_SEC,  # 连接与读取都要在 60 秒内给出结果
             )
             item["cost_ms"] = int((time.time() - t0) * 1000)
@@ -1496,7 +1530,9 @@ async def model_connectivity_test(request: Request):
     win = winner or {}
     return {
         "ok": winner is not None,
-        "model": model,
+        # 顶层 model 必须是"实际生效那次"的模型名：循环里 model 已被逐次覆盖，
+        # 直接回它会显示最后一条探测地址的模型（hybrid 下曾把 Ollama 应答标成云端名）
+        "model": win.get("model") or (results[-1].get("model") if results else model),
         "cost_ms": win.get("cost_ms"),
         "reply": win.get("reply"),
         "base": win.get("base") or first.get("base") or "",
@@ -1505,6 +1541,28 @@ async def model_connectivity_test(request: Request):
         "fallback_used": bool(winner and not winner.get("primary")),
         "error": err_text,
     }
+
+@router.get("/ollama-status", summary="本地引擎（Ollama）状态与模型清单（管理员）")
+async def ollama_status(request: Request, refresh: bool = False):
+    """配置页红绿灯与模型下拉的数据源。
+
+    health 走 /v1/models（OpenAI 兼容，3+5 秒超时、30 秒缓存）；live 走原生 /api/ps
+    （当前驻留模型、context、卸载时限 —— Ollama 的 ctx 与 keep_alive 是服务端配置，
+    页面必须让人看见实际值，不然「改了模型名却还在跑旧模型」这类问题无从发现）。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+    from backend import llm_provider
+
+    st = llm_provider.health(refresh=refresh)
+    st["active"] = llm_provider.ollama_active()
+    st["live"] = llm_provider.live_info() if st.get("ok") else {"ok": False, "error": "引擎未连通"}
+    cfg = load_config()
+    st["config"] = {k: cfg.get(k) for k in (
+        "AI_MODE", "OLLAMA_API_BASE", "OLLAMA_CHAT_MODEL", "OLLAMA_LONG_MODEL",
+        "OLLAMA_VL_MODEL", "OLLAMA_THINKING", "OLLAMA_FALLBACK_TO_CLOUD")}
+    return st
+
 
 @router.post("/appid-test", summary="智能体应用连通性自检（管理员）")
 async def appid_connectivity_test(request: Request):
@@ -1606,8 +1664,17 @@ async def model_options(request: Request, kind: str = "chat"):
 
     user = get_current_user(request)
     require_admin(user)
-    if kind not in ("chat", "long", "vl", "image"):
-        raise HTTPException(status_code=400, detail="kind 只能是 chat / long / vl / image")
+    if kind not in ("chat", "long", "vl", "image", "ollama"):
+        raise HTTPException(status_code=400, detail="kind 只能是 chat / long / vl / image / ollama")
+    if kind == "ollama":
+        # 本地引擎：候选实时取自 Ollama 自身（llm_provider.model_catalog）。
+        # 连不上就返回空清单 —— 前端只退回手输、配置页照常打开，与云端清单"只当提示"同一原则。
+        import asyncio
+        from backend import llm_provider
+        cat = await asyncio.to_thread(llm_provider.model_catalog)
+        return {"kind": kind, "options": cat["options"],
+                "known": sorted(o["id"] for o in cat["options"]),
+                "ok": cat["ok"], "error": cat["error"]}
     out: dict = {"kind": kind, "options": annotate(kind),
                  "known": sorted(m["id"] for m in options_for(kind))}
     if kind == "image":

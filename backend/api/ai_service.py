@@ -15,6 +15,7 @@ from typing import Any, Optional
 from backend.logger import logger
 from backend.config import ai_api_base
 from backend.model_catalog import DEFAULT_CHAT_MODEL
+from backend import llm_provider
 
 # AI 读超时统一取系统配置 AI_REQUEST_TIMEOUT（默认 300 秒）：前端各 AI 端点的
 # 专属 timeout 不应被后端硬编码的 120/180 秒反向截断，三层（前端/后端/IIS）同向对齐。
@@ -222,6 +223,10 @@ def _post_model(bases: list, payload: dict, headers: dict, timeout, stream: bool
                 f"，换 {_host_of(bases[idx + 1])} 再试 {nxt:.0f}s（这条提示词可能被重复计费一次）"
             )
     if last_err is not None:
+        friendly = llm_provider.friendly_chain_error(bases, last_err)
+        if friendly is not None:
+            logger.error(f"[AI] 本地链失败转友好提示: {type(last_err).__name__}: {ai_error_brief(last_err)}")
+            raise friendly from last_err
         raise _timeout_error(last_err, bases, segments) from last_err
     return bases[-1], None
 
@@ -258,6 +263,10 @@ async def _apost_model(bases: list, client, payload: dict, headers: dict, timeou
                 f"，换 {_host_of(bases[idx + 1])} 再试 {nxt:.0f}s（这条提示词可能被重复计费一次）"
             )
     if last_err is not None:
+        friendly = llm_provider.friendly_chain_error(bases, last_err)
+        if friendly is not None:
+            logger.error(f"[AI] 本地链失败转友好提示: {type(last_err).__name__}: {ai_error_brief(last_err)}")
+            raise friendly from last_err
         raise _timeout_error(last_err, bases, segments) from last_err
     return bases[-1], None
 # AI 线程池：全站所有同步 AI 调用（图示/板书/出题/批改/讨论/闯关…）共用一个池。
@@ -330,6 +339,10 @@ def get_ai_config(use_agent: bool = True):
         use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
     """
     from backend.api.config_router import get_config_value
+    # AI_MODE=local：智能体应用与百炼知识库接管都要出网，本地模式下一律旁路，
+    # 强制走直连（实际地址在 transport 层由 llm_provider 改写成 Ollama）。
+    if llm_provider.ai_mode() == "local":
+        use_agent = False
     if use_agent:
         # V6.8 知识库接管：检索链路就绪时，原本走 APPID 智能体的全部 AI 业务
         # 统一改走「直连 + 知识库检索」（接管语义与原智能体一致：自带知识库）。
@@ -463,7 +476,7 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
                  max_tokens: Optional[int] = None, json_mode: bool = False,
                  use_kb: bool = True, kb_query: str = "") -> str:
     """同步调用 AI，返回完整响应文本（history 仅在直连分支生效）"""
-    if not api_key or not api_key.strip():
+    if not (api_key or "").strip() and not llm_provider.key_ok(api_key):
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     cfg = get_ai_config()
@@ -471,7 +484,8 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
     # 并同步关闭思考链——这类任务无需深度推理，开着会把 6 秒的活拖成 60 秒、前端超时。
     if not use_kb:
         cfg = get_ai_config(use_agent=False)
-    os.environ["DASHSCOPE_API_KEY"] = api_key
+    if (api_key or "").strip() and not llm_provider.is_placeholder_key(api_key):
+        os.environ["DASHSCOPE_API_KEY"] = api_key
 
     if cfg["mode"] == "agent":
         return _call_agent_sync(prompt, api_key, cfg["app_id"])
@@ -635,9 +649,11 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                 payload["enable_thinking"] = bool(enable_thinking)
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
+            _chain, _provider = llm_provider.route(api_base, payload, _base_chain(api_base))
             _base, resp = _post_model(
-                _base_chain(api_base), payload,
-                {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                _chain, payload,
+                {"Authorization": f"Bearer {llm_provider.effective_key(api_key, _provider)}",
+                 "Content-Type": "application/json"},
                 (30, _ai_read_timeout()),  # 连接30秒；读取对齐 AI_REQUEST_TIMEOUT
             )
             if resp.status_code == 200:
@@ -646,7 +662,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                 content_out = (_ch.get("message") or {}).get("content") or ""
                 _u = data.get("usage") or {}
                 _finish = _ch.get("finish_reason") or "-"
-                logger.info(f"_call_model_sync response: model={model}, len={len(content_out)}, finish={_finish}, "
+                logger.info(f"_call_model_sync response: model={payload.get('model', model)}@{_provider}, len={len(content_out)}, finish={_finish}, "
                             f"prompt_tokens={_u.get('prompt_tokens', '-')}, "
                             f"completion_tokens={_u.get('completion_tokens', '-')}, "
                             f"turns={len(messages)}, head={content_out[:200]}")
@@ -680,7 +696,7 @@ def call_ai_sync_direct(prompt: str, api_key: str,
 
     enable_thinking=False 可关闭思考链 —— 摘要、简报、改写这类无需推理的任务能省 10 倍等待。
     """
-    if not api_key or not api_key.strip():
+    if not (api_key or "").strip() and not llm_provider.key_ok(api_key):
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     from backend.api.config_router import get_config_value
@@ -707,7 +723,8 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
     cfg = get_ai_config(use_agent=use_agent)
     if not use_kb:
         cfg = get_ai_config(use_agent=False)
-    os.environ["DASHSCOPE_API_KEY"] = api_key
+    if (api_key or "").strip() and not llm_provider.is_placeholder_key(api_key):
+        os.environ["DASHSCOPE_API_KEY"] = api_key
 
     if cfg["mode"] == "agent":
         # 百炼智能体应用的 messages 只收 user 轮，独立 system 送不进去 → 身份段内联到问题前
@@ -808,9 +825,11 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
             if enable_thinking is not None and "qwen" in model.lower():
                 # 仅 qwen 系列支持 enable_thinking；其他模型传了会被网关拒 400
                 payload["enable_thinking"] = bool(enable_thinking)
+            _chain, _provider = llm_provider.route(api_base, payload, _base_chain(api_base))
             _base, resp = _post_model(
-                _base_chain(api_base), payload,
-                {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                _chain, payload,
+                {"Authorization": f"Bearer {llm_provider.effective_key(api_key, _provider)}",
+                 "Content-Type": "application/json"},
                 _ai_read_timeout(), stream=True,
             )
             if resp.status_code == 400 and json_mode:
@@ -864,13 +883,14 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
     max_tokens：题目/课件这类长输出必须显式给，否则走服务商默认上限会被静默截断；
     json_mode：要求模型只回 JSON 对象（部分网关不支持，_call_model_async 里会自动降级）。
     """
-    if not api_key or not api_key.strip():
+    if not (api_key or "").strip() and not llm_provider.key_ok(api_key):
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     cfg = get_ai_config()
     if not use_kb:
         cfg = get_ai_config(use_agent=False)
-    os.environ["DASHSCOPE_API_KEY"] = api_key
+    if (api_key or "").strip() and not llm_provider.is_placeholder_key(api_key):
+        os.environ["DASHSCOPE_API_KEY"] = api_key
     if cfg["mode"] == "agent":
         return await _call_agent_async(prompt, api_key, cfg["app_id"])
     elif cfg["mode"] == "kb_direct":
@@ -939,10 +959,12 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                 payload["response_format"] = {"type": "json_object"}
             if enable_thinking is not None and "qwen" in model.lower():
                 payload["enable_thinking"] = bool(enable_thinking)
+            _chain, _provider = llm_provider.route(api_base, payload, _base_chain(api_base))
             async with httpx.AsyncClient(timeout=_ai_read_timeout()) as client:
                 _base, resp = await _apost_model(
-                    _base_chain(api_base), client, payload,
-                    {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    _chain, client, payload,
+                    {"Authorization": f"Bearer {llm_provider.effective_key(api_key, _provider)}",
+                     "Content-Type": "application/json"},
                     _ai_read_timeout(),
                 )
                 if resp.status_code == 200:
@@ -952,8 +974,8 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                     usage = data.get("usage") or {}
                     finish = choice.get("finish_reason") or ""
                     logger.info(
-                        "AI 响应: model=%s len=%d finish=%s prompt_tokens=%s completion_tokens=%s head=%r",
-                        model, len(content_out), finish or "-",
+                        "AI 响应: model=%s@%s len=%d finish=%s prompt_tokens=%s completion_tokens=%s head=%r",
+                        payload.get("model", model), _provider, len(content_out), finish or "-",
                         usage.get("prompt_tokens", "-"), usage.get("completion_tokens", "-"),
                         content_out[:160],
                     )
@@ -1070,11 +1092,13 @@ def call_multimodal_stream(
         "messages": [{"role": "user", "content": content}],
         "stream": True,
     }
+    _chain, _provider = llm_provider.route(api_base, payload, [api_base])
 
     try:
         resp = sync_requests.post(
-            f"{api_base}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            f"{_chain[0]}/chat/completions",
+            headers={"Authorization": f"Bearer {llm_provider.effective_key(api_key, _provider)}",
+                     "Content-Type": "application/json"},
             json=payload,
             stream=True,
             timeout=_ai_read_timeout(),
@@ -1105,7 +1129,8 @@ def call_multimodal_stream(
                     continue
     except Exception as e:
         logger.error(f"多模态流式调用异常: {e}")
-        yield {"text": f"网络连接错误：{str(e)}", "session_id": None}
+        _fr = llm_provider.friendly_chain_error(_chain, e) if _provider == llm_provider.PROVIDER_OLLAMA else None
+        yield {"text": _fr.args[0] if _fr else f"网络连接错误：{str(e)}", "session_id": None}
 
 
 def call_multimodal_sync(
@@ -1124,11 +1149,13 @@ def call_multimodal_sync(
         "messages": [{"role": "user", "content": content}],
         "stream": False,
     }
+    _chain, _provider = llm_provider.route(api_base, payload, [api_base])
 
     try:
         resp = sync_requests.post(
-            f"{api_base}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            f"{_chain[0]}/chat/completions",
+            headers={"Authorization": f"Bearer {llm_provider.effective_key(api_key, _provider)}",
+                     "Content-Type": "application/json"},
             json=payload,
             timeout=(30, _ai_read_timeout()),
         )
@@ -1140,4 +1167,7 @@ def call_multimodal_sync(
         raise Exception(f"AI 多模态调用失败 (HTTP {resp.status_code}: {resp.text[:160]})")
     except Exception as e:
         logger.error(f"多模态同步调用异常: {e}")
+        _fr = llm_provider.friendly_chain_error(_chain, e) if _provider == llm_provider.PROVIDER_OLLAMA else None
+        if _fr is not None:
+            raise _fr from e
         raise

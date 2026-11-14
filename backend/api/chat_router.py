@@ -132,6 +132,12 @@ def get_api_keys(username: str) -> Tuple[str, str]:
             pass
 
     if not key:
+        # 本地引擎开着：给业务侧回占位 Key（Ollama 忽略 Authorization），对话/出题/批改等
+        # 直连链路照常放行；不缓存、不告警，切回云端且仍无真 Key 时自动恢复原告警口径。
+        # 注意：知识库/TTS/生图不走这里（各自有 Key 源），纯本地无云端 Key 时它们仍会明确报缺 Key。
+        from backend import llm_provider
+        if llm_provider.ollama_active():
+            return llm_provider.OLLAMA_PLACEHOLDER_KEY, ""
         logger.warning("API Key 未配置：请设置环境变量 DASHSCOPE_API_KEY，或由管理员在系统配置中填写")
     else:
         # 仅在 key 非空时缓存，避免空 key 污染缓存
@@ -251,41 +257,36 @@ class FileSummaryCache:
         # 摘要只是"看图说清楚"，不会有解题意图，所以不传 prompt 去猜（避免误判走贵模型）
         model_name, _route = pick_image_model("", "")
         try:
+            from backend import llm_provider
             encoded = encode_image_to_base64(file_path)
+            _pl = {
+                "model": model_name,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:{get_image_mime_type(file_path)};base64,{encoded}"}},
+                        {"type": "text", "text": prompt},
+                    ]
+                }],
+                "stream": False,
+            }
             async with httpx.AsyncClient() as client:
+                _b, _p = llm_provider.decorate(ai_api_base(), _pl)
                 resp = await client.post(
-                    f'{ai_api_base()}/chat/completions',
+                    f'{_b}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": model_name,
-                        "messages": [{
-                            "role": "user",
-                            "content": [
-                                {"type": "image_url", "image_url": {"url": f"data:{get_image_mime_type(file_path)};base64,{encoded}"}},
-                                {"type": "text", "text": prompt},
-                            ]
-                        }],
-                        "stream": False,
-                    },
+                    json=_p,
                 )
                 if resp.status_code != 200:
                     alt = fallback_model(model_name, resp.status_code, resp.text)
                     if alt:
                         logger.info("[聊天] 对话模型不吃图(HTTP %s)，摘要回落 %s", resp.status_code, alt)
+                        _pl["model"] = alt
+                        _b, _p = llm_provider.decorate(ai_api_base(), _pl)
                         resp = await client.post(
-                            f'{ai_api_base()}/chat/completions',
+                            f'{_b}/chat/completions',
                             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                            json={
-                                "model": alt,
-                                "messages": [{
-                                    "role": "user",
-                                    "content": [
-                                        {"type": "image_url", "image_url": {"url": f"data:{get_image_mime_type(file_path)};base64,{encoded}"}},
-                                        {"type": "text", "text": prompt},
-                                    ]
-                                }],
-                                "stream": False,
-                            },
+                            json=_p,
                         )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -321,19 +322,28 @@ async def get_usage(request: Request):
     from backend.api.ai_service import get_ai_config
     chat_mode = {"kb_direct": "kb", "agent": "agent"}.get(get_ai_config()["mode"], "llm")
 
+    # 引擎徽章：只有「直连大模型」且本地分流开着时，应答者才可能是本地引擎。
+    # kb/agent 与 cloud 档一律标 cloud；hybrid 的实际应答者可能回落云端，标 hybrid（本地优先）。
+    from backend import llm_provider
+    _m = llm_provider.ai_mode()
+    engine = ("local" if _m == "local" else "hybrid" if _m == "hybrid" else "cloud") if chat_mode == "llm" else "cloud"
+    # 回显真正会跑的模型名：只要本地分流开着且不是智能体模式（agent 由应用侧决定模型），
+    # 生成步骤就路由到 Ollama —— kb_direct 接管下同样如此，不能只按 llm 档判断
+    _gen_local = llm_provider.ollama_active() and chat_mode != "agent"
+    model_name = (llm_provider.ollama_model_for("chat") if _gen_local
+                  else get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL))
+
     if role_val == 0:
         multimodal_enabled = True   # 对话模型按约定必须支持图片（不支持时由路由回落视觉模型）
-        model_name = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
         return {
             "enabled": enabled, "used": 0, "max": 0, "remaining": -1,
             "multimodal_enabled": multimodal_enabled,
-            "model_name": model_name,
+            "model_name": model_name, "engine": engine,
             "appid_configured": appid_configured,
             "kb_ready": kb_ready_flag, "kb_reason": kb_reason, "chat_mode": chat_mode,
         }
 
     multimodal_enabled = True   # 同上：不再提供开关
-    model_name = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
 
     return {
         "enabled": enabled,
@@ -341,7 +351,7 @@ async def get_usage(request: Request):
         "max": max_req,
         "remaining": max(0, max_req - used),
         "multimodal_enabled": multimodal_enabled,
-        "model_name": model_name,
+        "model_name": model_name, "engine": engine,
         "appid_configured": appid_configured,
         "kb_ready": kb_ready_flag, "kb_reason": kb_reason, "chat_mode": chat_mode,
     }
@@ -869,11 +879,14 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             "stream": True,
         }
 
+        from backend import llm_provider
+
         def _post(p):
+            _b, _p = llm_provider.decorate(ai_api_base(), p)
             return sync_requests.post(
-                f'{ai_api_base()}/chat/completions',
+                f'{_b}/chat/completions',
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=p, stream=True, timeout=300,
+                json=_p, stream=True, timeout=300,
             )
 
         resp = _post(payload)

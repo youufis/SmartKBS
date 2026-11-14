@@ -83,7 +83,7 @@ interface ConfigField {
   /** 生效方式，未标注即保存后立即生效 */
   scope?: EffScope
   /** model_select 用：向 /api/config/model-options 取哪一类候选 */
-  optionsKind?: 'chat' | 'long' | 'vl' | 'image'
+  optionsKind?: 'chat' | 'long' | 'vl' | 'image' | 'ollama'
   /** tts_voice 用：置顶一个「自动（按模型挑选）」空值选项（播客音色留空 = 交给后端自选） */
   autoOption?: boolean
   /** select / radio 的候选值 */
@@ -119,7 +119,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'ai',
     titleKey: 'zone_ai',
     descKey: 'zone_ai_desc',
-    sections: ['credentials', 'models', 'vision', 'knowledgebase', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'imagegen', 'tts', 'asr', 'explore', 'docx'],
+    sections: ['credentials', 'models', 'ollama', 'knowledgebase', 'imagegen', 'tts', 'asr', 'chat', 'quality', 'aioutput', 'memory', 'grading', 'explore', 'docx'],
   },
   {
     id: 'storage',
@@ -142,7 +142,7 @@ const SECTION_TITLES: Record<string, string> = {
   showcase: 'group_showcase',
   credentials: 'group_credentials',
   models: 'group_models',
-  vision: 'group_vision',
+  ollama: 'group_ollama',
   knowledgebase: 'group_knowledgebase',
   chat: 'group_chat',
   quality: 'group_quality',
@@ -276,6 +276,17 @@ const QWEN_ENDPOINT_PRESETS = [
   'https://dashscope.aliyuncs.com/compatible-mode/v1',
   'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
 ]
+// ── 本地引擎（Ollama）── 三档模式文案与 backend/llm_provider.py 注释同口径
+const AI_MODE_OPTIONS: FieldOption[] = [
+  { value: 'cloud', labelKey: 'optAiModeCloud' },
+  { value: 'hybrid', labelKey: 'optAiModeHybrid' },
+  { value: 'local', labelKey: 'optAiModeLocal' },
+]
+const OLLAMA_THINKING_OPTIONS: FieldOption[] = [
+  { value: 'off', labelKey: 'optOllamaThinkingOff' },
+  { value: 'on', labelKey: 'optOllamaThinkingOn' },
+]
+const OLLAMA_ENDPOINT_PRESETS = ['http://localhost:11434/v1', 'http://127.0.0.1:11434/v1']
 
 // 后端下发的校验元数据（GET /api/config/meta），前端不再自己复制一份取值范围
 interface ConfigMeta {
@@ -324,7 +335,7 @@ interface ImageSizeConf {
 interface ModelOption {
   id: string
   note: string
-  tier: 'recommended' | 'alternative' | 'premium' | 'legacy'
+  tier: '' | 'recommended' | 'alternative' | 'premium' | 'legacy'
   visible: boolean | null
   endpoint?: string
 }
@@ -395,13 +406,21 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models', level: 'basic' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models', level: 'basic' },
   // ── 图像理解：默认用对话模型看图（快、省），解题类交视觉模型 ──
-  { key: 'MODEL_IMAGE_VIA_CHAT', labelKey: 'field_MODEL_IMAGE_VIA_CHAT', descKey: 'field_MODEL_IMAGE_VIA_CHAT_desc', longDescKey: 'field_MODEL_IMAGE_VIA_CHAT_tip', type: 'boolean', group: 'vision', level: 'basic', required: false },
-  { key: 'MODEL_IMAGE_SOLVE_VL', labelKey: 'field_MODEL_IMAGE_SOLVE_VL', descKey: 'field_MODEL_IMAGE_SOLVE_VL_desc', type: 'boolean', group: 'vision', level: 'basic', required: false },
+  { key: 'MODEL_IMAGE_VIA_CHAT', labelKey: 'field_MODEL_IMAGE_VIA_CHAT', descKey: 'field_MODEL_IMAGE_VIA_CHAT_desc', longDescKey: 'field_MODEL_IMAGE_VIA_CHAT_tip', type: 'boolean', group: 'models', level: 'basic', required: false },
+  { key: 'MODEL_IMAGE_SOLVE_VL', labelKey: 'field_MODEL_IMAGE_SOLVE_VL', descKey: 'field_MODEL_IMAGE_SOLVE_VL_desc', type: 'boolean', group: 'models', level: 'basic', required: false },
   // 接入地址：专属域名优先（非必填），普通域名备用（默认已填）；两者通用，连不上自动回落
   { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', longDescKey: 'field_KB_API_BASE_tip', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
   { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', longDescKey: 'field_QWEN_OPENAI_API_BASE_tip', type: 'combobox', group: 'models', presets: QWEN_ENDPOINT_PRESETS },
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'model_select', optionsKind: 'long', group: 'models' },
   { key: 'HOMEWORK_ENABLE_VL', labelKey: 'field_HOMEWORK_ENABLE_VL', descKey: 'field_HOMEWORK_ENABLE_VL_desc', type: 'boolean', group: 'models' },
+  // ── 本地引擎（Ollama，OpenAI 兼容端点）：backend/llm_provider.py 消费这些键 ──
+  { key: 'AI_MODE', labelKey: 'field_AI_MODE', descKey: 'field_AI_MODE_desc', longDescKey: 'field_AI_MODE_tip', type: 'select', options: AI_MODE_OPTIONS, group: 'ollama', level: 'basic', required: false },
+  { key: 'OLLAMA_API_BASE', labelKey: 'field_OLLAMA_API_BASE', descKey: 'field_OLLAMA_API_BASE_desc', type: 'combobox', group: 'ollama', level: 'basic', required: false, presets: OLLAMA_ENDPOINT_PRESETS },
+  { key: 'OLLAMA_CHAT_MODEL', labelKey: 'field_OLLAMA_CHAT_MODEL', descKey: 'field_OLLAMA_CHAT_MODEL_desc', type: 'model_select', optionsKind: 'ollama', group: 'ollama', level: 'basic', required: false },
+  { key: 'OLLAMA_LONG_MODEL', labelKey: 'field_OLLAMA_LONG_MODEL', descKey: 'field_OLLAMA_LONG_MODEL_desc', type: 'model_select', optionsKind: 'ollama', group: 'ollama', required: false },
+  { key: 'OLLAMA_VL_MODEL', labelKey: 'field_OLLAMA_VL_MODEL', descKey: 'field_OLLAMA_VL_MODEL_desc', type: 'model_select', optionsKind: 'ollama', group: 'ollama', required: false },
+  { key: 'OLLAMA_THINKING', labelKey: 'field_OLLAMA_THINKING', descKey: 'field_OLLAMA_THINKING_desc', longDescKey: 'field_OLLAMA_THINKING_tip', type: 'select', options: OLLAMA_THINKING_OPTIONS, group: 'ollama', required: false },
+  { key: 'OLLAMA_FALLBACK_TO_CLOUD', labelKey: 'field_OLLAMA_FALLBACK_TO_CLOUD', descKey: 'field_OLLAMA_FALLBACK_TO_CLOUD_desc', type: 'boolean', group: 'ollama', required: false },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
   { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', longDescKey: 'field_KB_ENABLED_tip', type: 'boolean', group: 'knowledgebase', level: 'basic', required: false },
   { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', level: 'basic', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
@@ -2261,7 +2280,15 @@ const SystemConfigPage: React.FC = () => {
   const [appidTestResult, setAppidTestResult] = useState<{
     ok: boolean; cost_ms?: number; reply?: string; error?: string
   } | null>(null)
+  // 本地引擎探活（GET /api/config/ollama-status：/v1/models + /api/ps）
+  const [ollamaChecking, setOllamaChecking] = useState(false)
+  const [ollamaStatus, setOllamaStatus] = useState<Record<string, any> | null>(null)
+  // 进页自动探活的轻量结果（蹭 loadModelOptions 的 kind=ollama 请求，零额外开销）：
+  // 没装 Ollama 的管理员不该靠"点检测按钮"才知道没装
+  const [ollamaReach, setOllamaReach] = useState<{ ok: boolean; error: string } | null>(null)
   const [form] = Form.useForm()
+  // AI_MODE 实时值：未装 Ollama 的分级提示按当前模式变色（form 声明之后才能引用）
+  const aiModeWatch = Form.useWatch('AI_MODE', form) as string | undefined
   const [query, setQuery] = useState('')                // 顶部搜索关键词
   const [activeSec, setActiveSec] = useState('brand')   // 左栏当前小节（主从视图右侧只渲染它）
   const [dirty, setDirty] = useState<string[]>([])      // 与已加载值不同的配置键
@@ -2311,7 +2338,7 @@ const SystemConfigPage: React.FC = () => {
 
   // ── 加载模型候选（含账号可见性与各模型可用尺寸；失败只退回手填，不挡配置页） ──
   const loadModelOptions = useCallback(async () => {
-    const kinds = ['chat', 'long', 'vl', 'image'] as const
+    const kinds = ['chat', 'long', 'vl', 'image', 'ollama'] as const
     const results = await Promise.all(
       kinds.map((k) => apiClient.get('/api/config/model-options', { params: { kind: k } })
         .then(({ data }) => [k, data] as const)
@@ -2322,6 +2349,7 @@ const SystemConfigPage: React.FC = () => {
     for (const [k, data] of results) {
       if (Array.isArray(data?.options)) opts[k] = data.options
       if (data?.image_sizes) Object.assign(sizes, data.image_sizes)
+      if (k === 'ollama' && data) setOllamaReach({ ok: !!data.ok, error: String(data.error || '') })
     }
     setModelOptions(opts)
     if (Object.keys(sizes).length) setImageSizes(sizes)
@@ -2666,7 +2694,9 @@ const SystemConfigPage: React.FC = () => {
       .sort((a, b) => (order[a.tier] ?? 9) - (order[b.tier] ?? 9))
       .map((m) => ({
         value: m.id,
-        label: `${tierLabel[m.tier] || ''} · ${m.id} — ${m.note}`
+        // 云端清单恒有 tier/note；本地（Ollama）清单 tier 为空 —— 缺项时不留悬挂的 " · "/" — "
+        label: (tierLabel[m.tier] ? `${tierLabel[m.tier]} · ${m.id}` : m.id)
+          + (m.note ? ` — ${m.note}` : '')
           + (m.visible === false ? `（${t('modelNotVisibleTag')}）` : ''),
       }))
   }, [modelOptions, t])
@@ -3154,8 +3184,101 @@ const SystemConfigPage: React.FC = () => {
               )}
             </div>
           )}
+          {/* 本地引擎自检：ctx / keep_alive 是 Ollama 服务端配置，页面必须让人看见实际值，
+              否则"改了模型名却还在跑旧模型/旧上下文"这类问题无从发现 */}
+          {group === 'ollama' && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+              {/* 指引与能力矩阵：默认折叠省屏；仅"本地模式＋引擎不可达"这种会全挂的
+                  危险组合才自动展开，管理员不会错过 */}
+              <Collapse
+                ghost
+                size="small"
+                style={{ width: '100%' }}
+                defaultActiveKey={ollamaReach && !ollamaReach.ok && aiModeWatch === 'local' ? ['guide'] : []}
+                items={[{
+                  key: 'guide',
+                  label: t('ollamaGuideTitle'),
+                  children: (
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {ollamaReach && !ollamaReach.ok && (
+                        <Alert
+                          type={aiModeWatch === 'local' ? 'error' : aiModeWatch === 'hybrid' ? 'warning' : 'info'}
+                          showIcon
+                          message={t('ollamaMissingTitle')}
+                          description={(
+                            <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                              <div>{aiModeWatch === 'local' ? t('ollamaMissingLocal') : aiModeWatch === 'hybrid' ? t('ollamaMissingHybrid') : t('ollamaMissingCloud')}</div>
+                              <div style={{ color: 'var(--text-secondary)' }}>{t('ollamaInstallSteps')}（{ollamaReach.error || '-'}）</div>
+                            </div>
+                          )}
+                        />
+                      )}
+                      <Alert
+                        type="info"
+                        showIcon
+                        message={t('ollamaCapTitle')}
+                        description={(
+                          <div style={{ fontSize: 12, lineHeight: 1.9 }}>
+                            <div>{t('ollamaCapLocal')}</div>
+                            <div>{t('ollamaCapCloud')}</div>
+                            <div>{t('ollamaCapBypass')}</div>
+                            <div>{t('ollamaCapQuality')}</div>
+                          </div>
+                        )}
+                      />
+                    </div>
+                  ),
+                }]}
+              />
+              <Button size="small" loading={ollamaChecking} onClick={async () => {
+                setOllamaChecking(true); setOllamaStatus(null)
+                try {
+                  const { data } = await apiClient.get('/api/config/ollama-status', { params: { refresh: true }, timeout: 15000 })
+                  setOllamaStatus(data)
+                  // 检测 = 刷新：ollama pull 完的新模型马上进三个本地模型下拉
+                  if (data?.ok) loadModelOptions()
+                } catch (e: any) {
+                  setOllamaStatus({ ok: false, error: selfTestErr(e) })
+                } finally { setOllamaChecking(false) }
+              }}>{t('ollamaCheckBtn')}</Button>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('ollamaCheckHint')}</Text>
+              {ollamaStatus && (
+                <Alert
+                  style={{ width: '100%', marginTop: 4 }}
+                  type={ollamaStatus.ok ? (ollamaStatus.active ? 'success' : 'warning') : 'error'}
+                  showIcon
+                  title={ollamaStatus.ok
+                    ? (ollamaStatus.active
+                        ? t('ollamaOk', { base: ollamaStatus.base, ms: ollamaStatus.latency_ms, n: (ollamaStatus.models || []).length })
+                        : t('ollamaReachableButIdle'))
+                    : t('ollamaFail', { err: ollamaStatus.error })}
+                  description={ollamaStatus.ok && (
+                    <div style={{ fontSize: 12 }}>
+                      <div style={{ margin: '2px 0 4px' }}>
+                        {(ollamaStatus.models || []).map((m: string) => <Tag key={m}>{m}</Tag>)}
+                      </div>
+                      {(ollamaStatus.live?.models || []).map((m: any) => (
+                        <div key={m.name}>{t('ollamaLoaded', { name: m.name, ctx: m.context, mb: m.size_mb })}</div>
+                      ))}
+                      {ollamaStatus.config?.AI_MODE === 'local' && (
+                        <div style={{ marginTop: 2, color: 'var(--text-secondary)' }}>{t('ollamaLocalNotice')}</div>
+                      )}
+                    </div>
+                  )}
+                />
+              )}
+            </div>
+          )}
           {group === 'knowledgebase' && (
             <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+              {aiModeWatch === 'local' && (
+                <Alert
+                  style={{ width: '100%' }}
+                  type="warning"
+                  showIcon
+                  message={t('kbLocalModeNotice')}
+                />
+              )}
               <Button size="small" loading={kbTesting} onClick={async () => {
                 setKbTesting(true); setKbTestResult(null)
                 try {

@@ -15,6 +15,8 @@ export interface UsageInfo {
   kb_reason?: string;
   /** V6.9 全局聊天模式（服务端裁决）：llm=大模型 agent=智能体 kb=知识库 */
   chat_mode?: 'llm' | 'agent' | 'kb';
+  /** 直连大模型时实际应答的引擎：cloud=百炼，local=Ollama，hybrid=本地优先（故障回落云端） */
+  engine?: 'cloud' | 'local' | 'hybrid';
 }
 
 /** 获取当前用户的每日用量 */

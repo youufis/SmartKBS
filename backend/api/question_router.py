@@ -2284,24 +2284,27 @@ async def _call_vision_extract(image_bytes: bytes, mime_type: str, prompt_text: 
     import httpx
     import base64
     encoded = await asyncio.to_thread(lambda: base64.b64encode(image_bytes).decode("utf-8"))
+    from backend import llm_provider
     api_base = ai_api_base()
+    _pl = {
+        "model": model_name,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
+                {"type": "text", "text": prompt_text},
+            ],
+        }],
+        "max_tokens": int(get_config_value("IMAGE_EXTRACT_MAX_TOKENS", 8000) or 8000),
+        "stream": False,
+    }
+    api_base, _pl = llm_provider.decorate(api_base, _pl)
     try:
         async with httpx.AsyncClient(timeout=180) as client:
             resp = await client.post(
                 f"{api_base}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model_name,
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
-                            {"type": "text", "text": prompt_text},
-                        ],
-                    }],
-                    "max_tokens": int(get_config_value("IMAGE_EXTRACT_MAX_TOKENS", 8000) or 8000),
-                    "stream": False,
-                },
+                json=_pl,
             )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="视觉模型调用超时，请重试或减少单图题量")

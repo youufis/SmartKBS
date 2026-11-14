@@ -58,6 +58,17 @@ VL_MODELS: list[dict[str, str]] = [
 # 读取时直接换成默认值 —— 部署机各自有一份 system_config.json，改代码改不到它们。
 RETIRED_VL_MODELS: set[str] = {"qwen3-vl-flash"}
 
+# ── 本地引擎（Ollama）默认模型（AI_MODE != cloud 时生效）──
+# 开发基线 qwen3.5:0.8b：原生多模态（2026-11-14 /api/show 实测 capabilities 含
+# vision），chat/long/vl 三条链路用一个模型就能全部联起来；0.8B 只做流程联调，
+# 质量评测与生产部署请在系统配置里换成更大档位（如 qwen3:14b 级别）。
+DEFAULT_OLLAMA_MODELS: dict[str, str] = {
+    "chat": "qwen3.5:0.8b",
+    "long": "qwen3.5:0.8b",
+    "vl": "qwen3.5:0.8b",
+}
+
+
 
 def resolve_chat_model(name: str | None = None) -> str:
     """对话模型名归一：配置留空就回落到默认（默认值只在本文件维护）"""

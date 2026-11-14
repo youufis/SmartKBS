@@ -220,7 +220,7 @@
   "modeLlm": "LLM",
   "modeAgent": "Agent",
   "modeKb": "Knowledge Base",
-  "modeBadgeTip": "The chat pipeline is set by system config (priority: knowledge base > agent > LLM); admins adjust it in System Settings",
+  "modeBadgeTip": "The chat pipeline follows system config (priority: knowledge base > agent > model). In direct-model mode the badge shows the actual engine: Cloud Model = DashScope; Local Model = answered entirely by Ollama; Local-first = hybrid mode, local answers with automatic cloud fallback. Teachers/admins can adjust it in System Settings → AI",
   "pageTitle": "Knowledge Q&A",
   "historyRangeAll": "All",
   "historyRangeToday": "Today",
@@ -242,5 +242,8 @@
     "Explain Newton's third law with an everyday example"
   ],
   "attachmentExpired": "Attachment expired",
-  "historyYearLabel": "{{year}}"
+  "historyYearLabel": "{{year}}",
+  "modeLlmCloud": "Cloud Model",
+  "modeLlmLocal": "Local Model",
+  "modeLlmHybrid": "Local-first"
 }
