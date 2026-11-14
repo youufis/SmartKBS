@@ -1,505 +1,509 @@
-"""
-SmartKB 后端入口
-纯 FastAPI 应用，替代 Gradio 启动
-"""
-import json
-import os
-import sys
-from contextlib import asynccontextmanager
-from pathlib import Path
-
-# 确保项目根目录在 sys.path 中
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-
-from backend.config import SERVER_HOST, SERVER_PORT, FRONTEND_DIST_DIR
-from backend.database import init_db
-from backend.question_db import init_question_db
-from backend.logger import logger
-from backend.middleware import register_middleware, SSEAwareGZipMiddleware
-
-# 从 version.json 读取版本号
-_VERSION_FILE = Path(__file__).resolve().parent.parent / "version.json"
-
-def _get_app_version() -> str:
-    try:
-        with open(_VERSION_FILE, encoding="utf-8") as _f:
-            return json.load(_f).get("latest_version", "0.0.0")
-    except Exception:
-        logger.warning(f"无法读取版本文件: {_VERSION_FILE}")
-        return "0.0.0"
-
-APP_VERSION = _get_app_version()
-
-# ── 应用生命周期 ──
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用生命周期：启动初始化 + 关闭清理"""
-    # ── startup ──
-    # 桌面版升级上来时，把旧版留在安装目录里的库/配置/配图先搬到用户数据目录（幂等、失败不阻断）
-    # 必须在 init_db 之前：否则会先在空目录里建出一个空库，再「发现目标已存在」而不迁移
-    try:
-        from backend.data_migration import migrate_legacy_data
-        migrate_legacy_data()
-    except Exception as e:
-        # 注意：本函数后面有局部 `import sys`，此处不能用 sys（会被当成局部变量而未绑定）
-        print(f"[main] 历史数据迁移检查失败（已忽略，不影响启动）: {e}")
-    init_db()
-    init_question_db()
-    try:
-        # 代码练习：判题任务只活在本进程，重启后把残留的「评分中」标记失败
-        from backend.code_grader import recover_stale_submissions
-        recover_stale_submissions()
-    except Exception as e:
-        print(f"[main] 代码练习残留判题回收失败: {e}", file=sys.stderr)
-    try:
-        # 代码练习：用例分归一到合计 100（早期题目按每个用例 1~2 分建，满分只有 10 甚至 1 分，
-        # 学生的分数、教师看到的平均分都跟着走，跨题没法比）。历史提交按同比例换算成百分制。
-        # 注意：这里必须从 code_score 导入，不能从 api.code_router 导入 ——
-        # 后者 import 一次要 15 秒（依赖全站路由与 AI 服务），会把 startup 同步阻塞住
-        from backend.code_score import normalize_all_case_scores
-        n = normalize_all_case_scores()
-        if n:
-            print(f"[main] 代码练习用例分已归一：{n} 道题", file=sys.stderr)
-    except Exception as e:
-        print(f"[main] 代码练习用例分归一失败: {e}", file=sys.stderr)
-    try:
-        # 压缩中间件自检：gzip 会把 SSE 攒到整条流结束才吐，症状只是“对话没有流式输出”。
-        # 它依赖 Starlette 的私有压缩钩子，钩子改过名、也就静默失效过一次，
-        # 所以启动时用一条真实的 text/event-stream 响应实测一遍；不通过就整体不压缩。
-        from backend.middleware import check_gzip_middleware
-        await check_gzip_middleware()
-    except Exception as e:
-        print(f"[main] GZip/SSE 自检失败: {e}", file=sys.stderr)
-    try:
-        # U-SEC: 未设置 JWT_SECRET_KEY 环境变量时沿用仓库内默认密钥, 存在令牌伪造面,
-        # 已在中间件里加"账号必须存在且 token_version>=1"的兜底, 这里仍提示运维改配置
-        from backend.config import JWT_SECRET_IS_DEFAULT
-        if JWT_SECRET_IS_DEFAULT:
-            logger.warning(
-                "[安全提示] 未设置环境变量 JWT_SECRET_KEY, 正在使用内置默认密钥; "
-                "请在部署环境设置随机密钥(设置后所有用户需重新登录)"
-            )
-    except Exception:
-        pass
-    try:
-        # 知识库检索预热：把 TLS 握手与服务端冷启动 costs 消化在启动期，
-        # 首个用户请求即可落在 keep-alive 热连接上（检索本身免费）
-        import threading
-        from backend import bailian_kb
-        threading.Thread(target=bailian_kb.warmup, daemon=True, name="kb-warmup").start()
-    except Exception:
-        pass
-    try:
-        from backend.api.sharing_router import cleanup_empty_dir_shares
-        cleanup_empty_dir_shares()
-    except Exception:
-        pass
-    try:
-        # 启动时自动清理无效的残留资源绑定（悬挂绑定 + 文件已不存在的脏共享行）
-        from backend.api.sharing_router import run_bind_repair
-        run_bind_repair()
-    except Exception as e:
-        print(f"[main] 启动自动清理资源绑定残留失败: {e}", file=sys.stderr)
-    try:
-        # R8: 清理点名临时状态表里"年级与班级名互相矛盾"的历史脏行
-        from backend.api.rollcall_router import prune_stale_rollcall_meta
-        prune_stale_rollcall_meta()
-    except Exception as e:
-        print(f"[main] 点名脏状态清理失败: {e}", file=sys.stderr)
-    try:
-        # 启动期数据口径治理(均幂等, 单项失败互不影响):
-        #   - 积分流水分桶/去前缀: 保证"按活动清理积分"能精确定位(活动重置前置)
-        #   - 存量通知 source_type/source_id 回填: 保证"按活动清理通知"不再空转
-        #   - 题库↔教材知识点 ID 关联补边: 让新入库/AI 生成的题自动进选题 T0 候选
-        from backend.notify_hygiene import backfill_notification_sources, dedupe_notifications
-        from backend.question_select import rebuild_kp_map
-        from backend.kp_link import ensure_table as ensure_kp_link_table
-        from backend.reward_hygiene import normalize_reward_activity_keys
-        _no_fix = []
-        for _repair in (normalize_reward_activity_keys, backfill_notification_sources,
-                        dedupe_notifications, ensure_kp_link_table, rebuild_kp_map):
-            try:
-                _res = _repair()
-                if _res.get("changed"):
-                    logger.info(f"[启动自检] {_repair.__name__} 已修复数据口径: {_res}")
-                else:
-                    _no_fix.append(_repair.__name__)
-            except Exception as repair_err:
-                logger.warning(f"[启动自检] {_repair.__name__} 失败(不阻断启动): {repair_err}")
-        if _no_fix:
-            logger.debug("[启动自检] 无需修复: " + ", ".join(_no_fix))
-    except Exception as e:
-        print(f"[main] 启动期数据治理加载失败: {e}", file=sys.stderr)
-    try:
-        # 实例守卫: 点名其他疑似存活实例(它们会锁住 backend.log 使轮转退避, 还会引发数据库锁重试)
-        from backend.instance_guard import enforce_log_writer_exclusion, warn_multi_instance
-        enforce_log_writer_exclusion()
-        warn_multi_instance()
-    except Exception as e:
-        print(f"[main] 实例守卫检查失败: {e}", file=sys.stderr)
-
-    try:
-        # 业务日志保留策略: 后台线程延迟清理, 防登录/浏览/通知等日志表无限增长
-        from backend.log_retention import start as start_log_retention
-        start_log_retention()
-    except Exception as e:
-        print(f"[main] 日志保留任务启动失败: {e}", file=sys.stderr)
-    try:
-        # S-GRADING: 主观题后台批量批改引擎(练习/考试/测验共用一个守护线程)
-        from backend.ai_grading import start as start_ai_grading
-        start_ai_grading()
-    except Exception as e:
-        print(f"[main] 主观题后台批改任务启动失败: {e}", file=sys.stderr)
-    try:
-        # P-7: 我的画像周期自动生成巡检（受 PORTRAIT_AUTO_PUSH 控制，默认关）
-        from backend.portrait_auto import start as start_portrait_auto
-        start_portrait_auto()
-    except Exception as e:
-        print(f"[main] 我的画像自动生成巡检启动失败: {e}", file=sys.stderr)
-    try:
-        # S1: 荣耀殿堂自动建卡巡检（受 SHOWCASE_AUTO_ENABLED 控制，默认开）
-        from backend.showcase_auto import start as start_showcase_auto
-        start_showcase_auto()
-    except Exception as e:
-        print(f"[main] 荣耀殿堂自动建卡巡检启动失败: {e}", file=sys.stderr)
-    try:
-        # 探索画布：素材自动清理每日线程（EXPLORE_SWEEP_DRY 默认只出清单不动文件）
-        from backend.explore_asset_sweeper import start as start_explore_sweeper
-        start_explore_sweeper()
-        from backend.explore_text_index import start_backfill as start_explore_text_index
-        start_explore_text_index()
-        # 聊天附件回收：只回收「已无历史引用且闲置 N 天」的文件
-        from backend.chat_asset_gc import start as start_chat_asset_gc
-        start_chat_asset_gc()
-    except Exception as e:
-        print(f"[main] 探索画布清理线程启动失败: {e}", file=sys.stderr)
-    try:
-        from backend.config_sync import try_sync_remote_config
-        import asyncio
-        asyncio.ensure_future(try_sync_remote_config())
-    except Exception:
-        pass
-    try:
-        # C1: 配置文件损坏时不再静默用默认值覆盖, 启动阶段显式告警
-        from backend.api.config_router import config_health
-        _cfg_health = config_health()
-        if _cfg_health.get("status") != "ok":
-            logger.error(
-                "[配置健康] system_config.json 状态异常: "
-                f"{_cfg_health}；请尽快在系统配置页面复核并重新保存"
-            )
-            # 只写日志等于没人看见 —— 同步给管理员发一条站内通知（同一状态只提醒一次）
-            try:
-                from backend.api.config_router import notify_admins_config_risk
-                notify_admins_config_risk()
-            except Exception as alert_err:
-                logger.debug(f"[配置健康] 告警通知未发出: {alert_err}")
-    except Exception as e:
-        print(f"[main] 配置文件健康检查失败: {e}", file=sys.stderr)
-    try:
-        # 存量配置补齐通知类型（success）：靠标记文件只执行一次，之后尊重管理员的勾选
-        from backend.notification_types import migrate_enabled_types
-        migrate_enabled_types()
-    except Exception as e:
-        print(f"[main] 通知类型迁移失败: {e}", file=sys.stderr)
-    try:
-        # 先对账上一次没走完的升级(被 --reload / 应用池回收打断的现场)，再启动后台版本检测
-        from backend.api.upgrade_router import reconcile_upgrade_state_on_startup
-        reconcile_upgrade_state_on_startup()
-    except Exception as e:
-        import sys
-        print(f"[main] 升级状态对账失败: {e}", file=sys.stderr)
-    try:
-        from backend.api.upgrade_router import start_auto_version_check
-        start_auto_version_check()
-    except Exception as e:
-        import sys
-        print(f"[main] 启动后台版本检测失败: {e}", file=sys.stderr)
-    try:
-        # 分组讨论：AI 助教自动引导后台循环（扫描进行中的讨论，冷场自动触发）
-        from backend.api.discussion_router import discussion_auto_trigger_loop
-        import asyncio as _asyncio
-        _auto_trigger_task = _asyncio.create_task(discussion_auto_trigger_loop())
-        _auto_trigger_task.set_name("discussion-auto-trigger")
-        app.state.discussion_auto_trigger_task = _auto_trigger_task
-    except Exception as e:
-        import sys
-        print(f"[main] 启动讨论 AI 自动引导失败: {e}", file=sys.stderr)
-    yield
-    # ── shutdown ──
-    _task = getattr(app.state, "discussion_auto_trigger_task", None)
-    if _task is not None:
-        _task.cancel()
-    pass
-
-
-# 创建 FastAPI 应用
-#
-# S1: 交互式 API 文档默认关闭。/docs 与 /openapi.json 都不带 /api/ 前缀，中间件把
-# 「非 /api/ 前缀」一律判为公开路径，于是任何人都能在未登录状态下拉走整份接口结构
-# （2026-10-26 实测：GET /openapi.json -> 200 / 455,493 字节，全部端点、参数与模型字段
-# 名一次性公开），等于把攻击面清单挂在大门口。
-# 需要看文档时显式打开：设环境变量 SMARTKB_DOCS_ENABLED=1 再重启。建议只在开发机开，
-# 校内/公网可访问的部署保持默认关闭。
-_DOCS_ENABLED = os.environ.get("SMARTKB_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
-
-app = FastAPI(
-    title="SmartKBS - 智慧教学平台 API",
-    description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version=APP_VERSION,
-    docs_url="/docs" if _DOCS_ENABLED else None,
-    redoc_url="/redoc" if _DOCS_ENABLED else None,
-    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
-    lifespan=lifespan,
-)
-
-if not _DOCS_ENABLED:
-    logger.info(
-        "API 文档(/docs、/redoc、/openapi.json)已关闭; 开发机需查看请设 SMARTKB_DOCS_ENABLED=1 后重启"
-    )
-
-# AI 后台任务并发上限: 统一转 429, 避免在每个端点各写一遍 try/except
-from backend.ai_task_manager import TooManyAITasks
-from backend.auth_errors import AuthError, auth_error_response, log_auth_reject
-
-
-@app.exception_handler(TooManyAITasks)
-async def _handle_too_many_ai_tasks(request, exc: TooManyAITasks):
-    from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=429,
-                        content={"detail": f"您已有 {exc.limit} 个 AI 分析在进行中，请等待当前结果后再试"})
-
-
-# 未登录: 401 里带上原因码(expired / invalid / stale / missing)，前端好区分处理、日志好排查
-@app.exception_handler(AuthError)
-async def _handle_auth_error(request, exc: AuthError):
-    log_auth_reject(request, exc.code, where="dependency")
-    # 统一走 auth_error_response：401 一律捎带删掉 smartkb_token cookie
-    return auth_error_response(exc.code, exc.message)
-
-
-# CORS 配置（开发环境允许前端 dev server 跨域）
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    # 跨域只走 Bearer/query token（沙箱 iframe 为 null origin 且不带 cookie）；
-    # credentials=True + "*" 会让 starlette 对 null origin 预检不下发 ACAO，POST 全被浏览器拦
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    # 滑动续期的新令牌放在自定义头里，跨域时浏览器默认读不到，必须显式 expose
-    expose_headers=["X-Renew-Token"],
-)
-
-# Gzip 压缩（所有大于 100KB 的响应自动压缩；SSE 流式响应自动跳过压缩）
-app.add_middleware(SSEAwareGZipMiddleware, minimum_size=100000)
-
-# 注册认证中间件
-register_middleware(app)
-
-# ── 挂载 API 路由（按功能模块分组）──
-
-# 重构后的遗留模块路由
-from backend.api.score_router import router as score_router
-from backend.api.rollcall_router import router as rollcall_router
-from backend.api.class_drill_router import router as class_drill_router
-from backend.api.class_ladder_router import router as class_ladder_router
-from backend.api.downloads_router import router as downloads_router
-
-app.include_router(score_router, prefix="/api/scores", tags=["课堂积分"])
-app.include_router(rollcall_router, prefix="/api/rollcall", tags=["智能点名"])
-app.include_router(class_drill_router, prefix="/api/class-drill", tags=["课堂抽问"])
-app.include_router(class_ladder_router, prefix="/api/class-ladder", tags=["课堂闯关"])
-app.include_router(downloads_router, prefix="/api/downloads", tags=["文件下载"])
-# ── 新架构 API 路由 ──
-from backend.api.auth_router import router as auth_router
-from backend.api.users_router import router as users_router
-from backend.api.chat_router import router as chat_router
-from backend.api.history_router import router as history_router
-from backend.api.resources_router import router as resources_router
-from backend.api.tasks_router import router as tasks_router
-from backend.api.system_router import router as system_router
-from backend.api.files_router import router as files_router
-from backend.api.config_router import router as config_router
-from backend.api.question_router import router as question_router
-from backend.api.exam_router import router as exam_router
-from backend.api.paper_router import router as paper_router
-from backend.api.sharing_router import router as sharing_router
-from backend.api.dashboard_router import router as dashboard_router
-from backend.api.notification_router import router as notification_router
-from backend.api.export_router import router as export_router
-from backend.api.portfolio_router import router as portfolio_router
-from backend.api.analytics_router import router as analytics_router
-from backend.api.interaction_router import router as interaction_router
-from backend.api.discussion_router import router as discussion_router
-from backend.api.curriculum_router import router as curriculum_router
-from backend.api.lesson_cast_router import router as lesson_cast_router
-from backend.api.wrong_book_router import router as wrong_book_router
-from backend.api.practice_router import router as practice_router
-from backend.api.recommend_router import router as recommend_router
-from backend.api.reward_router import router as reward_router
-from backend.api.code_router import router as code_router
-from backend.api.quest_router import router as quest_router
-from backend.api.quick_quiz_router import router as quick_quiz_router
-from backend.api.activity_monitor_router import router as activity_monitor_router
-from backend.api.activity_reset_router import router as activity_reset_router
-from backend.api.companion_router import router as companion_router
-from backend.api.skill_router import router as skill_router
-from backend.api.whiteboard_router import router as whiteboard_router
-from backend.api.personal_canvas_router import router as personal_canvas_router
-from backend.api.portrait_router import router as portrait_router
-from backend.api.tracking_router import router as tracking_router
-from backend.api.upgrade_router import router as upgrade_router
-from backend.api.daily_discovery_router import router as daily_discovery_router
-from backend.api.news_router import router as news_router
-from backend.api.showcase_router import router as showcase_router
-
-app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
-app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
-app.include_router(activity_monitor_router, prefix="/api", tags=["活动监控"])
-app.include_router(activity_reset_router, prefix="/api", tags=["活动重置"])
-app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
-app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
-app.include_router(chat_router, prefix="/api/chat", tags=["对话"])
-app.include_router(history_router, prefix="/api/history", tags=["历史记录"])
-app.include_router(resources_router, prefix="/api/resources", tags=["资源中心"])
-app.include_router(tasks_router, prefix="/api/tasks", tags=["任务管理"])
-app.include_router(system_router, prefix="/api/system", tags=["系统工具"])
-app.include_router(files_router, prefix="/api/files", tags=["文件服务"])
-app.include_router(config_router, prefix="/api/config", tags=["系统配置"])
-app.include_router(question_router, prefix="/api/questions", tags=["试题库"])
-app.include_router(exam_router, prefix="/api/exams", tags=["考试发布"])
-app.include_router(paper_router, prefix="/api/exams", tags=["智能组卷"])
-app.include_router(sharing_router, prefix="/api/sharing", tags=["资源共享"])
-app.include_router(dashboard_router, prefix="/api/dashboard", tags=["仪表盘"])
-app.include_router(notification_router, prefix="/api/notifications", tags=["通知公告"])
-app.include_router(export_router, prefix="/api/export", tags=["数据导出"])
-app.include_router(portfolio_router, prefix="/api/portfolio", tags=["成长档案"])
-app.include_router(analytics_router, prefix="/api/analytics", tags=["学情分析"])
-app.include_router(interaction_router, prefix="/api/interaction", tags=["课堂互动"])
-app.include_router(discussion_router, prefix="/api/interaction", tags=["分组讨论"])
-app.include_router(curriculum_router, prefix="/api/curriculum", tags=["课程大纲"])
-app.include_router(lesson_cast_router, prefix="/api/curriculum/lesson-cast", tags=["AI 讲演"])
-app.include_router(wrong_book_router, prefix="/api/wrong-book", tags=["错题本"])
-app.include_router(practice_router, prefix="/api/practice", tags=["自适应出题"])
-app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源推荐"])
-app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
-app.include_router(code_router, prefix="/api", tags=["代码练习"])
-app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
-app.include_router(skill_router, prefix="/api/skills", tags=["技能管理"])
-app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
-app.include_router(personal_canvas_router, prefix="/api/explore", tags=["探索画布"])
-app.include_router(portrait_router, prefix="/api/portrait", tags=["我的画像"])
-app.include_router(tracking_router, prefix="/api", tags=["资源追踪"])
-app.include_router(upgrade_router, prefix="/api/system/upgrade", tags=["系统升级"])
-app.include_router(daily_discovery_router, prefix="/api", tags=["每日精选"])
-app.include_router(news_router, prefix="/api", tags=["热点新闻"])
-app.include_router(showcase_router, prefix="/api", tags=["荣耀殿堂"])
-# 配置同步服务接口（不出现在文档中）
-from backend.api.sync_service import router as sync_service_router
-app.include_router(sync_service_router, prefix="/api", tags=[])
-
-
-# ── 试题配图不做静态挂载 ──
-# 这里曾经 mount 了一个 StaticFiles("/api/files/question_media")。它被上面 files_router
-# 的 /api/files/{path:path} 完全遮蔽（Starlette 按注册顺序匹配），也就是说：现在是不生效
-# 的死代码，一旦有人调整注册顺序，就等价于"免登录下载全部教学配图"（中间件还把该路径
-# 列在 public_paths 里）。配图统一下走 files_router：登录校验 + 归属判断 + 访问审计。
-
-# ── 静态文件服务（前端构建产物） ──
-# 使用 catch-all 路由代替 mount，避免挂载点优先级高于 API 路由
-# 必须放在所有 API 路由之后，否则会拦截 API 请求
-_frontend_dist = Path(FRONTEND_DIST_DIR)
-if _frontend_dist.exists() and _frontend_dist.is_dir():
-    import re
-    _HASHED_FILE_RE = re.compile(r'^assets/.+\.[a-fA-F0-9]{8}\.(js|css|woff2?|png|svg)$')
-
-    #: 入口 HTML 必须每次回源校验。它引用的是带 hash 的 JS/CSS，缓存住 index.html
-    #: 就等于把整站钉死在旧版本上 —— 2026-10-06 现场即如此：服务器已换新包，
-    #: 浏览器仍跑旧包，管理员看到的是"下拉和新文案都没生效"。
-    _INDEX_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
-
-    # S2: 静态根目录的可读边界。uvicorn 会先把 URL 百分号解码再交给路由，于是
-    #   /%2e%2e%2f%2e%2e%2fbackend/smartkb.db     -> full_path = "../../backend/smartkb.db"
-    #   /..%5c..%5cbackend%5csystem_config.json   -> full_path = "..\..\backend\system_config.json"
-    # 这类写法直接落到下面。而 pathlib 的 "/" 拼接不做归一化：
-    #   Path(<dist>) / "../../backend/smartkb.db"  -> 词法上就在 dist 外面，is_file() 一判即通过；
-    #   Path(<dist>) / "C:/Windows/win.ini"        -> 绝对路径整体替换基目录，连 .. 都不必带。
-    # 旧写法只有那一个 is_file() 判断，结果是不登录就能拖走 13 MB 的 smartkb.db
-    # （1410 个账号的密码哈希）、system_config.json（AI Key），还能读源码与 .git/config。
-    # 现在两层拦截：① 形态判黑（反斜杠/盘符/点段/空段一律不当文件路径）；
-    # ② resolve() 归一化后必须仍在 dist 内（顺带收敛符号链接与词法穿越）。
-    # 越界与"文件不存在"回同一份 SPA 外壳：不给探测者区分信号，也不抛 500。
-    _DIST_ROOT = _frontend_dist.resolve()
-    _UNSAFE_PATH_CHARS = set('\\:*?"<>|')
-
-    def _spa_index() -> FileResponse:
-        """SPA 外壳：未知前端路由、越界路径、不存在的文件统一回这里"""
-        return FileResponse(str(_DIST_ROOT / "index.html"), headers=_INDEX_HEADERS)
-
-    def _resolve_dist_file(full_path: str):
-        """把 URL 路径段解析成 dist 内的真实文件；非法/越界/不存在一律返回 None"""
-        if not full_path or any(c in _UNSAFE_PATH_CHARS for c in full_path):
-            return None
-        # 空段与点段（//、./、../）正是穿越的载体，合法前端路由里不会出现
-        if any(seg in ("", ".", "..") for seg in full_path.split("/")):
-            return None
-        try:
-            requested = (_DIST_ROOT / full_path).resolve()
-            # Windows 下比较大小写不敏感，不会误伤 assets 里的 hash 文件名
-            if not requested.is_relative_to(_DIST_ROOT) or not requested.is_file():
-                return None
-        except (OSError, ValueError):
-            # 超长路径、非法字符、符号链接环等：按"不存在"处理即可，不值得抛 500
-            return None
-        return requested
-
-    @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
-        file_path = _resolve_dist_file(full_path)
-        if file_path is None:
-            return _spa_index()
-        headers = {}
-        if _HASHED_FILE_RE.match(full_path):
-            # 带 hash 的静态资源（assets/*.xxx.js/css 等）设置一年强缓存
-            headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif full_path.endswith('.json'):
-            # locale JSON 文件不缓存，确保翻译更新即时生效
-            headers["Cache-Control"] = "no-cache, must-revalidate"
-        elif full_path == "index.html":
-            headers.update(_INDEX_HEADERS)
-        return FileResponse(str(file_path), headers=headers)
-else:
-    logger.warning(f"前端构建目录不存在: {_frontend_dist}，请先执行 npm run build")
-
-
-# ── 启动入口（直接运行 python backend/main.py） ──
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "backend.main:app",
-        host=SERVER_HOST,
-        port=SERVER_PORT,
-        reload=True,
-        log_level="info",
-        # 白板快照/补丁是较大的单条消息。websockets 的 legacy 实现没有发送锁：
-        # uvicorn 自己的 keepalive ping 和业务 send_json 会同时进入 drain，
-        # 触发 `assert waiter is None or waiter.cancelled()`（现场日志里的
-        # "keepalive ping failed"）。sansio 实现由协议层串行化写入，才是正确选择。
-        ws="websockets-sansio",
-        # 前端已有 15s 的应用层 ping/pong；库心跳只负责兜底，放稀一点少占带宽。
-        ws_ping_interval=45,
-        ws_ping_timeout=20,
-        # 按消息压缩：白板一份快照实测 21KB，且是重复度极高的 JSON。一个班 55 人
-        # 同时在线时，下行带宽能降到原来的十分之一上下（浏览器默认就带
-        # permessage-deflate 扩展；实现不支持时 uvicorn 只会忽略并提示）。
-        # 注意：图片资产 base64 的重复度很低，实测只压到 0.74；真正的解法是
-        # 资产外链 + 增量补丁，不能指望 deflate。
-        ws_per_message_deflate=True,
-    )
+"""
+SmartKB 后端入口
+纯 FastAPI 应用，替代 Gradio 启动
+"""
+import json
+import os
+import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+# 确保项目根目录在 sys.path 中
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+
+from backend.config import SERVER_HOST, SERVER_PORT, FRONTEND_DIST_DIR
+from backend.database import init_db
+from backend.question_db import init_question_db
+from backend.logger import logger
+from backend.middleware import register_middleware, SSEAwareGZipMiddleware
+
+# 从 version.json 读取版本号
+_VERSION_FILE = Path(__file__).resolve().parent.parent / "version.json"
+
+def _get_app_version() -> str:
+    try:
+        with open(_VERSION_FILE, encoding="utf-8") as _f:
+            return json.load(_f).get("latest_version", "0.0.0")
+    except Exception:
+        logger.warning(f"无法读取版本文件: {_VERSION_FILE}")
+        return "0.0.0"
+
+APP_VERSION = _get_app_version()
+
+# ── 应用生命周期 ──
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动初始化 + 关闭清理"""
+    # ── startup ──
+    # 桌面版升级上来时，把旧版留在安装目录里的库/配置/配图先搬到用户数据目录（幂等、失败不阻断）
+    # 必须在 init_db 之前：否则会先在空目录里建出一个空库，再「发现目标已存在」而不迁移
+    try:
+        from backend.data_migration import migrate_legacy_data
+        migrate_legacy_data()
+    except Exception as e:
+        # 注意：本函数后面有局部 `import sys`，此处不能用 sys（会被当成局部变量而未绑定）
+        print(f"[main] 历史数据迁移检查失败（已忽略，不影响启动）: {e}")
+    init_db()
+    init_question_db()
+    try:
+        # 代码练习：判题任务只活在本进程，重启后把残留的「评分中」标记失败
+        from backend.code_grader import recover_stale_submissions
+        recover_stale_submissions()
+    except Exception as e:
+        print(f"[main] 代码练习残留判题回收失败: {e}", file=sys.stderr)
+    try:
+        # 代码练习：用例分归一到合计 100（早期题目按每个用例 1~2 分建，满分只有 10 甚至 1 分，
+        # 学生的分数、教师看到的平均分都跟着走，跨题没法比）。历史提交按同比例换算成百分制。
+        # 注意：这里必须从 code_score 导入，不能从 api.code_router 导入 ——
+        # 后者 import 一次要 15 秒（依赖全站路由与 AI 服务），会把 startup 同步阻塞住
+        from backend.code_score import normalize_all_case_scores
+        n = normalize_all_case_scores()
+        if n:
+            print(f"[main] 代码练习用例分已归一：{n} 道题", file=sys.stderr)
+    except Exception as e:
+        print(f"[main] 代码练习用例分归一失败: {e}", file=sys.stderr)
+    try:
+        # 压缩中间件自检：gzip 会把 SSE 攒到整条流结束才吐，症状只是“对话没有流式输出”。
+        # 它依赖 Starlette 的私有压缩钩子，钩子改过名、也就静默失效过一次，
+        # 所以启动时用一条真实的 text/event-stream 响应实测一遍；不通过就整体不压缩。
+        from backend.middleware import check_gzip_middleware
+        await check_gzip_middleware()
+    except Exception as e:
+        print(f"[main] GZip/SSE 自检失败: {e}", file=sys.stderr)
+    try:
+        # U-SEC: 未设置 JWT_SECRET_KEY 环境变量时沿用仓库内默认密钥, 存在令牌伪造面,
+        # 已在中间件里加"账号必须存在且 token_version>=1"的兜底, 这里仍提示运维改配置
+        from backend.config import JWT_SECRET_IS_DEFAULT
+        if JWT_SECRET_IS_DEFAULT:
+            logger.warning(
+                "[安全提示] 未设置环境变量 JWT_SECRET_KEY, 正在使用内置默认密钥; "
+                "请在部署环境设置随机密钥(设置后所有用户需重新登录)"
+            )
+    except Exception:
+        pass
+    try:
+        # 知识库检索预热：把 TLS 握手与服务端冷启动 costs 消化在启动期，
+        # 首个用户请求即可落在 keep-alive 热连接上（检索本身免费）
+        import threading
+        from backend import bailian_kb
+        threading.Thread(target=bailian_kb.warmup, daemon=True, name="kb-warmup").start()
+    except Exception:
+        pass
+    try:
+        from backend.api.sharing_router import cleanup_empty_dir_shares
+        cleanup_empty_dir_shares()
+    except Exception:
+        pass
+    try:
+        # 启动时自动清理无效的残留资源绑定（悬挂绑定 + 文件已不存在的脏共享行）
+        from backend.api.sharing_router import run_bind_repair
+        run_bind_repair()
+    except Exception as e:
+        print(f"[main] 启动自动清理资源绑定残留失败: {e}", file=sys.stderr)
+    try:
+        # R8: 清理点名临时状态表里"年级与班级名互相矛盾"的历史脏行
+        from backend.api.rollcall_router import prune_stale_rollcall_meta
+        prune_stale_rollcall_meta()
+    except Exception as e:
+        print(f"[main] 点名脏状态清理失败: {e}", file=sys.stderr)
+    try:
+        # 启动期数据口径治理(均幂等, 单项失败互不影响):
+        #   - 积分流水分桶/去前缀: 保证"按活动清理积分"能精确定位(活动重置前置)
+        #   - 存量通知 source_type/source_id 回填: 保证"按活动清理通知"不再空转
+        #   - 题库↔教材知识点 ID 关联补边: 让新入库/AI 生成的题自动进选题 T0 候选
+        from backend.notify_hygiene import backfill_notification_sources, dedupe_notifications
+        from backend.question_select import rebuild_kp_map
+        from backend.kp_link import ensure_table as ensure_kp_link_table
+        from backend.reward_hygiene import normalize_reward_activity_keys
+        _no_fix = []
+        for _repair in (normalize_reward_activity_keys, backfill_notification_sources,
+                        dedupe_notifications, ensure_kp_link_table, rebuild_kp_map):
+            try:
+                _res = _repair()
+                if _res.get("changed"):
+                    logger.info(f"[启动自检] {_repair.__name__} 已修复数据口径: {_res}")
+                else:
+                    _no_fix.append(_repair.__name__)
+            except Exception as repair_err:
+                logger.warning(f"[启动自检] {_repair.__name__} 失败(不阻断启动): {repair_err}")
+        if _no_fix:
+            logger.debug("[启动自检] 无需修复: " + ", ".join(_no_fix))
+    except Exception as e:
+        print(f"[main] 启动期数据治理加载失败: {e}", file=sys.stderr)
+    try:
+        # 实例守卫: 点名其他疑似存活实例(它们会锁住 backend.log 使轮转退避, 还会引发数据库锁重试)
+        from backend.instance_guard import enforce_log_writer_exclusion, warn_multi_instance
+        enforce_log_writer_exclusion()
+        warn_multi_instance()
+    except Exception as e:
+        print(f"[main] 实例守卫检查失败: {e}", file=sys.stderr)
+
+    try:
+        # 业务日志保留策略: 后台线程延迟清理, 防登录/浏览/通知等日志表无限增长
+        from backend.log_retention import start as start_log_retention
+        start_log_retention()
+    except Exception as e:
+        print(f"[main] 日志保留任务启动失败: {e}", file=sys.stderr)
+    try:
+        # S-GRADING: 主观题后台批量批改引擎(练习/考试/测验共用一个守护线程)
+        from backend.ai_grading import start as start_ai_grading
+        start_ai_grading()
+    except Exception as e:
+        print(f"[main] 主观题后台批改任务启动失败: {e}", file=sys.stderr)
+    try:
+        # P-7: 我的画像周期自动生成巡检（受 PORTRAIT_AUTO_PUSH 控制，默认关）
+        from backend.portrait_auto import start as start_portrait_auto
+        start_portrait_auto()
+    except Exception as e:
+        print(f"[main] 我的画像自动生成巡检启动失败: {e}", file=sys.stderr)
+    try:
+        # S1: 荣耀殿堂自动建卡巡检（受 SHOWCASE_AUTO_ENABLED 控制，默认开）
+        from backend.showcase_auto import start as start_showcase_auto
+        start_showcase_auto()
+    except Exception as e:
+        print(f"[main] 荣耀殿堂自动建卡巡检启动失败: {e}", file=sys.stderr)
+    try:
+        # 探索画布：素材自动清理每日线程（EXPLORE_SWEEP_DRY 默认只出清单不动文件）
+        from backend.explore_asset_sweeper import start as start_explore_sweeper
+        start_explore_sweeper()
+        from backend.explore_text_index import start_backfill as start_explore_text_index
+        start_explore_text_index()
+        # 聊天附件回收：只回收「已无历史引用且闲置 N 天」的文件
+        from backend.chat_asset_gc import start as start_chat_asset_gc
+        start_chat_asset_gc()
+    except Exception as e:
+        print(f"[main] 探索画布清理线程启动失败: {e}", file=sys.stderr)
+    try:
+        from backend.config_sync import try_sync_remote_config
+        import asyncio
+        asyncio.ensure_future(try_sync_remote_config())
+    except Exception:
+        pass
+    try:
+        # C1: 配置文件损坏时不再静默用默认值覆盖, 启动阶段显式告警
+        from backend.api.config_router import config_health
+        _cfg_health = config_health()
+        if _cfg_health.get("status") != "ok":
+            logger.error(
+                "[配置健康] system_config.json 状态异常: "
+                f"{_cfg_health}；请尽快在系统配置页面复核并重新保存"
+            )
+            # 只写日志等于没人看见 —— 同步给管理员发一条站内通知（同一状态只提醒一次）
+            try:
+                from backend.api.config_router import notify_admins_config_risk
+                notify_admins_config_risk()
+            except Exception as alert_err:
+                logger.debug(f"[配置健康] 告警通知未发出: {alert_err}")
+    except Exception as e:
+        print(f"[main] 配置文件健康检查失败: {e}", file=sys.stderr)
+    try:
+        # 存量配置补齐通知类型（success）：靠标记文件只执行一次，之后尊重管理员的勾选
+        from backend.notification_types import migrate_enabled_types
+        migrate_enabled_types()
+    except Exception as e:
+        print(f"[main] 通知类型迁移失败: {e}", file=sys.stderr)
+    try:
+        # 先对账上一次没走完的升级(被 --reload / 应用池回收打断的现场)，再启动后台版本检测
+        from backend.api.upgrade_router import reconcile_upgrade_state_on_startup
+        reconcile_upgrade_state_on_startup()
+    except Exception as e:
+        import sys
+        print(f"[main] 升级状态对账失败: {e}", file=sys.stderr)
+    try:
+        from backend.api.upgrade_router import start_auto_version_check
+        start_auto_version_check()
+    except Exception as e:
+        import sys
+        print(f"[main] 启动后台版本检测失败: {e}", file=sys.stderr)
+    try:
+        # 分组讨论：AI 助教自动引导后台循环（扫描进行中的讨论，冷场自动触发）
+        from backend.api.discussion_router import discussion_auto_trigger_loop
+        import asyncio as _asyncio
+        _auto_trigger_task = _asyncio.create_task(discussion_auto_trigger_loop())
+        _auto_trigger_task.set_name("discussion-auto-trigger")
+        app.state.discussion_auto_trigger_task = _auto_trigger_task
+    except Exception as e:
+        import sys
+        print(f"[main] 启动讨论 AI 自动引导失败: {e}", file=sys.stderr)
+    yield
+    # ── shutdown ──
+    _task = getattr(app.state, "discussion_auto_trigger_task", None)
+    if _task is not None:
+        _task.cancel()
+    pass
+
+
+# 创建 FastAPI 应用
+#
+# S1: 交互式 API 文档默认关闭。/docs 与 /openapi.json 都不带 /api/ 前缀，中间件把
+# 「非 /api/ 前缀」一律判为公开路径，于是任何人都能在未登录状态下拉走整份接口结构
+# （2026-10-26 实测：GET /openapi.json -> 200 / 455,493 字节，全部端点、参数与模型字段
+# 名一次性公开），等于把攻击面清单挂在大门口。
+# 需要看文档时显式打开：设环境变量 SMARTKB_DOCS_ENABLED=1 再重启。建议只在开发机开，
+# 校内/公网可访问的部署保持默认关闭。
+_DOCS_ENABLED = os.environ.get("SMARTKB_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+app = FastAPI(
+    title="SmartKBS - 智慧教学平台 API",
+    description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
+    version=APP_VERSION,
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
+    lifespan=lifespan,
+)
+
+if not _DOCS_ENABLED:
+    logger.info(
+        "API 文档(/docs、/redoc、/openapi.json)已关闭; 开发机需查看请设 SMARTKB_DOCS_ENABLED=1 后重启"
+    )
+
+# AI 后台任务并发上限: 统一转 429, 避免在每个端点各写一遍 try/except
+from backend.ai_task_manager import TooManyAITasks
+from backend.auth_errors import AuthError, auth_error_response, log_auth_reject
+
+
+@app.exception_handler(TooManyAITasks)
+async def _handle_too_many_ai_tasks(request, exc: TooManyAITasks):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=429,
+                        content={"detail": f"您已有 {exc.limit} 个 AI 分析在进行中，请等待当前结果后再试"})
+
+
+# 未登录: 401 里带上原因码(expired / invalid / stale / missing)，前端好区分处理、日志好排查
+@app.exception_handler(AuthError)
+async def _handle_auth_error(request, exc: AuthError):
+    log_auth_reject(request, exc.code, where="dependency")
+    # 统一走 auth_error_response：401 一律捎带删掉 smartkb_token cookie
+    return auth_error_response(exc.code, exc.message)
+
+
+# CORS 配置（开发环境允许前端 dev server 跨域）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    # 跨域只走 Bearer/query token（沙箱 iframe 为 null origin 且不带 cookie）；
+    # credentials=True + "*" 会让 starlette 对 null origin 预检不下发 ACAO，POST 全被浏览器拦
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    # 滑动续期的新令牌放在自定义头里，跨域时浏览器默认读不到，必须显式 expose
+    expose_headers=["X-Renew-Token"],
+)
+
+# Gzip 压缩（所有大于 100KB 的响应自动压缩；SSE 流式响应自动跳过压缩）
+app.add_middleware(SSEAwareGZipMiddleware, minimum_size=100000)
+
+# 注册认证中间件
+register_middleware(app)
+
+# ── 挂载 API 路由（按功能模块分组）──
+
+# 重构后的遗留模块路由
+from backend.api.score_router import router as score_router
+from backend.api.rollcall_router import router as rollcall_router
+from backend.api.class_drill_router import router as class_drill_router
+from backend.api.class_ladder_router import router as class_ladder_router
+from backend.api.downloads_router import router as downloads_router
+
+app.include_router(score_router, prefix="/api/scores", tags=["课堂积分"])
+app.include_router(rollcall_router, prefix="/api/rollcall", tags=["智能点名"])
+app.include_router(class_drill_router, prefix="/api/class-drill", tags=["课堂抽问"])
+app.include_router(class_ladder_router, prefix="/api/class-ladder", tags=["课堂闯关"])
+app.include_router(downloads_router, prefix="/api/downloads", tags=["文件下载"])
+# ── 新架构 API 路由 ──
+from backend.api.auth_router import router as auth_router
+from backend.api.users_router import router as users_router
+from backend.api.chat_router import router as chat_router
+from backend.api.history_router import router as history_router
+from backend.api.resources_router import router as resources_router
+from backend.api.tasks_router import router as tasks_router
+from backend.api.system_router import router as system_router
+from backend.api.files_router import router as files_router
+from backend.api.config_router import router as config_router
+from backend.api.question_router import router as question_router
+from backend.api.exam_router import router as exam_router
+from backend.api.paper_router import router as paper_router
+from backend.api.sharing_router import router as sharing_router
+from backend.api.dashboard_router import router as dashboard_router
+from backend.api.notification_router import router as notification_router
+from backend.api.export_router import router as export_router
+from backend.api.portfolio_router import router as portfolio_router
+from backend.api.analytics_router import router as analytics_router
+from backend.api.interaction_router import router as interaction_router
+from backend.api.discussion_router import router as discussion_router
+from backend.api.curriculum_router import router as curriculum_router
+from backend.api.lesson_cast_router import router as lesson_cast_router
+from backend.api.wrong_book_router import router as wrong_book_router
+from backend.api.practice_router import router as practice_router
+from backend.api.recommend_router import router as recommend_router
+from backend.api.reward_router import router as reward_router
+from backend.api.code_router import router as code_router
+from backend.api.quest_router import router as quest_router
+from backend.api.quick_quiz_router import router as quick_quiz_router
+from backend.api.activity_monitor_router import router as activity_monitor_router
+from backend.api.activity_reset_router import router as activity_reset_router
+from backend.api.companion_router import router as companion_router
+from backend.api.skill_router import router as skill_router
+from backend.api.whiteboard_router import router as whiteboard_router
+from backend.api.personal_canvas_router import router as personal_canvas_router
+from backend.api.portrait_router import router as portrait_router
+from backend.api.tracking_router import router as tracking_router
+from backend.api.upgrade_router import router as upgrade_router
+from backend.api.daily_discovery_router import router as daily_discovery_router
+from backend.api.news_router import router as news_router
+from backend.api.showcase_router import router as showcase_router
+
+app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
+app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
+app.include_router(activity_monitor_router, prefix="/api", tags=["活动监控"])
+app.include_router(activity_reset_router, prefix="/api", tags=["活动重置"])
+app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
+app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
+app.include_router(chat_router, prefix="/api/chat", tags=["对话"])
+app.include_router(history_router, prefix="/api/history", tags=["历史记录"])
+app.include_router(resources_router, prefix="/api/resources", tags=["资源中心"])
+app.include_router(tasks_router, prefix="/api/tasks", tags=["任务管理"])
+app.include_router(system_router, prefix="/api/system", tags=["系统工具"])
+app.include_router(files_router, prefix="/api/files", tags=["文件服务"])
+
+# 内容源：资源 HTML 独立 origin（跨域隔离替代 sandbox），Worker/wasm 原生运行
+from backend.content_server import start_content_server
+start_content_server()
+app.include_router(config_router, prefix="/api/config", tags=["系统配置"])
+app.include_router(question_router, prefix="/api/questions", tags=["试题库"])
+app.include_router(exam_router, prefix="/api/exams", tags=["考试发布"])
+app.include_router(paper_router, prefix="/api/exams", tags=["智能组卷"])
+app.include_router(sharing_router, prefix="/api/sharing", tags=["资源共享"])
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["仪表盘"])
+app.include_router(notification_router, prefix="/api/notifications", tags=["通知公告"])
+app.include_router(export_router, prefix="/api/export", tags=["数据导出"])
+app.include_router(portfolio_router, prefix="/api/portfolio", tags=["成长档案"])
+app.include_router(analytics_router, prefix="/api/analytics", tags=["学情分析"])
+app.include_router(interaction_router, prefix="/api/interaction", tags=["课堂互动"])
+app.include_router(discussion_router, prefix="/api/interaction", tags=["分组讨论"])
+app.include_router(curriculum_router, prefix="/api/curriculum", tags=["课程大纲"])
+app.include_router(lesson_cast_router, prefix="/api/curriculum/lesson-cast", tags=["AI 讲演"])
+app.include_router(wrong_book_router, prefix="/api/wrong-book", tags=["错题本"])
+app.include_router(practice_router, prefix="/api/practice", tags=["自适应出题"])
+app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源推荐"])
+app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
+app.include_router(code_router, prefix="/api", tags=["代码练习"])
+app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
+app.include_router(skill_router, prefix="/api/skills", tags=["技能管理"])
+app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
+app.include_router(personal_canvas_router, prefix="/api/explore", tags=["探索画布"])
+app.include_router(portrait_router, prefix="/api/portrait", tags=["我的画像"])
+app.include_router(tracking_router, prefix="/api", tags=["资源追踪"])
+app.include_router(upgrade_router, prefix="/api/system/upgrade", tags=["系统升级"])
+app.include_router(daily_discovery_router, prefix="/api", tags=["每日精选"])
+app.include_router(news_router, prefix="/api", tags=["热点新闻"])
+app.include_router(showcase_router, prefix="/api", tags=["荣耀殿堂"])
+# 配置同步服务接口（不出现在文档中）
+from backend.api.sync_service import router as sync_service_router
+app.include_router(sync_service_router, prefix="/api", tags=[])
+
+
+# ── 试题配图不做静态挂载 ──
+# 这里曾经 mount 了一个 StaticFiles("/api/files/question_media")。它被上面 files_router
+# 的 /api/files/{path:path} 完全遮蔽（Starlette 按注册顺序匹配），也就是说：现在是不生效
+# 的死代码，一旦有人调整注册顺序，就等价于"免登录下载全部教学配图"（中间件还把该路径
+# 列在 public_paths 里）。配图统一下走 files_router：登录校验 + 归属判断 + 访问审计。
+
+# ── 静态文件服务（前端构建产物） ──
+# 使用 catch-all 路由代替 mount，避免挂载点优先级高于 API 路由
+# 必须放在所有 API 路由之后，否则会拦截 API 请求
+_frontend_dist = Path(FRONTEND_DIST_DIR)
+if _frontend_dist.exists() and _frontend_dist.is_dir():
+    import re
+    _HASHED_FILE_RE = re.compile(r'^assets/.+\.[a-fA-F0-9]{8}\.(js|css|woff2?|png|svg)$')
+
+    #: 入口 HTML 必须每次回源校验。它引用的是带 hash 的 JS/CSS，缓存住 index.html
+    #: 就等于把整站钉死在旧版本上 —— 2026-10-06 现场即如此：服务器已换新包，
+    #: 浏览器仍跑旧包，管理员看到的是"下拉和新文案都没生效"。
+    _INDEX_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
+
+    # S2: 静态根目录的可读边界。uvicorn 会先把 URL 百分号解码再交给路由，于是
+    #   /%2e%2e%2f%2e%2e%2fbackend/smartkb.db     -> full_path = "../../backend/smartkb.db"
+    #   /..%5c..%5cbackend%5csystem_config.json   -> full_path = "..\..\backend\system_config.json"
+    # 这类写法直接落到下面。而 pathlib 的 "/" 拼接不做归一化：
+    #   Path(<dist>) / "../../backend/smartkb.db"  -> 词法上就在 dist 外面，is_file() 一判即通过；
+    #   Path(<dist>) / "C:/Windows/win.ini"        -> 绝对路径整体替换基目录，连 .. 都不必带。
+    # 旧写法只有那一个 is_file() 判断，结果是不登录就能拖走 13 MB 的 smartkb.db
+    # （1410 个账号的密码哈希）、system_config.json（AI Key），还能读源码与 .git/config。
+    # 现在两层拦截：① 形态判黑（反斜杠/盘符/点段/空段一律不当文件路径）；
+    # ② resolve() 归一化后必须仍在 dist 内（顺带收敛符号链接与词法穿越）。
+    # 越界与"文件不存在"回同一份 SPA 外壳：不给探测者区分信号，也不抛 500。
+    _DIST_ROOT = _frontend_dist.resolve()
+    _UNSAFE_PATH_CHARS = set('\\:*?"<>|')
+
+    def _spa_index() -> FileResponse:
+        """SPA 外壳：未知前端路由、越界路径、不存在的文件统一回这里"""
+        return FileResponse(str(_DIST_ROOT / "index.html"), headers=_INDEX_HEADERS)
+
+    def _resolve_dist_file(full_path: str):
+        """把 URL 路径段解析成 dist 内的真实文件；非法/越界/不存在一律返回 None"""
+        if not full_path or any(c in _UNSAFE_PATH_CHARS for c in full_path):
+            return None
+        # 空段与点段（//、./、../）正是穿越的载体，合法前端路由里不会出现
+        if any(seg in ("", ".", "..") for seg in full_path.split("/")):
+            return None
+        try:
+            requested = (_DIST_ROOT / full_path).resolve()
+            # Windows 下比较大小写不敏感，不会误伤 assets 里的 hash 文件名
+            if not requested.is_relative_to(_DIST_ROOT) or not requested.is_file():
+                return None
+        except (OSError, ValueError):
+            # 超长路径、非法字符、符号链接环等：按"不存在"处理即可，不值得抛 500
+            return None
+        return requested
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        file_path = _resolve_dist_file(full_path)
+        if file_path is None:
+            return _spa_index()
+        headers = {}
+        if _HASHED_FILE_RE.match(full_path):
+            # 带 hash 的静态资源（assets/*.xxx.js/css 等）设置一年强缓存
+            headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif full_path.endswith('.json'):
+            # locale JSON 文件不缓存，确保翻译更新即时生效
+            headers["Cache-Control"] = "no-cache, must-revalidate"
+        elif full_path == "index.html":
+            headers.update(_INDEX_HEADERS)
+        return FileResponse(str(file_path), headers=headers)
+else:
+    logger.warning(f"前端构建目录不存在: {_frontend_dist}，请先执行 npm run build")
+
+
+# ── 启动入口（直接运行 python backend/main.py） ──
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "backend.main:app",
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        reload=True,
+        log_level="info",
+        # 白板快照/补丁是较大的单条消息。websockets 的 legacy 实现没有发送锁：
+        # uvicorn 自己的 keepalive ping 和业务 send_json 会同时进入 drain，
+        # 触发 `assert waiter is None or waiter.cancelled()`（现场日志里的
+        # "keepalive ping failed"）。sansio 实现由协议层串行化写入，才是正确选择。
+        ws="websockets-sansio",
+        # 前端已有 15s 的应用层 ping/pong；库心跳只负责兜底，放稀一点少占带宽。
+        ws_ping_interval=45,
+        ws_ping_timeout=20,
+        # 按消息压缩：白板一份快照实测 21KB，且是重复度极高的 JSON。一个班 55 人
+        # 同时在线时，下行带宽能降到原来的十分之一上下（浏览器默认就带
+        # permessage-deflate 扩展；实现不支持时 uvicorn 只会忽略并提示）。
+        # 注意：图片资产 base64 的重复度很低，实测只压到 0.74；真正的解法是
+        # 资产外链 + 增量补丁，不能指望 deflate。
+        ws_per_message_deflate=True,
+    )

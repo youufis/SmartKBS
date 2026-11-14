@@ -397,5 +397,6 @@
   "previewWinFull": "全屏",
   "previewWinExitFull": "退出全屏",
   "previewWinReset": "恢复默认大小与位置",
-  "previewWinResizeHint": "拖动调整窗口大小"
+  "previewWinResizeHint": "拖动调整窗口大小",
+  "previewWinClose": "关闭"
 }

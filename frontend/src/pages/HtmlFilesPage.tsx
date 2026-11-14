@@ -15,7 +15,7 @@ import KindTag from '../components/KindTag'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import ResizableModal from '../components/ResizableModal'
-import { previewSrc } from '../api/files'
+import { previewSrc, contentPreviewUrl } from '../api/files'
 
 const HtmlFilesPage: React.FC = () => {
   const { t } = useTranslation(['menu', 'curriculum'])
@@ -854,7 +854,8 @@ const HtmlFilesPage: React.FC = () => {
         title={previewRes?.name || ''}
         open={!!previewRes}
         onClose={() => setPreviewRes(null)}
-        storageKey="smartkb_preview_html"
+        storageKey="smartkb_preview_html_v2"
+        flush
         footer={
           <Space>
             <a href={previewRes?.url} download style={{ textDecoration: 'none' }}>
@@ -866,8 +867,8 @@ const HtmlFilesPage: React.FC = () => {
       >
         {previewRes && (
           <iframe
-            src={previewSrc(previewRes.url)}
-            sandbox="allow-scripts allow-forms allow-popups allow-modals"
+            src={contentPreviewUrl(previewRes.url)}
+            sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin"
             style={{ width: '100%', height: '100%', border: 'none' }}
             title={previewRes.name}
           />

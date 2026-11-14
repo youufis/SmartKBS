@@ -4,7 +4,7 @@ import { fetchGrades } from '../api/gradeClass'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import ResizableModal from '../components/ResizableModal'
-import { previewSrc } from '../api/files'
+import { previewSrc, contentPreviewUrl } from '../api/files'
 import { Layout, Card, Tree, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress, Collapse, Segmented, Drawer, Grid, Alert, Switch } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 
@@ -2557,7 +2557,8 @@ const CurriculumPage: React.FC = () => {
         open={cwModal}
         onClose={() => setCwModal(false)}
         cancelDisabled={cwLoading}
-        storageKey="smartkb_preview_courseware"
+        storageKey="smartkb_preview_courseware_v2"
+        flush
         footer={
           cwLoading ? null : (
             <Space>
@@ -2577,8 +2578,8 @@ const CurriculumPage: React.FC = () => {
             <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('aiGeneratingCourseware')}</div>
           </div>
         ) : cwUrl ? (
-          <div style={{ height: '100%', border: '1px solid var(--border-color-secondary)', borderRadius: 4, overflow: 'hidden' }}>
-            <iframe src={previewSrc(cwUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals" style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
+          <div style={{ height: '100%', border: 'none', borderRadius: 0, overflow: 'hidden' }}>
+            <iframe src={contentPreviewUrl(cwUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
           </div>
         ) : null}
       </ResizableModal>
@@ -2589,7 +2590,8 @@ const CurriculumPage: React.FC = () => {
         open={podcastModal}
         onClose={() => setPodcastModal(false)}
         cancelDisabled={podcastLoading}
-        storageKey="smartkb_preview_podcast"
+        storageKey="smartkb_preview_podcast_v2"
+        flush
         footer={
           podcastLoading ? null : (
             <Space>
@@ -2705,8 +2707,8 @@ const CurriculumPage: React.FC = () => {
                     <Typography.Text type="warning" style={{ fontSize: 12 }}>{t('podcastTruncated')}</Typography.Text>
                   ) : null}
                 </Space>
-                <div style={{ height: 'calc(100% - 44px)', border: '1px solid var(--border-color-secondary)', borderRadius: 8, overflow: 'hidden' }}>
-                  <iframe src={previewSrc(podcastUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals" style={{ width: '100%', height: '100%', border: 'none' }} title={t('aiPodcastTitle')} />
+                <div style={{ height: 'calc(100% - 44px)', border: 'none', borderRadius: 0, overflow: 'hidden' }}>
+                  <iframe src={contentPreviewUrl(podcastUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" style={{ width: '100%', height: '100%', border: 'none' }} title={t('aiPodcastTitle')} />
                 </div>
               </div>
             )}

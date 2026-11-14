@@ -401,5 +401,6 @@
   "previewWinFull": "Fullscreen",
   "previewWinExitFull": "Exit fullscreen",
   "previewWinReset": "Reset size & position",
-  "previewWinResizeHint": "Drag to resize the window"
+  "previewWinResizeHint": "Drag to resize the window",
+  "previewWinClose": "Close"
 }
