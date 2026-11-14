@@ -4,7 +4,7 @@ import { fetchGrades } from '../api/gradeClass'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import ResizableModal from '../components/ResizableModal'
-import { previewSrc, contentPreviewUrl } from '../api/files'
+import { previewSrc } from '../api/files'
 import { Layout, Card, Tree, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress, Collapse, Segmented, Drawer, Grid, Alert, Switch } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 
@@ -2579,7 +2579,7 @@ const CurriculumPage: React.FC = () => {
           </div>
         ) : cwUrl ? (
           <div style={{ height: '100%', border: 'none', borderRadius: 0, overflow: 'hidden' }}>
-            <iframe src={contentPreviewUrl(cwUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
+            <iframe src={previewSrc(cwUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
           </div>
         ) : null}
       </ResizableModal>
@@ -2708,7 +2708,7 @@ const CurriculumPage: React.FC = () => {
                   ) : null}
                 </Space>
                 <div style={{ height: 'calc(100% - 44px)', border: 'none', borderRadius: 0, overflow: 'hidden' }}>
-                  <iframe src={contentPreviewUrl(podcastUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" style={{ width: '100%', height: '100%', border: 'none' }} title={t('aiPodcastTitle')} />
+                  <iframe src={previewSrc(podcastUrl)} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" style={{ width: '100%', height: '100%', border: 'none' }} title={t('aiPodcastTitle')} />
                 </div>
               </div>
             )}

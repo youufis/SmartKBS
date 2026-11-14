@@ -38,7 +38,7 @@
 > 📌 **Highlights of V9.1.0** (outline)
 >
 > - 🧭 **Explore Canvas (new)**: personal infinite canvas + floating AI companion (chat / image / read-aloud / voice / camera) + circle-to-ask + granted shares & template library + badges & care alerts; contiguous pages / page trash / timeline thumbnails / portfolio / mobile fit
-> - 🛡 **Security hardening**: share permission checks (forged re-share escalation blocked) · content-origin isolated HTML preview & attachment downloads · directory-browsing traversal guard · upload role/type/size limits · view-tracking visibility checks · exam anti-copy & watermark · export CSV formula-injection sanitization · user/score teaching-scope checks · password minimum length
+> - 🛡 **Security hardening**: share permission checks (forged re-share escalation blocked) · same-origin HTML preview (uploads restricted to teachers/admins) & attachment downloads · directory-browsing traversal guard · upload role/type/size limits · view-tracking visibility checks · exam anti-copy & watermark · export CSV formula-injection sanitization · user/score teaching-scope checks · password minimum length
 > - 📚 **Curriculum & practice**: server-side grading (no forged scores or answer leaks) · escaped question text & server-delivered explanations · same-course reorder check · recursive cascade delete + transactions · AI import unified at 20MB
 > - 🏷 **Question bank**: import & edit share one validation (malformed questions rejected) · cross-creator dedupe admin-only · extraction size caps & image magic-byte checks · generation dedupe · field length limits
 > - 📊 **Analytics & summaries**: scores student-ID migration (same-name separation, auto at startup) · ID-first aggregation · student analytics daily cap · class-summary prompt data isolation
@@ -46,7 +46,7 @@
 > - 📝 **Exams & analytics**: AI analysis / class-wide error review / practice & quiz analytics all export to Word (with per-question accuracy tables) · configurable multiple-choice scoring (default: no points for partial/wrong; optional half credit for partial; takes effect on save) · task-list failure retry & semantic score colors · live pulse & softer suggestions · unified Chinese type labels in exports · configurable export fonts (Word/Excel same criterion)
 > - 🎪 **Classroom interaction**: quiz race & class ladder rebuilt (server clock / resume on refresh / teacher control) · quest explanations after answering · discussion AI auto-guidance · announcement search & read tracking
 > - 📰 **News & discovery**: news favorites / search / unread · daily picks retry & poster · feed circuit-breaker & auto-switching
-> - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled · route-level code splitting (first-load -79%) · hand-drawn SVG radar · courseware external deps localized (offline instant load)
+> - ⚡ **Performance**: activity/score/user lists batched + cached · weekly-ranking SQL pushdown · portrait data cache · batch scoring single transaction · read endpoints thread-pooled · route-level code splitting (first-load -79%) · hand-drawn SVG radar · courseware external deps localized (offline instant load) · single-port deployment (same-origin preview, configurable port)
 > - 🎨 **Interface experience**: home/task-list skeletons · refresh entry & updated-at · visible-period revalidation & ticking countdowns · quick-action tiles · semantic tags dark-consistent · mobile wrap/overflow fixes · row-level keyboard access · unified icon language · draggable/resizable/fullscreen preview window · flush edge-to-edge preview & aligned controls
 >
 > - ⚠️ **Breaking changes**: none
@@ -1210,13 +1210,13 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 **🛡 Security hardening**
 
 - Share permission checks: forged re-share escalation blocked; re-share rows follow owner renames
-- Content-origin isolated HTML preview (courseware / podcast / resource center on a separate port); downloads HTML forced attachment
+- Same-origin HTML preview (courseware / podcast / resource center; uploads restricted to trusted teachers/admins); downloads HTML forced attachment
 - Uploads: file center restricted to teachers/admins + type whitelist; size pre-checks in three upload paths; AI import unified at 20MB
 - Directory-browsing traversal guard; view-tracking visibility checks + server-side lookup; diagnostic endpoint no longer echoes tokens
 - Exam protection: anti-copy + personal watermark (off by default)
 - Score protection: grade clearing limited to practice resources across bind/unbind/unshare/purge/delete; progress scores clamped
 - Export CSV formula-injection sanitization (summary / user exports); user/score read-write teaching-scope checks
-- Courseware content-origin isolation: separate port, cross-origin containment instead of sandbox restrictions
+- Courseware preview single-port same-origin: native cookie auth, Worker/wasm run natively
 - Password minimum length (configurable); error messages no longer leak internal details
 
 **📚 Curriculum & practice**
@@ -1273,6 +1273,7 @@ Current version **9.1.0**. Only changes a reader can notice are listed; per-comm
 - Portrait role-data cache; batch scoring/reset single transaction; read endpoints thread-pooled (async→def)
 - Route-level code splitting (first-load JS -79%); hand-drawn SVG radar keeps recharts off the first load
 - Courseware external deps localized: fonts / KaTeX / Chart.js bundled, offline instant load
+- Single-port deployment: same-origin courseware preview, no extra port; server port env-overridable
 
 **🎨 Interface experience**
 

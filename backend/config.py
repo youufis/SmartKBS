@@ -57,7 +57,7 @@ SUMMARY_DIR_NAME = "Summary"
 
 # ── 服务器配置 ──
 SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 8086
+SERVER_PORT = int(os.environ.get("SMARTKB_PORT", "8086"))
 
 # ── 默认用户 ──
 DEFAULT_LOGGED_IN_NAME = "root"
