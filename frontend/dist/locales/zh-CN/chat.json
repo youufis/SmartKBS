@@ -220,7 +220,7 @@
   "modeLlm": "大模型",
   "modeAgent": "智能体",
   "modeKb": "知识库",
-  "modeBadgeTip": "AI 对话链路由系统配置决定（优先级：知识库 > 智能体 > 大模型），教师/管理员可在「系统配置」调整",
+  "modeBadgeTip": "AI 对话链路由系统配置决定（优先级：知识库 > 智能体 > 大模型）。直连大模型时，徽章会标明实际引擎：云端模型＝百炼；本地模型＝Ollama 全本地应答；本地优先＝混合档，本地应答、故障自动回落云端。教师/管理员可在「系统配置 → AI 能力」调整",
   "pageTitle": "知识问答",
   "historyRangeAll": "全部",
   "historyRangeToday": "今天",
@@ -242,5 +242,8 @@
     "用一个生活例子解释牛顿第三定律"
   ],
   "attachmentExpired": "原附件已过期",
-  "historyYearLabel": "{{year}} 年"
+  "historyYearLabel": "{{year}} 年",
+  "modeLlmCloud": "云端模型",
+  "modeLlmLocal": "本地模型",
+  "modeLlmHybrid": "本地优先"
 }
