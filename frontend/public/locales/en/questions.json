@@ -227,6 +227,7 @@
   "answerSuccess": "Answer submitted successfully",
   "answerFail": "Failed to submit answer",
   "aiSuggestedAnswer": "AI generated a suggested answer, you can modify it before submitting",
+  "aiSuggestEmpty": "AI returned no suggested answer this time (the question may lack enough detail). Write it yourself or try another question.",
   "aiSuggestFail": "AI suggestion failed",
   "updated": "Updated",
   "updateFail": "Update failed",

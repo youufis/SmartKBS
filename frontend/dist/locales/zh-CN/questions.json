@@ -227,6 +227,7 @@
   "answerSuccess": "回答成功",
   "answerFail": "回答失败",
   "aiSuggestedAnswer": "AI 已生成建议回答，可修改后提交",
+  "aiSuggestEmpty": "AI 这次没有给出建议回答（题目信息可能不足以作答），可手动补写或换一题再试",
   "aiSuggestFail": "AI 建议失败",
   "updated": "已更新",
   "updateFail": "更新失败",

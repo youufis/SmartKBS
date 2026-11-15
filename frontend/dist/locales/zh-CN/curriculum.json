@@ -229,6 +229,7 @@
   "autoGenerateHtml": "自动生成 HTML 答题页面",
   "practiceGenerated": "✅ 练习已生成",
   "practiceNotBoundHint": "已存进「我的资源」，但还没绑定到课程，学生暂时看不到 —— 在知识点页的「绑定资源」里选中它即可上架",
+  "practiceGenerateEmpty": "练习生成失败：接口没有返回练习文件，请稍后重试，或改用其它生成方式",
   "openPreview": "打开预览",
   "practiceSaveHint": "提示：生成的文件保存在您的个人目录中，可前往「资源中心」共享并绑定到知识点",
   "done": "完成",

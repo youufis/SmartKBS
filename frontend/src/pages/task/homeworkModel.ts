@@ -5,6 +5,8 @@
  * 否则热更新整页失效（改一行要重进页面）。
  */
 import type { TaskInfo } from '../../types'
+import * as tasksApi from '../../api/tasks'
+import { pollAiTaskWithProgress } from '../../api/aiTask'
 
 /** 教师未填维度时的默认四维（与后端 homework.DEFAULT_RUBRIC 同一口径） */
 export const DEFAULT_DIMS = [
@@ -65,5 +67,37 @@ export const homeworkFromTask = (task: TaskInfo): HomeworkValue => ({
   grading_policy: (task.grading_policy || 'ai_then_review') as HomeworkValue['grading_policy'],
 })
 
-// 截止时间统一按后端口径存 'YYYY-MM-DD HH:MM:SS'（DatePicker 直接 format 出来）
-export const parseDeadline = (v: string) => (v ? Date.parse(v.replace(' ', 'T')) : NaN)
+// 截止时间统一按后端口径存 'YYYY-MM-DD HH:MM:SS'（DatePicker 直接 format 出来）。
+// 这里不再提供 parseDeadline：是否已截止一律由后端按服务器时间算好下发（P1-4），
+// 前端自己比时钟会被学生改本机时间绕过，留着这个函数就是在引诱下一轮再写回前端判断。
+
+/** 后台批改的产物（后端 _hw_grade_class / _hw_grade_one_student 的 result） */
+export interface FileGradingResult {
+  message?: string
+  needs_review_students?: string[]
+  similarity_pairs?: unknown[]
+}
+
+/**
+ * 起一个文件作业后台批改任务并轮询到结束。
+ *
+ * 列表上的「AI 批改」按钮与批改台里的批量按钮共用这一份，避免两处各写一遍轮询与超时口径。
+ * 文件作业走的是后台任务（不是同步长请求），全班几十人也能看到 done/total 进度。
+ */
+export async function startAndPollFileGrading(
+  taskId: string,
+  student?: string,
+  onPhase?: (text: string) => void,
+): Promise<FileGradingResult> {
+  const res = await tasksApi.startFileGradingJob(taskId, student)
+  const state = await pollAiTaskWithProgress(res.task_id, (p) => {
+    if (p?.phase) onPhase?.(`${p.phase}${p.total ? ` ${p.done ?? 0}/${p.total}` : ''}`)
+  }, 900000)
+  return (state.result || {}) as FileGradingResult
+}
+
+/** 提交上限：作业限额 + 教师额外给这个学生的次数（0 = 不限） */
+export const submitCeiling = (limit?: number, extra?: number): number => {
+  const l = Number(limit || 0)
+  return l ? l + Math.max(0, Number(extra || 0)) : 0
+}

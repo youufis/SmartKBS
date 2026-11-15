@@ -590,8 +590,11 @@ const WrongBookPage: React.FC = () => {
 
     // 教师/管理员 → 生成并弹窗预览，可直接布置
     if (!isStudent) {
-      // 立即弹窗显示 loading
+      // 立即弹窗显示 loading。题目清空了，但知识点与标题也要一起清 ——
+      // 生成要跑上一两分钟，期间弹窗顶部显示的还是上一位学生的知识点和姓名
       setGeneratedQuestions([])
+      setGenKp('')
+      setPubTitle('')
       setGenLoading(true)
       setPracticeModal(true)
       try {

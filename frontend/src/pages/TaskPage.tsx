@@ -1,12 +1,12 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Card, Table, Button, Modal, Input, Tag, Space, Checkbox, Alert, Radio, Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select, Empty } from 'antd'
+import { Card, Table, Button, Modal, Input, Tag, Space, Checkbox, Alert, Radio, Typography, Spin, Popconfirm, Popover, Tooltip, Collapse, Select, Empty, Dropdown } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
   CheckCircleOutlined, EyeOutlined, UndoOutlined,
   RobotOutlined, BarChartOutlined, QuestionCircleOutlined, BulbOutlined, ExpandAltOutlined,
-  EditOutlined,
+  EditOutlined, MoreOutlined, DownloadOutlined, CopyOutlined, NotificationOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
 import ListFilterBar from '../components/ListFilterBar'
@@ -24,7 +24,10 @@ import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
 import MobileCardTable from '../components/MobileCardTable'
 import { HomeworkForm, HomeworkBoard, HomeworkSubmitModal } from './task/HomeworkPanel'
-import { emptyHomework, homeworkFromTask, type HomeworkValue } from './task/homeworkModel'
+import {
+  emptyHomework, homeworkFromTask, startAndPollFileGrading,
+  type HomeworkValue,
+} from './task/homeworkModel'
 import { useIsMobile } from '../hooks/useIsMobile'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 
@@ -103,7 +106,12 @@ const TaskPage: React.FC = () => {
   const [taskKw, setTaskKw] = useState('')
   const [taskFilter, setTaskFilter] = useState('all')
   const [taskSubjectFilter, setTaskSubjectFilter] = useState('')
-  const taskStatusOf = (t: any) => (t?.status === 'active' ? 'active' : 'ended')
+  // 三态：进行中 / 已截止 / 已结束（P1-4）。"已截止"是后端按服务器时间算出来的派生态，
+  // 不改变 status 的含义 —— 教师仍然可以随时点「结束」，截止也不会把补批改与改分的窗口关掉
+  const taskStatusOf = (x: any): 'active' | 'expired' | 'ended' => (
+    x?.effective_status
+    || (x?.status === 'active' ? (x?.expired ? 'expired' : 'active') : 'ended'))
+
   const taskMatched = useMemo(() => {
     const base = pendingOnly && !isStudent
       ? tasks.filter((x) => (x.pending_grade_count ?? 0) > 0)
@@ -117,6 +125,7 @@ const TaskPage: React.FC = () => {
   }, [tasks, pendingOnly, isStudent, taskKw, taskSubjectFilter])
   const taskStatusCount = useMemo(() => ({
     active: taskMatched.filter((x) => taskStatusOf(x) === 'active').length,
+    expired: taskMatched.filter((x) => taskStatusOf(x) === 'expired').length,
     ended: taskMatched.filter((x) => taskStatusOf(x) === 'ended').length,
   }), [taskMatched])
   const visibleTasks = taskFilter === 'all'
@@ -132,6 +141,11 @@ const TaskPage: React.FC = () => {
   const [taskSubject, setTaskSubject] = useState('')
   // 正在编辑的作业 id（null = 新建）：同一个弹窗两用
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  // 提交方式只在"已有学生提交"后锁死（与后端同一条判据，P0-4）；
+  // 以前编辑态无条件锁，选错形态又没人交过，就只能删了重建
+  const [editModeLocked, setEditModeLocked] = useState(false)
+  // 复制模式下的源作业 id：非空时"确定"走 /duplicate，范围选择器一定可编辑
+  const [copySourceId, setCopySourceId] = useState<string | null>(null)
   const { subjects: subjectOptions } = useSubjectOptions()
   // 学科清单到位后补默认值（留空太容易漏填，作业就没有科目了）
   useEffect(() => {
@@ -150,27 +164,50 @@ const TaskPage: React.FC = () => {
   const [selectedTask, setSelectedTask] = useState<TaskInfo | null>(null)
 
   // 提交详情
-  const [submissionsDrawer, setSubmissionsDrawer] = useState(false)
+  const [submissionsModal, setSubmissionsModal] = useState(false)
   const [submissionsData, setSubmissionsData] = useState<{
-    task_name: string; task_status: string; submissions: tasksApi.TaskSubmission[]; count: number
-  }>({ task_name: '', task_status: '', submissions: [], count: 0 })
+    task_name: string; task_status: string; submissions: tasksApi.TaskSubmission[]; count: number;
+    expected_count?: number
+  }>({ task_name: '', task_status: '', submissions: [], count: 0, expected_count: 0 })
   const [submissionsLoading, setSubmissionsLoading] = useState(false)
   const [viewTask, setViewTask] = useState<TaskInfo | null>(null)
   // 深链 ?open=<作业id> 只处理一次（列表是异步来的，effect 会跑到第二遍）
   const deepLinkOpened = useRef(false)
 
+
   // 查看学生提交内容
-  const [contentDrawer, setContentDrawer] = useState(false)
+  const [contentModal, setContentModal] = useState(false)
   const [studentContent, setStudentContent] = useState('')
   const [contentLoading, setContentLoading] = useState(false)
 
-  // AI 批改
-  const [aiGradingTaskId, setAiGradingTaskId] = useState<string | null>(null)
-  const [gradesMap, setGradesMap] = useState<Record<string, tasksApi.AIGradeResult>>({})
-  const [classSummary, setClassSummary] = useState<tasksApi.AIClassSummary | null>(null)
+  // AI 批改：两种形态统一走后台任务，这里只记"哪份作业 / 哪个人"正在跑
+  // （键为 task.id，单人重批为 task.id:student）
+  const [gradingJobKey, setGradingJobKey] = useState<string | null>(null)
+  // 应交名单按需取（列表气泡点开才查），不在 /active 里逐作业算范围
+  const [rosterMap, setRosterMap] = useState<Record<string, tasksApi.TaskRoster>>({})
+  const [rosterBusy, setRosterBusy] = useState<string>('')
+  const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null)
+  // 对话作业的「通知成绩」进行中
+  const [notifyingGrades, setNotifyingGrades] = useState(false)
+  // 批改结果与全班总结必须自带"我属于哪份作业"。详情弹窗复用同一个组件实例，
+  // 以前两个 state 是页面级裸值，配上"有数据才覆盖"的写法，换一份没有批改记录的作业
+  // 打开，屏幕上仍是上一份的成绩与总结 —— 出现「已提交 0 / 已批改 2 / 总结人数 2」
+  // 这种三个数字互相打架的画面（线上实测）。归属写进 state，不匹配的回包一律丢掉。
+  const [grading, setGrading] = useState<{
+    taskId: string
+    map: Record<string, tasksApi.AIGradeResult>
+    summary: tasksApi.AIClassSummary | null
+  }>({ taskId: '', map: {}, summary: null })
+  const gradesMap = grading.map
+  const classSummary = grading.summary
+
+  /** 认领某份作业的批改数据：先清空再写；回包只允许落在仍然归属它的窗口里 */
+  const claimGrading = (taskId: string) => setGrading({ taskId, map: {}, summary: null })
+  const applyGrading = (taskId: string, map: Record<string, tasksApi.AIGradeResult>,
+    summary: tasksApi.AIClassSummary | null) =>
+    setGrading((cur) => (cur.taskId === taskId ? { taskId, map, summary } : cur))
   const [gradesLoading, setGradesLoading] = useState(false)
-  // 单个学生批改的行内 loading（键为学生用户名）
-  const [aiGradingStudent, setAiGradingStudent] = useState<string | null>(null)
+
 
   // 使用说明：不占版面，点标题旁「使用说明」弹窗查看（学生端/教师端同一交互）
   const [guideOpen, setGuideOpen] = useState(false)
@@ -209,10 +246,25 @@ const TaskPage: React.FC = () => {
   const handleCreate = async () => {
     if (!taskName.trim()) { message.warning(t('enterTaskName')); return }
     try {
+      if (copySourceId) {
+        // 复制：范围由教师在这里重选，提交与成绩一律不带过来
+        const res = await tasksApi.duplicateTask({
+          task_id: copySourceId, name: taskName.trim(),
+          ...taskScope,
+        })
+        message.success(res.message)
+        setCreateModal(false)
+        setCopySourceId(null)
+        setTaskName(''); setTaskDesc('')
+        setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
+        loadTasks()
+        return
+      }
       if (editingTaskId) {
         const res = await tasksApi.updateTask(editingTaskId, {
           name: taskName.trim(), description: taskDesc.trim(), subject: taskSubject,
-          // 截止/限额/维度随时可改；提交方式已由后端在有提交时锁死
+          // 截止/限额/维度随时可改；提交方式与目标范围由后端在"已有提交"时锁死
+          ...(editModeLocked ? {} : taskScope),
           ...hw,
         })
         message.success(res.message)
@@ -222,8 +274,9 @@ const TaskPage: React.FC = () => {
         loadTasks()
         return
       }
-      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope, taskSubject,
-        hw.submit_mode === 'conversation' ? undefined : hw)
+      // 对话作业同样下发截止/总分/迟交等字段（P1-3）。以前 conversation 一律传 undefined，
+      // 后端拿到的永远是默认值 —— 表单开放了也白搭，截止填了也不落库
+      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope, taskSubject, hw)
       message.success(res.message)
       setCreateModal(false)
       setTaskName('')
@@ -235,6 +288,23 @@ const TaskPage: React.FC = () => {
     }
   }
 
+  /** 复制作业：把源作业的要求与批改参数灌进新建表单，范围由教师重选 */
+  const openCopy = (record: TaskInfo) => {
+    setCopySourceId(record.id)
+    setEditingTaskId(null)
+    setTaskName((record.name + '-副本').slice(0, 60))
+    setTaskDesc(record.description || '')
+    setTaskSubject(record.subject || '')
+    setHw(homeworkFromTask(record))
+    setTaskScope({
+      target_scope: (record.target_scope || 'teacher_classes') as ActivityScopeValue['target_scope'],
+      target_grade: record.target_grade || '',
+      target_class: record.target_class || '',
+      target_users: record.target_users || '',
+    })
+    setCreateModal(true)
+  }
+
   // ── 结束任务 ──
   const handleEnd = async (taskId: string) => {
     try {
@@ -243,6 +313,58 @@ const TaskPage: React.FC = () => {
       loadTasks()
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('endFailed'))
+    }
+  }
+
+  // ── 编辑作业 ──
+  const openEdit = (record: TaskInfo) => {
+    setEditingTaskId(record.id)
+    setTaskName(record.name || '')
+    setTaskDesc(record.description || '')
+    setTaskSubject(record.subject || '')
+    setHw(homeworkFromTask(record))
+    // 范围现在可能在编辑态出现，必须先把当前范围灌进去：
+    // 否则显示的是默认"我任教班级"，教师点保存就等于偷偷改了可见范围
+    setTaskScope({
+      target_scope: (record.target_scope || 'teacher_classes') as ActivityScopeValue['target_scope'],
+      target_grade: record.target_grade || '',
+      target_class: record.target_class || '',
+      target_users: record.target_users || '',
+    })
+    // 提交方式与目标范围都只在已有提交后锁死（P0-4，与后端同一条判据）
+    setEditModeLocked(!!(record.submissions?.length ?? 0))
+    setCreateModal(true)
+  }
+
+  /**
+   * 「更多」菜单里的动作。结束与删除用确认弹窗 —— 下拉一收，Popconfirm 就跟着没了，
+   * 原来那种"图标 + Popconfirm"的写法在菜单里根本弹不出来。
+   */
+  const handleRowAction = (key: string, record: TaskInfo) => {
+    if (key === 'edit') { openEdit(record); return }
+    if (key === 'copy') { openCopy(record); return }
+    if (key === 'export') {
+      // 复用既有导出端点（/api/export/tasks 支持 task_id，且校验归属）
+      window.open('/api/export/tasks?task_id=' + encodeURIComponent(record.id), '_blank')
+      return
+    }
+    if (key === 'end') {
+      modalApi.confirm({
+        title: t('confirmEndTitle', { name: record.name }),
+        content: t('confirmEndDesc'),
+        okText: t('confirmEndOk'), cancelText: t('cancel'),
+        onOk: () => handleEnd(record.id),
+      })
+      return
+    }
+    if (key === 'delete') {
+      modalApi.confirm({
+        title: t('confirmDeleteTitle', { name: record.name }),
+        content: t('taskDeleteConfirmDesc'),
+        okText: t('confirmDeleteOk'), cancelText: t('cancel'),
+        okButtonProps: { danger: true },
+        onOk: () => handleDelete(record.id),
+      })
     }
   }
 
@@ -283,7 +405,7 @@ const TaskPage: React.FC = () => {
   const handleViewContent = async (studentUsername: string) => {
     if (!viewTask) return
     setContentLoading(true)
-    setContentDrawer(true)
+    setContentModal(true)
     setStudentContent(t('loading'))
     try {
       const data = await tasksApi.getTaskSubmissions(viewTask.id, studentUsername)
@@ -308,40 +430,93 @@ const TaskPage: React.FC = () => {
     }
   }
 
-  // ── AI 批改 ──
-  const handleAiGrade = async (taskId: string) => {
-    setAiGradingTaskId(taskId)
+  /**
+   * AI 批改：两种形态一律走后台批改任务（P0-1 + P1-3）。
+   *
+   * 以前这里分三条路：列表按钮不分形态一律打 /ai-grade（文件作业必然「汇总文件未找到」404）、
+   * 抽屉里对话作业走同步长请求（一个班几十段对话很容易超过请求等待上限，中途断连还得
+   * 整个重烧一遍 token）、批改台才是后台任务。现在统一一条：起任务 → 轮询进度 → 重取成绩与名单。
+   */
+  const runGradeJob = async (task: TaskInfo, student?: string, label?: string) => {
+    setGradingJobKey(student ? `${task.id}:${student}` : task.id)
+    // 同一条 toast 反复更新（antd 的 key 语义），批完全班不会刷出一屏提示
+    const key = 'task-grading-job'
+    message.loading({ content: t('hwJobStarted'), key, duration: 0 })
     try {
-      const res = await tasksApi.aiGradeTask(taskId)
-      message.success(res.message)
-      const map: Record<string, tasksApi.AIGradeResult> = {}
-      if (res.grades && res.grades.length > 0) {
-        res.grades.forEach(g => { map[g.student] = g })
-        setGradesMap(map)
-      } else {
-        message.warning(t('aiGradingFailed'))
-      }
-      if (res.summary) setClassSummary(res.summary)
+      const res = await startAndPollFileGrading(task.id, student,
+        (phase) => message.loading({ content: phase, key, duration: 0 }))
+      message.destroy(key)
+      message.success(res.message || (student
+        ? t('aiGradeStudentSuccess', { name: label || student })
+        : t('hwJobDone')))
+      if (res.similarity_pairs?.length) message.warning(t('hwSimFound', { n: res.similarity_pairs.length }))
+      if (res.needs_review_students?.length)
+        message.warning(t('hwAiMissed', { n: res.needs_review_students.length }))
+      // 抽屉开着就重新拉一次成绩与全班总结：两种形态的批改回包形状不同，
+      // 统一"重取"比在前端拼三种回包更不容易出错
+      if (viewTask?.id === task.id) void loadGrades(task.id)
+      loadTasks()
     } catch (err: any) {
-      message.error(t('aiGradeFailed') + ': ' + (err?.response?.data?.detail || err.message || t('unknownError')))
+      message.destroy(key)
+      if (err?.aiTaskTimeout) message.warning(t('hwJobTimeout'))
+      else message.error(err?.response?.data?.detail || err?.message || t('hwJobFailed'))
     } finally {
-      setAiGradingTaskId(null)
+      setGradingJobKey(null)
     }
   }
 
-  // ── 只批改一位学生：重批某个人或补批新提交，不动其他学生的成绩 ──
-  const handleAiGradeStudent = async (taskId: string, student: string, label: string) => {
-    setAiGradingStudent(student)
+  /**
+   * 对话作业的「通知成绩」：发通知 + 补发等级奖。
+   *
+   * 拍板③把发奖时机统一放进这个动作，可按钮此前只存在于文件作业的批改台里 ——
+   * 对话作业批完既没人收到通知，`award_grade` 也永远轮不到它发。
+   * 分数本身批完就能看（可见性已统一），这里补的是"告诉学生去查"那一步。
+   */
+  const notifyConversationGrades = async () => {
+    if (!viewTask) return
+    setNotifyingGrades(true)
     try {
-      const res = await tasksApi.aiGradeStudent(taskId, student)
-      if (res.grade) setGradesMap((prev) => ({ ...prev, [student]: res.grade }))
-      if (res.summary) setClassSummary(res.summary)
-      message.success(t('aiGradeStudentSuccess', { name: label }))
+      const res = await tasksApi.publishGrades(viewTask.id)
+      message[res.notified ? 'success' : 'warning']({
+        content: res.message, key: 'task-notify-grades', duration: 5,
+      })
       loadTasks()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || err?.message || t('aiGradeFailed'))
+      message.error(err?.response?.data?.detail || t('hwPublishFailed'))
     } finally {
-      setAiGradingStudent(null)
+      setNotifyingGrades(false)
+    }
+  }
+
+  /** 应交名单：点开气泡才取，同一作业缓存一份 */
+  const loadRoster = async (taskId: string) => {
+    if (rosterMap[taskId]) return
+    setRosterBusy(taskId)
+    try {
+      const r0 = await tasksApi.getTaskRoster(taskId)
+      setRosterMap((prev) => ({ ...prev, [taskId]: r0 }))
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('loadDetailFailed'))
+    } finally {
+      setRosterBusy('')
+    }
+  }
+
+  /** 一键催交（照搬练习侧的「提醒未提交」）：提醒完把名单缓存清掉，下次点开重新算 */
+  const handleRemind = async (taskId: string) => {
+    setRemindingTaskId(taskId)
+    try {
+      const res = await tasksApi.notifyUnsubmitted(taskId)
+      message.success(res.message)
+      setRosterMap((prev) => {
+        const next = { ...prev }
+        delete next[taskId]
+        return next
+      })
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('loadDetailFailed'))
+    } finally {
+      setRemindingTaskId(null)
     }
   }
 
@@ -390,22 +565,41 @@ const TaskPage: React.FC = () => {
   const asSteps = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : [])
   const guideSteps = asSteps(t(isStudent ? 'guide.studentSteps' : 'guide.teacherSteps', { returnObjects: true }))
 
-  // ── 加载批改结果 ──
+  /**
+   * 加载某份作业的批改结果与全班总结。
+   *
+   * 原来两个赋值都写成"有数据才覆盖"（成绩那份甚至写在 grades.length > 0 里面），于是换一份
+   * 还没有批改记录的作业打开，屏幕上仍是上一份的成绩与总结 —— 教师看到的是
+   * 「已提交 0 / 已批改 2 / 总结人数 2」这种自相矛盾的画面，只会以为系统算错了。
+   * 现在：先清空 → 再无条件覆盖 → 并且只接受当前作业的响应（点得快时旧请求可能后到）。
+   */
   const loadGrades = async (taskId: string) => {
     setGradesLoading(true)
+    claimGrading(taskId)
     try {
       const res = await tasksApi.getTaskGrades(taskId)
       const map: Record<string, tasksApi.AIGradeResult> = {}
-      if (res.grades && res.grades.length > 0) {
-        res.grades.forEach(g => { map[g.student] = g })
-        setGradesMap(map)
-      }
-      if (res.summary) setClassSummary(res.summary)
+      ;(res.grades || []).forEach(g => { map[g.student] = g })
+      // 空结果也照样覆盖：不覆盖的就是上一份作业的残留
+      applyGrading(taskId, map, res.summary || null)
     } catch {
-      // 忽略，可能还没有批改结果
+      // 没有批改结果是正常状态：保持清空后的样子，不把上一份的残留留给这一份
+      applyGrading(taskId, {}, null)
     } finally {
       setGradesLoading(false)
     }
+  }
+
+  /**
+   * 关闭详情：连带把这份作业的批改残留清掉。
+   *
+   * 批改结果与全班总结是页面级 state，不清的话下一份作业打开时会先闪出上一份的数字。
+   */
+  const closeDetail = () => {
+    setViewTask(null)
+    setSubmissionsModal(false)
+    setContentModal(false)
+    setGrading({ taskId: '', map: {}, summary: null })
   }
 
   // ── 查看提交详情（同时加载批改结果） ──
@@ -428,8 +622,13 @@ const TaskPage: React.FC = () => {
       return
     }
     setViewTask(task)
-    setSubmissionsDrawer(true)
+    setSubmissionsModal(true)
     setSubmissionsLoading(true)
+    // 打开新作业先认领它：上一份的批改残留到此为止（列表数据同一份口径）
+    claimGrading(task.id)
+    // 提交名单/应交人数也要清：弹窗是先打开再填的，不清的话加载那段时间里
+    // 名单仍是上一份作业的，标题却已经换成这一份了
+    setSubmissionsData({ task_name: task.name, task_status: task.status, submissions: [], count: 0, expected_count: 0 })
     try {
       const data = await tasksApi.getTaskSubmissions(task.id)
       setSubmissionsData({
@@ -437,12 +636,13 @@ const TaskPage: React.FC = () => {
         task_status: data.task_status,
         submissions: data.submissions,
         count: data.submission_count,
+        expected_count: data.expected_count ?? data.submission_count,
       })
       // 同时加载批改结果
       loadGrades(task.id)
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('loadDetailFailed'))
-      setSubmissionsData({ task_name: '', task_status: '', submissions: [], count: 0 })
+      setSubmissionsData({ task_name: '', task_status: '', submissions: [], count: 0, expected_count: 0 })
     } finally {
       setSubmissionsLoading(false)
     }
@@ -474,6 +674,8 @@ const TaskPage: React.FC = () => {
     setMyGradeTaskName(task.name)
     setMyGradeModal(true)
     setMyGradeLoading(true)
+    // 先清掉上一份作业的分数：标题已经换成这一份，分数还是上一份的比不显示更糟
+    setMyGrade(null)
     try {
       const res = await tasksApi.getTaskGrades(task.id)
       if (res.grades && res.grades.length > 0) {
@@ -493,19 +695,22 @@ const TaskPage: React.FC = () => {
 
   // ── 列定义 ──
   const studentStatusColumn = {
-    title: t('myStatus'), key: 'myStatus', width: 120,
+    title: t('myStatus'), key: 'myStatus', width: 150,
     render: (_: any, record: TaskInfo) => {
       const submitted = record.submissions?.includes(username)
-      const mode = record.submit_mode && record.submit_mode !== 'conversation'
+      // 截止与否用后端算好的 expired（P1-4）：学生本机时钟不可信
+      const expired = !!record.expired
       return (
         <Space size={4} wrap>
-          <Tag color={submitted ? 'success' : 'default'}>
+          <Tag color={submitted ? 'success' : expired ? 'red' : 'default'}>
             {submitted ? t('hwSubmittedShort') : t('notSubmitted')}
           </Tag>
-          {/* 文件作业批完默认待复核，学生先看到"批改中"而不是空白 */}
-          {submitted && mode && record.publish_status !== 'published' && (
-            <Tag color="processing">{t('hwGradingSoon')}</Tag>
-          )}
+          {!submitted && expired && <Tag color="orange">{t('hwStatusExpired')}</Tag>}
+          {/* 拍板口径③：两种形态一律"批完即可见"，所以这里看的是"我有没有有效分"，
+              不再是教师点没点通知 —— 以前文件作业批完了学生还看不到，只能显示"批改中" */}
+          {submitted && (record.my_graded
+            ? <Tag color="blue">{t('hwGradeViewable')}</Tag>
+            : <Tag color="processing">{t('hwGradingSoon')}</Tag>)}
         </Space>
       )
     },
@@ -557,19 +762,37 @@ const TaskPage: React.FC = () => {
       ),
     },
     {
-      title: t('status'), dataIndex: 'status', key: 'status', width: 70,
-      render: (s: string) => (
-        <Tag color={s === 'active' ? 'green' : 'default'}>
-          {s === 'active' ? t('inProgress') : t('ended')}
-        </Tag>
-      ),
+      title: t('status'), dataIndex: 'status', key: 'status', width: 90,
+      render: (_s: string, r: TaskInfo) => {
+        // 以前只看 status，过了截止时间仍显示"进行中"，而旁边的截止时间列自己算出
+        // 一个红色"已截止" —— 同一行两列口径打架。现在统一由后端算、这里只渲染。
+        const st = taskStatusOf(r)
+        const color = st === 'active' ? 'green' : st === 'expired' ? 'orange' : 'default'
+        const label = st === 'active' ? t('inProgress')
+          : st === 'expired' ? t('hwStatusExpired') : t('ended')
+        return <Tag color={color}>{label}</Tag>
+      },
     },
-    { title: t('createdTime'), dataIndex: 'created_time', key: 'created_time', width: 160 },
+    // 三列可排序：教师最常问的是"哪份快截止了"和"哪份交的人最少"
+    { title: t('createdTime'), dataIndex: 'created_time', key: 'created_time', width: 160,
+      sorter: (a: TaskInfo, b: TaskInfo) => String(a.created_time || '').localeCompare(String(b.created_time || '')),
+      defaultSortOrder: 'descend' as const },
     {
       title: t('hwDeadline'), key: 'deadline', width: 150,
+      // 没填截止的排最后（升序时"快截止的"就顶在最前面，不限期的不会插进来）
+      sorter: (a: TaskInfo, b: TaskInfo) => {
+        const x = String(a.deadline_at || ''), y = String(b.deadline_at || '')
+        if (!x && !y) return 0
+        if (!x) return 1
+        if (!y) return -1
+        return x.localeCompare(y)
+      },
       render: (_: any, r: TaskInfo) => {
         if (!r.deadline_at) return <Typography.Text type="secondary">-</Typography.Text>
-        const passed = new Date(r.deadline_at.replace(' ', 'T')).getTime() < Date.now()
+        // 与"状态"列共用同一个后端判据。以前这一列自己拿 Date.now() 比，
+        // 于是同一行里状态列说"进行中"、截止列说"已截止" —— 两个时钟各算一遍，
+        // 学生改本机时间还能让这里显示得和后端不一致。
+        const passed = taskStatusOf(r) === 'expired'
         return (
           <Space size={4}>
             <Typography.Text style={{ fontSize: 12 }} type={passed ? 'danger' : undefined}>{r.deadline_at}</Typography.Text>
@@ -581,37 +804,109 @@ const TaskPage: React.FC = () => {
     ...(isStudent
       ? [studentStatusColumn]
       : [{
-          title: t('submittedCount'), key: 'submissions', width: 156,
+          title: t('submittedCount'), key: 'submissions', width: 210,
+          sorter: (a: TaskInfo, b: TaskInfo) => (a.submissions?.length || 0) - (b.submissions?.length || 0),
           render: (_: any, record: TaskInfo) => {
-            const names = (record as any).submissions_names || []
             const count = record.submissions?.length || 0
-            if (count === 0) return <Typography.Text type="secondary">{t('zeroPeople')}</Typography.Text>
             const pending = record.pending_grade_count ?? 0
+            // 批过之后学生又重交的（P0-3）：旧分不动，单独一枚标签说清"这批要重批"
+            const stale = record.stale_grade_count ?? 0
+            const r0 = rosterMap[record.id]
+            const busy = rosterBusy === record.id
             return (
               <Space size={4}>
-              <Popover
-                title={t('submittedStudents')}
-                content={
-                  <div style={{ maxHeight: 200, overflow: 'auto' }}>
-                    {names.map((n: string, i: number) => (
-                      <div key={i} style={{ padding: '2px 0' }}>{n}</div>
-                    ))}
-                  </div>
-                }
-                trigger="click"
-              >
-                <Button type="link" size="small">{t('peopleCount', { count })} 👤</Button>
-              </Popover>
-              {pending > 0 && (
-                <Tag color="orange" style={{ marginInlineEnd: 0 }}>{t('pendingGradeTag', { n: pending })}</Tag>
-              )}
+                <Popover
+                  // 应交名单点开才取：在 /active 里逐作业算范围会把列表接口拖成新的 N+1
+                  trigger="click"
+                  onOpenChange={(open) => { if (open) loadRoster(record.id) }}
+                  title={(
+                    <Space size={6}>
+                      <span>{t('rosterTitle')}</span>
+                      {!!r0?.expected_count && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {t('hwExpectedShort', { n: r0.expected_count })}
+                        </Typography.Text>
+                      )}
+                    </Space>
+                  )}
+                  content={(
+                    <div style={{ maxWidth: 360, maxHeight: 300, overflow: 'auto' }}>
+                      {!r0 ? (
+                        <Typography.Text type="secondary">
+                          {busy ? t('loading') : t('hwClickRosterHint')}
+                        </Typography.Text>
+                      ) : (
+                        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                          <div>
+                            <Typography.Text style={{ fontSize: 12 }} strong>
+                              {t('submittedStudents')}（{r0.submitted.length}）
+                            </Typography.Text>
+                            {r0.submitted.length === 0 && (
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}> - </Typography.Text>
+                            )}
+                            {r0.submitted.map((x) => (
+                              <div key={x.username} style={{ padding: '2px 0', fontSize: 12 }}>
+                                {x.name || x.username}
+                                {x.class_name ? `（${x.class_name}）` : ''}
+                                {x.submitted_at ? ` · ${x.submitted_at.slice(5, 16)}` : ''}
+                                {x.late_submitted && <Tag color="volcano" style={{ marginInlineStart: 4 }}>{t('hwLate')}</Tag>}
+                                {x.stale && <Tag color="orange" style={{ marginInlineStart: 4 }}>{t('hwStaleTag')}</Tag>}
+                                {!x.in_scope && <Tag style={{ marginInlineStart: 4 }}>{t('hwOutOfScope')}</Tag>}
+                              </div>
+                            ))}
+                          </div>
+                          <div>
+                            <Typography.Text style={{ fontSize: 12 }} strong type="danger">
+                              {t('missingStudents')}（{r0.missing.length}）
+                            </Typography.Text>
+                            {r0.missing.length === 0 ? (
+                              <Typography.Text type="success" style={{ fontSize: 12, marginInlineStart: 6 }}>
+                                {t('hwAllSubmitted')}
+                              </Typography.Text>
+                            ) : (
+                              <div style={{ marginTop: 2 }}>
+                                {r0.missing.map((x) => (
+                                  <div key={x.username} style={{ padding: '2px 0', fontSize: 12 }}>
+                                    {x.name || x.username}
+                                    {x.class_name ? `（${x.class_name}）` : ''}
+                                  </div>
+                                ))}
+                                <Button
+                                  size="small" type="primary" ghost icon={<SendOutlined />}
+                                  style={{ marginTop: 6 }}
+                                  loading={remindingTaskId === record.id}
+                                  onClick={() => handleRemind(record.id)}
+                                >{t('hwRemindUnsubmitted')}</Button>
+                              </div>
+                            )}
+                          </div>
+                        </Space>
+                      )}
+                    </div>
+                  )}
+                >
+                  <Button type="link" size="small">{t('peopleCount', { count })} 👤</Button>
+                </Popover>
+                {!!r0?.expected_count && r0.expected_count > count && (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    / {t('hwExpectedShort', { n: r0.expected_count })}
+                  </Typography.Text>
+                )}
+                {pending > 0 && (
+                  <Tag color="orange" style={{ marginInlineEnd: 0 }}>{t('pendingGradeTag', { n: pending })}</Tag>
+                )}
+                {stale > 0 && (
+                  <Tooltip title={t('hwStaleHint')}>
+                    <Tag color="gold" style={{ marginInlineEnd: 0 }}>{t('hwStaleTagN', { n: stale })}</Tag>
+                  </Tooltip>
+                )}
               </Space>
             )
           },
         }]
     ),
     {
-      title: t('actions'), key: 'action', width: 280,
+      title: t('actions'), key: 'action', width: 190,
       render: (_: any, record: TaskInfo) => (
         <Space size="small" wrap>
           {isStudent && record.status === 'active' && (
@@ -641,54 +936,54 @@ const TaskPage: React.FC = () => {
             </Tooltip>
           )}
           {/* 编辑：名称/要求/学科（老作业的科目也在这里补） */}
+
+          {/* 批改入口一律在场。以前按"有没有人交"决定显不显示，同一列里图标忽有忽无，
+              教师只会以为功能坏了（实测反馈正是"少了一个批改图标"）；没人可批时置灰并
+              说清原因，而不是把按钮藏起来。两种形态一律走后台批改任务（P0-1 + P1-3），
+              不再按形态挑端点 —— 以前文件作业打只读 summary 的 /ai-grade，点一下必然 404。
+              注意 disabled 的按钮不响应 hover，所以 Tooltip 外面要再包一层 span。 */}
           {isAdminOrTeacher && (
-            <Tooltip title={t('edit')}>
-              <Button size="small" icon={<EditOutlined />}
-                onClick={() => {
-                  setEditingTaskId(record.id)
-                  setTaskName(record.name || '')
-                  setTaskDesc(record.description || '')
-                  setTaskSubject(record.subject || '')
-                  setHw(homeworkFromTask(record))
-                  setCreateModal(true)
-                }}
-              />
+            <Tooltip title={(record.submissions?.length ?? 0) > 0
+              ? t(isFileTask(record.submit_mode) ? 'aiGradeFileTooltip' : 'aiGradeTooltip')
+              : t('aiGradeNothingTooltip')}>
+              <span>
+                <Button size="small" icon={<RobotOutlined />}
+                  loading={gradingJobKey === record.id}
+                  disabled={(record.submissions?.length ?? 0) === 0
+                    || (!!gradingJobKey && gradingJobKey !== record.id)}
+                  onClick={() => runGradeJob(record)}
+                />
+              </span>
             </Tooltip>
           )}
-          {isAdminOrTeacher && record.submissions && record.submissions.length > 0 && (
-            <Tooltip title={t('aiGradeTooltip')}>
-              <Button size="small" icon={<RobotOutlined />}
-                loading={aiGradingTaskId === record.id}
-                onClick={() => handleAiGrade(record.id)}
-              />
-            </Tooltip>
-          )}
-          {isAdminOrTeacher && record.status === 'active' && (
-            <Popconfirm
-              title={t('confirmEndTitle', { name: record.name })}
-              description={t('confirmEndDesc')}
-              onConfirm={() => handleEnd(record.id)}
-              okText={t('confirmEndOk')} cancelText={t('cancel')}
-            >
-              <Tooltip title={t('endAction')}>
-                <Button size="small" icon={<CheckCircleOutlined />} />
-              </Tooltip>
-            </Popconfirm>
-          )}
+
           {isAdminOrTeacher && (
             <ResetActivityButton activityType="task" activityId={record.id}
               iconOnly stopPropagation onSuccess={loadTasks} />
           )}
+          {/* 低频与高危动作收进「更多」：原来一行 6 个纯图标，删除还会被挤到换行，
+              每个都要 hover 才知道是什么，误点一次就是删掉整份作业。
+              详情 / 批改 / 重置 留在外面（前两个天天点，重置自带三段式确认）。
+              菜单项一律带文字；结束与删除改走确认弹窗（下拉一关 Popconfirm 就没了）。 */}
           {isAdminOrTeacher && (
-            <Popconfirm
-              title={t('confirmDeleteTitle', { name: record.name })}
-              onConfirm={() => handleDelete(record.id)}
-              okText={t('confirmDeleteOk')} cancelText={t('cancel')}
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'edit', icon: <EditOutlined />, label: t('edit') },
+                  { key: 'export', icon: <DownloadOutlined />, label: t('hwExportReport') },
+                  { key: 'copy', icon: <CopyOutlined />, label: t('hwDuplicate') },
+                  ...(record.status === 'active'
+                    ? [{ type: 'divider' as const },
+                       { key: 'end', icon: <CheckCircleOutlined />, label: t('endAction') }] : []),
+                  { type: 'divider' as const },
+                  { key: 'delete', icon: <DeleteOutlined />, label: t('deleteAction'), danger: true },
+                ],
+                onClick: ({ key }) => handleRowAction(key, record),
+              }}
             >
-              <Tooltip title={t('deleteAction')}>
-                <Button size="small" danger icon={<DeleteOutlined />} />
-              </Tooltip>
-            </Popconfirm>
+              <Button size="small" icon={<MoreOutlined />} />
+            </Dropdown>
           )}
         </Space>
       ),
@@ -749,6 +1044,7 @@ const TaskPage: React.FC = () => {
           statusOptions={[
             { value: 'all', label: `${t('all')} (${taskMatched.length})` },
             { value: 'active', label: `${t('inProgress')} (${taskStatusCount.active})` },
+            { value: 'expired', label: `${t('hwStatusExpired')} (${taskStatusCount.expired})` },
             { value: 'ended', label: `${t('ended')} (${taskStatusCount.ended})` },
           ]}
           subject={taskSubjectFilter}
@@ -801,7 +1097,7 @@ const TaskPage: React.FC = () => {
 
       {/* 创建任务弹窗 */}
       <Modal mask={{ closable: false }}
-        title={editingTaskId ? t('edit') : t('createNewTask')}
+        title={copySourceId ? t('hwDuplicateTitle') : editingTaskId ? t('edit') : t('createNewTask')}
         open={createModal}
         onOk={handleCreate}
         onCancel={() => {
@@ -810,8 +1106,11 @@ const TaskPage: React.FC = () => {
           setTaskSubject(subjectOptions[0] || '')
           setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
           setHw(emptyHomework())
+          setEditModeLocked(false)
+          setCopySourceId(null)
         }}
-        okText={editingTaskId ? t('save') : t('createTask')} cancelText={t('cancel')}
+        okText={copySourceId ? t('hwDuplicateConfirm') : editingTaskId ? t('save') : t('createTask')}
+        cancelText={t('cancel')}
         width={640}
       >
         <Input
@@ -833,7 +1132,7 @@ const TaskPage: React.FC = () => {
         <HomeworkForm
           value={hw}
           onChange={setHw}
-          modeLocked={!!editingTaskId}
+          modeLocked={!!editingTaskId && editModeLocked}
         />
         {/* 学科：落库后作业列表与活动监控的"科目"列才显示得出来 */}
         <div style={{ marginTop: 12 }}>
@@ -845,11 +1144,17 @@ const TaskPage: React.FC = () => {
             options={subjectOptions.map(s => ({ value: s, label: s }))}
           />
         </div>
-        {/* 目标范围只在新建时可选：改它会影响已发布作业的可见范围，编辑模式隐藏 */}
-        {!editingTaskId && (
+        {/* 目标范围：新建与复制一定可选；编辑时只在"零提交"下开放（与后端同一条判据）。
+            以前编辑态整体隐藏，建错班级只能删了重建 —— 而删除会连带清掉文件与批改记录。 */}
+        {(!editingTaskId || !editModeLocked) && (
           <div style={{ marginTop: 16 }}>
             <ActivityScopeSelector value={taskScope} onChange={setTaskScope} />
           </div>
+        )}
+        {!!editingTaskId && editModeLocked && (
+          <Typography.Text type="warning" style={{ fontSize: 12, display: 'block', marginTop: 10 }}>
+            {t('hwScopeLockedHint')}
+          </Typography.Text>
         )}
       </Modal>
 
@@ -860,6 +1165,8 @@ const TaskPage: React.FC = () => {
         onOk={handleSubmit}
         onCancel={() => { setSubmitModal(false); setSelectedTask(null) }}
         okText={t('confirmSubmit')} cancelText={t('cancel')}
+        // 过期且教师关闭了迟交：按钮直接按不住，后端同样会拒（双保险）
+        okButtonProps={{ disabled: !!selectedTask?.expired && !selectedTask?.allow_late }}
       >
         <Space orientation="vertical">
           <Typography.Text>
@@ -872,6 +1179,13 @@ const TaskPage: React.FC = () => {
                 <FormulaRenderer content={selectedTask.description} breaks />
               </div>
             </div>
+          )}
+          {/* 对话作业现在也有截止时间了（P1-3）：过期就如实提示，allow_late=0 时后端会拒收 */}
+          {selectedTask?.expired && (
+            <Alert type={selectedTask.allow_late ? "warning" : "error"} showIcon
+              message={selectedTask.allow_late ? t("hwLate") : t("hwClosedNoSubmit")}
+              description={t("hwExpiredNote")}
+            />
           )}
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {t('totalMessagesCount', { count: messages.length })}
@@ -889,29 +1203,54 @@ const TaskPage: React.FC = () => {
         />
       )}
 
-      {/* 提交详情侧栏 */}
-      <Drawer
-        title={`📋 ${submissionsData.task_name || t('loading')}`}
-        placement="right"
-        size={760}
-        open={submissionsDrawer}
-        onClose={() => { setSubmissionsDrawer(false); setContentDrawer(false) }}
+      {/* 提交详情：改成弹窗。原来是 760px 的右侧抽屉 —— 批改台一行要放
+          姓名/班级/提交标签/分数/三个操作按钮，抽屉宽度不够就整行换行，
+          而且抽屉盖在列表上半遮半露，看完一条还得先关再点下一条。 */}
+      <Modal
+        mask={{ closable: false }}
+        open={submissionsModal}
+        onCancel={closeDetail}
+        footer={(<Button onClick={closeDetail}>
+          {t('close')}
+        </Button>)}
+        width="min(1120px, 94vw)"
+        styles={{ body: { maxHeight: '76vh', overflowY: 'auto', paddingTop: 8 } }}
+        title={(<Space wrap size={6}>
+          <span>📋 {submissionsData.task_name || t('loading')}</span>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('submittedCount')} {submissionsData.count}
+            {!!submissionsData.expected_count && ` / ${t('hwExpectedShort', { n: submissionsData.expected_count })}`}
+          </Typography.Text>
+        </Space>)}
       >
         <Spin spinning={submissionsLoading || gradesLoading}>
           <Space style={{ marginBottom: 16 }} wrap>
             <Tag color={submissionsData.task_status === 'active' ? 'green' : 'default'}>
               {submissionsData.task_status === 'active' ? t('inProgress') : t('ended')}
             </Tag>
-            {Object.keys(gradesMap).length > 0 && (
+            {/* 分母用"已提交"，且没有提交时不显示：以前这里能显示成「已批改 2/0 人」，
+                等于把上一份作业的 2 份成绩挂在这份 0 提交的作业上，看着像系统算错 */}
+            {submissionsData.count > 0 && Object.keys(gradesMap).length > 0 && (
               <Tag color="blue" icon={<RobotOutlined />}>
                 {t('gradedCount', { graded: Object.keys(gradesMap).length, total: submissionsData.count })}
               </Tag>
             )}
-            {viewTask && !isFileTask(viewTask.submit_mode) && submissionsData.submissions.length > 0 && (
+            {/* 同上：详情里这个按钮也不因为"还没人交"就消失，置灰 + 说明 */}
+            {viewTask && (
               <Button size="small" icon={<RobotOutlined />}
-                loading={aiGradingTaskId === viewTask.id}
-                onClick={() => handleAiGrade(viewTask.id)}
+                loading={gradingJobKey === viewTask.id}
+                disabled={submissionsData.submissions.length === 0}
+                onClick={() => runGradeJob(viewTask)}
               >{Object.keys(gradesMap).length > 0 ? t('regrade') : t('aiGradeAction')}</Button>
+            )}
+            {/* 拍板③把"发通知 + 发等级奖"统一成「通知成绩」，可这个动作以前只在文件作业的
+                批改台里有入口 —— 对话作业批完既没人收到通知，等级奖也永远轮不到它发。
+                分数本身批完就能看（可见性已统一），这里补的是"告诉学生去查"那一步。 */}
+            {viewTask && !isFileTask(viewTask.submit_mode) && Object.keys(gradesMap).length > 0 && (
+              <Button size="small" icon={<NotificationOutlined />}
+                loading={notifyingGrades}
+                onClick={notifyConversationGrades}
+              >{t('hwPublish')}</Button>
             )}
           </Space>
 
@@ -1096,8 +1435,8 @@ const TaskPage: React.FC = () => {
                         {viewTask && (
                           <Tooltip title={r.gradeInfo ? t('aiRegradeStudentTooltip') : t('aiGradeStudentTooltip')}>
                             <Button size="small" type="text" icon={<RobotOutlined />}
-                              loading={aiGradingStudent === r.username}
-                              onClick={() => handleAiGradeStudent(viewTask.id, r.username, studentLabel(r))}
+                              loading={gradingJobKey === viewTask.id + ':' + r.username}
+                              onClick={() => runGradeJob(viewTask, r.username, studentLabel(r))}
                             />
                           </Tooltip>
                         )}
@@ -1129,23 +1468,24 @@ const TaskPage: React.FC = () => {
           )}
         </Spin>
 
-        {/* 学生提交内容抽屉 */}
-        <Drawer
-          title={t('contentTitle')}
-          placement="right"
-          size={520}
-          open={contentDrawer}
-          onClose={() => setContentDrawer(false)}
-          getContainer={false}
-          style={{ position: 'absolute' }}
-        >
-          <Spin spinning={contentLoading}>
-            <div className="markdown-content">
-              <FormulaRenderer content={studentContent || t('noContent')} />
-            </div>
-          </Spin>
-        </Drawer>
-      </Drawer>
+      </Modal>
+
+      {/* 学生提交正文：同样改弹窗。弹窗里再套一个从右边抽出来的抽屉，
+          两层都盖住上一层，看到一半就不知道自己点的是谁了 */}
+      <Modal
+        title={t('contentTitle')}
+        open={contentModal}
+        onCancel={() => setContentModal(false)}
+        footer={<Button onClick={() => setContentModal(false)}>{t('close')}</Button>}
+        width={680}
+        styles={{ body: { maxHeight: '64vh', overflowY: 'auto' } }}
+      >
+        <Spin spinning={contentLoading}>
+          <div className="markdown-content">
+            <FormulaRenderer content={studentContent || t('noContent')} />
+          </div>
+        </Spin>
+      </Modal>
 
       <style>{`
         .requirement-box { max-height: 320px; overflow: auto; padding: 8px 10px; background: var(--bg-layout, #fafafa); border: 1px solid var(--border-color, #f0f0f0); border-radius: 4px; }

@@ -229,6 +229,7 @@
   "autoGenerateHtml": "Auto-generating HTML page",
   "practiceGenerated": "✅ Practice generated",
   "practiceNotBoundHint": "Saved to My Resources but not bound to the course yet - students cannot see it until you bind it in Bind Resources",
+  "practiceGenerateEmpty": "Practice generation returned no file. Try again later or use another generation path.",
   "openPreview": "Open Preview",
   "practiceSaveHint": "Tip: The generated file is saved in your personal directory.",
   "done": "Done",

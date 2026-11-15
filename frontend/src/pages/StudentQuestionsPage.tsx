@@ -713,6 +713,9 @@ const StudentQuestionsPage: React.FC = () => {
       if (data.suggested_answer) {
         setAnswerText(data.suggested_answer)
         message.success(t('aiSuggestedAnswer'))
+      } else {
+        // AI 这轮没给内容时不能只让按钮停转：教师会以为按钮没生效，再点一次、再点一次
+        message.info(data.message || t('aiSuggestEmpty'))
       }
     } catch { message.error(t('aiSuggestFail')) }
     finally { setAiSuggesting(false) }

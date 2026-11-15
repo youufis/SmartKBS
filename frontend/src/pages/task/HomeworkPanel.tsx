@@ -5,23 +5,21 @@
  * 口径：一次提交=一个批次(seq)，批改只看最后一次；AI 分默认待复核，教师点发布学生才可见。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Col, Empty, Image, Input, InputNumber, Modal, Progress, Radio, Row, DatePicker, Select, Space, Switch, Tag, Tooltip, Typography, Upload } from 'antd'
+import { Alert, Button, Card, Col, Collapse, Empty, Image, Input, InputNumber, Modal, Pagination, Popconfirm, Progress, Radio, Row, DatePicker, Select, Space, Switch, Tag, Tooltip, Typography, Upload } from 'antd'
 import { message, modalApi } from '../../utils/feedback'
 import {
   CameraOutlined, CheckCircleOutlined, CloudUploadOutlined, DeleteOutlined, DownloadOutlined,
-  FileTextOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined,
+  FileTextOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined, UndoOutlined,
 } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import * as tasksApi from '../../api/tasks'
 import type { HomeworkFileItem } from '../../api/tasks'
 import CameraCapture from '../../components/CameraCapture'
-import { useIsMobile } from '../../hooks/useIsMobile'
-import { pollAiTaskWithProgress } from '../../api/aiTask'
 import type { TaskInfo } from '../../types'
 import {
   DEFAULT_DIMS, statusMeta, fmtSize,
-  parseDeadline, type HomeworkValue,
+  startAndPollFileGrading, type HomeworkValue,
 } from './homeworkModel'
 
 const { Text, Paragraph } = Typography
@@ -84,7 +82,10 @@ export const HomeworkForm: React.FC<FormProps> = ({ value, onChange, modeLocked,
           {modeLocked && <Text type="warning" style={{ fontSize: 12, marginLeft: 8 }}>{t('hwModeLockedHint')}</Text>}
         </div>
 
-        {isFile && (
+        {/* 截止/总分/重交次数/允许迟交/批改策略 三种形态一律开放（P1-3）：后端列早就有，
+            以前被 isFile 整个挡在表单外，于是对话作业永远"无截止、随时能交、没有迟交"，
+            待办里也永远排到最后。收文件的字段仍按形态单独控制。 */}
+        {(
           <>
             <Row gutter={10}>
               <Col span={12}>
@@ -108,6 +109,7 @@ export const HomeworkForm: React.FC<FormProps> = ({ value, onChange, modeLocked,
                   value={value.total_score} onChange={(v) => set('total_score', Number(v) || 100)}
                 />
               </Col>
+              {isFile && (
               <Col span={8}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('hwMaxFiles')}</Text>
                 <InputNumber
@@ -115,6 +117,8 @@ export const HomeworkForm: React.FC<FormProps> = ({ value, onChange, modeLocked,
                   value={value.max_files} onChange={(v) => set('max_files', Number(v) || 3)}
                 />
               </Col>
+              )}
+              {isFile && (
               <Col span={8}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('hwMaxFileMb')}</Text>
                 <InputNumber
@@ -123,6 +127,7 @@ export const HomeworkForm: React.FC<FormProps> = ({ value, onChange, modeLocked,
                   onChange={(v) => set('max_file_mb', Number(v) || 10)}
                 />
               </Col>
+              )}
               <Col span={8}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('hwResubmitLimit')}</Text>
                 <InputNumber
@@ -153,8 +158,12 @@ export const HomeworkForm: React.FC<FormProps> = ({ value, onChange, modeLocked,
                   ]}
                 />
               </Col>
+              <Col span={24}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('hwVisibleNote')}</Text>
+              </Col>
             </Row>
 
+            {isFile && (<>
             <div>
               <Text type="secondary" style={{ fontSize: 12 }}>{t('hwDims')}</Text>
               {dims.map((d: { name: string; max: number }, i: number) => (
@@ -190,6 +199,8 @@ export const HomeworkForm: React.FC<FormProps> = ({ value, onChange, modeLocked,
               </Space>
             </div>
             <Text type="secondary" style={{ fontSize: 12 }}>{t('hwDeadlineNote')}</Text>
+            </>)}
+            {!isFile && <Text type="secondary" style={{ fontSize: 12 }}>{t('hwConvNoDims')}</Text>}
           </>
         )}
       </Space>
@@ -210,14 +221,11 @@ interface SubmitProps {
 
 export const HomeworkSubmitModal: React.FC<SubmitProps> = ({ task, open, onClose, onSubmitted }) => {
   const { t } = useTranslation('system')
-  const isMobile = useIsMobile()
   const [ov, setOv] = useState<tasksApi.HomeworkOverview | null>(null)
   const [picked, setPicked] = useState<File[]>([])
   const [note, setNote] = useState('')
   const [progress, setProgress] = useState<number | null>(null)
   const [cameraOpen, setCameraOpen] = useState(false)
-  // 时间基准放在 state：渲染期调 Date.now() 属于副作用，会让倒计时在重渲染时跳变
-  const [nowMs, setNowMs] = useState(() => Date.parse(new Date().toISOString()))
   const [loading, setLoading] = useState(false)
 
   const reload = useCallback(async () => {
@@ -231,18 +239,32 @@ export const HomeworkSubmitModal: React.FC<SubmitProps> = ({ task, open, onClose
     }
   }, [task.id, t])
 
-  useEffect(() => { if (open) { setNowMs(Date.parse(new Date().toISOString())); reload() } }, [open, reload])
+  useEffect(() => { if (open) reload() }, [open, reload])
 
   const maxFiles = ov?.max_files ?? task.max_files ?? 3
   const maxMb = ov?.max_file_mb ?? task.max_file_mb ?? 10
   const allowed = ov?.allowed_exts ?? []
   const mine = useMemo(() => (ov?.files || []).filter((f) => f.is_latest), [ov])
+  // 历次提交：后端没给 history 时退回"只看最新一批"，至少不空
+  const history = useMemo(() => {
+    if (ov?.history?.length) return ov.history
+    return mine.length
+      ? [{ seq: mine[0].seq, is_latest: true, submitted_at: '', late_submitted: false,
+           files: mine.map((f) => ({ id: f.id, filename: f.filename, kind: f.kind,
+             size: f.size, extract_status: f.extract_status, url: f.url })) }]
+      : []
+  }, [ov, mine])
   // 学生视角只看自己：后端每次提交把 seq 递增（首次=1），所以最新 seq 就是「已经交过的次数」
   const usedTimes = mine.length ? mine[0].seq : 0
   const limit = ov?.resubmit_limit ?? task.resubmit_limit ?? 3
-  const left = limit > 0 ? Math.max(0, limit - usedTimes) : Infinity
+  // 教师「允许再交一次」的次数要算进上限（P0-5），否则学生会看到"次数用完"却又真能交进去
+  const extra = ov?.extra_times ?? 0
+  const ceiling = limit > 0 ? limit + extra : 0
+  const left = ceiling > 0 ? Math.max(0, ceiling - usedTimes) : Infinity
   const deadline = ov?.deadline_at || task.deadline_at || ''
-  const closed = !!deadline && parseDeadline(deadline) < nowMs
+  // 是否已截止一律用后端算好的值（P1-4）：以前在这里拿浏览器时钟比 deadline，
+  // 学生把本机时间往回调就能绕过截止；名单接口还没回来时退回列表里同一份后端值
+  const closed = ov ? !!ov.expired : !!task.expired
   const canSubmit = left > 0 && (!closed || !!task.allow_late) && task.status === 'active'
 
   const pick = (files: File[]): boolean => {
@@ -320,15 +342,24 @@ export const HomeworkSubmitModal: React.FC<SubmitProps> = ({ task, open, onClose
           description={
             <Space size={6} wrap>
               <span>{deadline ? `${t('hwDeadline')}: ${deadline}` : t('hwNoDeadline')}</span>
-              <span>{limit > 0
-                ? t('hwTimesUsed', { used: usedTimes, left, limit })
+              <span>{ceiling > 0
+                ? t('hwTimesUsed', { used: usedTimes, left, limit: ceiling })
                 : t('hwUnlimitedTimes')}</span>
+              {!!extra && (
+                <Tag color="purple">{t('hwExtraTimes', { n: extra })}</Tag>
+              )}
             </Space>
           }
         />
-        {closed && <Alert type="warning" showIcon message={t('hwClosedWarn')} />}
-        {limit > 0 && left <= 0 && (
-          <Alert type="error" showIcon message={t('hwNoTimesLeft', { limit })}
+        {/* 截止 ≠ 结束（拍板④）：允许迟交时仍可交，只是记迟交；关闭了迟交就明确说不能交 */}
+        {closed && (
+          <Alert type={ov?.closed_for_submit ? "error" : "warning"} showIcon
+            message={t(ov?.closed_for_submit ? 'hwClosedNoSubmit' : 'hwClosedWarn')}
+            description={t('hwExpiredNote')}
+          />
+        )}
+        {ceiling > 0 && left <= 0 && (
+          <Alert type="error" showIcon message={t('hwNoTimesLeft', { limit: ceiling })}
             description={t('hwNoTimesLeftHint')} />
         )}
 
@@ -367,20 +398,40 @@ export const HomeworkSubmitModal: React.FC<SubmitProps> = ({ task, open, onClose
         {progress !== null && <Progress percent={progress} size="small" />}
 
         <div>
-          <Text type="secondary" style={{ fontSize: 12 }}>{t('hwMyLatest')}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('hwMyHistory')}</Text>
           {loading ? <Text style={{ marginLeft: 8 }}>{t('loading')}</Text> : (
-            mine.length ? (
-              <Space wrap style={{ marginTop: 6 }}>
-                {mine.map((f) => {
-                  const meta = statusMeta(f.extract_status)
+            history.length ? (
+              <Space orientation="vertical" size={8} style={{ width: '100%', marginTop: 6 }}>
+                {history.map((h) => {
+                  // 学生要能确认"老师收到的是哪一版"：以前只显示最新一批，
+                  // 重交过的学生自己都不知道现在生效的是第几版，只能去问老师
                   return (
-                    <Tag key={f.id} color={meta.color}
-                      icon={f.kind === 'image' ? undefined : <FileTextOutlined />}
-                      closable onClose={(e) => { e.preventDefault(); removeMine(f) }}
-                    >
-                      <a href={tasksApi.homeworkFileUrl(f.id)} download>{f.filename}</a>
-                      {' · '}{fmtSize(f.size)}{f.chars ? ` · ${f.chars}字` : ''}（{t(meta.key)}）
-                    </Tag>
+                    <div key={h.seq}>
+                      <Space wrap size={4}>
+                        <Tag color={h.is_latest ? 'cyan' : 'default'}>{t('hwSeq', { n: h.seq })}</Tag>
+                        {h.is_latest && <Tag color="success">{t('hwEffectiveVersion')}</Tag>}
+                        {!!h.submitted_at && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>{h.submitted_at}</Text>
+                        )}
+                        {h.late_submitted && <Tag color="volcano">{t('hwLate')}</Tag>}
+                      </Space>
+                      <div style={{ marginTop: 2 }}>
+                        <Space wrap size={4}>
+                          {h.files.map((f) => {
+                            const meta = statusMeta(f.extract_status)
+                            return (
+                              <Tag key={f.id} color={meta.color}
+                                closable={h.is_latest}
+                                onClose={(ev) => { ev.preventDefault(); removeMine(f as any) }}
+                              >
+                                <a href={f.url} download>{f.filename}</a>
+                                {' · '}{fmtSize(f.size)}（{t(meta.key)}）
+                              </Tag>
+                            )
+                          })}
+                        </Space>
+                      </div>
+                    </div>
                   )
                 })}
               </Space>
@@ -388,9 +439,9 @@ export const HomeworkSubmitModal: React.FC<SubmitProps> = ({ task, open, onClose
           )}
         </div>
 
-        {isMobile && (
-          <Button icon={<CameraOutlined />} onClick={() => setCameraOpen(true)}>{t('hwTakePhoto')}</Button>
-        )}
+        {/* 拍照上传不再只在手机出现：桌面接了摄像头/高拍台的学生同样要用。
+            CameraCapture 自己会处理"没有设备"，所以这里一律给入口，比按视口藏起来诚实。 */}
+        <Button icon={<CameraOutlined />} onClick={() => setCameraOpen(true)}>{t('hwTakePhoto')}</Button>
         <CameraCapture
           open={cameraOpen}
           onClose={() => setCameraOpen(false)}
@@ -407,9 +458,48 @@ export const HomeworkSubmitModal: React.FC<SubmitProps> = ({ task, open, onClose
 
 interface BoardProps {
   task: TaskInfo
+  /** 兜底名单（应交名单取不到时才用，只含已提交的人） */
   roster: { username: string; name: string }[]
   onChanged?: () => void
 }
+
+/** 批改台里的一行：应交名单打底，未交的学生也要成行（P1-1） */
+interface BoardPerson {
+  username: string
+  name: string
+  grade?: string
+  class_name?: string
+  submitted: boolean
+  submitted_at?: string
+  /** 批改过后又重交（P0-3） */
+  stale?: boolean
+  late?: boolean
+  /** 教师额外允许再交的次数（P0-5） */
+  extra_times?: number
+}
+
+type BoardFilter = 'submitted' | 'all' | 'missing' | 'ungraded' | 'review' | 'unpublished'
+
+/** 档位顺序：已交排第一，默认就停在这一档（见 activeFilter） */
+const FILTER_KEYS: BoardFilter[] = ['submitted', 'all', 'missing', 'ungraded', 'review', 'unpublished']
+
+/** 筛选档的词条键（平铺键，与其余 hw* 一致，不用点号嵌套） */
+const FILTER_LABELS: Record<BoardFilter, string[]> = {
+  submitted: ['hwFilterSubmitted'],
+  all: ['hwFilterAll'],
+  missing: ['hwFilterMissing'],
+  ungraded: ['hwFilterUngraded'],
+  review: ['hwFilterReview'],
+  unpublished: ['hwFilterUnpublished'],
+}
+
+/** 一行一条、默认收起，一屏 20 人够横向比对；再多人靠分页，而不是把教师埋在长页里 */
+const BOARD_PAGE = 20
+
+/** 空年级/空班级归成一档（这些人不能因为字段为空就从筛选里消失）。
+    线上传的是哨兵值、显示交给 i18n —— 拿中文当协议值的话，英文界面既显示中文、
+    又往后端发一个中文串，翻译一改就断。 */
+const NO_SCOPE_VALUE = '__none__'
 
 const criterionIcon = (s?: string) => (s === 'met' ? '✅' : s === 'missing' ? '❌' : '🟡')
 
@@ -422,11 +512,32 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
   const [missing, setMissing] = useState<string[]>([])
   const [review, setReview] = useState<{ student: string; score: number; comment: string } | null>(null)
   const [preview, setPreview] = useState<HomeworkFileItem | null>(null)
+  const [roster0, setRoster0] = useState<tasksApi.TaskRoster | null>(null)
+  // 档位默认不写死：交给"有没有人交"决定（见 activeFilter）。
+  // 发向全体的作业应交上千人，默认停在"全部"就等于第一屏全是未交的人，
+  // 教师进来什么也干不了 —— 他要看的永远是"已经交上来的这几份"。
+  const [filter, setFilter] = useState<BoardFilter | null>(null)
+  const [page, setPage] = useState(1)
+  // 人头列表默认全部收起（教师第一眼要扫的是"谁交了、几分、要不要人工"，
+  // 不是几十屏评语）；点开某一行才展开维度分与要求点
+  const [openKeys, setOpenKeys] = useState<string[]>([])
+  const [pageSize, setPageSize] = useState(BOARD_PAGE)
+  // 批改台内的班级筛选：发给全体的作业应交上千人，只看状态档仍然翻不动。
+  // 选项来自名单本身（people 的 class_name），与列表页那个下拉同源同理。
+  const [classFilter, setClassFilter] = useState('')
+  // 年级在前、班级在后：发给全体的作业横跨几个年级，直接列几十个班不好选
+  const [gradeFilter, setGradeFilter] = useState('')
 
   const load = useCallback(async () => {
     try {
-      const [o, g] = await Promise.all([tasksApi.getTaskFiles(task.id), tasksApi.getTaskGrades(task.id)])
+      // 应交名单与文件清单一起取：批改台的分母从此是"该谁交"，不再是"谁交了"（P0-2 / P1-1）
+      const [o, g, rs] = await Promise.all([
+        tasksApi.getTaskFiles(task.id),
+        tasksApi.getTaskGrades(task.id),
+        tasksApi.getTaskRoster(task.id).catch(() => null),
+      ])
       setOv(o)
+      setRoster0(rs)
       const map: Record<string, tasksApi.AIGradeResult> = {}
       ;(g.grades || []).forEach((x) => { map[x.student] = x })
       setGrades(map)
@@ -435,23 +546,154 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
     }
   }, [task.id, t])
 
+  // 换一份作业先把上一份的批改数据清掉：批改台是同一个组件实例复用，
+  // 不清的话 fetch 回来之前那几秒显示的是别的作业的成绩与名单
+  useEffect(() => {
+    setOv(null)
+    setGrades({})
+    setRoster0(null)
+    setMissing([])
+    setOpenKeys([])
+    setPage(1)
+  }, [task.id])
+
   useEffect(() => { load() }, [load])
 
-  const submitted = ov?.submissions || {}
+  // ov 每次重新赋值都是新对象，这里过一层 useMemo，免得下游 people/filtered 的依赖每轮都变
+  const submitted = useMemo(() => ov?.submissions || {}, [ov])
   const filesOf = useCallback((stu: string) =>
     (ov?.files || []).filter((f) => f.student === stu && f.is_latest), [ov])
+
+  /**
+   * 批改台的人头表：应交名单（含一个都没交的）打底，交过的补上提交时间/迟交/待重批。
+   *
+   * 名单取不到时（只读预览等）退回"提交名单"，功能不受影响，
+   * 但分母会退化成已交人数 —— 这一点由顶部的 hwRosterUnknown 标签如实告诉教师。
+   */
+  const people = useMemo<BoardPerson[]>(() => {
+    const map = new Map<string, BoardPerson>()
+    ;(roster0?.missing || []).forEach((x) => map.set(x.username, {
+      username: x.username, name: x.name || x.username,
+      grade: x.grade, class_name: x.class_name, submitted: false,
+    }))
+    ;(roster0?.submitted || []).forEach((x) => map.set(x.username, {
+      username: x.username, name: x.name || x.username,
+      grade: x.grade, class_name: x.class_name, submitted: true,
+      submitted_at: x.submitted_at, stale: x.stale, late: x.late_submitted, extra_times: x.extra_times,
+    }))
+    if (!roster0) {
+      roster.forEach((x) => map.set(x.username, {
+        username: x.username, name: x.name || x.username, submitted: true,
+        stale: (ov?.stale_students || []).includes(x.username),
+        extra_times: (submitted[x.username] as any)?.extra_times,
+      }))
+    }
+    // String() 是必需的，不是洁癖：users.class 在遗留数据里是数字（"3"），
+    // 后端已经统一走 attach_student_info 规范化，但前端这里再兜一层 ——
+    // 一个 localeCompare is not a function 会把整块批改台白屏掉
+    return [...map.values()].sort((a, b) =>
+      String(a.class_name || '').localeCompare(String(b.class_name || '')) ||
+      String(a.name || '').localeCompare(String(b.name || '')))
+  }, [roster0, roster, ov, submitted])
+
+  const expectedCount = roster0 ? roster0.expected_count : 0
+  const submittedCount = people.filter((p) => p.submitted).length
+  const missingCount = people.filter((p) => !p.submitted).length
+  const staleCount = people.filter((p) => p.stale).length
+
+  const activeFilter: BoardFilter = filter ?? (submittedCount > 0 ? 'submitted' : 'all')
+
+  /** 自然序：高一2班 要排在 高一10班 前面，纯字符串比较会反过来 */
+  const naturalSort = (a: string, b: string) => {
+    const na = +(a.match(/\d+/) || [0])[0], nb = +(b.match(/\d+/) || [0])[0]
+    return a.replace(/\d+/g, '').localeCompare(b.replace(/\d+/g, ''), 'zh') || na - nb || a.localeCompare(b, 'zh')
+  }
+  const gradeOf = (p: BoardPerson) => String(p.grade || '').trim() || NO_SCOPE_VALUE
+  const classOf = (p: BoardPerson) => String(p.class_name || '').trim() || NO_SCOPE_VALUE
+  /** 哨兵值只活在筛选逻辑与网络里，界面上永远显示译文 */
+  const scopeLabel = (v: string) => (v === NO_SCOPE_VALUE ? t('hwNoScope') : v)
+
+  /** 年级选项来自名单本身，不另找一处年级清单：两处不同源就会出现选了年级、下面空一片 */
+  const boardGradeOptions = useMemo(
+    () => [...new Set(people.map(gradeOf))].sort(naturalSort), [people])
+
+  /** 班级选项跟着已选年级收窄；没选年级时列全部 */
+  const boardClassOptions = useMemo(() => {
+    const src = gradeFilter ? people.filter((p) => gradeOf(p) === gradeFilter) : people
+    return [...new Set(src.map(classOf))].sort(naturalSort)
+  }, [people, gradeFilter])
+
+  /** 年级/班级先于状态生效：档位上的数字必须跟着一起变，
+      否则"已交 (3)"配下面只剩 1 行，教师不敢信这些数 */
+  const byClass = useMemo(() => {
+    let list = people
+    if (gradeFilter) list = list.filter((p) => gradeOf(p) === gradeFilter)
+    if (classFilter) list = list.filter((p) => classOf(p) === classFilter)
+    return list
+  }, [people, gradeFilter, classFilter])
+
+  /** 判定只写一处：档位计数与列表过滤共用，避免「标签写 3 人、点进去 2 人」 */
+  const matchesFilter = useCallback((p: BoardPerson, k: BoardFilter): boolean => {
+    const g = grades[p.username]
+    const score = g ? (g.teacher_score ?? g.ai_score) : null
+    if (k === 'submitted') return p.submitted
+    if (k === 'missing') return !p.submitted
+    if (k === 'ungraded') return p.submitted && score == null
+    if (k === 'review') return !!g?.needs_review
+    if (k === 'unpublished') return !!g && g.published === false && score != null
+    return true
+  }, [grades])
+
+  const filtered = useMemo(() => byClass.filter((p) => matchesFilter(p, activeFilter)),
+    [byClass, matchesFilter, activeFilter])
+
+  // 每一档都带人数：上千人的名单里，教师得先知道「未批改到底有几个人」才知道点哪档
+  const filterCounts = useMemo(() => {
+    const m = {} as Record<BoardFilter, number>
+    FILTER_KEYS.forEach((k) => { m[k] = byClass.filter((p) => matchesFilter(p, k)).length })
+    return m
+  }, [byClass, matchesFilter])
+
+  const shown = filtered.slice((page - 1) * BOARD_PAGE, page * BOARD_PAGE)
+  // 展开/收起合成一个开关（与聊天历史同一交互），全展开时再点就是收起
+  const allOpen = shown.length > 0 && shown.every((p) => openKeys.includes(p.username))
+
+  /** 允许某个学生再交一次（P0-5）：只放宽限额，不动已交的文件与成绩 */
+  const grant = async (stu: string) => {
+    setBusy('grant:' + stu)
+    try {
+      const res = await tasksApi.grantResubmit(task.id, stu)
+      message.success(res.message)
+      await load()
+      onChanged?.()
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('saveFailed'))
+    } finally { setBusy(null) }
+  }
+
+  /** 一键催交（P1-2）：走通知中心，与练习侧「提醒未提交」同一口径 */
+  const remind = async () => {
+    setBusy('remind')
+    try {
+      const res = await tasksApi.notifyUnsubmitted(task.id, { grade: gradeFilter, className: classFilter })
+      message.success(res.message)
+      await load()
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('hwRemindFailed'))
+    } finally { setBusy(null) }
+  }
 
   /** 全班批改：提交后台任务并轮询进度（文件多时这一步会跑几分钟） */
   const runJob = async (student?: string) => {
     setBusy(student ? `grade:${student}` : 'grade')
     setJob(t('hwJobStarted'))
     try {
-      const res = await tasksApi.startFileGradingJob(task.id, student)
-      const state = await pollAiTaskWithProgress(res.task_id, (p) => {
-        if (p?.phase) setJob(`${p.phase}${p.total ? ` ${p.done ?? 0}/${p.total}` : ''}`)
-      }, 900000)
-      const r: any = state.result || {}
+      // 轮询逻辑与列表上的「AI 批改」按钮共用一份（startAndPollFileGrading），不再各写一遍
+      const r = await startAndPollFileGrading(task.id, student, (phase) => setJob(phase))
       message.success(r.message || t('hwJobDone'))
+      // 单人重批完自动展开那一行：教师点的就是"看这个人批得怎么样"，
+      // 还要他自己再拉一下折叠面板就多余了
+      if (student) setOpenKeys((prev) => (prev.includes(student) ? prev : [...prev, student]))
       setMissing(Array.isArray(r.needs_review_students) ? r.needs_review_students : [])
       if (r.similarity_pairs?.length) message.warning(t('hwSimFound', { n: r.similarity_pairs.length }))
       await load()
@@ -521,6 +763,22 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
   const gradedOk = Object.values(grades).filter((g) => (g.teacher_score ?? g.ai_score) != null).length
   const unpublished = Object.values(grades).filter((g) => g.published === false && (g.teacher_score ?? g.ai_score) != null).length
   const needReview = Object.values(grades).filter((g) => g.needs_review).length
+
+  /** 分数分布：按这份作业的满分折算成百分位再分档，教师一眼看出"是不是普遍偏低" */
+  const dist = useMemo(() => {
+    const buckets = [0, 0, 0, 0, 0]
+    let scored = 0
+    byClass.forEach((p) => {
+      if (!p.submitted) return
+      const g = grades[p.username]
+      const s = g ? (g.teacher_score ?? g.ai_score) : null
+      if (s == null) return
+      scored += 1
+      const rate = total > 0 ? (Number(s) / total) * 100 : 0
+      buckets[rate >= 90 ? 4 : rate >= 80 ? 3 : rate >= 70 ? 2 : rate >= 60 ? 1 : 0] += 1
+    })
+    return { buckets, scored }
+  }, [byClass, grades, total])
   const dims = useMemo(() => {
     try {
       const d = JSON.parse(task.rubric || '[]')
@@ -530,11 +788,16 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
 
   return (
     <div>
-      {/* 顶部：口径与批量动作。批改数必须说清"有效/待人工/未发布"，否则教师以为批完了 */}
+      {/* 顶部：口径与批量动作。批改数必须说清"应交/已交/待人工/未发布"，否则教师以为批完了 */}
       <Card size="small" style={{ marginBottom: 12 }}>
         <Space wrap size={6} style={{ marginBottom: job ? 8 : 0 }}>
           <Tag color="blue">{t('hwModeFile')}</Tag>
-          <Tag>{t('hwSubmitted', { n: Object.keys(submitted).length, m: roster.length })}</Tag>
+          {/* 分母是应交人数（P0-2）；名单取不到时如实说明，不再拿已交人数冒充总数 */}
+          <Tag>{expectedCount
+            ? t('hwSubmitted', { n: submittedCount, m: expectedCount })
+            : t('hwSubmittedNoRoster', { n: submittedCount })}</Tag>
+          {missingCount > 0 && <Tag color="red">{t('hwMissingN', { n: missingCount })}</Tag>}
+          {staleCount > 0 && <Tooltip title={t('hwStaleHint')}><Tag color="gold">{t('hwStaleTagN', { n: staleCount })}</Tag></Tooltip>}
           <Tag color={gradedOk ? 'green' : 'default'}>{t('hwGraded', { n: gradedOk })}</Tag>
           {needReview > 0 && <Tag color="orange">{t('hwNeedReview', { n: needReview })}</Tag>}
           {unpublished > 0 && <Tag color="gold">{t('hwUnpublished', { n: unpublished })}</Tag>}
@@ -546,6 +809,14 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
           <Button type="primary" icon={<RobotOutlined />} loading={busy === 'grade'}
             disabled={!!job} onClick={() => runJob()}
           >{t('hwAiGradeAll')}</Button>
+          {/* 催交（P1-2）：应交名单里还有没交的人才给这个入口 */}
+          {/* 按班级筛之后，"有没有未交"要按筛后的集合判断，催交也只催这个班 */}
+          {filterCounts.missing > 0 && (
+            <Button icon={<SendOutlined />} loading={busy === 'remind'} onClick={remind}>
+              {t('hwRemindUnsubmitted')}
+              {(gradeFilter || classFilter) ? `（${[gradeFilter, classFilter].filter(Boolean).map(scopeLabel).join(' ')}）` : ''}
+            </Button>
+          )}
           <Button icon={<SafetyCertificateOutlined />} loading={busy === 'publish'}
             disabled={!unpublished && !Object.keys(grades).length} onClick={publish}
           >{t('hwPublish')}</Button>
@@ -553,50 +824,173 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
           <Button icon={<ReloadOutlined />} loading={busy === 'extract'} onClick={reextract}>{t('hwReextract')}</Button>
           <Button icon={<DownloadOutlined />}
             href={tasksApi.homeworkArchiveUrl(task.id)} target="_blank">{t('hwArchive')}</Button>
+          {/* 成绩表走既有导出端点（/api/export/tasks?task_id= 校验归属）。
+              作业中心以前没有入口，教师得自己去导出中心找 */}
+          <Button icon={<FileTextOutlined />}
+            href={'/api/export/tasks?task_id=' + encodeURIComponent(task.id)}
+            target="_blank">{t('hwExportReport')}</Button>
           <Button icon={<ReloadOutlined />} onClick={load}>{t('refresh')}</Button>
         </Space>
         <div style={{ marginTop: 6 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>{t('hwDimsHint')}：{dims.map((d: any) => `${d.name} ${d.max}`).join(' / ')}</Text>
         </div>
+        {/* 统计条：批到哪儿了、分数长什么样，不用逐个翻卡片 */}
+        {dist.scored > 0 && (
+          <Space wrap size={4} style={{ marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('hwDistTitle')}</Text>
+            {[
+              { key: 'hwDistBandFail', n: dist.buckets[0], color: '#ff4d4f' },
+              { key: 'hwDistBandPass', n: dist.buckets[1], color: '#faad14' },
+              { key: 'hwDistBandGood', n: dist.buckets[2], color: '#1677ff' },
+              { key: 'hwDistBandHigh', n: dist.buckets[3], color: '#52c41a' },
+              { key: 'hwDistBandTop', n: dist.buckets[4], color: '#13c2c2' },
+            ].map((b) => (
+              <Tag key={b.key} color={b.n ? b.color : 'default'}>{t(b.key)} {b.n}</Tag>
+            ))}
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('hwDistScored', { n: dist.scored })}</Text>
+          </Space>
+        )}
+        {/* 人头一多就翻不动：先按状态筛，再分页（P2-4 的最小可用版） */}
+        {/* 班级筛选：发给全体的作业应交上千人，只看状态档还是翻不动。
+            选了班级后，下面这些档位计数、分数分布、人头列表都只算这个班 ——
+            数字必须跟着筛一起变，否则"已交 (3)"配一行列表，教师不敢信。 */}
+        <Space wrap size={6} style={{ marginTop: 8 }}>
+          {boardGradeOptions.length > 1 && (
+            <Select
+              size="small"
+              style={{ width: 110 }}
+              allowClear
+              showSearch
+              value={gradeFilter || undefined}
+              placeholder={t('hwGradeFilterPh')}
+              onChange={(v) => {
+                const g = v || ''
+                setGradeFilter(g)
+                // 换年级要把班级重置：否则"高一 + 高二3班"这种组合筛出一片空白，
+                // 而班级下拉里还留着上一个个年级的选项，看起来像坏了
+                setClassFilter((prev) => (prev && g && !people.some((p) => gradeOf(p) === g && classOf(p) === prev) ? '' : prev))
+                setPage(1)
+              }}
+              options={boardGradeOptions.map((g) => ({ value: g, label: scopeLabel(g) }))}
+            />
+          )}
+          {boardClassOptions.length > 1 && (
+            <Select
+              size="small"
+              style={{ width: 130 }}
+              allowClear
+              showSearch
+              value={classFilter || undefined}
+              placeholder={t('hwClassFilterPh')}
+              onChange={(v) => { setClassFilter(v || ''); setPage(1) }}
+              options={boardClassOptions.map((c) => ({ value: c, label: scopeLabel(c) }))}
+            />
+          )}
+          {FILTER_KEYS.map((k) => (
+            <Button key={k} size="small"
+              type={activeFilter === k ? 'primary' : 'default'}
+              ghost={activeFilter === k}
+              onClick={() => { setFilter(k); setPage(1) }}
+            >{FILTER_LABELS[k].map((m) => t(m))}
+              {` (${filterCounts[k] ?? 0})`}</Button>
+          ))}
+          {/* 展开/收起合成一个开关：全展开时再点就是收起，不占两个按钮位 */}
+          {shown.length > 0 && (
+            <Button size="small" type="text" onClick={() => setOpenKeys(allOpen ? [] : shown.map((p) => p.username))}>
+              {t(allOpen ? 'hwCollapseAll' : 'hwExpandAll')}
+            </Button>
+          )}
+          {/* 顶部那行标签（应交/已交/未交/已通知）始终是整份作业的口径；
+              只有档位计数、分数分布和下面的人头列表跟着年级/班级走 ——
+              不说清就会被读成"数字对不上" */}
+          {(!!gradeFilter || !!classFilter) && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t('hwClassScopedNote', {
+                name: [gradeFilter, classFilter].filter(Boolean).map(scopeLabel).join(' '),
+              })}
+            </Text>
+          )}
+        </Space>
       </Card>
 
-      {roster.length === 0 && <Empty description={t('hwNoStudent')} />}
+      {people.length === 0 && <Empty description={t('hwNoStudent')} />}
+      {people.length > 0 && filtered.length === 0 && (
+        <Empty description={t('hwFilterEmpty')} />
+      )}
 
-      {roster.map((stu) => {
-        const files = filesOf(stu.username)
+      {/* 默认全部收起：一屏能扫完"谁交了 / 几分 / 要不要人工"，点开某一行才出维度分与要求点 */}
+      {shown.length > 0 && (
+        <Collapse
+          size="small"
+          activeKey={openKeys}
+          onChange={(k) => setOpenKeys(Array.isArray(k) ? (k as string[]) : [k as string])}
+          items={shown.map((stu) => {
+            const files = filesOf(stu.username)
         const sub = submitted[stu.username]
         const g = grades[stu.username]
         const score = g ? (g.teacher_score ?? g.ai_score) : null
         const level = score == null ? null
           : score >= total * 0.9 ? 'green' : score >= total * 0.75 ? 'blue'
           : score >= total * 0.6 ? 'orange' : 'red'
-        return (
-          <Card key={stu.username} size="small" style={{ marginBottom: 10 }}
-            title={
+            return {
+              key: stu.username,
+              label: (
               <Space wrap size={6}>
                 <Text strong>{stu.name || stu.username}</Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>{stu.username}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {/* 数字班级也要能显示：这里只做展示，不参与排序，兜 String 足够 */}
+                  {stu.class_name ? String(stu.class_name) + ' · ' : ''}{stu.username}</Text>
                 {sub ? (
                   <>
                     <Tag color="cyan">{t('hwSeq', { n: files[0]?.seq || 1 })}</Tag>
                     {sub.late_submitted && <Tag color="volcano">{t('hwLate')}</Tag>}
+                    {/* 批过之后又重交：旧分还在，但要提醒这一版没批（P0-3） */}
+                    {(stu.stale || sub.stale) && (
+                      <Tooltip title={t('hwStaleHint')}>
+                        <Tag color="gold">{t('hwStaleTag')}</Tag>
+                      </Tooltip>
+                    )}
                   </>
-                ) : <Tag>{t('hwNotSubmitted')}</Tag>}
+                ) : <Tag color="red">{t('hwNotSubmitted')}</Tag>}
+                {!!stu.extra_times && <Tag color="purple">{t('hwExtraTimes', { n: stu.extra_times })}</Tag>}
                 {g?.needs_review && <Tag color="orange">{t('hwNeedReviewTag')}</Tag>}
                 {g && g.published === false && <Tag color="gold">{t('hwNotPublished')}</Tag>}
                 {score != null && <Tag color={level as string}>{score} / {total}</Tag>}
               </Space>
-            }
-            extra={
-              <Space size={4}>
-                <Button size="small" icon={<RobotOutlined />} loading={busy === `grade:${stu.username}`}
-                  onClick={() => runJob(stu.username)}>{t('hwAiGradeOne')}</Button>
+              ),
+              extra: (
+              // 操作区自己吃掉点击，否则点「改分 / 复核」会连带把这一行收起
+              <Space size={4} onClick={(e) => e.stopPropagation()}>
+                {/* 未交的人没有可批的东西，按钮直接不给（以前点了只会拿到"无提交"的错误） */}
+                {stu.submitted && (
+                  <Button size="small" icon={<RobotOutlined />} loading={busy === `grade:${stu.username}`}
+                    onClick={() => runJob(stu.username)}>{t('hwAiGradeOne')}</Button>
+                )}
+                {/* 允许再交一次（P0-5）：交过就把限额用满、还想给机会的学生，不必再走"回退提交"这种删数据的重手 */}
+                {stu.submitted && (
+                  <Popconfirm title={t('hwGrantConfirm', { name: stu.name || stu.username })}
+                    description={t('hwGrantDesc')} okText={t('confirmOk')} cancelText={t('cancel')}
+                    onConfirm={() => grant(stu.username)}
+                  >
+                    <Button size="small" icon={<UndoOutlined />}>{t('hwGrantResubmit')}</Button>
+                  </Popconfirm>
+                )}
                 <Button size="small" onClick={() => setReview({
                   student: stu.username, score: Number(score ?? 0), comment: g?.comment || '',
                 })} disabled={!sub}>{t('hwReview')}</Button>
               </Space>
-            }
-          >
+              ),
+              children: (
+            <>
+            {/* 没交的人也要有地方说清"该做什么"，否则展开是一片空白 */}
+            {!stu.submitted && (
+              <Space wrap size={6}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('hwNotSubmittedHint')}</Text>
+                <Button size="small" icon={<SendOutlined />} loading={busy === 'remind'} onClick={remind}>
+                  {t('hwRemindUnsubmitted')}
+                </Button>
+              </Space>
+            )}
             {files.length > 0 ? (
               <Space wrap size={6} style={{ marginBottom: 8 }}>
                 {files.map((f) => {
@@ -659,9 +1053,22 @@ export const HomeworkBoard: React.FC<BoardProps> = ({ task, roster, onChanged })
                 )}
               </div>
             ) : (sub ? <Text type="secondary" style={{ fontSize: 12 }}>{t('hwNotGraded')}</Text> : null)}
-          </Card>
-        )
-      })}
+            </>
+              ),
+            }
+          })}
+        />
+      )}
+
+      {/* 应交名单可能几十上百人：筛完再分页，别把教师埋在长页里 */}
+      {filtered.length > pageSize && (
+        <div style={{ textAlign: 'right', marginTop: 4 }}>
+          <Pagination size="small" current={page} pageSize={pageSize} total={filtered.length}
+            showSizeChanger pageSizeOptions={[10, 20, 50]}
+            onChange={(p, ps) => { setPage(ps !== pageSize ? 1 : p); setPageSize(ps) }}
+            showTotal={(tt) => t('hwPageTotal', { n: tt })} />
+        </div>
+      )}
 
       <Modal mask={{ closable: false }} open={!!review} title={t('hwReview')} onCancel={() => setReview(null)}
         onOk={saveReview} okText={t('save')} cancelText={t('cancel')} confirmLoading={busy === 'review'}

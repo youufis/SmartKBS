@@ -812,6 +812,8 @@ const ExamPage: React.FC = () => {
     setResultModal(true)
     setResultLoading(true)
     // E2: 换一场考试时重置内层页签/筛选与 AI 报告，避免沿用上一场的状态
+    // 成绩数据本身也要清 —— 弹窗是先打开再填的，不清的话加载期间显示的是上一场的分
+    setResultData(null)
     setResultTab('overview')
     setResultFilter('all')
     setResultSearch('')

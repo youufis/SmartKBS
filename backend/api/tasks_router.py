@@ -355,6 +355,15 @@ def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, An
     else:
         task["submit_mode"] = "conversation"
     task.setdefault("total_score", 100)
+    task.setdefault("deadline_at", "")
+    # 派生状态（P1-4）：过了截止就是"已截止"，但要不要"结束"仍由教师决定 ——
+    # 自动置 ended 会把补批改与改分的窗口一起关掉，反而更糟。一律用服务器时间算，
+    # 学生端以前拿浏览器时钟判断是否截止，改本机时间就能绕。
+    _dl = str(task.get("deadline_at") or "").strip()
+    task["expired"] = bool(_dl) and task["status"] == "active" \
+        and time.strftime("%Y-%m-%d %H:%M:%S") > _dl
+    task["effective_status"] = ("ended" if task["status"] != "active"
+                                else ("expired" if task["expired"] else "active"))
     if submissions is not None:
         task["submissions"] = submissions
     else:
@@ -365,12 +374,32 @@ def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, An
     return task
 
 
+def _rows_to_tasks(rows: list) -> list[dict[str, Any]]:
+    """任务行 → 对外 dict，提交名单一次批量取。
+
+    \`_task_row_to_dict\` 单独用时每个任务都要查一次 \`task_submissions\` ——
+    列表页就是 N+1（一学期几十份作业 = 几十次查询，全在渲染首屏的路上）。
+    这里改成一次 IN 查询拿全部名单再分发。
+    """
+    ids = [r[0] for r in rows]
+    subs_map: dict[str, list[str]] = {i: [] for i in ids}
+    if ids:
+        ph = ",".join("?" for _ in ids)
+        for r in execute_query(
+            f"SELECT task_id, student_username FROM task_submissions "
+            f"WHERE task_id IN ({ph}) ORDER BY submitted_at",
+            tuple(ids),
+        ):
+            subs_map.setdefault(r[0], []).append(r[1])
+    return [_task_row_to_dict(row, subs_map.get(row[0], [])) for row in rows]
+
+
 def get_all_tasks() -> list[dict[str, Any]]:
     """从数据库获取所有活跃任务"""
     rows = execute_query(
         f"SELECT {_TASK_COLS} FROM tasks WHERE status='active' ORDER BY created_at DESC"
     )
-    return [_task_row_to_dict(row) for row in rows]
+    return _rows_to_tasks(rows)
 
 
 def _get_all_tasks_raw() -> list[dict[str, Any]]:
@@ -378,7 +407,7 @@ def _get_all_tasks_raw() -> list[dict[str, Any]]:
     rows = execute_query(
         f"SELECT {_TASK_COLS} FROM tasks ORDER BY created_at DESC"
     )
-    return [_task_row_to_dict(row) for row in rows]
+    return _rows_to_tasks(rows)
 
 
 def _get_creator_tasks(username: str) -> list[dict[str, Any]]:  # type: ignore[valid-type]
@@ -387,7 +416,7 @@ def _get_creator_tasks(username: str) -> list[dict[str, Any]]:  # type: ignore[v
         f"SELECT {_TASK_COLS} FROM tasks WHERE creator_username=? ORDER BY created_at DESC",
         (username,),
     )
-    return [_task_row_to_dict(row) for row in rows]
+    return _rows_to_tasks(rows)
 
 
 def _check_task_ownership(task_id: str, username: str) -> dict[str, Any] | None:
@@ -460,10 +489,23 @@ async def get_active_tasks(request: Request):
     if caller_role == 2:
         # 学生: 只暴露"我自己是否提交", 不含同学学号与姓名(K1)
         relevant = get_user_relevant_tasks(target_user, all_tasks)
+        ids = [t["id"] for t in relevant]
+        graded_ids: set[str] = set()
+        if ids:
+            ph = ",".join("?" for _ in ids)
+            # 一次批量拿"我已经有有效分的作业"，不在逐作业循环里发查询
+            for r in execute_query(
+                f"SELECT task_id FROM task_grades WHERE student_username=? AND task_id IN ({ph}) "
+                f"AND COALESCE(teacher_score, ai_score) IS NOT NULL",
+                tuple([target_user] + ids),
+            ):
+                graded_ids.add(r[0])
         for task in relevant:
             mine = target_user in (task.get("submissions") or [])
             task["submissions"] = [target_user] if mine else []
             task["submissions_names"] = [target_user] if mine else []
+            # 学生"能不能查分"取决于有没有自己的有效分，不取决于教师点没点通知（拍板③）
+            task["my_graded"] = task["id"] in graded_ids
         return {"tasks": relevant, "total": len(relevant)}
 
     tasks = all_tasks if caller_role == 0 else [t for t in all_tasks if t.get("creator") == target_user]
@@ -505,6 +547,19 @@ async def get_active_tasks(request: Request):
             tuple(task_ids),
         ):
             graded_map[r[0]] = r[1]
+    # 重交后待重批（P0-3）：一次批量算完，不在逐任务循环里发查询
+    stale_map: dict[str, int] = {}
+    if task_ids:
+        ph = ",".join("?" for _ in task_ids)
+        for r in execute_query(
+            f"""SELECT ts.task_id, COUNT(*) FROM task_submissions ts
+                JOIN task_grades tg
+                  ON tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+                WHERE ts.task_id IN ({ph}) AND {STALE_GRADE_SQL}
+                GROUP BY ts.task_id""",
+            tuple(task_ids),
+        ):
+            stale_map[r[0]] = r[1]
     for task in tasks:
         graded = graded_map.get(task["id"], 0)
         # 只读预览的绑定作业不下发提交/批改统计
@@ -512,6 +567,12 @@ async def get_active_tasks(request: Request):
             continue
         task["graded_count"] = graded
         task["pending_grade_count"] = max(0, len(task.get("submissions") or []) - graded)
+        # 待批改只算"从没批过"的人；"批过又重交"是另一件事，单独下发，两者不混成一个数字
+        task["stale_grade_count"] = stale_map.get(task["id"], 0)
+
+    # 这里曾经下发过 scope_classes 供列表按班级筛选；列表筛选价值不足已移除。
+    # 批改台的班级筛选用的是 /roster 的真实名单，不需要这份预解析，
+    # 也就不必每次加载列表都多跑三条查询（全校班级 / 任教范围 / 定向名单）。
     return {"tasks": tasks, "total": len(tasks)}
 
 
@@ -582,6 +643,11 @@ class UpdateTaskRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     subject: str | None = None
+    # 目标范围：零提交时可改（发错班级不必再"删了重建"）；有提交后后端拒绝
+    target_scope: str | None = None
+    target_grade: str | None = None
+    target_class: str | None = None
+    target_users: str | None = None
     # 文件作业可调项（提交方式除外，见 update_task 里的锁）
     submit_mode: str | None = None
     allowed_exts: str | None = None
@@ -632,6 +698,34 @@ async def update_task(req: UpdateTaskRequest, request: Request):
     if req.subject is not None:
         fields.append("subject=?")
         params.append(req.subject.strip())
+    # ── 目标范围：零提交时允许改 ──
+    # 建错班级以前只能"删了重建"，而删除会连带清掉文件与批改记录；
+    # 一旦有人交过就不给改（可见范围已经产生过数据归属，改它等于动别人的提交）。
+    if any(getattr(req, f, None) is not None for f in
+           ("target_scope", "target_grade", "target_class", "target_users")):
+        cur_rows = execute_query_dict(f"SELECT {_TASK_COLS} FROM tasks WHERE id=?", (req.task_id,))
+        cur = cur_rows[0] if cur_rows else {}
+        merged = {
+            "target_scope": req.target_scope if req.target_scope is not None
+                            else (cur.get("target_scope") or "teacher_classes"),
+            "target_grade": req.target_grade if req.target_grade is not None
+                            else (cur.get("target_grade") or ""),
+            "target_class": req.target_class if req.target_class is not None
+                            else (cur.get("target_class") or ""),
+            "target_users": req.target_users if req.target_users is not None
+                            else (cur.get("target_users") or ""),
+        }
+        has_sub = execute_query(
+            "SELECT COUNT(*) FROM task_submissions WHERE task_id=?", (req.task_id,))
+        if has_sub and has_sub[0][0]:
+            raise HTTPException(status_code=400,
+                                detail="已有学生提交，不能改目标范围（要换范围请新建或复制作业）")
+        _assert_task_target_scope(user, merged["target_scope"], merged["target_grade"],
+                                  merged["target_class"], merged["target_users"])
+        for col, val in merged.items():
+            fields.append(f"{col}=?")
+            params.append(val)
+
     if not fields:
         return {"message": "没有需要更新的字段"}
 
@@ -666,6 +760,82 @@ async def update_task(req: UpdateTaskRequest, request: Request):
 
     row = execute_query(f"SELECT {_TASK_COLS} FROM tasks WHERE id=?", (req.task_id,))
     return {"task": _task_row_to_dict(row[0]) if row else None, "message": "作业已更新"}
+
+
+class DuplicateTaskRequest(BaseModel):
+    task_id: str
+    # 范围由教师重新选：复制的典型用途就是"同一份要求发给另一个班"
+    target_scope: str = "teacher_classes"
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
+    name: str | None = None
+
+
+@router.post("/duplicate")
+async def duplicate_task(req: DuplicateTaskRequest, request: Request):
+    """📋 复制作业：带走名称/要求/学科/提交形态与全部批改参数，不带提交与成绩。
+
+    这是"同一份要求发给另一个班"的正解。以前只能新建重填一遍，或者更糟 ——
+    改范围改不动（有提交后禁改）就删了重建，而删除会连带清掉文件与批改记录。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_create_task(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    rows = execute_query(f"SELECT {_TASK_COLS} FROM tasks WHERE id=?", (req.task_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="作业未找到")
+    src = _task_row_to_dict(rows[0])
+    if not is_admin(username) and src["creator"] != username:
+        raise HTTPException(status_code=403, detail="只能复制自己创建的作业")
+
+    new_name = (req.name or "").strip() or f"{src['name']}-副本"
+    if len(new_name) > TASK_NAME_MAX:
+        new_name = new_name[:TASK_NAME_MAX]
+    _assert_task_target_scope(user, req.target_scope, req.target_grade,
+                              req.target_class, req.target_users)
+    # 批改参数原样带过去，但走一遍同一套清洗：源作业可能是老数据（满分/维度不规范），
+    # 直接抄列值会把脏数据复制成新作业的种子
+    from types import SimpleNamespace
+    hw = _norm_hw_fields(SimpleNamespace(**{k: src.get(k) for k in (
+        "submit_mode", "allowed_exts", "max_files", "max_file_mb", "deadline_at",
+        "resubmit_limit", "allow_late", "total_score", "rubric", "grading_policy")}))
+
+    # 源作业的截止时间大概率已经过了（复制的典型用途是"发给另一个班再写一遍"）。
+    # 原样带过去，副本一创建就显示"已截止"、还顺手挡掉提交 —— 那不是复用，是埋雷。
+    # 同样走 _hw_is_expired：hw 里就有 deadline_at，不必在这里再写一遍"现在是不是过了它"
+    _dl = str(hw.get("deadline_at") or "").strip()
+    cleared_deadline = _dl if _hw_is_expired(hw) else ""
+    if cleared_deadline:
+        hw["deadline_at"] = ""
+
+    import uuid
+    task_id = f"{username}_{new_name}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        """INSERT INTO tasks (id, creator_username, name, description, subject, status,
+                              created_at, updated_at,
+                              target_scope, target_grade, target_class, target_users,
+                              submit_mode, allowed_exts, max_files, max_file_mb, deadline_at,
+                              resubmit_limit, allow_late, total_score, rubric, grading_policy,
+                              publish_status)
+           VALUES (:id, :creator, :name, :description, :subject, 'active', :now, :now,
+                   :target_scope, :target_grade, :target_class, :target_users,
+                   :submit_mode, :allowed_exts, :max_files, :max_file_mb, :deadline_at,
+                   :resubmit_limit, :allow_late, :total_score, :rubric, :grading_policy, 'draft')""",
+        {"id": task_id, "creator": username, "name": new_name,
+         "description": src.get("description") or "", "subject": src.get("subject") or "",
+         "now": now, "target_scope": req.target_scope, "target_grade": req.target_grade,
+         "target_class": req.target_class, "target_users": req.target_users, **hw},
+    )
+    logger.info(f"作业已复制: {src['name']} -> {new_name}, by={username}, "
+                f"清掉过期截止={cleared_deadline or '无'}")
+    new_rows = execute_query(f"SELECT {_TASK_COLS} FROM tasks WHERE id=?", (task_id,))
+    return {"task": _task_row_to_dict(new_rows[0], []) if new_rows else None,
+            "message": (f"已复制为「{new_name}」，提交与成绩不带过来"
+                        + (f"；源作业的截止 {_dl} 已过，副本已清空，请重填" if cleared_deadline else ""))}
 
 
 def _strip_json_fence(text: str) -> str:
@@ -808,20 +978,19 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
     # 查找任务（数据库）
     # 必须取全列：submit_mode 在后面的列上，只取前 6 列会让"文件作业不能交对话记录"的保护
     # 读不到真实形态而形同虚设
-    rows = execute_query(
-        f"SELECT {_TASK_COLS} FROM tasks WHERE id=? AND status='active'", (req.task_id,))
-    if rows:
-        task_info = _task_row_to_dict(rows[0])
-    else:
+    # 状态不在这条查询里筛：已结束和"压根找不到"是两件事，混成一个 404 会误导学生
+    rows = execute_query(f"SELECT {_TASK_COLS} FROM tasks WHERE id=?", (req.task_id,))
+    if not rows:
         # 兼容按名称查找
-        rows2 = execute_query(
-            f"SELECT {_TASK_COLS} FROM tasks WHERE name=? AND status='active' LIMIT 1",
-            (req.task_id,),
-        )
-        if rows2:
-            task_info = _task_row_to_dict(rows2[0])
-        else:
-            raise HTTPException(status_code=404, detail="任务未找到")
+        rows = execute_query(
+            f"SELECT {_TASK_COLS} FROM tasks WHERE name=? LIMIT 1", (req.task_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="任务未找到")
+    task_info = _task_row_to_dict(rows[0])
+    # 与文件提交同一条口径（那边是 409"该作业已结束，无法再提交"）：
+    # 以前这里报 404"任务未找到"，学生只会以为自己点错了，不会想到是作业被结束了
+    if (task_info.get("status") or "active") != "active":
+        raise HTTPException(status_code=409, detail="该作业已结束，无法再提交")
 
     creator = task_info["creator"]
     target_scope = task_info.get("target_scope", "teacher_classes")
@@ -834,6 +1003,15 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
 
     # 权限校验：学生只能提交到可见范围内的任务（与文件提交共用 _assert_submit_visible）
     _assert_submit_visible(user, task_info)
+
+    # 对话作业同样受截止时间约束（P1-3）。以前只有文件提交校验 deadline，
+    # 于是对话作业的"不限截止"和"忘了填截止"在界面上长得一模一样，学生永远能交。
+    # 判据一律走 _hw_is_expired / _hw_closed_for_submit：这条规则以前在对话提交、
+    # 文件提交、撤回文件三处各写了一遍，allow_late 语义一动就要同时改三处，必漏
+    deadline = str(task_info.get("deadline_at") or "").strip()
+    late = _hw_is_expired(task_info)
+    if _hw_closed_for_submit(task_info):
+        raise HTTPException(status_code=409, detail=f"已过截止时间 {deadline}，本次不再接收提交")
 
     # 记录提交（已存在的更新提交时间，不静默忽略）
     execute_insert_update(
@@ -860,8 +1038,11 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
         except Exception:
             pass
 
-    logger.info(f"任务已提交: {task_info['name']}, student={username}")
-    return {"message": f"已提交到任务 '{task_info['name']}'"}
+    # late 在上面已经按同一判据算过，这里不再重算一遍（重算就是多一个会漂的地方）
+    logger.info(f"任务已提交: {task_info['name']}, student={username}, late={late}")
+    return {"message": f"已提交到任务 '{task_info['name']}'"
+            + ("（已过截止时间，本次记为迟交）" if late else ""),
+            "late_submitted": late}
 
 
 def _save_to_summary(creator: str, task_name: str, student: str, content: str, task_id: str = "") -> bool:
@@ -1003,15 +1184,14 @@ async def get_task_submissions(task_id: str, request: Request):
     creator = task_info["creator"]
     submissions = task_info.get("submissions", [])
 
-    # 获取学生姓名
-    result = []
-    for uname in submissions:
-        row = execute_query("SELECT name FROM users WHERE username=?", (uname,))
-        display_name = row[0][0] if row and row[0][0] else uname
-        result.append({
-            "username": uname,
-            "name": display_name,
-        })
+    # 学生姓名一次批量取（以前每人查一次 users，一个班几十次）
+    name_map: dict[str, str] = {}
+    if submissions:
+        ph = ",".join("?" for _ in submissions)
+        for r in execute_query(
+            f"SELECT username, name FROM users WHERE username IN ({ph})", tuple(submissions)):
+            name_map[r[0]] = r[1] or r[0]
+    result = [{"username": u, "name": name_map.get(u, u)} for u in submissions]
 
     # 如果有具体某学生的查询参数，返回该学生的提交内容
     student = request.query_params.get("student", "")
@@ -1022,11 +1202,17 @@ async def get_task_submissions(task_id: str, request: Request):
     # 提交名单补年级班级(此前只有学号+姓名)
     from backend.permission_service import attach_student_info
     attach_student_info(result, key="username", prefix="")
+    # 应交人数：详情弹窗标题要写"已提交 3 / 应交 21"，只给"3 人"教师会以为全班都交了。
+    # 上面的 task_info 只取了 6 列，范围字段不在里面，这里单独查一行现算。
+    hw_row = execute_query_dict(
+        "SELECT creator_username, target_scope, target_grade, target_class, target_users "
+        "FROM tasks WHERE id=?", (task_id,))
     return {
         "task_name": task_info["name"],
         "task_status": task_info["status"],
         "submissions": result,
         "submission_count": len(result),
+        "expected_count": _hw_expected_count(hw_row[0]) if hw_row else len(result),
         "student_content": content if student else None,
     }
 
@@ -1181,6 +1367,15 @@ def _remove_student_from_summary(creator: str, task_name: str, student: str, tas
 # AI 批改功能
 # ═══════════════════════════════════════════════════════════
 
+def _task_total(task_id: str) -> float:
+    """这份作业的满分（对话作业也吃这个口径，P1-3）。取不到按 100。"""
+    rows = execute_query("SELECT total_score FROM tasks WHERE id=?", (task_id,))
+    try:
+        return float(rows[0][0] or 100) if rows and rows[0][0] else 100.0
+    except (TypeError, ValueError):
+        return 100.0
+
+
 def _grading_basis(task_name: str, task_desc: str) -> str:
     """把教师填的任务名称/任务说明渲染成 AI 的批改依据文本。
 
@@ -1231,12 +1426,21 @@ def _find_summary_file(creator: str, task_name: str, task_id: str = "") -> str |
 
 @router.post("/ai-grade/{task_id}")
 async def ai_grade_task(task_id: str, request: Request):
-    """🤖 AI 批改任务：读取 summary 汇总文件，调用 qwen-long 分析每位学生的对话并评分"""
+    """🤖 对话作业全班批改（同步入口，保留给老调用方；新界面一律走 /grading-job）"""
     user = get_current_user(request)
-    username = user["username"]
-    if not can_create_task(username):
+    if not can_create_task(user["username"]):
         raise HTTPException(status_code=403, detail="权限不足")
+    return await _conversation_grade_class(task_id, user["username"])
 
+
+async def _conversation_grade_class(task_id: str, username: str) -> dict[str, Any]:
+    """对话作业全班批改：读 summary 汇总文件 → qwen-long 一次批完全班 → 回写 task_grades。
+
+    从端点里抽出来，是为了让 /grading-job 能在后台任务里跑同一段代码（P1-3）：
+    一个班几十人的对话记录，同步长请求很容易超过网关与前端的等待上限，
+    而且批改中途断连，教师只能重来一遍、再烧一次 token。文件作业早就是后台任务，
+    同一件事两套体验说不过去。
+    """
     # 1. 查找任务信息
     rows = execute_query(
         "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE id=?",
@@ -1278,6 +1482,7 @@ async def ai_grade_task(task_id: str, request: Request):
     ai_role = build_ai_role()
     prompt = f"{ai_role}\n" + TASK_GRADING_PROMPT.format(
         basis=_grading_basis(task_name, task_desc),
+        total_score=f"{_task_total(task_id):g}",
     )
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
@@ -1347,12 +1552,15 @@ async def ai_grade_task(task_id: str, request: Request):
     # 直接回写就会留下没有提交、没有归属的孤儿成绩（列表与统计都会读到）。
     saved = []
     skipped_gone: list[str] = []
+    total = _task_total(task_id)
     for g in grades_list:
         student = g.get("student", "")
         # AI 可能从 "## 学生 xxx" 中提取出 "学生 xxx"，需要清洗前缀
         if student.startswith("学生 "):
             student = student[3:]
-        score = g.get("score")
+        # 分数按这份作业的满分夹：教师把满分设成 50，AI 仍可能按百分制给到 80，
+        # 以前原样入库，学生端就会出现 "80 / 50" 这种不可能的分数
+        score = _clamp_score_to_total(g.get("score"), total)
         comment = g.get("comment", "")
         feedback = g.get("feedback", "")
         strengths = g.get("strengths", [])
@@ -1536,21 +1744,23 @@ def _get_task_grade_row(task_id: str, student: str) -> dict[str, Any]:
 
 @router.post("/ai-grade-student/{task_id}")
 async def ai_grade_single_student(task_id: str, request: Request):
-    """🤖 只批改一位学生：把该学生的对话记录单独交给 AI 分析评分
-
-    与 /ai-grade/{task_id}（全班一次批完）互补：全班批完后发现某个学生批得不准、
-    或某个学生重新提交了，教师可以只重批那一个人 —— 省 token，也不覆盖其他学生的成绩。
-    """
+    """🤖 只批改一位学生（同步入口，保留给老调用方；新界面走 /grading-job 带 student）"""
     user = get_current_user(request)
-    username = user["username"]
-    if not can_create_task(username):
+    if not can_create_task(user["username"]):
         raise HTTPException(status_code=403, detail="权限不足")
-
     body = await request.json()
     student = str(body.get("student", "")).strip()
     if not student:
         raise HTTPException(status_code=400, detail="缺少 student")
+    return await _conversation_grade_one(task_id, user["username"], student)
 
+
+async def _conversation_grade_one(task_id: str, username: str, student: str) -> dict[str, Any]:
+    """只批改一位学生的对话记录（从端点抽出，供 /grading-job 在后台跑同一段代码）。
+
+    与全班批改互补：批得不准、或某个学生重新提交了，只重批那一个人 ——
+    省 token，也不覆盖其他学生的成绩。
+    """
     rows = execute_query(
         "SELECT id, creator_username, name, description FROM tasks WHERE id=?",
         (task_id,),
@@ -1583,6 +1793,7 @@ async def ai_grade_single_student(task_id: str, request: Request):
     from backend.prompts.homework_grade import TASK_STUDENT_GRADING_PROMPT
     prompt = f"{build_ai_role()}\n" + TASK_STUDENT_GRADING_PROMPT.format(
         basis=_grading_basis(task_name, task_desc), student=student,
+        total_score=f"{_task_total(task_id):g}",
     )
 
     import re as _re
@@ -1668,7 +1879,8 @@ async def ai_grade_single_student(task_id: str, request: Request):
         lst = parsed.get("grades")
         one = lst[0] if (isinstance(lst, list) and lst and isinstance(lst[0], dict)) else parsed
 
-    score = _clamp_task_score(one.get("score"))
+    # 与全班批改同一口径：按这份作业自己设的满分夹（以前硬夹 0-100，50 分的作业会出 "80 / 50"）
+    score = _clamp_score_to_total(one.get("score"), _task_total(task_id))
     if score is None:
         logger.error(f"[单人批改] AI 未给出有效分数 task={task_id} student={student}")
         raise HTTPException(status_code=502, detail="AI 未给出有效分数，请重试")
@@ -1744,14 +1956,16 @@ async def get_task_grades(task_id: str, request: Request):
     if not is_admin(username) and creator != username:
         # 学生可以看自己的批改
         if not is_teacher(username) and not is_admin(username):
+            # 拍板口径③：两种形态一律"批完即可见"。published 不再是可见性闸门，
+            # 它只表示"已通知 / 已发等级奖"（见 _notify_grades），所以这里一律不按它过滤 ——
+            # 以前文件作业卡 published、对话作业不卡，同一件事两套规则，教师得先记住
+            # "这批分是哪种作业批出来的"才知道学生看不看得到。
             rows = execute_query(
                 "SELECT ai_score, ai_comment, ai_feedback, ai_strengths, ai_weaknesses, ai_graded_at, "
                 "ai_criteria, teacher_score, teacher_comment, dim_scores, needs_review, published, "
                 "late_submitted, graded_by FROM task_grades "
-                "WHERE task_id=? AND student_username=? AND (?=0 OR COALESCE(published, 1)=1)",
-                # 「未发布不给学生看」是文件作业的规则；对话作业历来批完即可见，
-                # 而且老库的 published 默认值取决于建列时机，不能拿它当判据
-                (task_id, username, 1 if mode in ("file", "mixed") else 0),
+                "WHERE task_id=? AND student_username=?",
+                (task_id, username),
             )
             if rows:
                 r = rows[0]
@@ -1832,6 +2046,8 @@ async def get_task_grades(task_id: str, request: Request):
 # ════════════════════════════════════════════════════════════════════════
 
 HW_NOTE_MAX = 5000
+# 空年级/空班级这一档在线上传输的哨兵值：界面显示什么语言都由前端翻，协议里只传这个
+NO_SCOPE_SENTINEL = "__none__"
 HW_DISK_MIN_FREE_MB = 100
 
 
@@ -1867,6 +2083,20 @@ def _assert_submit_visible(user: dict, task: dict) -> None:
         raise HTTPException(status_code=403, detail="无权提交到该任务")
 
 
+def _hw_is_expired(task: dict) -> bool:
+    """过了截止时间（服务器口径）。status 是否"已结束"另说 —— 见 effective_status。"""
+    deadline = str(task.get("deadline_at") or "").strip()
+    return bool(deadline) and time.strftime("%Y-%m-%d %H:%M:%S") > deadline
+
+
+def _hw_closed_for_submit(task: dict) -> bool:
+    """现在还能不能交：过期且教师关掉了迟交，才是"停止接收"。
+
+    截止≠结束（拍板口径 ④）：allow_late=1 时过期了仍然能交，只是记迟交。
+    """
+    return _hw_is_expired(task) and not int(task.get("allow_late") or 0)
+
+
 def _hw_is_late(task: dict, submitted_at: str) -> bool:
     """迟交判定：字符串按 'YYYY-MM-DD HH:MM:SS' 同格式可直接比（全站本地时间口径）"""
     deadline = str(task.get("deadline_at") or "").strip()
@@ -1890,6 +2120,114 @@ def _hw_submitted_times(task_id: str, student: str) -> int:
         (task_id, student),
     )
     return int(rows[0][0] if rows else 0)
+
+
+def _hw_extra_times(task_id: str, student: str) -> int:
+    """教师「允许再交一次」给该生的额外次数（P0-5）；没有提交记录时为 0"""
+    rows = execute_query(
+        "SELECT IFNULL(extra_times, 0) FROM task_submissions WHERE task_id=? AND student_username=?",
+        (task_id, student),
+    )
+    return int(rows[0][0] or 0) if rows else 0
+
+
+def _hw_ceiling(task: dict, extra: int) -> int:
+    """本次作业该生的提交上限：0 = 不限次数（与老口径一致，额外次数只在有限额时有意义）"""
+    limit = int(task.get("resubmit_limit") or 0)
+    return limit + max(0, extra) if limit else 0
+
+
+def _hw_stale_students(task_id: str) -> list[str]:
+    """「批改过后学生又重交了」的名单（P0-3）。
+
+    旧分一律保留不动，只标出来提醒教师重批 —— 拍板口径 A。
+    ai_graded_at 为空的历史行不参与判断，避免把"从没批过"误算成"批过时了"。
+    """
+    rows = execute_query(
+        f"""SELECT ts.student_username FROM task_submissions ts
+            JOIN task_grades tg
+              ON tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+            WHERE ts.task_id=? AND {STALE_GRADE_SQL}""",
+        (task_id,),
+    )
+    return [r[0] for r in rows]
+
+
+def _hw_roster(task: dict) -> list[dict[str, Any]]:
+    """应交名单：按活动范围现算，与考试缺考名单（exam_router E2）、练习未交名单同一条口径。
+
+    走 permission_service.get_students_by_scope，学生转班/升级后名单自动跟着变，
+    不落库、不缓存 —— 缓存一份名单反而会在学期中途骗教师。
+    """
+    from backend.permission_service import get_students_by_scope
+    try:
+        return get_students_by_scope(
+            task.get("creator_username") or task.get("creator") or "",
+            target_scope=task.get("target_scope") or "teacher_classes",
+            target_grade=task.get("target_grade") or "",
+            target_class=task.get("target_class") or "",
+            target_users=task.get("target_users") or "",
+        ) or []
+    except Exception as e:
+        logger.warning(f"[作业名单] 应交名单计算失败 task={task.get('id')}: {e}")
+        return []
+
+
+def _hw_expected_count(task: dict) -> int:
+    """应交人数。批改台只要一个分母时走这里，不必把整份名单搬进响应。"""
+    return len({str(x.get("username") or "") for x in _hw_roster(task) if x.get("username")})
+
+
+def _hw_roster_payload(task: dict) -> dict[str, Any]:
+    """应交 / 已交 / 未交 三张名单，批改台与列表 Popover 共用一份口径。
+
+    已交名单以 task_submissions 为准（不是以 expected 为准）：范围改过、学生转过班之后，
+    历史上交过的提交不能凭空从教师眼前消失，所以交过的一律列出，另用 in_scope 标出是否仍在范围内。
+    """
+    from backend.permission_service import attach_student_info
+    task_id = task["id"]
+    expected = _hw_roster(task)
+    exp_map = {str(x.get("username") or ""): x for x in expected if x.get("username")}
+    sub_rows = execute_query_dict(
+        "SELECT student_username, submitted_at, IFNULL(extra_times, 0) AS extra_times "
+        "FROM task_submissions WHERE task_id=? ORDER BY submitted_at", (task_id,))
+    stale = set(_hw_stale_students(task_id))
+    submitted: list[dict[str, Any]] = []
+    for r in sub_rows:
+        u = r["student_username"]
+        # 姓名/年级/班级一律留给下面的 attach_student_info 填：它查 users+grades+classes
+        # 规范表、返回的都是字符串，还会把遗留的数字班级（users.class 存成 "3"）
+        # 补成"高一1班"。直接搬 get_students_by_scope 的原始行会拿到 int 班级，
+        # 前端排序 (a.class_name || "").localeCompare 当场炸成 TypeError。
+        submitted.append({
+            "username": str(u or ""), "name": "", "grade": "", "class_name": "",
+            "submitted_at": str(r["submitted_at"] or ""),
+            "extra_times": int(r["extra_times"] or 0),
+            "late_submitted": _hw_is_late(task, r["submitted_at"] or ""),
+            "stale": u in stale,
+            "in_scope": u in exp_map,
+        })
+    done = {r["student_username"] for r in sub_rows}
+    missing = [{"username": str(u or ""), "name": "", "grade": "", "class_name": ""}
+               for u in exp_map if u not in done]
+    for lst in (submitted, missing):
+        attach_student_info(lst, key="username", prefix="")
+    # str() 兜底：int 与 str 混在一元组里排序会直接 TypeError，不该赌上游永远给字符串
+    missing.sort(key=lambda x: (str(x.get("grade") or ""), str(x.get("class_name") or ""),
+                               str(x.get("name") or "")))
+    return {
+        "task_id": task_id,
+        "task_name": task.get("name") or "",
+        "status": task.get("status") or "active",
+        "submit_mode": task.get("submit_mode") or "conversation",
+        "deadline_at": task.get("deadline_at") or "",
+        "expected_count": len(exp_map),
+        "submitted_count": len(submitted),
+        "missing_count": len(missing),
+        "stale_count": sum(1 for x in submitted if x["stale"]),
+        "submitted": submitted,
+        "missing": missing,
+    }
 
 
 def purge_task_files_on_disk(task_id: str, students: list[str] | None = None) -> int:
@@ -1920,6 +2258,37 @@ def purge_task_files_on_disk(task_id: str, students: list[str] | None = None) ->
         except Exception as e:
             logger.warning(f"[作业文件] 目录清理失败 task={task_id} dir={d}: {e}")
     return removed
+
+
+def _hw_student_history(rows: list[dict], sub: dict) -> list[dict[str, Any]]:
+    """学生的历次提交（按批次分组，新的在前）。
+
+    只给文件名、大小与时间，正文与抽取内容一律不外泄；
+    每批的时间取**那一批文件自己的落盘时间** —— task_submissions 里只有最后一次提交时间，
+    拿它当每一版的时间会把旧版都标成最新那天的日期。
+    """
+    groups: dict[int, list[dict]] = {}
+    for r in rows:
+        groups.setdefault(int(r.get("submission_seq") or 1), []).append(r)
+    if not groups:
+        return []
+    top = max(groups)
+    out: list[dict[str, Any]] = []
+    for seq in sorted(groups, reverse=True):
+        times = sorted(str(r.get("created_at") or "") for r in groups[seq])
+        out.append({
+            "seq": seq,
+            "is_latest": seq == top,
+            # 迟交标记只有最后一批可信：提交行存的是最后一次提交时间
+            "submitted_at": (sub.get("submitted_at") or "") if seq == top else (times[-1] if times else ""),
+            "late_submitted": bool(sub.get("late_submitted")) if seq == top else False,
+            "files": [{
+                "id": r["id"], "filename": r.get("filename") or "", "kind": r.get("kind") or "",
+                "size": int(r.get("size") or 0), "extract_status": r.get("extract_status") or "pending",
+                "url": f"/api/tasks/file/{r['id']}",
+            } for r in groups[seq]],
+        })
+    return out
 
 
 def _hw_file_payload(row: dict, with_text: bool = False) -> dict[str, Any]:
@@ -1971,14 +2340,20 @@ async def submit_task_files(task_id: str, request: Request,
 
     deadline = str(task.get("deadline_at") or "").strip()
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    if deadline and now > deadline and not int(task.get("allow_late") or 0):
+    # 与对话提交同一条判据（见 _hw_closed_for_submit），不再在这里重写一遍过期+迟交规则
+    if _hw_closed_for_submit(task):
         raise HTTPException(status_code=409, detail=f"已过截止时间 {deadline}，本次不再接收提交")
 
     seq = _hw_next_seq(task_id, username)
+    # 上限 = 作业限额 + 教师「允许再交一次」给这个学生的额外次数（P0-5）
+    extra = _hw_extra_times(task_id, username)
     limit = int(task.get("resubmit_limit") or 0)
-    if limit and seq > limit:
+    ceiling = _hw_ceiling(task, extra)
+    if ceiling and seq > ceiling:
         raise HTTPException(status_code=409,
-                            detail=f"已提交 {seq - 1} 次，达到上限 {limit} 次；如需重交请联系教师")
+                            detail=f"已提交 {seq - 1} 次，达到上限 {limit} 次"
+                                   + (f"（含老师额外给的 {extra} 次）" if extra else "")
+                                   + "；如需重交请联系教师在详情里「允许再交一次」")
 
     if not files:
         raise HTTPException(status_code=400, detail="请选择要提交的文件")
@@ -2131,6 +2506,8 @@ async def get_task_files(task_id: str, request: Request):
     for r in rows:
         latest_map[r["student_username"]] = max(
             latest_map.get(r["student_username"], 0), int(r["submission_seq"] or 1))
+    # 学生要看历次提交，所以先留一份未过滤的行；对外仍然只给最新一批做主列表
+    hist_rows = [] if teacher_view else list(rows)
     if not teacher_view:      # 学生端不必翻历史批次，只给当前有效的那一次
         rows = [r for r in rows if int(r["submission_seq"] or 1) == latest_map.get(username, 1)]
 
@@ -2140,17 +2517,22 @@ async def get_task_files(task_id: str, request: Request):
         item["is_latest"] = int(r["submission_seq"] or 1) == latest_map.get(r["student_username"], 0)
         items.append(item)
 
+    stale = set(_hw_stale_students(task_id)) if teacher_view else set()
     subs: dict[str, Any] = {}
     sub_rows = execute_query_dict(
-        "SELECT student_username, submitted_at, note FROM task_submissions WHERE task_id=?", (task_id,))
+        "SELECT student_username, submitted_at, note, IFNULL(extra_times, 0) AS extra_times "
+        "FROM task_submissions WHERE task_id=?", (task_id,))
     for s in sub_rows:
         if teacher_view or s["student_username"] == username:
             subs[s["student_username"]] = {
                 "submitted_at": s["submitted_at"],
                 "note": s["note"] or "",
                 "late_submitted": _hw_is_late(task, s["submitted_at"] or ""),
+                # 教师「允许再交一次」：教师看全班，学生只看自己的
+                "extra_times": int(s["extra_times"] or 0),
+                "stale": s["student_username"] in stale,
             }
-    return {
+    out = {
         "task_id": task_id,
         "task_name": task.get("name"),
         "submit_mode": task.get("submit_mode"),
@@ -2162,7 +2544,154 @@ async def get_task_files(task_id: str, request: Request):
         "total_score": float(task.get("total_score") or 100),
         "files": items,
         "submissions": subs,
+        "stale_count": len(stale),
+        # 是否已截止由服务器算（P1-4）：学生端以前拿本机时间比，改时钟就能绕
+        "expired": _hw_is_expired(task),
+        "closed_for_submit": _hw_closed_for_submit(task),
     }
+    if not teacher_view:
+        out["extra_times"] = int((subs.get(username) or {}).get("extra_times") or 0)
+        # 学生要能确认"老师收到的是哪一版"：按批次给出历次提交，
+        # 不然界面只有"最新一次"，重交过的学生自己都不知道现在生效的是第几版
+        out["history"] = _hw_student_history(hist_rows, subs.get(username) or {})
+        return out
+    # 教师端补应交口径（P0-2 / P1-1）：批改台的分母从此是"该谁交"，不再是"谁交了"。
+    # 这里只给计数与"待重批"名单 —— 未交名单可能上千人（全体学生作业），
+    # 批改台每次刷新都重取 /files，把名单塞进来等于每次搬一份花名册；名单走 /roster 按需取。
+    out["expected_count"] = _hw_expected_count(task)
+    out["stale_students"] = _hw_stale_students(task_id)
+    return out
+
+
+@router.get("/{task_id}/roster")
+async def get_task_roster(task_id: str, request: Request):
+    """📋 应交名单（应交 / 已交 / 未交）：教师由此看到「谁该交但没交」
+
+    列表页的「已提交」气泡与批改台共用这一个端点：名单按需取，
+    不在 /active 里逐作业算范围，免得把列表接口拖成新的 N+1。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    task = _hw_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="作业未找到")
+    if not is_admin(username) and task["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="无权限查看该作业名单")
+    return _hw_roster_payload(task)
+
+
+@router.post("/{task_id}/notify-unsubmitted")
+async def notify_unsubmitted(task_id: str, request: Request):
+    """📣 一键提醒未提交的学生（照搬练习侧 /sessions/{id}/notify-unsubmitted）
+
+    通知走通知中心既有通道，深链 /tasks?open=<id> —— 该参数前端已经在消费，不新造轮子。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_create_task(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+    task = _hw_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="作业未找到")
+    if not is_admin(username) and task["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="无权限操作该作业")
+
+    # 可选按班级催交：批改台里筛了班级时，教师看到的就是这个班的未交名单，
+    # 点"催交未交"却把全校 1403 人都 ping 一遍 —— 那是不负责任的打扰。
+    # 年级在前、班级在后，与批改台那两个下拉一一对应
+    want_grade = want_class = ""
+    try:
+        body2 = (await request.json()) or {}
+        want_grade = str(body2.get("grade") or "").strip()
+        want_class = str(body2.get("class_name") or "").strip()
+    except Exception:
+        pass
+    roster = _hw_roster_payload(task)
+    missing = roster.get("missing") or []
+
+    def _same_field(val, want):
+        # 空年级/空班级这一档用哨兵值传，不拿中文文案当协议：
+        # 否则英文界面下筛"未分班"会往后端发一个中文串，翻译一改就断
+        v = str(val or "").strip()
+        if want == NO_SCOPE_SENTINEL:
+            return not v
+        return v == want
+
+    if want_grade:
+        missing = [x for x in missing if _same_field(x.get("grade"), want_grade)]
+    if want_class:
+        missing = [x for x in missing if _same_field(x.get("class_name"), want_class)]
+    todo = [x["username"] for x in missing if x.get("username")]
+    scope_note = "（" + " ".join([x for x in (want_grade, want_class) if x]) + "）" \
+        if (want_grade or want_class) else ""
+    if not todo:
+        return {"message": f"应交名单里所有人都已提交{scope_note}，无需提醒",
+                "notified": 0, "missing": 0, "class_name": want_class}
+
+    from backend.api.notification_router import notify_users
+    from backend.text_utils import clip
+    deadline = str(task.get("deadline_at") or "").strip()
+    notify_users(
+        todo, "task",
+        f"请提交作业「{clip(task.get('name') or '', 30)}」",
+        (f"截止时间：{deadline}" if deadline else "本次作业未设截止时间，请尽快提交。"),
+        related_link=f"/tasks?open={task_id}", source_type="task", source_id=str(task_id))
+    # 与"发布成绩"同一口径：通知类型没启用时 notify_users 是静默返回的，
+    # 这里必须如实告诉教师"没投递"，否则教师等不到学生回应只会反复点催交。
+    enabled = get_config_value("enabled_notification_types", ["exam", "system"])
+    delivered = "task" in (enabled or [])
+    logger.info(f"[作业催交] teacher={username} task={task_id} 班级={want_class or '全部'} "
+                f"提醒={len(todo)} delivered={delivered}")
+    return {"message": (f"已提醒 {len(todo)} 名未提交的学生{scope_note}"
+                        + ("" if delivered else "（注意：系统配置里未启用「task」通知类型，学生不会收到推送）")),
+            "notified": len(todo) if delivered else 0,
+            "intended": len(todo), "missing": len(todo), "delivered": delivered,
+            "class_name": want_class, "expected_count": roster.get("expected_count")}
+
+
+@router.post("/{task_id}/grant-resubmit")
+async def grant_resubmit(task_id: str, request: Request):
+    """↪️ 允许某个学生再交一次（P0-5）：只放宽限额，不动任何已提交的文件与成绩。
+
+    这是教师 90% 情况下真正想要的"给他一次机会" —— 以前的「回退提交」会把该生
+    全部批次、文件与成绩一起删掉，代价与意图完全不成比例。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_create_task(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+    task = _hw_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="作业未找到")
+    if not is_admin(username) and task["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="无权限操作该作业")
+
+    body = await request.json()
+    student = str(body.get("student") or "").strip()
+    times = int(body.get("times") or 1)
+    if not student:
+        raise HTTPException(status_code=400, detail="缺少 student")
+    if not (0 <= times <= 10):
+        raise HTTPException(status_code=400, detail="每次最多加 10 次")
+    if not execute_query("SELECT 1 FROM users WHERE username=? AND role=2", (student,)):
+        raise HTTPException(status_code=404, detail="学生不存在")
+
+    # 只在已有提交行上放宽：限额是"交过之后"才生效的规则，从没交过的学生本来就能交，
+    # 给他插一条空提交记录反而会把"已交/待批改"的数字算脏。
+    if not execute_query("SELECT 1 FROM task_submissions WHERE task_id=? AND student_username=?",
+                         (task_id, student)):
+        raise HTTPException(status_code=400,
+                            detail="该生还没有提交记录，无需额外次数（限额只在交过之后才生效）")
+    execute_insert_update(
+        "UPDATE task_submissions SET extra_times = IFNULL(extra_times, 0) + ? "
+        "WHERE task_id=? AND student_username=?",
+        (times, task_id, student))
+    used = _hw_submitted_times(task_id, student)
+    ceiling = _hw_ceiling(task, _hw_extra_times(task_id, student))
+    logger.info(f"[作业额外次数] teacher={username} task={task_id} student={student} +{times}")
+    return {"message": (f"已允许 {student} 再提交，上限现为 "
+                        + (f"{ceiling} 次（已用 {used}）" if ceiling else "不限次数")),
+            "extra_times": _hw_extra_times(task_id, student), "ceiling": ceiling}
 
 
 @router.get("/file/{file_id}")
@@ -2216,9 +2745,9 @@ async def delete_homework_file(task_id: str, file_id: int, request: Request):
     if not is_creator:
         if (task.get("status") or "active") != "active":
             raise HTTPException(status_code=409, detail="作业已结束，不能撤回")
-        deadline = str(task.get("deadline_at") or "").strip()
-        if deadline and time.strftime("%Y-%m-%d %H:%M:%S") > deadline \
-                and not int(task.get("allow_late") or 0):
+        # 撤回走同一条判据：能交就不能撤回、不能交也不能撤回，避免出现
+        # "过期后交不进去、却还能把已交的撤掉"这种自相矛盾的组合
+        if _hw_closed_for_submit(task):
             raise HTTPException(status_code=409, detail="已过截止时间，不能撤回")
         latest = _hw_next_seq(task_id, row["student_username"]) - 1
         if int(row["submission_seq"] or 1) != latest:
@@ -2609,7 +3138,10 @@ async def _hw_grade_class(task_id: str, teacher: str, on_progress: Any = None) -
 
     total = float(task.get("total_score") or 100)
     policy = task.get("grading_policy") or "ai_then_review"
-    published = 1 if policy == "ai_auto_publish" else 0
+    # 拍板口径③：一律"批完即可见"。published 在这里恒写 0 —— 它不再决定可见性，
+    # 只表示"这批分还没通知过"。发通知与发等级奖的时机留在教师手里（点「通知成绩」），
+    # 或由策略 ai_auto_publish 在批完这一刻自动补上；AI 分随后被复核改掉也不会追发奖。
+    published = 0
     grades = parsed.get("grades")
     if not isinstance(grades, list):
         grades = []
@@ -2668,6 +3200,16 @@ async def _hw_grade_class(task_id: str, teacher: str, on_progress: Any = None) -
         (json.dumps(summary, ensure_ascii=False), task_id))
     _refresh_class_stats(task_id)
 
+    # 策略 ai_auto_publish：批完立刻补通知与等级奖（等价于教师批完就点「通知成绩」）。
+    # 放在最后一步，是为了让"成绩已落库"先成立 —— 通知里说的分数得是学生真能看到的分数。
+    notify_info: dict[str, Any] = {}
+    if policy == "ai_auto_publish":
+        try:
+            notify_info = _notify_grades(task_id, task, teacher)
+        except Exception as e:
+            logger.warning(f"[文件批改] 自动通知失败 task={task_id}: {e}")
+            notify_info = {"notified": 0, "message": f"自动通知失败：{str(e)[:60]}"}
+
     logger.info(f"[文件批改] 全班完成 task={task_id} 有效={written} 待人工={len(skipped)} by={teacher}")
     return {
         "summary": summary,
@@ -2676,8 +3218,14 @@ async def _hw_grade_class(task_id: str, teacher: str, on_progress: Any = None) -
         "images": img,
         "similarity_pairs": sim,
         "published": published,
-        "message": (f"AI 批改完成：有效 {written} 份，待教师处理 {len(skipped)} 份"
-                    + ("（已按策略自动发布）" if published else "（默认待复核，点「发布成绩」后学生可见）")),
+        "auto_notified": int(notify_info.get("notified") or 0),
+        # 前端（批改台与列表）都读这个键来显示"AI 未覆盖 n"，以前压根没返回，
+        # 那枚标签永远是 0 —— 数字看着像批完了，实际一批人还挂在待人工上。
+        "needs_review_students": skipped,
+        "message": (f"AI 批改完成：有效 {written} 份，待教师处理 {len(skipped)} 份。"
+                    + (f"已自动通知 {notify_info.get('notified', 0)} 人。"
+                       if notify_info.get("notified") else
+                       "（成绩学生已可见；点「通知成绩」发推送与等级奖）")),
     }
 
 
@@ -2715,7 +3263,8 @@ async def _hw_grade_one_student(task_id: str, teacher: str, student: str) -> dic
     if not grade:
         raise HTTPException(status_code=409, detail="批改结果未写入：该学生的提交可能已被回退")
     return {"grade": grade, "needs_review": bool(bad),
-            "message": f"已完成 {student} 的文件作业批改（待复核后发布）"}
+            # 批完即可见（拍板口径③）：不再说"待复核后发布"，那会让人以为学生还看不到
+            "message": f"已完成 {student} 的文件作业批改，学生已可见该分数"}
 
 
 def _hw_similarity(task_id: str, persist: bool = False) -> list[dict[str, Any]]:
@@ -2741,10 +3290,11 @@ def _hw_similarity(task_id: str, persist: bool = False) -> list[dict[str, Any]]:
 
 @router.post("/grading-job/{task_id}")
 async def create_file_grading_job(task_id: str, request: Request):
-    """🤖 文件作业全班/单人 AI 批改（后台任务 + 进度轮询）
+    """🤖 作业全班/单人 AI 批改（后台任务 + 进度轮询），两种提交形态都走这里
 
-    为什么不复用同步的 /ai-grade：一个班 40 份文件「图片识别 + 组包 + 评分」很容易
+    为什么不复用同步的 /ai-grade：一个班 40 份「图片识别 + 组包 + 评分」很容易
     超过一个请求能等的时长，做成后台任务教师才不用盯着转圈，失败也不会重复烧 token。
+    对话作业同样几十段记录，道理一样（P1-3），所以这里不再按形态拒绝。
     """
     user = get_current_user(request)
     username = user["username"]
@@ -2755,8 +3305,10 @@ async def create_file_grading_job(task_id: str, request: Request):
         raise HTTPException(status_code=404, detail="作业未找到")
     if not is_admin(username) and task["creator_username"] != username:
         raise HTTPException(status_code=403, detail="无权限批改此任务")
-    if (task.get("submit_mode") or "conversation") == "conversation":
-        raise HTTPException(status_code=400, detail="对话作业请用 /api/tasks/ai-grade 批改")
+    # 两种形态都走这一条后台任务通道（P1-3）：以前对话作业被挡在外面，
+    # 只能吃同步长请求 —— 同一件事两套体验，文件作业有进度、对话作业只有转圈。
+    mode = task.get("submit_mode") or "conversation"
+    is_file = mode in ("file", "mixed")
 
     body: dict[str, Any] = {}
     try:
@@ -2764,10 +3316,19 @@ async def create_file_grading_job(task_id: str, request: Request):
     except Exception:
         body = {}
     student = str(body.get("student") or "").strip()
-    if student and not _hw_latest_files(task_id, student).get(student):
-        raise HTTPException(status_code=404, detail=f"学生 {student} 没有提交文件")
-    if not student and not _hw_latest_files(task_id):
-        raise HTTPException(status_code=404, detail="还没有学生提交文件")
+    if is_file:
+        if student and not _hw_latest_files(task_id, student).get(student):
+            raise HTTPException(status_code=404, detail=f"学生 {student} 没有提交文件")
+        if not student and not _hw_latest_files(task_id):
+            raise HTTPException(status_code=404, detail="还没有学生提交文件")
+    else:
+        # 对话作业的正文在 summary 汇总文件里，没有它就没有可批的东西，提前拒掉
+        # 而不是让教师等到超时才知道"其实没人交"。
+        if not _find_summary_file(task["creator_username"], task.get("name") or "", task_id):
+            raise HTTPException(status_code=404, detail="还没有学生提交对话记录")
+        if student and not _read_student_submission(
+                task["creator_username"], task.get("name") or "", student, task_id):
+            raise HTTPException(status_code=404, detail=f"学生 {student} 还没有提交对话记录")
 
     from backend.ai_task_manager import task_manager, report_progress
 
@@ -2784,14 +3345,20 @@ async def create_file_grading_job(task_id: str, request: Request):
 
     async def run() -> dict[str, Any]:
         try:
+            if is_file:
+                if student:
+                    return await _hw_grade_one_student(task_id, username, student)
+                return await _hw_grade_class(task_id, username, on_progress=on_progress)
             if student:
-                return await _hw_grade_one_student(task_id, username, student)
-            return await _hw_grade_class(task_id, username, on_progress=on_progress)
+                return await _conversation_grade_one(task_id, username, student)
+            return await _conversation_grade_class(task_id, username)
         finally:
             _JOB_PROGRESS.pop(task_id, None)
 
     job_id = await task_manager.create_task(
-        f"批改文件作业「{task.get('name') or task_id}」" + (f"（{student}）" if student else "（全班）"),
+        f"批改作业「{task.get('name') or task_id}」"
+        + ("（文件）" if is_file else "（对话记录）")
+        + (f"（{student}）" if student else "（全班）"),
         run,
         owner_username=username,
         dedupe_key=f"hw_grade:{task_id}:{username}:{student}",
@@ -2804,6 +3371,11 @@ async def create_file_grading_job(task_id: str, request: Request):
 
 
 _JOB_PROGRESS: dict[str, dict[str, Any]] = {}
+
+# 「批过之后学生又重交了」的唯一 SQL 判据：批改时间非空且早于提交时间。
+# 列表的待重批计数、单人名单、首页待批改角标都拼这一段 —— 这个条件今天被抄过四遍，
+# 写歪任何一处就会出现"同一个问题三个答案"，而且各页面各自都看着挺自洽。
+STALE_GRADE_SQL = "IFNULL(tg.ai_graded_at, '') <> '' AND tg.ai_graded_at < ts.submitted_at"
 
 
 @router.put("/grade-review/{task_id}")
@@ -2866,23 +3438,20 @@ async def grade_review(task_id: str, req: GradeReviewRequest, request: Request):
     return {"grade": _get_task_grade_row(task_id, student), "message": "已保存教师批改结果"}
 
 
-@router.post("/publish/{task_id}")
-async def publish_task_grades(task_id: str, request: Request):
-    """📣 发布成绩：学生可见 + 通知 + 等级奖（AI 分默认停在这里之前，教师确认才放行）"""
-    user = get_current_user(request)
-    username = user["username"]
-    task = _hw_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="作业未找到")
-    if not is_admin(username) and task["creator_username"] != username:
-        raise HTTPException(status_code=403, detail="无权限发布此任务")
+def _notify_grades(task_id: str, task: dict, teacher: str) -> dict[str, Any]:
+    """通知学生成绩 + 补发等级奖，并把这批行标成"已通知"（published=1）。
 
+    拍板口径③之后 published 不再决定学生能不能看分数（一律批完即可见），它只记录
+    "这批分通知过没有、奖发过没有" —— 因此这个函数可以安全重入：新批出来的行是 0，
+    通知过的置 1，重复点不会重复发奖。
+    """
     rows = execute_query_dict(
-        "SELECT student_username, needs_review FROM task_grades WHERE task_id=? "
+        "SELECT student_username FROM task_grades WHERE task_id=? "
         "AND COALESCE(teacher_score, ai_score) IS NOT NULL AND COALESCE(published,1)=0",
         (task_id,))
     if not rows:
-        return {"message": "没有待发布的成绩（可能已发布，或还有学生未批改）", "published": 0}
+        return {"message": "没有需要新通知的成绩（都已通知过，或还有学生未批改）",
+                "published": 0, "notified": 0, "grade_awarded": 0, "delivered": False}
     students = [r["student_username"] for r in rows]
     placeholders = ",".join("?" for _ in students)
     execute_insert_update(
@@ -2903,7 +3472,7 @@ async def publish_task_grades(task_id: str, request: Request):
                                                   float(r["s"]), total, task.get("name") or ""):
                 awarded += 1
     except Exception as e:
-        logger.warning(f"[作业发布] 等级奖发放失败 task={task_id}: {e}")
+        logger.warning(f"[作业通知] 等级奖发放失败 task={task_id}: {e}")
 
     notified = True
     try:
@@ -2912,22 +3481,43 @@ async def publish_task_grades(task_id: str, request: Request):
         notified = "task" in (enabled or [])
         notify_users(
             students, "task",
-            f"作业成绩已发布：{task.get('name') or ''}",
-            f"教师已发布「{task.get('name') or ''}」的批改结果，可查看分数与评语。",
-            related_link=f"/tasks?task={task_id}", source_type="task", source_id=str(task_id))
+            f"作业成绩已出：{task.get('name') or ''}",
+            f"「{task.get('name') or ''}」已批改完成，可查看分数与评语。",
+            # 深链参数用 open —— 前端消费的就是它；以前写的 ?task= 全站没人读，点了只落到列表第一屏
+            related_link=f"/tasks?open={task_id}", source_type="task", source_id=str(task_id))
     except Exception as e:
         notified = False
-        logger.warning(f"[作业发布] 通知失败 task={task_id}: {e}")
+        logger.warning(f"[作业通知] 通知失败 task={task_id}: {e}")
 
-    logger.info(f"[作业发布] task={task_id} 人数={len(students)} 等级奖={awarded} by={username}")
+    logger.info(f"[作业通知] task={task_id} 人数={len(students)} 等级奖={awarded} by={teacher}")
     return {
-        "message": (f"已发布 {len(students)} 人的成绩"
+        "message": (f"已通知 {len(students)} 名学生"
                     + (f"，{awarded} 人获得等级奖" if awarded else "")
                     + ("" if notified else "（注意：系统配置里未启用「task」通知类型，学生不会收到推送）")),
         "published": len(students),
         "grade_awarded": awarded,
+        # notified/delivered 是同一个布尔（通知类型有没有启用），人数在 published 里。
+        # 两个名字容易看错，delivered 留给前端做语义更清楚的判断。
         "notified": notified,
+        "delivered": notified,
     }
+
+
+@router.post("/publish/{task_id}")
+async def publish_task_grades(task_id: str, request: Request):
+    """📣 通知成绩：把已批改但还没通知过的人推一遍并补发等级奖。
+
+    路由名与返回字段保留 publish*，是为了不动既有调用方与测试；语义已经从
+    "决定学生能不能看分数"改成"发通知 + 发奖"（拍板口径③：一律批完即可见）。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    task = _hw_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="作业未找到")
+    if not is_admin(username) and task["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="无权限发布此任务")
+    return _notify_grades(task_id, task, username)
 
 
 @router.get("/{task_id}/similarity")

@@ -4,6 +4,14 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   define: {
+    // 翻译文件的缓存破坏参数用得上（i18n.ts）。
+    // 【为什么不用 package.json 版本号】版本号只在发版时变，而翻译文案天天改：
+    // 加完新键、URL 里的 ?v=9.2.0 一个字没变，浏览器继续吃旧的 system.json，
+    // 界面上就只剩裸键名（实测踩过：hwDuplicate / hwDuplicateTitle 显示成键名）。
+    // 绑到构建时间戳上，每次构建自然失效；开发态则随 dev server 重启变化。
+    '__APP_BUILD__': JSON.stringify(
+      process.env.VITE_BUILD_ID
+      || new Date().toISOString().replace(/[-:TZ]/g, '').slice(0, 14)),
     // 【为什么这里要动 NODE_ENV】
     // TLDraw v5 的 LicenseManager.getIsDevelopment() = 「页面协议不是 https:」或「localhost」或「NODE_ENV != production」。
     // 早年为了跳过白板 license 校验，这里把 NODE_ENV 全局钉成 development，

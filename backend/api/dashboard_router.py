@@ -1167,23 +1167,37 @@ async def teacher_todo(request: Request):
     )
 
     # ── 任务提交中尚无批改结果的 ──
+    # 待批改 = 从没批过的 + 批过之后学生又重交的。判据一律用
+    # tasks_router.STALE_GRADE_SQL，不在这里另发明一遍 —— 同一条规则今天被抄过四份，
+    # 写歪任何一份，首页角标与作业列表就会各自都"看着挺自洽"却互相矛盾。
+    from backend.api.tasks_router import STALE_GRADE_SQL
     if is_admin:
         pending_task_grades = _db_count(
-            """SELECT COUNT(*) FROM task_submissions ts
+            f"""SELECT COUNT(*) FROM task_submissions ts
                WHERE NOT EXISTS (
                  SELECT 1 FROM task_grades tg
                  WHERE tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+               )
+                  OR EXISTS (
+                 SELECT 1 FROM task_grades tg
+                 WHERE tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+                   AND {STALE_GRADE_SQL}
                )""",
         )
     else:
         pending_task_grades = _db_count(
-            """SELECT COUNT(*) FROM task_submissions ts
+            f"""SELECT COUNT(*) FROM task_submissions ts
                JOIN tasks t ON t.id = ts.task_id
                WHERE t.creator_username = ?
-                 AND NOT EXISTS (
-                   SELECT 1 FROM task_grades tg
-                   WHERE tg.task_id = ts.task_id AND tg.student_username = ts.student_username
-                 )""",
+                 AND (NOT EXISTS (
+                       SELECT 1 FROM task_grades tg
+                       WHERE tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+                     )
+                      OR EXISTS (
+                       SELECT 1 FROM task_grades tg
+                       WHERE tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+                         AND {STALE_GRADE_SQL}
+                     ))""",
             (username,),
         )
 

@@ -341,6 +341,8 @@ const DiscussionRoomPage: React.FC = () => {
     if (!groupId) return
     setSummaryLoading(true)
     setSummaryModal(true)
+    // 弹窗是先打开再填的：不清掉上一场讨论的报告，加载那段时间里看到的就是别人的总结
+    setSummaryData(null)
     try {
       const { data } = await apiClient.get(`/api/interaction/groups/${groupId}/summary`)
       if (data.has_summary) {

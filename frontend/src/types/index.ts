@@ -125,11 +125,23 @@ export interface TaskInfo {
   status: 'active' | 'inactive';
   created_time: string;
   submissions: string[];
+  /** 目标范围：后端一直在下发，以前类型里没写，各处只能靠 any 取（ScopeTag 首当其冲） */
+  target_scope?: string;
+  target_grade?: string;
+  target_class?: string;
+  target_users?: string;
   /** 教师端列表附带：已批改与待批改份数 */
   graded_count?: number;
   pending_grade_count?: number;
+  /** 「批过之后学生又重交了」的份数（P0-3）：与待批改分开算，不混成一个数字 */
+  stale_grade_count?: number;
   /** 「绑定即授权」：false=他人创建但绑定到课程知识点的只读预览（提交/批改数据不透出） */
   is_owner?: boolean;
+  /** 学生端：这份作业是否已有自己的有效分（决定"可查成绩"还是"批改中"） */
+  my_graded?: boolean;
+  /** 派生态：已过截止时间（服务器口径），与 status 是否"已结束"是两件事 */
+  expired?: boolean;
+  effective_status?: "active" | "expired" | "ended";
   // ── 文件提交类作业（方案 A：提交形态是同一类作业的一个维度）──
   /** conversation=交对话记录 | file=交文件 | mixed=文件+说明 */
   submit_mode?: 'conversation' | 'file' | 'mixed';

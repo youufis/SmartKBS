@@ -91,6 +91,8 @@ const DownloadsPage: React.FC = () => {
     setBrowseDirInfo({ owner, dirPath, dirName })
     setBrowseDirOpen(true)
     setBrowseDirLoading(true)
+    // 先清掉上一个目录的文件：标题已经换成这个目录了，列表还是上一个的话就是串数据
+    setBrowseDirFiles([])
     try {
       const { data } = await apiClient.get('/api/downloads/shared-list', {
         params: { owner, dir_path: dirPath },

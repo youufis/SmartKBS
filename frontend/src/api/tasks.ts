@@ -28,12 +28,31 @@ export async function createTask(name: string, description?: string, scope?: {
   return data;
 }
 
-/** 编辑作业：名称 / 要求 / 学科（其它字段涉及发布范围，后端不放） */
+/**
+ * 编辑作业：名称 / 要求 / 学科 / 批改参数；目标范围只在"零提交"时可改（后端同一条判据）。
+ */
 export async function updateTask(
   task_id: string,
-  patch: { name?: string; description?: string; subject?: string } & HomeworkOptions,
+  patch: {
+    name?: string; description?: string; subject?: string
+    target_scope?: string; target_grade?: string; target_class?: string; target_users?: string
+  } & HomeworkOptions,
 ): Promise<{ task: TaskInfo; message: string }> {
   const { data } = await apiClient.put('/api/tasks/update', { task_id, ...patch });
+  return data;
+}
+
+/**
+ * 复制作业：带走要求与全部批改参数，不带提交与成绩。
+ *
+ * "同一份要求发给另一个班"的正解 —— 以前只能重填一遍，或者删了重建
+ * （而删除会连带清掉文件与批改记录）。
+ */
+export async function duplicateTask(payload: {
+  task_id: string; name?: string;
+  target_scope?: string; target_grade?: string; target_class?: string; target_users?: string
+}): Promise<{ task: TaskInfo | null; message: string }> {
+  const { data } = await apiClient.post('/api/tasks/duplicate', payload);
   return data;
 }
 
@@ -67,6 +86,8 @@ export async function getTaskSubmissions(task_id: string, student?: string): Pro
   task_status: string;
   submissions: TaskSubmission[];
   submission_count: number;
+  /** 应交人数（按活动范围现算），详情标题里"已提交 n / 应交 m"的分母 */
+  expected_count?: number;
   student_content?: string;
 }> {
   const params: any = {};
@@ -226,7 +247,65 @@ export interface HomeworkOverview {
   resubmit_limit: number;
   total_score: number;
   files: HomeworkFileItem[];
-  submissions: Record<string, { submitted_at: string; note: string; late_submitted: boolean }>;
+  submissions: Record<string, {
+    submitted_at: string; note: string; late_submitted: boolean;
+    /** 教师「允许再交一次」加的次数 */
+    extra_times?: number;
+    /** 批改过后学生又重交了（旧分仍在，只是需要重批） */
+    stale?: boolean;
+  }>;
+  /** 应交人数（按活动范围现算，与考试缺考名单、练习未交名单同一口径） */
+  expected_count?: number;
+  /** 应交人数；未交名单不在此下发（全体学生作业可能上千人），走 getTaskRoster 按需取 */
+  /** 「批完又重交」的学生用户名 */
+  stale_students?: string[];
+  stale_count?: number;
+  /** 学生端：自己被额外允许的次数 */
+  extra_times?: number;
+  /** 是否已过截止时间 —— 一律后端按服务器时间算，前端不再看本机时钟 */
+  expired?: boolean;
+  /** 过期且教师关闭了迟交：现在不能再交 */
+  closed_for_submit?: boolean;
+  /** 学生端：历次提交（按批次，新的在前） */
+  history?: HomeworkHistoryEntry[];
+}
+
+/** 学生自己的一批提交 */
+export interface HomeworkHistoryEntry {
+  seq: number;
+  is_latest: boolean;
+  submitted_at: string;
+  late_submitted: boolean;
+  files: { id: number; filename: string; kind: string; size: number; extract_status: string; url: string }[];
+}
+
+/** 应交名单里的一行 */
+export interface RosterStudent {
+  username: string;
+  name: string;
+  grade?: string;
+  class_name?: string;
+  submitted_at?: string;
+  extra_times?: number;
+  late_submitted?: boolean;
+  /** 批改过后又重交 */
+  stale?: boolean;
+  /** 仍在活动范围内（改过范围/转过班的历史提交为 false） */
+  in_scope?: boolean;
+}
+
+export interface TaskRoster {
+  task_id: string;
+  task_name: string;
+  status: string;
+  submit_mode: string;
+  deadline_at: string;
+  expected_count: number;
+  submitted_count: number;
+  missing_count: number;
+  stale_count: number;
+  submitted: RosterStudent[];
+  missing: RosterStudent[];
 }
 
 /** 提交/编辑作业时可选的文件作业参数（不传即对话作业，与老行为完全一致） */
@@ -295,7 +374,10 @@ export async function reviewGrade(task_id: string, payload: {
 }
 
 export async function publishGrades(task_id: string): Promise<{
-  message: string; published: number; grade_awarded: number; notified: boolean
+  message: string; published: number; grade_awarded: number
+  /** notified 是"通知类型有没有真的投递出去"的布尔；人数在 published 里。
+      两个字段同名不同义，读代码时容易看错，这里注明。 */
+  notified: boolean; delivered?: boolean
 }> {
   const { data } = await apiClient.post(`/api/tasks/publish/${encodeURIComponent(task_id)}`);
   return data;
@@ -305,6 +387,42 @@ export async function getTaskSimilarity(task_id: string): Promise<{
   pairs: { a: string; b: string; ratio: number }[]; count: number; message: string
 }> {
   const { data } = await apiClient.get(`/api/tasks/${encodeURIComponent(task_id)}/similarity`);
+  return data;
+}
+
+// ── 应交名单 / 催交 / 允许再交一次 ──
+
+/** 应交名单：谁该交、谁交了、谁没交（列表气泡与批改台共用一份口径，按需取） */
+export async function getTaskRoster(task_id: string): Promise<TaskRoster> {
+  const { data } = await apiClient.get('/api/tasks/' + encodeURIComponent(task_id) + '/roster');
+  return data;
+}
+
+/**
+ * 一键提醒未提交的学生（走通知中心，深链 /tasks?open=<id>）。
+ *
+ * className 非空时只催这个班 —— 批改台筛了班级时，教师看到的名单是筛过的，
+ * 催交却把全校未交的人一起 ping 一遍，是不负责任的打扰。
+ */
+export async function notifyUnsubmitted(task_id: string, scope?: {
+  grade?: string; className?: string
+}): Promise<{
+  message: string; notified: number; missing: number; intended?: number
+  delivered?: boolean; grade?: string; class_name?: string
+}> {
+  const grade = scope?.grade || '', className = scope?.className || ''
+  const body = (!grade && !className) ? {} : { grade, class_name: className }
+  const { data } = await apiClient.post(
+    '/api/tasks/' + encodeURIComponent(task_id) + '/notify-unsubmitted', body);
+  return data;
+}
+
+/** 允许某学生再交一次：只放宽限额，不动已交文件与成绩 */
+export async function grantResubmit(task_id: string, student: string, times = 1): Promise<{
+  message: string; extra_times: number; ceiling: number
+}> {
+  const { data } = await apiClient.post('/api/tasks/' + encodeURIComponent(task_id) + '/grant-resubmit',
+    { student, times });
   return data;
 }
 

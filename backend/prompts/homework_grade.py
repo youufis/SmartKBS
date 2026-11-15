@@ -33,12 +33,14 @@ TASK_GRADING_PROMPT = """现在需要批改学生提交的作业。
 
 {basis}
 
+**满分**：{total_score} 分 —— 所有分数都落在 0-{total_score} 区间内，按这份作业自己设的满分给，不要一律按 100 分制。
+
 ## 输出格式
 请严格按照以下 JSON 格式输出，不要包含其他内容：
 ```json
 {{
     "summary": {{
-        "class_average": <全班平均分（浮点数）>,
+        "class_average": <全班平均分（浮点数，按满分 {total_score} 折算的分数本身）>,
         "highest_score": <最高分>,
         "lowest_score": <最低分>,
         "total_students": <学生总数>,
@@ -51,7 +53,7 @@ TASK_GRADING_PROMPT = """现在需要批改学生提交的作业。
     "grades": [
         {{
             "student": "学生用户名（与文件中保持一致）",
-            "score": <0-100的整数>,
+            "score": <0-{total_score} 的整数>,
             "comment": "<总体评语，30-80字>",
             "criteria": [
                 {{"item": "<要求点>", "status": "met|partial|missing", "evidence": "<该学生对话中的依据，25字以内>"}}
@@ -78,6 +80,7 @@ TASK_STUDENT_GRADING_PROMPT = """现在需要批改 **一位学生** 提交的�
 
 {basis}
 - **学生用户名**：{student}
+- **满分**：{total_score} 分 —— 分数落在 0-{total_score} 区间内，按这份作业自己设的满分给。
 
 ## 批改范围
 附件里只有这一位学生的对话记录（可能包含他多次提交的内容，请综合看待）。
@@ -88,7 +91,7 @@ TASK_STUDENT_GRADING_PROMPT = """现在需要批改 **一位学生** 提交的�
 ```json
 {{
     "student": "{student}",
-    "score": <0-100的整数>,
+    "score": <0-{total_score} 的整数>,
     "comment": "<总体评语，30-80字>",
     "criteria": [
         {{"item": "<要求点>", "status": "met|partial|missing", "evidence": "<该学生对话中的依据，25字以内>"}}

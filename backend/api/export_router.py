@@ -804,7 +804,7 @@ def export_tasks(
                 trow[0][0] or "conversation", "对话记录")
 
         headers = ["序号", "学生用户名", "学生姓名", "提交时间", "提交方式", "成绩",
-                   "迟交", "待人工", "已发布", "提交文件"]
+                   "迟交", "待人工", "已通知", "提交文件"]
         for i, h in enumerate(headers, 1):
             ws.cell(4, i, h)
         _style_header(ws, 4, len(headers))

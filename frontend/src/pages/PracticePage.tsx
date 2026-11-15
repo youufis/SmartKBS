@@ -822,7 +822,8 @@ const TeacherView: React.FC = () => {
     setDetailSid(id)
     setDetailOpen(true)
     setDetailLoading(true)
-    // 换了一场练习, AI 分析结果不能沿用上一场的
+    // 换了一场练习, AI 分析结果不能沿用上一场的；详情本身同理（先打开后填充）
+    setDetail(null)
     setDetailAiAnalysis(null)
     setDetailAiCached(false)
     try {

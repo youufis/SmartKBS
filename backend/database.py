@@ -727,6 +727,9 @@ def init_db():
                 pass
             # mixed 模式（文件 + 文字说明）的说明正文；对话作业一直不用这一列
             _ensure_column(c, "task_submissions", "note", "TEXT DEFAULT ''")
+            # 教师「允许再交一次」给单个学生的额外次数（P0-5）。
+            # 限额口径 = resubmit_limit + extra_times；不额外给时恒为 0，老行为一字不变。
+            _ensure_column(c, "task_submissions", "extra_times", "INTEGER DEFAULT 0")
 
             # ── 对话历史索引表（替代文件扫描） ──
             c.execute("""CREATE TABLE IF NOT EXISTS conversations (

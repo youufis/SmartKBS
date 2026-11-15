@@ -198,6 +198,11 @@ const CurriculumPage: React.FC = () => {
   const [linkSaving, setLinkSaving] = useState(false)
 
   const openKpLink = async (kp: KnowledgePoint) => {
+    // 先清空再打开。不清的话：linkKp 已经是这个知识点了，面板里的候选与勾选却还是
+    // 上一个知识点的，而那份勾选就是保存时要写回去的内容 —— 教师手快按一次确定，
+    // 上一个知识点的资源绑定就被原样写到这个知识点上。这不是显示问题，是会改坏数据。
+    setLinkCands([])
+    setLinkIds([])
     setLinkKp(kp); setLinkOpen(true); setLinkLoading(true)
     try {
       const res = await curriculumApi.getKpLinks(kp.id)
@@ -205,6 +210,8 @@ const CurriculumPage: React.FC = () => {
       setLinkCands(res.candidates || [])
     } catch {
       message.error(t('kpLinkLoadFailed'))
+      // 没拿到这个知识点真实的勾选就把面板关掉：留在"空勾选/旧勾选"上点保存同样会写错
+      setLinkOpen(false)
     } finally {
       setLinkLoading(false)
     }
@@ -212,6 +219,7 @@ const CurriculumPage: React.FC = () => {
 
   const saveKpLink = async () => {
     if (!linkKp) return
+    if (linkLoading) return   // 双保险：真实勾选还没回来之前一律不允许保存
     setLinkSaving(true)
     try {
       const res = await curriculumApi.setKpLinks(linkKp.id, linkIds)
@@ -510,6 +518,9 @@ const CurriculumPage: React.FC = () => {
         setPracticeHtmlUrl(data.file_url)
         setPracticeMode('ai')
         message.success(data.message)
+      } else {
+        // 请求 200 但没给出文件：走不到 catch，不兜这一句就是"点了生成、转圈结束、什么都没发生"
+        message.error(data?.message || t('practiceGenerateEmpty'))
       }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('generatePracticeFailed'))
@@ -590,6 +601,8 @@ const CurriculumPage: React.FC = () => {
       if (data.file_url) {
         setPracticeHtmlUrl(data.file_url)
         message.success(data.message)
+      } else {
+        message.error(data?.message || t('practiceGenerateEmpty'))
       }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('generatePracticeFailed'))
@@ -622,6 +635,8 @@ const CurriculumPage: React.FC = () => {
         setMixedAiQuestions([])
         setMixedBankIds([])
         message.success(`${data.message || t('smartPracticeGenerated', { total: data.total })}，${t('practiceNotBoundHint')}`, 5)
+      } else {
+        message.error(data?.message || t('practiceGenerateEmpty'))
       }
     } catch (err: any) {
       // 如果后端返回了详细错误，直接显示
@@ -2224,6 +2239,7 @@ const CurriculumPage: React.FC = () => {
                   title={`${t('kpLinkTitle')}${linkKp ? ' · ' + linkKp.name : ''}`}
                   onCancel={() => setLinkOpen(false)}
                   onOk={saveKpLink}
+                  okButtonProps={{ disabled: linkLoading }}
                   confirmLoading={linkSaving}
                   width={680}
                 >

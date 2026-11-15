@@ -675,6 +675,9 @@ const SessionsManager: React.FC = () => {
 
   const viewDetail = async (s: Session) => {
     setDetailLoading(true)
+    // 先清掉上一个班的明细再打开：弹窗是"立即打开 + 转圈"，不清的话加载那段时间里
+    // 表格显示的是另一个老师/另一个班的数据，标题却已经是这个班了
+    setDetail(null)
     setDetailVisible(true)
     try {
       const { data } = await apiClient.get('/api/rollcall/admin/detail', {
@@ -1160,6 +1163,8 @@ const AttendanceStats: React.FC = () => {
     setViewLogs(student)
     setLogLoading(true)
     setLogModalVisible(true)
+    // 弹窗先开、数据后到：不清的话加载期间显示的是上一位学生的点名记录
+    setLogRecords([])
     try {
       const { data } = await apiClient.get('/api/rollcall/attendance/logs', {
         params: { username: student.username },

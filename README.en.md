@@ -9,7 +9,7 @@
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
-> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files)
+> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration (cloud/local dual engine), online incremental upgrade, multi-theme appearance
 >
@@ -776,25 +776,25 @@ A big-screen "draw a question → pick a student → answer" loop for warm-ups a
 
 ### Assignments (Chat / Files)
 
-One entry, two submission types: **chat transcript** (students work it out with the AI and hand in the conversation) and **files** (Word / PDF / spreadsheets / slides / images). Both are graded by the AI first and published by the teacher after review:
+One entry, two submission types: **chat transcript** (work it out with the AI, hand in the conversation) and **files**
+(Word / PDF / spreadsheets / slides / images). Deadlines, late handling, full score and grading policy now apply to
+**both types**, and AI grading always runs as a background job.
 
-- **Teacher Side**:
-  - Pick the submission type when creating homework; for file assignments set the deadline, allowed types, file count and size, attempts, full score and scoring dimensions
-  - Requirements are the rubric: AI splits them into 3-5 checkpoints and judges each one against the submitted content
-  - AI grading: chat homework is graded in one call; file homework runs as a background job (images are read by a vision model first, then the whole class is graded from a single package) with live progress
-  - The grading board shows each student's files, extracted text or image preview, per-dimension scores, checkpoints with quotes from the work, similarity flags and a zip download of every original
-  - Edit scores and comments freely - the original AI score is kept for comparison
-  - Students see results only after "Publish grades", which also awards the grade-level bonus points
-- **Student Side**:
-  - See active assignments, the deadline countdown and how many attempts are left
-  - Chat homework: submit the current conversation in one click; file homework: drag and drop or take a photo on a phone, resubmit before the deadline (only the last attempt is graded, late ones are just tagged)
-  - Download your own originals, and after publication view total score, dimension scores, checkpoints, comments and next steps
-- **📖 How to use**: the button next to the title opens step-by-step guidance for students and teachers
-- **🧮 Math rendering**: formulas in transcripts and requirements display correctly, even written in the same line as the text
+- **Teacher side**:
+  - Create: pick the submission type; set the deadline (tonight / tomorrow / this Sunday / next week presets), full score, attempt limit, late policy and grading policy; file assignments also set allowed types, file count/size and scoring dimensions
+  - Grading: AI splits the requirements into 3-5 checkpoints, finds evidence per checkpoint and aligns dimension scores with the total; chat homework is graded in one call, file homework reads images with a vision model first then grades the whole class from one package - both with live progress and a failure list
+  - Detail dialog: student rows collapsed by default, status tabs, pagination; score distribution scaled to this assignment's full score; grade -> class two-level filter
+  - Expected roster: computed from the activity scope, so students who have not submitted still appear; one-click reminders can be narrowed to a grade or a class
+  - Review: edit scores and comments in place (the original AI score is kept); "Notify grades" sends the push and awards the grade bonus - safe to click again without double-awarding
+  - Tools: similarity overview, re-extract, download all originals, export grade sheet, duplicate assignment, allow one more attempt
+- **Student side**:
+  - To-dos and the list show the deadline, attempts left (including extra ones granted by the teacher) and late tags
+  - Chat homework: submit the current conversation in one click; file homework: drag and drop or use the camera - whether late submissions are accepted is set by the teacher
+  - **Scores are visible as soon as grading finishes**: total, dimension scores, checkpoint results, comments and next steps; originals can be downloaded
+  - Submission history is listed per batch, with the version currently in effect marked
+- **📖 How to use**: step-by-step guidance for students and teachers next to the title　**🧮 Math rendering**: formulas in requirements and transcripts display correctly
 
 > **Available to all users, differentiated by role**
-
----
 
 ### Knowledge Challenge
 
@@ -1213,6 +1213,15 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 - Cloud-service attribution labels: KB / TTS / ASR / image gen (DashScope cloud)
 - Guides & capability matrix collapsed by default (auto-expand for the local+unreachable danger combo)
 
+**📚 Assignments (chat / files)**
+
+- Both types unified: deadlines, late handling, full score and grading policy now apply to chat homework too; AI grading always runs as a background job with progress
+- Expected roster computed from the activity scope, so non-submitters still appear; one-click reminders can be narrowed to a grade or class
+- Detail moves from a side drawer to a dialog; student rows collapsed by default with status tabs and pagination; score distribution scaled to the assignment's full score
+- Scores are visible as soon as grading finishes; "Notify grades" now only sends the push and awards the grade bonus (repeat clicks never double-award); resubmitted-needs-regrade is counted separately and folded into the home to-grade badge
+- Duplicate assignment (re-send to another class; an already-passed deadline is cleared automatically); the target scope is editable while no submission exists; "Allow one more attempt" replaces deleting data to grant a second chance
+- Quality: 195 new assignment-track checks (493 repo-wide); the expired / late / needs-regrade predicates each collapsed to one definition; 10 cross-object state leaks and 12 silent failures or duplicated rules fixed
+
 ### v7.x – v9.1.0
 
 > Merged section: v9.1.0 and v7.x – v9.0.0 updates (reverse chronological).
@@ -1388,6 +1397,10 @@ Don't want to install Python or Node.js? Use the desktop installer — double-cl
 3. Launch SmartKBS: the built-in backend starts on its own and the app window opens once port `8086` is ready
 4. Local access at `http://127.0.0.1:8086`; students on the same LAN use `http://LAN-IP-of-this-machine:8086` (e.g. `http://192.168.1.100:8086`)
    (click "Allow access" on the first Windows Firewall prompt, or other devices can't reach it)
+5. Sign in: a fresh install creates one administrator automatically — username `root`, password `root`
+
+> 🔑 **Change that password right after the first sign-in** (System Management → Users & Permissions) and set a security question. `root / root` is a public default; leaving it in place is effectively no protection. Then create teacher and student accounts and fill in subjects and grades in System Configuration.
+
 
 | Item | Notes |
 | --- | --- |

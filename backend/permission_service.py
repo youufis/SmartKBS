@@ -447,10 +447,6 @@ def get_students_in_scope(username: str, grade_id: int | None = None, class_id: 
     return result
 
 
-# ═══════════════════════════════════════════════════════════════
-# 通用师生关系查询（替代旧的 users.grade/class 字符串匹配）
-# ═══════════════════════════════════════════════════════════════
-
 def get_teachers_for_student(student_username: str) -> list[str]:
     """获取某学生的所有任教教师用户名列表（通过 teacher_assignments）"""
     student = execute_query_dict(
