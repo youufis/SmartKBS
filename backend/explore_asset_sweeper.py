@@ -154,9 +154,11 @@ def sweep_once(dry=None):
 
         # 3) 临时件到期（未被引用）→ 回收站
         tmp_cut = _fmt(now - timedelta(hours=tmp_hours))
+        # fetchall 是必须的：_to_trash 会在同一个游标 c 上执行 UPDATE，
+        # 直接迭代 c.execute(...) 的游标会被那条 UPDATE 重置，一轮只处理第一条。
         for (fn,) in c.execute(
                 "SELECT filename FROM pc_assets WHERE status = 'active' AND source = 'asr_tmp' AND created_at < ?",
-                (tmp_cut,)):
+                (tmp_cut,)).fetchall():
             if fn not in refs:
                 if _to_trash(c, fn, "tmp_expired", dry, entries):
                     moved += 1
@@ -165,7 +167,7 @@ def sweep_once(dry=None):
         orphan_cut = _fmt(now - timedelta(days=orphan_days))
         for (fn,) in c.execute(
                 "SELECT filename FROM pc_assets WHERE status = 'active' AND last_seen_at < ? ORDER BY last_seen_at",
-                (orphan_cut,)):
+                (orphan_cut,)).fetchall():
             if fn not in refs:
                 if _to_trash(c, fn, "orphan_" + str(int(orphan_days)) + "d", dry, entries):
                     moved += 1
@@ -190,9 +192,29 @@ def sweep_once(dry=None):
             if not dry:
                 c.execute("DELETE FROM pc_shares WHERE id = ?", (sid,))
                 purged += 1
+        # 4.7) 页面回收站到期：删除超过 EXPLORE_PAGE_TRASH_DAYS 天的页面，
+        # 连带它的时间线存档与文本索引一起物删（还原窗口只在这 30 天内）
+        page_days = _num("EXPLORE_PAGE_TRASH_DAYS", 30)
+        cutoff = _fmt(now - timedelta(days=page_days))
+        dead = c.execute(
+            "SELECT canvas_id, page_number FROM pc_pages"
+            " WHERE archived = 1 AND archived_at <> '' AND archived_at < ?", (cutoff,)).fetchall()
+        for dcid, dpn in dead:
+            if not dry:
+                c.execute("DELETE FROM pc_pages WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
+                c.execute("DELETE FROM pc_pages_history WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
+                c.execute("DELETE FROM pc_page_text WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
+            pages_purged += 1
+            entries.append({"canvas_id": dcid, "page_number": dpn, "rule": "page_trash_expired", "dry": dry})
+
         # 5) 水位：只统计与告警，绝不强删学生正在用的作品（设计 §6.2-6）
         total = c.execute("SELECT COALESCE(SUM(bytes), 0) FROM pc_assets WHERE status = 'active'").fetchone()[0]
         active_bytes = int(total or 0)
+
+        # 2026-11-15：本块此前从没有可达的 commit —— 唯一的 conn.commit() 被写在
+        # with 块之外（连接已 close → ProgrammingError: Cannot operate on a closed
+        # database，整轮报废），导致步骤 1~4.7 的写入每轮都随 close 回滚。统一在此提交。
+        conn.commit()
 
     # 5.5) TTS 缓存治理：缓存是可再生资产——超水位清最久未动的，最近 7 天产物豁免（课堂讲演/播客不受影响）
     try:
@@ -245,23 +267,6 @@ def sweep_once(dry=None):
                             sub.rmdir()
                     except OSError:
                         pass
-
-        # 4.7) 页面回收站到期：删除超过 EXPLORE_PAGE_TRASH_DAYS 天的页面，
-        # 连带它的时间线存档与文本索引一起物删（还原窗口只在这 30 天内）
-        page_days = _num("EXPLORE_PAGE_TRASH_DAYS", 30)
-        cutoff = _fmt(now - timedelta(days=page_days))
-        dead = c.execute(
-            "SELECT canvas_id, page_number FROM pc_pages"
-            " WHERE archived = 1 AND archived_at <> '' AND archived_at < ?", (cutoff,)).fetchall()
-        for dcid, dpn in dead:
-            if not dry:
-                c.execute("DELETE FROM pc_pages WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
-                c.execute("DELETE FROM pc_pages_history WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
-                c.execute("DELETE FROM pc_page_text WHERE canvas_id = ? AND page_number = ?", (dcid, dpn))
-            pages_purged += 1
-            entries.append({"canvas_id": dcid, "page_number": dpn, "rule": "page_trash_expired", "dry": dry})
-        if dead:
-            conn.commit()
 
     over = active_bytes > watermark_mb * 1024 * 1024
     if over:
