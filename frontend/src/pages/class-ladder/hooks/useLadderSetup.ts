@@ -1,5 +1,5 @@
 import { App, } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import apiClient from '../../../api/client'
 import { runAiTaskJob } from '../../../api/aiTask'
@@ -9,6 +9,8 @@ import {
 import type { LadderConfig, LadderSession } from '../../../api/classLadder'
 import useSubjectOptions from '../../../hooks/useSubjectOptions'
 import { reportLoadError } from '../../../utils/loadError'
+import { joinKps } from '../../../components/KnowledgePointSelect'
+
 import { SCOPE_LS_KEY } from '../constants'
 
 type MsgApi = ReturnType<typeof App.useApp>['message']
@@ -39,7 +41,7 @@ export function useLadderSetup(a: Args) {
   const [grade, setGrade] = useState('')
   const [cls, setCls] = useState('')
   const [subject, setSubject] = useState('')
-  const [courseKp, setCourseKp] = useState('')
+  const [courseKps, setCourseKps] = useState<string[]>([])
   const [questionType, setQuestionType] = useState('single')
   const [timeLimit, setTimeLimit] = useState(0)
   const [poolSize, setPoolSize] = useState(30)
@@ -130,7 +132,10 @@ export function useLadderSetup(a: Args) {
     } finally { setBuilding(false); setPoolProgress(null) }
   }, [session, t, message, setSession])
 
-  const topic = courseKp.trim()
+  // 知识点多选（上限 5）：topics 是发给后端的名称数组，topic 只作展示串与 AI 主题。
+  // 不靠顿号拼串表达多选 —— 知识点名本身可以含顿号，拼串会让选题层的 T0 精确关联整层失效。
+  const topics = useMemo(() => courseKps.map((x) => x.trim()).filter(Boolean), [courseKps])
+  const topic = joinKps(topics)
   // 学科、知识点都可留空（＝整库随机），硬门槛只剩年级 + 班级
   const ready = Boolean(grade && cls)
 
@@ -139,7 +144,7 @@ export function useLadderSetup(a: Args) {
     setOpening(true)
     try {
       const s = await openLadderSession({
-        grade, class: cls, subject, topic,
+        grade, class: cls, subject, topic, topics,
         allow_ai: allowAi && Boolean(topic), question_type: questionType,
         time_limit_sec: timeLimit, pool_size: poolSize, skin: activeSkin,
         safe_mode: safeMode ? 1 : 0,
@@ -153,7 +158,7 @@ export function useLadderSetup(a: Args) {
     } catch (e: any) {
       message.error(String(e?.response?.data?.detail || t('openFailed')), 6)
     } finally { setOpening(false) }
-  }, [ready, grade, cls, subject, topic, allowAi, safeMode, lifelinesSel, questionType, timeLimit, poolSize,
+  }, [ready, grade, cls, subject, topic, topics, allowAi, safeMode, lifelinesSel, questionType, timeLimit, poolSize,
       activeSkin, t, doBuildPool, message, setSession, clearBoard, onSessionReset])
 
   const doEndSession = useCallback(async () => {
@@ -172,9 +177,9 @@ export function useLadderSetup(a: Args) {
   }, [grade, cls, t, message, setSession, clearBoard, onSessionReset])
 
   return {
-    subjects, grades, classes, grade, cls, subject, courseKp, questionType,
+    subjects, grades, classes, grade, cls, subject, courseKps, topics, questionType,
     timeLimit, poolSize, allowAi, safeMode, lifelinesSel, report, ttsEnabled, poolProgress, opening, building,
-    setSubject, setCourseKp, setQuestionType, setTimeLimit, setPoolSize, setAllowAi, setTtsEnabled,
+    setSubject, setCourseKps, setQuestionType, setTimeLimit, setPoolSize, setAllowAi, setTtsEnabled,
     setSafeMode, setLifelinesSel, clearReport: () => setReport(null),
     handleGradeChange, handleClassChange, doBuildPool, doOpenSession, doEndSession,
     ready, topic,

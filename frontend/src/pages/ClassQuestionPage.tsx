@@ -2,12 +2,12 @@
  * ClassQuestionPage — 课堂抽问（随机抽问）
  *
  * 课前热身 / 课中提问互动用的"大屏"页面：
- *   选年级 → 选班级 → 选知识点（课程知识点或手动输入）→ 抽题（题库优先，可开关 AI 生题）
+ *   选年级 → 选班级 → 选知识点（可多选，上限 5）→ 抽题（题库优先，可开关 AI 生题）
  *   → 抽人（与智能点名同一套公平权重）→ 判定（答对 +5 / 答错 +2 / 跳过 0）→ 下一题，无限循环。
  *
  * 学生不使用自己的设备，本页只面向教师投屏；积分落现有积分表（教师积分 / 学生成长档案同源）。
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Space, Typography, Select, Switch, Tag, Empty, Divider, Popconfirm, Spin, Alert, Collapse, Tooltip } from 'antd'
 import { message } from '../utils/feedback'
 import {
@@ -18,7 +18,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import useSubjectOptions from '../hooks/useSubjectOptions'
-import KnowledgePointSelect from '../components/KnowledgePointSelect'
+import KnowledgePointSelect, { joinKps } from '../components/KnowledgePointSelect'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import { reportLoadError } from '../utils/loadError'
@@ -30,6 +30,9 @@ import {
 } from '../api/classDrill'
 
 const { Text } = Typography
+
+// 知识点多选上限：课堂一次覆盖 2-3 个知识点最常见，再多召回会被稀释、投屏那行也放不下
+const KP_MAX = 5
 
 /** 教师自己的播报偏好（与点名页分开记，互不影响） */
 const SPEAK_PREF_KEY = 'class_drill_speak_on'
@@ -57,7 +60,7 @@ const ClassQuestionPage: React.FC = () => {
   const [grade, setGrade] = useState('')
   const [cls, setCls] = useState('')
   const [subject, setSubject] = useState('')
-  const [courseKp, setCourseKp] = useState('')
+  const [courseKps, setCourseKps] = useState<string[]>([])
   const [questionType, setQuestionType] = useState('mixed')
   const [allowAi, setAllowAi] = useState(false)
 
@@ -68,7 +71,7 @@ const ClassQuestionPage: React.FC = () => {
   const [usedIds, setUsedIds] = useState<number[]>([])
   // 抽这道题时用的随机范围（空＝整库）。题卡右上角那枚 Tag 要说的是"这道题从哪来"，
   // 不是老师事后又把知识点框改成了什么，所以单独存一份。
-  const [drawnScope, setDrawnScope] = useState('')
+  const [drawnScope, setDrawnScope] = useState<string[]>([])
 
   // ── 抽人 ──
   const [studentNames, setStudentNames] = useState<string[]>([])
@@ -105,7 +108,11 @@ const ClassQuestionPage: React.FC = () => {
   const decelTimers = useRef<number[]>([])
   const frameRef = useRef(0)
 
-  const topic = courseKp.trim()   // 知识点：统一用同一个控件（下拉选或手输都落在 courseKp）
+  // 知识点：统一用同一个控件（下拉选或手输都落在 courseKps）。多选时 topics 是发给后端的
+  // 名称数组（并集召回 + 层内按知识点轮转），topic 只作展示串与 AI 主题 —— 不能反过来
+  // 靠顿号拼串表达多选：知识点名本身可以含顿号，拼串会让选题层的 T0 精确关联整层失效。
+  const topics = useMemo(() => courseKps.map((x) => x.trim()).filter(Boolean), [courseKps])
+  const topic = joinKps(topics)
   // 知识点留空＝不限知识点（整库随机），硬门槛只剩年级 + 班级
   const ready = Boolean(grade && cls)
 
@@ -194,13 +201,13 @@ const ClassQuestionPage: React.FC = () => {
     try {
       const data = await drawDrillQuestion({
         grade, class: cls, subject,
-        topic,
+        topic, topics,
         question_type: questionType,
         allow_ai: allowAi && Boolean(topic),
         exclude_ids: usedIds,
       })
       setQuestion(data.question)
-      setDrawnScope(topic)
+      setDrawnScope(topics)
       setShowAnswer(false)
       setLastPoints(null)
       setSelectedIdx(null)
@@ -215,7 +222,7 @@ const ClassQuestionPage: React.FC = () => {
     } finally {
       setDrawing(false)
     }
-  }, [ready, grade, cls, subject, topic, questionType, allowAi, usedIds, t])
+  }, [ready, grade, cls, subject, topic, topics, questionType, allowAi, usedIds, t])
 
   // ── 抽人（老虎机动画） ──
   const pickStudent = useCallback(async () => {
@@ -339,18 +346,18 @@ const ClassQuestionPage: React.FC = () => {
 
   const resetSession = useCallback(async () => {
     try {
-      await resetDrillSession({ grade, class: cls, subject, topic, allow_ai: allowAi })
+      await resetDrillSession({ grade, class: cls, subject, topic, topics, allow_ai: allowAi })
       clearAllTimers()
       setRecords([])
       setQuestion(null)
-      setDrawnScope('')
+      setDrawnScope([])
       setUsedIds([])
       setDisplayName('🎯'); setLastPicked(''); setLastPickId(null); setLastPoints(null)
       message.success(t('resetDone'))
     } catch (e: any) {
       message.error(String(e?.response?.data?.detail || t('resetFailed')))
     }
-  }, [grade, cls, subject, topic, allowAi, clearAllTimers, t])
+  }, [grade, cls, subject, topic, topics, allowAi, clearAllTimers, t])
 
   // ── 快捷键（大屏操作：老师可以全程用键盘） ──
   useEffect(() => {
@@ -400,18 +407,19 @@ const ClassQuestionPage: React.FC = () => {
           />
           <Select
             placeholder={t('subjectPlaceholder')} value={subject || undefined}
-            onChange={(v) => { setSubject(v || ''); setCourseKp('') }}
+            onChange={(v) => { setSubject(v || ''); setCourseKps([]) }}
             style={{ width: 130 }} allowClear
             options={subjects.map((s) => ({ label: s, value: s }))}
           />
-          {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 直接手输），不再"二选一" */}
+          {/* 知识点：与试题管理同款控件，可多选（上限 5）+ 直接手输；名称含顿号时原样保留 */}
           <KnowledgePointSelect
-            multiple={false}
             subject={subject}
-            value={courseKp}
-            onChange={(v) => setCourseKp(String(v || ''))}
+            maxCount={KP_MAX}
+            maxTagCount={1}
+            value={courseKps}
+            onChange={(v) => setCourseKps(Array.isArray(v) ? v : [])}
             placeholder={t('kpPlaceholder')}
-            style={{ width: 220 }}
+            style={{ width: 260 }}
           />
           <Select
             value={questionType} onChange={setQuestionType} style={{ width: 150 }}
@@ -457,11 +465,14 @@ const ClassQuestionPage: React.FC = () => {
         extra={question && (
           <Space>
             <Tag
-              color={drawnScope ? 'cyan' : 'default'} title={drawnScope || t('scopeAnyKp')}
+              color={drawnScope.length ? 'cyan' : 'default'}
+              title={drawnScope.join('、') || t('scopeAnyKp')}
               style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis',
                        whiteSpace: 'nowrap', verticalAlign: 'middle' }}
             >
-              {drawnScope || t('scopeAnyKp')}
+              {drawnScope.length > 1
+                ? t('kpScopeMore', { first: drawnScope[0], n: drawnScope.length })
+                : (drawnScope[0] || t('scopeAnyKp'))}
             </Tag>
             <Tag color={question.source === 'ai' ? 'purple' : 'blue'} icon={question.source === 'ai' ? <RobotOutlined /> : <DatabaseOutlined />}>
               {question.source === 'ai' ? t('sourceAi') : t('sourceBank')}

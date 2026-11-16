@@ -155,6 +155,14 @@ def _encode(value: Any, default: Any) -> str:
     return json.dumps(_decode(value, default), ensure_ascii=False)
 
 
+def _topics_of(session: dict) -> list[str]:
+    """会话里的知识点列表（多选真源）；老会话只有 topic 串时按同一口径兜底解析。"""
+    raw = _decode(session.get("topics"), [])
+    items = [str(x).strip() for x in raw if str(x).strip()] if isinstance(raw, (list, tuple)) else []
+    if items:
+        return list(dict.fromkeys(items))
+    return _norm_topics(session.get("topic") or "")
+
 def _norm_lifelines(raw: Any) -> list[str]:
     """收敛成"合法的、最多 3 个"的锦囊集合；空/非法一律回默认三件套。"""
     if not isinstance(raw, list):
@@ -230,16 +238,17 @@ def _load_active_session(teacher: str, grade: str, cls: str) -> dict | None:
 
 def _create_session(teacher: str, grade: str, cls: str, *, subject: str, topic: str,
                     ai_enabled: bool, question_type: str,
+                    topics: list[str] | None = None,
                     time_limit_sec: int, pool_size: int, safe_mode: int, skin: str,
                     lifelines: list[str] | None = None) -> dict:
     now = _now()
     sid = execute_insert_update(
         "INSERT INTO class_ladder_sessions "
-        "(teacher_username, grade, class_name, subject, topic, ai_enabled, "
+        "(teacher_username, grade, class_name, subject, topic, topics, ai_enabled, "
         " question_type, time_limit_sec, pool_size, safe_mode, skin, lifelines, status, weights, "
         " picked_in_round, last_time, build_note, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', '{}', '[]', ?, '', ?, ?)",
-        (teacher, grade, cls, subject, topic,
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', '{}', '[]', ?, '', ?, ?)",
+        (teacher, grade, cls, subject, topic, _encode(topics or [], []),
          1 if ai_enabled else 0, question_type, _as_time_limit(time_limit_sec),
          int(pool_size or DEFAULT_POOL_SIZE), int(safe_mode or 0), skin,
          _encode(_norm_lifelines(lifelines), list(DEFAULT_LIFELINES)),
@@ -250,11 +259,12 @@ def _create_session(teacher: str, grade: str, cls: str, *, subject: str, topic: 
 
 def _save_session(session: dict) -> None:
     execute_insert_update(
-        "UPDATE class_ladder_sessions SET subject=?, topic=?, ai_enabled=?, "
+        "UPDATE class_ladder_sessions SET subject=?, topic=?, topics=?, ai_enabled=?, "
         "question_type=?, time_limit_sec=?, pool_size=?, safe_mode=?, skin=?, lifelines=?, status=?, weights=?, "
         "picked_in_round=?, last_time=?, build_note=?, updated_at=? WHERE id=?",
         (
             session.get("subject") or "", session.get("topic") or "",
+            _encode(_topics_of(session), []),
             1 if session.get("ai_enabled") else 0, session.get("question_type") or "single",
             _as_time_limit(session.get("time_limit_sec")),
             int(session.get("pool_size") or DEFAULT_POOL_SIZE),
@@ -294,8 +304,7 @@ def _session_dict(session: dict, grade: str, cls: str) -> dict:
         "class": cls,
         "subject": session.get("subject") or "",
         "topic": session.get("topic") or "",
-
-
+        "topics": _topics_of(session),
         "ai_enabled": bool(session.get("ai_enabled")),
         "question_type": session.get("question_type") or "single",
         "time_limit_sec": _as_time_limit(session.get("time_limit_sec")),
@@ -345,6 +354,7 @@ async def _build_pool(session: dict, *, username: str, grade: str, cls: str) -> 
 
     session_id = session["id"]
     topic = session.get("topic") or ""
+    topics = _topics_of(session)          # 多选：按名称列表并集召回，topic 只作展示与 AI 主题
     subject = session.get("subject") or ""
     qtype = session.get("question_type") or "single"
     if qtype not in QUESTION_TYPES:
@@ -374,7 +384,8 @@ async def _build_pool(session: dict, *, username: str, grade: str, cls: str) -> 
         def _fetch_bank(n: int, _diff: str = diff) -> list[dict]:
             try:
                 rows = query_bank_questions(topic, subject, qtype, n, scene="class_ladder",
-                                            exclude_ids=used_ids, difficulty=_diff)
+                                            exclude_ids=used_ids, difficulty=_diff,
+                                            kp_names=topics)
             except Exception as e:  # 题库查不动不该阻断课堂
                 logger.warning(f"[课堂闯关] 题库搜索异常，跳过: {e}")
                 return []
@@ -765,12 +776,15 @@ async def _ai_lifeline(kind: str, snap: dict, username: str) -> dict:
 
 
 def _norm_topics(raw: Any) -> list[str]:
-    if isinstance(raw, list):
-        return [str(t).strip() for t in raw if str(t).strip()]
-    if isinstance(raw, str):
-        import re
-        return [t for t in re.split(r"[、,，;；\s]+", raw) if t.strip()]
-    return []
+    """知识点参数 → 名称列表。
+
+    真源在 backend.question_select.parse_kp_topics：默认**整串当一个知识点名**
+    （名称本身可以含顿号，全库 215 个里有 19 个），只有每一段都能在全库命中知识点名
+    时，才认定那是多个名称拼起来的串。旧实现按 `[、,，;；\s]+` 无脑拆，
+    会把「技术与人、社会、自然的关系」切成三段，名称在请求里就丢了。
+    """
+    from backend.question_select import parse_kp_topics
+    return parse_kp_topics(raw)[0]
 
 
 # ── API ──
@@ -824,8 +838,8 @@ async def open_session(request: Request):
     teacher, grade, cls = _scope_from_request(request, user, body)
 
     subject = str(body.get("subject") or "").strip()
-    topics = _norm_topics(body.get("topic") or body.get("topics"))
-    topic = "、".join(topics)
+    topics = _norm_topics(body.get("topics") if body.get("topics") else body.get("topic"))
+    topic = "、".join(topics)          # 展示串：投屏范围标签、战报标题都读它
     skin = str(body.get("skin") or "")
 
     # 结束上一场（同一老师同一班级）
@@ -840,7 +854,7 @@ async def open_session(request: Request):
     # 不依赖前端把开关置灰。
     session = _create_session(
         teacher, grade, cls,
-        subject=subject, topic=topic,
+        subject=subject, topic=topic, topics=topics,
         ai_enabled=bool(body.get("allow_ai")) and bool(topic),
         question_type="true_false" if body.get("question_type") == "true_false" else "single",
         time_limit_sec=_as_time_limit(body.get("time_limit_sec")),

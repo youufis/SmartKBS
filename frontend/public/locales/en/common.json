@@ -1,5 +1,6 @@
 {
   "knowledgePointHint": "Pick a course knowledge point, or type your own (separate several with commas)",
+  "knowledgePointMaxHint": "Up to {{n}} knowledge points — remove one first",
   "knowledgePointHintSingle": "Select or type a knowledge point",
   "guardUnansweredTitle": "{{n}} question(s) left unanswered",
   "guardAllBlankTitle": "Nothing has been answered yet",

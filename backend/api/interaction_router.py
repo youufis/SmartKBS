@@ -190,6 +190,7 @@ def _search_questions_from_bank(
     question_type: str,
     count: int,
     exclude_ids: tuple[int, ...] | list[int] = (),
+    kp_names: "list[str] | tuple[str, ...] | None" = None,
 ) -> list[dict[str, Any]]:
     """从学科题库（question_bank）搜索匹配的题目，返回与 AI 出题一致的格式。
 
@@ -197,10 +198,12 @@ def _search_questions_from_bank(
     这里只做展示层转换：options dict -> "A. 文本" 数组、判断题固定选项等。
 
     exclude_ids：本次已经出过的题（课堂抽问连续出题时防重复），透传给 question_select。
+    kp_names：多个知识点（课堂多选）；给了就按列表并集召回，topic 只作展示与 AI 主题。
     """
     from backend.question_search import query_bank_questions
 
-    rows = query_bank_questions(topic, subject, question_type, count, exclude_ids=exclude_ids)
+    rows = query_bank_questions(topic, subject, question_type, count, exclude_ids=exclude_ids,
+                                kp_names=kp_names)
 
     questions = []
     for r in rows:

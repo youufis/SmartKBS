@@ -6,6 +6,9 @@ import KnowledgePointSelect from '../../../components/KnowledgePointSelect'
 import { LF_I18N } from '../constants'
 import type { LadderSetupApi } from '../hooks/useLadderSetup'
 
+// 知识点多选上限（与课堂抽问同口径）
+const KP_MAX = 5
+
 const { Text } = Typography
 
 interface Props {
@@ -28,10 +31,15 @@ export default function LadderSetupBar(p: Props) {
   const { t } = useTranslation('classLadder')
   const { setup, config, session, setupOpen } = p
   // 题池的随机范围：开场后以会话为准（题池就是按它建的），还没开场就跟着当前选择
-  const scopeTopic = String((session ? session.topic : setup.topic) || '').trim()
+  // 会话没带 topics（半升级/旧后端）时退回 topic 串，至少别把有范围说成"整库随机"
+  const scopeTopics: string[] = session
+    ? (session.topics?.length ? session.topics : (session.topic ? [session.topic] : []))
+    : setup.topics
   const scopeSubject = String((session ? session.subject : setup.subject) || '').trim()
-  const scopeText = scopeTopic
-    || (scopeSubject ? t('scopeSubject', { subject: scopeSubject }) : t('scopeAny'))
+  // 多选时投屏那行放不下整串：显示『首个 等 N 个』，完整串挂 title
+  const scopeText = scopeTopics.length > 1
+    ? t('kpScopeMore', { first: scopeTopics[0], n: scopeTopics.length })
+    : (scopeTopics[0] || (scopeSubject ? t('scopeSubject', { subject: scopeSubject }) : t('scopeAny')))
   return (
     <div className="cl-setup">
       {setupOpen && (<>
@@ -41,11 +49,11 @@ export default function LadderSetupBar(p: Props) {
           style={{ width: 130 }} disabled={!setup.grade} options={setup.classes.map((c) => ({ label: c, value: c }))} />
 
         <Select placeholder={t('subjectPlaceholder')} value={setup.subject || undefined} allowClear
-          onChange={(v) => { setup.setSubject(v || ''); setup.setCourseKp('') }}
+          onChange={(v) => { setup.setSubject(v || ''); setup.setCourseKps([]) }}
           style={{ width: 118 }} options={setup.subjects.map((s) => ({ label: s, value: s }))} />
-        <KnowledgePointSelect multiple={false} subject={setup.subject} value={setup.courseKp}
-          onChange={(v) => setup.setCourseKp(String(v || ''))}
-          placeholder={t('kpPlaceholder')} style={{ width: 200 }} />
+        <KnowledgePointSelect subject={setup.subject} maxCount={KP_MAX} maxTagCount={1} value={setup.courseKps}
+          onChange={(v) => setup.setCourseKps(Array.isArray(v) ? v : [])}
+          placeholder={t('kpPlaceholder')} style={{ width: 230 }} />
 
         <Select value={setup.questionType} onChange={setup.setQuestionType} style={{ width: 116 }}
           options={(config?.question_types || [{ value: 'single', label: t('qtSingle') }]).map((o) => ({
@@ -105,7 +113,7 @@ export default function LadderSetupBar(p: Props) {
         </Space>
       </Tooltip>
       {/* 范围标签：整库随机 / 学科 / 知识点，投屏时一眼看出这局题从哪来 */}
-      <Tag color={scopeTopic ? 'cyan' : 'default'} title={scopeText}
+      <Tag color={scopeTopics.length ? 'cyan' : 'default'} title={scopeText}
         style={{ maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis',
                  whiteSpace: 'nowrap', verticalAlign: 'middle', marginInlineEnd: 0 }}>
         {scopeText}

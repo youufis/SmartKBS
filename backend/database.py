@@ -547,6 +547,10 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # 多选知识点（课堂抽问/闯关）：topics 存 JSON 数组，是多选的真源；
+            # topic 列保留为展示串，老会话/老客户端只给它也能照常工作
+            _ensure_column(c, "class_drill_sessions", "topics", "TEXT DEFAULT '[]'")
+
             # ── 课堂抽问流水表（一条 = 一道题 × 一名学生 × 一个判定）──
             c.execute("""CREATE TABLE IF NOT EXISTS class_drill_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -601,6 +605,7 @@ def init_db():
                 updated_at TEXT
             )""")
             _ensure_column(c, "class_ladder_sessions", "lifelines", "TEXT DEFAULT '[]'")
+            _ensure_column(c, "class_ladder_sessions", "topics", "TEXT DEFAULT '[]'")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cls_active ON class_ladder_sessions(teacher_username, grade, class_name, status)")
             except sqlite3.OperationalError:

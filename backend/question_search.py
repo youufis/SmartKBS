@@ -9,7 +9,7 @@ RANDOM()`，与各活动入口的另 5 套写法互不一致，且命中无优�
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Sequence
 
 from backend.question_select import log_audit, select_questions
 
@@ -38,6 +38,7 @@ def query_bank_questions(
     count: int,
     types: tuple[str, ...] | None = None,
     *,
+    kp_names: Sequence[str] | None = None,
     scene: str = "question_search",
     exclude_ids: tuple[int, ...] | list[int] = (),
     difficulty: str = "",
@@ -45,7 +46,9 @@ def query_bank_questions(
 ) -> list[dict[str, Any]]:
     """随机抽取题库匹配题（分层召回；返回 options 已解析为 dict）。
 
-    topic 支持"知识点全名"或以分隔符串起来的多个知识点；
+    topic 支持"知识点全名"；**多个知识点请传 kp_names 列表**（课堂多选走这条）。
+    不要把多个名称用顿号拼进 topic：知识点名本身可以含顿号（全库 215 个里有 19 个），
+    拼串还会让选题层的 T0（ID 级精确关联）整层失效 —— 见 docs/kp-multi-select/00-方案建议.md。
     types 为候选题型白名单（默认与旧口径一致：单选+判断）；
     question_type != "mixed" 时进一步限定为单一题型。
     """
@@ -56,9 +59,10 @@ def query_bank_questions(
     else:
         qtypes = tuple(types or ("single", "true_false"))
     rows, audit = select_questions(
-        kp_name=topic or "", subject=subject or "", types=qtypes, count=count,
+        kp_name=topic or "", kp_names=list(kp_names or []), subject=subject or "", types=qtypes, count=count,
         exclude_ids=list(exclude_ids or []), difficulty=difficulty,
-        allow_family_fallback=allow_family_fallback, seed=f"{scene}|{subject}|{topic}",
+        allow_family_fallback=allow_family_fallback,
+        seed="%s|%s|%s|%s" % (scene, subject, topic, "|".join(kp_names or [])),
     )
     LAST_AUDIT = audit
     if scene:

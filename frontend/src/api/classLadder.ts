@@ -59,6 +59,8 @@ export interface LadderSession {
   class: string
   subject: string
   topic: string
+  /** 知识点列表（多选真源）；topic 只是展示串 */
+  topics: string[]
   ai_enabled: boolean
   question_type: string
   time_limit_sec: number
@@ -158,6 +160,8 @@ export async function openLadderSession(payload: {
   class: string
   subject?: string
   topic?: string
+  /** 多选知识点名称数组（给了就以它为准，topic 只作展示） */
+  topics?: string[]
   theme_id?: number
   allow_ai?: boolean
   question_type?: string

@@ -103,6 +103,28 @@ def _encode(value: Any, default: Any) -> str:
     return json.dumps(_decode(value, default), ensure_ascii=False)
 
 
+def _topics_of(session: dict) -> list[str]:
+    """会话里的知识点列表（多选真源）。
+
+    老会话只有 topic 串时交给 parse_kp_topics 兜底：它默认**整串当一个名称**
+    （知识点名本身可以含顿号，全库 215 个里有 19 个），只有每一段都能在全库命中
+    知识点名时才认定那是多个名称拼起来的串。
+    """
+    from backend.question_select import parse_kp_topics
+    raw = _decode(session.get("topics"), [])
+    items = [str(x).strip() for x in raw if str(x).strip()] if isinstance(raw, (list, tuple)) else []
+    if items:
+        return list(dict.fromkeys(items))
+    return parse_kp_topics(session.get("topic") or "")[0]
+
+
+def _topics_from_body(body: dict) -> tuple[list[str], str]:
+    """接口参数 → (知识点列表, 展示串)。topics 数组是多选的正式口径。"""
+    from backend.question_select import parse_kp_topics
+    raw = body.get("topics") if body.get("topics") else body.get("topic")
+    return parse_kp_topics(raw)
+
+
 # ── 会话读写 ──
 
 
@@ -115,21 +137,22 @@ def _load_active_session(teacher: str, grade: str, cls: str) -> dict | None:
 
 
 def _create_session(teacher: str, grade: str, cls: str, subject: str, topic: str,
-                    ai_enabled: bool) -> dict:
+                    ai_enabled: bool, topics: list[str] | None = None) -> dict:
     now = _now()
     sid = execute_insert_update(
         "INSERT INTO class_drill_sessions "
-        "(teacher_username, grade, class_name, subject, topic, ai_enabled, status, "
+        "(teacher_username, grade, class_name, subject, topic, topics, ai_enabled, status, "
         " weights, picked_in_round, last_time, current_question, "
         " correct_count, incorrect_count, skip_count, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'active', '{}', '[]', ?, '', 0, 0, 0, ?, ?)",
-        (teacher, grade, cls, subject, topic, 1 if ai_enabled else 0, time.time(), now, now),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'active', '{}', '[]', ?, '', 0, 0, 0, ?, ?)",
+        (teacher, grade, cls, subject, topic, _encode(topics or [], []),
+         1 if ai_enabled else 0, time.time(), now, now),
     )
     return execute_query_one("SELECT * FROM class_drill_sessions WHERE id=?", (sid,)) or {}
 
 
 def _ensure_session(teacher: str, grade: str, cls: str, *, subject: str = "", topic: str = "",
-                    ai_enabled: bool | None = None) -> dict:
+                    ai_enabled: bool | None = None, topics: list[str] | None = None) -> dict:
     """取当前进行中的会话；没有就新建一个（老师点进页面即可用，无需先"开始活动"）。"""
     row = _load_active_session(teacher, grade, cls)
     if row:
@@ -138,7 +161,18 @@ def _ensure_session(teacher: str, grade: str, cls: str, *, subject: str = "", to
         if subject and subject != (row.get("subject") or ""):
             updates.append("subject=?")
             params.append(subject)
-        if topic and topic != (row.get("topic") or ""):
+        if topics is not None:
+            # topics 是多选的真源：给了（**包括空数组**）就以它为准，并把展示串 topic 一起改掉。
+            # 少了这一步，"清空知识点"只清了数组、库里旧主题串还在 —— _topics_of 读回来
+            # 又会按 topic 兜底解析出旧知识点，等于清空失败（实测过）。
+            want_topic = "、".join([str(x).strip() for x in topics if str(x).strip()])
+            if list(topics) != _topics_of(row):
+                updates.append("topics=?")
+                params.append(_encode(list(topics), []))
+            if want_topic != (row.get("topic") or ""):
+                updates.append("topic=?")
+                params.append(want_topic)
+        elif topic and topic != (row.get("topic") or ""):
             updates.append("topic=?")
             params.append(topic)
         if ai_enabled is not None and int(ai_enabled) != int(row.get("ai_enabled") or 0):
@@ -151,16 +185,17 @@ def _ensure_session(teacher: str, grade: str, cls: str, *, subject: str = "", to
                 f"UPDATE class_drill_sessions SET {', '.join(updates)} WHERE id=?", tuple(params))
             row = execute_query_one("SELECT * FROM class_drill_sessions WHERE id=?", (row["id"],)) or row
         return row
-    return _create_session(teacher, grade, cls, subject, topic, bool(ai_enabled))
+    return _create_session(teacher, grade, cls, subject, topic, bool(ai_enabled), topics or [])
 
 
 def _save_session(session: dict) -> None:
     execute_insert_update(
-        "UPDATE class_drill_sessions SET subject=?, topic=?, ai_enabled=?, status=?, "
+        "UPDATE class_drill_sessions SET subject=?, topic=?, topics=?, ai_enabled=?, status=?, "
         "weights=?, picked_in_round=?, last_time=?, current_question=?, "
         "correct_count=?, incorrect_count=?, skip_count=?, updated_at=? WHERE id=?",
         (
             session.get("subject") or "", session.get("topic") or "",
+            _encode(_topics_of(session), []),
             1 if session.get("ai_enabled") else 0, session.get("status") or "active",
             _encode(session.get("weights"), {}),
             _encode(session.get("picked_in_round"), []),
@@ -187,6 +222,7 @@ def _session_dict(session: dict, grade: str, cls: str) -> dict:
         "class": cls,
         "subject": session.get("subject") or "",
         "topic": session.get("topic") or "",
+        "topics": _topics_of(session),
         "ai_enabled": bool(session.get("ai_enabled")),
         "status": session.get("status") or "active",
         "total_students": len(names),
@@ -263,6 +299,7 @@ def _normalize_client_question(item: dict[str, Any]) -> dict[str, Any]:
 
 async def _draw_question(*, teacher: str, username: str, grade: str, cls: str, subject: str,
                          topic: str, question_type: str, allow_ai: bool,
+                         topics: list[str] | None = None,
                          exclude_ids: list) -> tuple[dict[str, Any], str, bool]:
     """抽 1 道题：题库优先，allow_ai 时缺口交 AI。返回 (题目, 提示文案, 是否用了 AI)。"""
     from backend import question_fill
@@ -281,7 +318,8 @@ async def _draw_question(*, teacher: str, username: str, grade: str, cls: str, s
 
     def _fetch_bank(need: int) -> list[dict[str, Any]]:
         try:
-            rows = ir._search_questions_from_bank(topic, subject, qtype, need, exclude_ids=exclude)
+            rows = ir._search_questions_from_bank(topic, subject, qtype, need,
+                                        exclude_ids=exclude, kp_names=topics or [])
         except Exception as e:  # 题库查不动不该阻断课堂
             logger.warning(f"[课堂抽问] 题库搜索异常，跳过: {e}")
             return []
@@ -365,10 +403,11 @@ async def open_session(request: Request):
     user = get_current_user(request)
     body = await request.json()
     teacher, grade, cls = _scope_from_request(request, user, body)
+    topics, topic = _topics_from_body(body)
     session = _ensure_session(
         teacher, grade, cls,
         subject=str(body.get("subject") or "").strip(),
-        topic=str(body.get("topic") or "").strip(),
+        topic=topic, topics=topics,
         ai_enabled=bool(body.get("allow_ai")),
     )
     return _session_dict(session, grade, cls)
@@ -395,11 +434,16 @@ async def reset_session(request: Request):
             "UPDATE class_drill_sessions SET status='ended', updated_at=? WHERE id=?",
             (_now(), old["id"]),
         )
+    topics, topic = _topics_from_body(body)
+    if old and body.get("topics") is None and not str(body.get("topic") or "").strip():
+        # 只有客户端"没表态"才沿用上一轮；明确传了空数组＝老师就是要清空，不许复活旧知识点
+        topics, topic = _topics_of(old), (old.get("topic") or "")
     session = _create_session(
         teacher, grade, cls,
         str(body.get("subject") or (old or {}).get("subject") or "").strip(),
-        str(body.get("topic") or (old or {}).get("topic") or "").strip(),
+        topic,
         bool(body.get("allow_ai")),
+        topics,
     )
     # 旧实现是"清空权重"，共享之后不能那么干：那会把点名/闯关攒下的公平性一起抹掉。
     # 老师要的其实是"本轮重新数一遍"，所以开新一轮、权重保留。
@@ -416,7 +460,7 @@ async def draw_question(request: Request):
     # 知识点留空＝「不限知识点」：整池随机（走 question_select 的 no_kp_constraint 分支，
     # 给了学科就按学科族隔离，没给就全库）。这时 AI 没有主题可依，出回来的题也挂不上
     # 知识点边，等于往题库塞脏数据，所以后端一并兜住，不依赖前端把开关置灰。
-    topic = str(body.get("topic") or "").strip()
+    topics, topic = _topics_from_body(body)   # 多选：topics 是名称列表，topic 只作展示与 AI 主题
     subject = str(body.get("subject") or "").strip()
     raw_type = str(body.get("question_type") or "mixed").strip()
     allow_ai = bool(body.get("allow_ai")) and _ai_enabled_by_admin() and bool(topic)
@@ -426,10 +470,11 @@ async def draw_question(request: Request):
 
     question, note, used_ai = await _draw_question(
         teacher=teacher, username=user["username"], grade=grade, cls=cls, subject=subject,
-        topic=topic, question_type=raw_type, allow_ai=allow_ai, exclude_ids=exclude_ids,
+        topic=topic, topics=topics, question_type=raw_type, allow_ai=allow_ai, exclude_ids=exclude_ids,
     )
 
-    session = _ensure_session(teacher, grade, cls, subject=subject, topic=topic, ai_enabled=allow_ai)
+    session = _ensure_session(teacher, grade, cls, subject=subject, topic=topic,
+                              topics=topics, ai_enabled=allow_ai)
     session["current_question"] = json.dumps(question, ensure_ascii=False)
     _save_session(session)
 

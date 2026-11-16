@@ -10,14 +10,20 @@
  * 用法：
  *   <KnowledgePointSelect subject={subject} value={kps} onChange={setKps} />          // 多选，值为 string[]
  *   <KnowledgePointSelect multiple={false} value={kp} onChange={setKp} />             // 单选，值为 string
+ *   <KnowledgePointSelect maxCount={5} value={kps} onChange={setKps} />               // 多选并限个数（课堂两处）
  *   <KnowledgePointSelect extraOptions={['三极管']} />                                 // 追加候选（不参与学科过滤）
  *
- * 分隔符：控件本身按 `,，、` 分词；`splitKps/joinKps` 额外认 `;；`（后端 split_tags
+ * 分隔符只用于**手输**那一刻：知识点名本身可以含顿号（全库 215 个里有 19 个，如
+ * "技术与人、社会、自然的关系"），把已选中的项再按分隔符拆一次，会把名称切成碎片、
+ * 单选时只剩最后一段（课堂抽问曾经因此把全名弄丢，只发出"自然的关系"）。
+ * 下拉选中的项一律原样保留；`splitKps/joinKps` 额外认 `;；`（后端 split_tags
  * 还认 `/ |` 与换行，所以手输的 "A/B" 落库后同样会被后端拆成两个标签，这里不预拆，
  * 免得 TCP/IP 这类带斜杠的专有名词在界面上被切成两段）。
+ *
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import { Select } from 'antd'
+import { Select, Tag } from 'antd'
+import { message } from '../utils/feedback'
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 
@@ -83,6 +89,11 @@ interface Props {
   subject?: string
   /** false = 单选（值为 string），默认多选（值为 string[]） */
   multiple?: boolean
+  /** 标签显示策略：默认按容器宽度折叠；课堂两处传 1 —— responsive 在窄框里会把
+   * 所有标签折成"+N"，投屏时一个知识点名都看不见 */
+  maxTagCount?: number | 'responsive'
+  /** 多选上限（含手输）；课堂抽问/闯关用 5 —— 再多召回质量与投屏可读性都会掉 */
+  maxCount?: number
   /**
    * 额外候选（不参与科目过滤，永远可见）。
    * 用途：题库里已存在的标签比课程树更贴合出题实际 —— 组卷向导的
@@ -99,7 +110,7 @@ interface Props {
 
 const KnowledgePointSelect: React.FC<Props> = ({
   value, onChange, subject = '', multiple = true,
-  extraOptions,
+  extraOptions, maxCount, maxTagCount,
   allowClear = true, disabled = false, placeholder, style, className,
 }) => {
   // 提示语统一由控件给出（common:knowledgePointHint*），调用点不必各写一份
@@ -121,11 +132,35 @@ const KnowledgePointSelect: React.FC<Props> = ({
     return [...base, ...extra]
   }, [all, subject, extraOptions])
 
-  const arr = useMemo(() => splitKps(value), [value])
+  // 数组项原样保留（见文件头）；只有从字符串属性接过来的旧值才需要考虑分词：
+  // 单选时整串就是一个名称，绝不按顿号切（名称本身可以含顿号，切了显示成三段、
+  // 提交出去也只剩一段）；多选时先认"整串本身就是一个知识点"，认不出才分词。
+  const arr = useMemo(() => {
+    if (Array.isArray(value)) return value.map((x) => String(x)).filter(Boolean)
+    const s = String(value ?? '').trim()
+    if (!s) return []
+    if (!multiple) return [s]
+    return options.some((o) => o.value === s) ? [s] : splitKps(s)
+  }, [value, multiple, options])
 
   const handle = (next: unknown) => {
-    const cleaned = splitKps(next)
-    onChange?.(multiple ? cleaned : (cleaned[cleaned.length - 1] || ''))
+    const known = new Set(options.map((o) => o.value))
+    const raw = (Array.isArray(next) ? next : [next]).map((x) => String(x ?? "").trim()).filter(Boolean)
+    if (!multiple) {
+      // 单选：一个名称就是一个名称，绝不按分隔符拆 —— 知识点名本身可以含顿号
+      // （「技术与人、社会、自然的关系」），而且手输的名称常常不在当前学科的候选里，
+      // 拆一次就把全名截成了最后一段（历史上课堂抽问就是这么把知识点传错的）
+      onChange?.(raw[raw.length - 1] || "")
+      return
+    }
+    // 多选：下拉选中的原样收；只有认不出是知识点的自由文本才按分隔符拆成多个标签
+    let items = Array.from(new Set(raw.flatMap((x) => (known.has(x) ? [x] : splitKps(x)))))
+    if (maxCount && items.length > maxCount) {
+      // 不交给 antd 的 maxCount：它是静默拒绝，老师点了第 6 个没反应也不知道为什么
+      message.warning(t('knowledgePointMaxHint', { n: maxCount }))
+      items = items.slice(0, maxCount)
+    }
+    onChange?.(items)
   }
 
   // 单选时不能说"多个用逗号分隔" —— 那个提示只对多选成立
@@ -136,8 +171,18 @@ const KnowledgePointSelect: React.FC<Props> = ({
       showSearch
       optionFilterProp="label"
       disabled={disabled}
-      maxTagCount={multiple ? 'responsive' : 1}
-      tokenSeparators={[',', '，', '、']}
+      maxTagCount={multiple ? (maxTagCount ?? 'responsive') : 1}
+      // 顿号不做输入分隔符：全库 215 个知识点有 19 个名称本身含顿号
+      // （「技术与人、社会、自然的关系」等），边打字边切会把它们当场切碎；
+      // 分词改在 handle 里做，那里认得出「这一整串本身就是一个知识点名」
+      tokenSeparators={[',', '，']}
+      // 已选标签只显示知识点名本身：下拉里的「（课程名）」是消歧用的，选完还挂着
+      // 就把投屏那一行占满了（长名称会被 maxTagCount 折掉，一个都看不见）
+      tagRender={(props) => (
+        <Tag closable={props.closable} onClose={props.onClose} style={{ marginInlineEnd: 4 }}>
+          {props.isMaxTag ? props.label : String(props.value)}
+        </Tag>
+      )}
       placeholder={placeholder ?? t(multiple ? 'knowledgePointHint' : 'knowledgePointHintSingle')}
       options={options}
       value={arr}

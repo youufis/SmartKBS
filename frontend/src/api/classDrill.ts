@@ -29,6 +29,8 @@ export interface DrillSession {
   class: string
   subject: string
   topic: string
+  /** 知识点列表（多选真源）；topic 只是展示串 */
+  topics: string[]
   ai_enabled: boolean
   status: string
   total_students: number
@@ -87,6 +89,7 @@ export async function openDrillSession(payload: {
   class: string
   subject?: string
   topic?: string
+  topics?: string[]
   allow_ai?: boolean
 }): Promise<DrillSession> {
   const { data } = await apiClient.post('/api/class-drill/session', payload)
@@ -98,6 +101,7 @@ export async function resetDrillSession(payload: {
   class: string
   subject?: string
   topic?: string
+  topics?: string[]
   allow_ai?: boolean
 }): Promise<DrillSession> {
   const { data } = await apiClient.post('/api/class-drill/session/reset', payload)
@@ -109,6 +113,8 @@ export async function drawDrillQuestion(payload: {
   class: string
   subject?: string
   topic: string
+  /** 多选知识点名称数组；留空＝不限知识点 */
+  topics?: string[]
   question_type?: string
   allow_ai?: boolean
   exclude_ids?: number[]
