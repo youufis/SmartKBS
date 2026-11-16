@@ -321,6 +321,89 @@ class _WsHandshakeNoiseFilter(logging.Filter):
 
 
 
+
+
+class _AsyncioTeardownNoiseFilter(logging.Filter):
+    """压掉 Windows proactor 拆连接时的固有噪声，其它 asyncio 错误一律照打。
+
+    现场（2026-11-15 部署机日志）：客户端把连接掐断（关标签页、断网、扫描器握手
+    即走）之后，_ProactorBasePipeTransport._call_connection_lost 仍对已断开的
+    socket 调 shutdown()，抛 OSError[WinError 10057]，事件循环默认异常处理器把
+    整段 traceback 以 ERROR 打出来：
+
+        Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+        handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+        Traceback (most recent call last): ... OSError: [WinError 10057] ...
+
+    它发生在连接拆除的瞬间，不影响该请求已经返回的结果，也不影响任何业务；但每次
+    掉线刷十几行，真错误会被埋掉。过滤要同时满足两条：命中拆除符号，且确认异常就
+    是那几个套接字错误码。判不准（没有 exc_info 的变体、别的回调恰好提到同一个符
+    号）一律放行 - 宁可漏滤，不可误吞。
+    """
+
+    WINDOW_SECONDS = 60.0
+    _TEARDOWN = re.compile(r"_call_connection_lost|_ProactorBasePipeTransport")
+    _SOCKET_CODES = (10053, 10054, 10057)   # 已断开 / 连接重置 / 未连接
+
+    def __init__(self, name: str = "", throttle: RepeatThrottle | None = None):
+        super().__init__(name)
+        self._passed: dict[str, float] = {}
+        self._suppressed: dict[str, int] = {}     # 按错误形态分桶，汇总别把账记错
+        self._samples: dict[str, str] = {}
+        self._throttle = throttle or RepeatThrottle(self.WINDOW_SECONDS)
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if not self._TEARDOWN.search(msg):
+            return True
+        kind = self._noise_kind(record)
+        if kind is None:
+            return True
+        now = time.monotonic()
+        key = "asyncio-teardown|" + kind
+        if now - self._passed.get(key, 0.0) >= self.WINDOW_SECONDS:
+            self._passed[key] = now
+            if len(self._passed) > 32:
+                cutoff = now - self.WINDOW_SECONDS
+                for stale in [k for k, ts in self._passed.items() if ts < cutoff]:
+                    self._passed.pop(stale, None)
+            return True
+
+        self._suppressed[kind] = self._suppressed.get(kind, 0) + 1
+        self._samples.setdefault(kind, redact_log_text(msg.strip().splitlines()[0])[:_MAX_SAMPLE_CHARS])
+        if self._throttle.allow(key, now):
+            count, sample = self._suppressed.pop(kind, 0), self._samples.pop(kind, "")
+            try:
+                logging.getLogger("smartkb").warning(
+                    f"[access] 近 60 秒内抑制 {count} 条 asyncio 拆连接噪声"
+                    f"（{kind}，连接已断后 shutdown 的固有报错），样例: {sample}"
+                )
+            except Exception:
+                pass
+        return False
+
+    @classmethod
+    def _noise_kind(cls, record) -> str | None:
+        """确认这条记录就是已知的套接字拆除错误；判不准返回 None（照常输出）"""
+        exc = record.exc_info[1] if record.exc_info and len(record.exc_info) > 1 else None
+        if isinstance(exc, OSError):
+            if exc.winerror in cls._SOCKET_CODES:
+                return "WinError %d" % int(exc.winerror)
+            if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+                return type(exc).__name__
+        if record.exc_info:
+            try:
+                text = logging.Formatter().formatException(record.exc_info)
+            except Exception:
+                return None
+            for code in cls._SOCKET_CODES:
+                if "WinError %d" % code in text:
+                    return "WinError %d" % code
+        return None
+
 class SizeRotatingHandler(logging.FileHandler):
     """按大小轮转的日志处理器, 归档名带时间戳, 保留最近 N 份
 
@@ -506,3 +589,10 @@ if not any(isinstance(f, _AccessNoiseFilter) for f in uvicorn_access.filters):
     uvicorn_access.addFilter(_AccessNoiseFilter())
 if not any(isinstance(f, _PollAuthNoiseFilter) for f in uvicorn_access.filters):
     uvicorn_access.addFilter(_PollAuthNoiseFilter())
+
+
+# asyncio 的默认异常处理器走的是 "asyncio" 这个 logger（uvicorn 不接管它，记录直接
+# 落到 lastResort/终端），Windows proactor 拆连接的固有报错就从这里出来。
+_asyncio_logger = logging.getLogger("asyncio")
+if not any(isinstance(f, _AsyncioTeardownNoiseFilter) for f in _asyncio_logger.filters):
+    _asyncio_logger.addFilter(_AsyncioTeardownNoiseFilter())
