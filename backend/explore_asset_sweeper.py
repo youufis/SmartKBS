@@ -6,7 +6,8 @@ main.py lifespan 调 start()，重复调用只起一个 daemon 线程；每日 E
 
 自动清理是唯一清理方式（不提供手动触发入口）：每日 EXPLORE_SWEEP_HOUR 低峰跑一轮，
 启动 60 秒后先跑一轮轻量。EXPLORE_SWEEP_DRY 默认 False（真清理）；
-想看"这一轮会处置什么"再临时打开——打开后只算清单、写 manifest，不碰文件。
+想看"这一轮会处置什么"再临时打开——打开后只算清单、写 manifest，既不碰文件也不写库
+  （2026-11-16 收口：此前 dry 仍会提交救回/续命/自愈三处账本写入，预检本身带副作用）。
 删除=移入回收站（explore_canvas_trash/YYYYMMDD/），满 EXPLORE_ASSET_TRASH_DAYS 天才物理删。
 只处置 explore_canvas_assets / explore_canvas_trash 两个目录——路径写死，
 物理上不可能误伤白板素材、题库配图等其它地盘。
@@ -119,36 +120,40 @@ def sweep_once(dry=None):
                 if p.is_file() and p.name in refs:
                     if not dry:
                         shutil.move(str(p), str(ASSET_DIR / p.name))
-                    with get_connection() as conn2:
-                        conn2.cursor().execute(
-                            "UPDATE pc_assets SET status = 'active', last_seen_at = ? WHERE filename = ?",
-                            (_fmt(now), p.name))
-                        conn2.commit()
+                        with get_connection() as conn2:
+                            conn2.cursor().execute(
+                                "UPDATE pc_assets SET status = 'active', last_seen_at = ? WHERE filename = ?",
+                                (_fmt(now), p.name))
+                            conn2.commit()
                     entries.append({"filename": p.name, "rule": "ref_back_to_active", "dry": dry})
                     reclaimed += 1
 
     with get_connection() as conn:
         c = conn.cursor()
-        # 1) 引用续命
-        for fn in refs:
-            c.execute("UPDATE pc_assets SET last_seen_at = ? WHERE filename = ? AND status = 'active'",
-                      (_fmt(now), fn))
+        # 1) 引用续命（dry 只读：试跑只算清单，不得改库）
+        if not dry:
+            for fn in refs:
+                c.execute("UPDATE pc_assets SET last_seen_at = ? WHERE filename = ? AND status = 'active'",
+                          (_fmt(now), fn))
 
         # 2) 账本自愈：库有行、盘没文件 → missing；盘有文件、库没行 → 补册
         known = set()
-        for (fn, status) in c.execute("SELECT filename, status FROM pc_assets WHERE status != 'purged'"):
+        for (fn, status) in c.execute(
+                "SELECT filename, status FROM pc_assets WHERE status != 'purged'").fetchall():
             known.add(fn)
             if status == "active" and not (ASSET_DIR / fn).exists():
-                c.execute("UPDATE pc_assets SET status = 'missing' WHERE filename = ?", (fn,))
+                if not dry:
+                    c.execute("UPDATE pc_assets SET status = 'missing' WHERE filename = ?", (fn,))
                 entries.append({"filename": fn, "rule": "heal_missing_file", "dry": dry})
                 healed += 1
         if ASSET_DIR.exists():
             for p in ASSET_DIR.iterdir():
                 if p.is_file() and p.name not in known and ASSET_NAME_RE.match(p.name):
-                    c.execute(
-                        "INSERT OR IGNORE INTO pc_assets (filename, source, owner_username, bytes, mime,"
-                        " created_at, last_seen_at, status) VALUES (?, 'canvas_ref', '', '', '', ?, ?, 'active')",
-                        (p.name, _fmt(now), _fmt(now)))
+                    if not dry:
+                        c.execute(
+                            "INSERT OR IGNORE INTO pc_assets (filename, source, owner_username, bytes, mime,"
+                            " created_at, last_seen_at, status) VALUES (?, 'canvas_ref', '', '', '', ?, ?, 'active')",
+                            (p.name, _fmt(now), _fmt(now)))
                     entries.append({"filename": p.name, "rule": "heal_add_ledger", "dry": dry})
                     healed += 1
 
