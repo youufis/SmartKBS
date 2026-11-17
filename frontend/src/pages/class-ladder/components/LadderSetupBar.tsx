@@ -3,6 +3,7 @@ import { DatabaseOutlined, RobotOutlined, RocketOutlined, SettingOutlined, Sound
 import { useTranslation } from 'react-i18next'
 import type { LadderConfig, LadderSession } from '../../../api/classLadder'
 import KnowledgePointSelect from '../../../components/KnowledgePointSelect'
+import { message } from '../../../utils/feedback'
 import { LF_I18N } from '../constants'
 import type { LadderSetupApi } from '../hooks/useLadderSetup'
 
@@ -49,7 +50,16 @@ export default function LadderSetupBar(p: Props) {
           style={{ width: 130 }} disabled={!setup.grade} options={setup.classes.map((c) => ({ label: c, value: c }))} />
 
         <Select placeholder={t('subjectPlaceholder')} value={setup.subject || undefined} allowClear
-          onChange={(v) => { setup.setSubject(v || ''); setup.setCourseKps([]) }}
+          onChange={(v) => {
+            const next = v || ''
+            setup.setSubject(next)
+            setup.setCourseKps([])
+            // 场次参数在开场时固化：已开场时切学科不会改变当前题池，必须重开一场。
+            // 不提示的话老师会以为切了学科却还在出旧学科的题。
+            if (session && next && next !== (session.subject || '')) {
+              message.warning(t('subjectChangeNeedRestart'), 5)
+            }
+          }}
           style={{ width: 118 }} options={setup.subjects.map((s) => ({ label: s, value: s }))} />
         <KnowledgePointSelect subject={setup.subject} maxCount={KP_MAX} maxTagCount={1} value={setup.courseKps}
           onChange={(v) => setup.setCourseKps(Array.isArray(v) ? v : [])}
@@ -63,7 +73,7 @@ export default function LadderSetupBar(p: Props) {
           options={[...(config?.time_limits || [60, 90, 120]).map((n) => ({ label: t('secondUnit', { n }), value: n })),
             { label: t('timeLimitNone'), value: 0 }]} />
         <Select value={setup.poolSize} onChange={setup.setPoolSize} style={{ width: 108 }}
-          options={[15, 30, 45].map((n) => ({ label: t('poolSizeUnit', { n }), value: n }))} />
+          options={[45, 60].map((n) => ({ label: t('poolSizeUnit', { n }), value: n }))} />
         <Tooltip title={t('safeModeTip')}>
           <Space size={6}>
             <Switch checked={setup.safeMode} onChange={setup.setSafeMode} size="small" />

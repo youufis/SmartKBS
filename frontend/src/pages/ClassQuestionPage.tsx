@@ -191,6 +191,27 @@ const ClassQuestionPage: React.FC = () => {
     loadSession(grade, val)
   }
 
+  // 切换学科：当前题、已抽 id、作答状态全部清掉。否则画面还停在上一题（旧学科），
+  // 老师会以为「选了新学科却还在出旧学科的题」——后端其实是按下一次抽题的新学科取的。
+  const handleSubjectChange = (val: string) => {
+    const next = val || ''
+    setSubject(next)
+    setCourseKps([])
+    if (next === subject) return
+    clearAllTimers()
+    setQuestion(null)
+    setShowAnswer(false)
+    setSelectedIdx(null)
+    setSubmitted(false)
+    setLastPoints(null)
+    setUsedIds([])
+    setDrawnScope([])
+    setLastPicked('')
+    setLastPickId(null)
+    setDisplayName('🎯')
+    if (next) message.info(t('subjectChangedDrawAgain'), 4)
+  }
+
   // 题库未入库的 AI 题没有 id，此时用题干做去重键
   const questionKey = (q: DrillQuestion): number | null => (q.id == null ? null : Number(q.id))
 
@@ -407,7 +428,7 @@ const ClassQuestionPage: React.FC = () => {
           />
           <Select
             placeholder={t('subjectPlaceholder')} value={subject || undefined}
-            onChange={(v) => { setSubject(v || ''); setCourseKps([]) }}
+            onChange={handleSubjectChange}
             style={{ width: 130 }} allowClear
             options={subjects.map((s) => ({ label: s, value: s }))}
           />

@@ -44,7 +44,8 @@ export function useLadderSetup(a: Args) {
   const [courseKps, setCourseKps] = useState<string[]>([])
   const [questionType, setQuestionType] = useState('single')
   const [timeLimit, setTimeLimit] = useState(0)
-  const [poolSize, setPoolSize] = useState(30)
+  // 45 = 每关 3 题：同场次再开一局能换题（15/30 会退化成每关 1~2 题，多局重复）
+  const [poolSize, setPoolSize] = useState(45)
   const [allowAi, setAllowAi] = useState(false)
   const [safeMode, setSafeMode] = useState(false)
   const [lifelinesSel, setLifelinesSel] = useState<string[]>([])

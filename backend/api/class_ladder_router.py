@@ -57,6 +57,10 @@ router = APIRouter()
 
 # ── 规则常量（与学生端「知识闯关」同口径）──
 MAX_LEVELS = 15
+#: 每关至少备几题 —— 同场次再开一局要能换题，池子不能"一关一道"。
+#: 旧实现一关一道时，第 2 局起每关都只能取回同一道题（2026-11-18 复现）。
+MIN_PER_LEVEL = 3
+MAX_PER_LEVEL = 4
 LEVEL_SCORES = {
     1: 10, 2: 15, 3: 15, 4: 20, 5: 20, 6: 20,
     7: 25, 8: 25, 9: 25, 10: 30, 11: 30, 12: 30,
@@ -78,7 +82,7 @@ DEFAULT_LIFELINES = ("remove_one", "phone_friend", "audience_vote")
 MAX_LIFELINES = 3
 QUESTION_TYPES = ("single", "true_false")
 DEFAULT_TIME_LIMIT = 0  # 0 = no countdown (default)
-DEFAULT_POOL_SIZE = 30
+DEFAULT_POOL_SIZE = MAX_LEVELS * MIN_PER_LEVEL   # 45 = 每关 3 题，可撑 3 局不重复
 SKINS = ("star", "cyber", "academy", "classic", "cloud", "sunrise", "mint")
 
 #: 权重口径（抽中 -3、答对 +1、上限 10、覆盖 60% 开新轮）只在 pick_engine 定义一次，
@@ -336,8 +340,13 @@ def _scope_from_request(request: Request, user: dict, body: dict) -> tuple[str, 
 
 
 def _levels_for_pool(pool_size: int) -> list[int]:
-    """题池的关卡分布：循环铺满 1..15（pool_size=30 → 每关 2 题）。"""
-    n = max(MAX_LEVELS, min(int(pool_size or DEFAULT_POOL_SIZE), MAX_LEVELS * 3))
+    """题池的关卡分布：循环铺满 1..15（pool_size=45 → 每关 3 题）。
+
+    下限抬到 15×MIN_PER_LEVEL：老师把题池调到 15 题（正好一局）时，
+    旧口径会变成"一关一道"，同场次第 2 局起每关只能取回同一道题。
+    """
+    target = int(pool_size or DEFAULT_POOL_SIZE)
+    n = max(MAX_LEVELS * MIN_PER_LEVEL, min(target, MAX_LEVELS * MAX_PER_LEVEL))
     return [i % MAX_LEVELS + 1 for i in range(n)]
 
 
@@ -501,19 +510,55 @@ def _write_student_record(run: dict, session: dict) -> None:
                           actor=session.get("teacher_username") or "")
 
 
+def _pool_row_for_level(session_id: int, level: int, diff: str,
+                        used_in_run: set[int]) -> dict | None:
+    """按"新鲜度"取一道题：本关未用 → 同难度其它关未用 → 本关最少用 → 全池。
+
+    同难度借题是给"同场次再开一局"用的：每关只备 MIN_PER_LEVEL 道，几局之后就
+    用完，旧实现会死磕本关那一道，导致每局题目完全不变。借来的题难度一致，
+    关卡曲线不受影响。used_in_run 排除本局已选，避免同一道题发给两个关卡。
+    """
+    excl = ""
+    tail: tuple[int, ...] = ()
+    if used_in_run:
+        excl = " AND id NOT IN (%s)" % ",".join("?" * len(used_in_run))
+        tail = tuple(used_in_run)
+    queries = (
+        (f"SELECT * FROM class_ladder_pool WHERE session_id=? AND level=? AND used_count=0{excl} "
+         f"ORDER BY RANDOM() LIMIT 1", (session_id, level, *tail)),
+        (f"SELECT * FROM class_ladder_pool WHERE session_id=? AND difficulty=? AND used_count=0{excl} "
+         f"ORDER BY RANDOM() LIMIT 1", (session_id, diff, *tail)),
+        (f"SELECT * FROM class_ladder_pool WHERE session_id=? AND level=?{excl} "
+         f"ORDER BY used_count ASC, RANDOM() LIMIT 1", (session_id, level, *tail)),
+        (f"SELECT * FROM class_ladder_pool WHERE session_id=? AND difficulty=?{excl} "
+         f"ORDER BY used_count ASC, RANDOM() LIMIT 1", (session_id, diff, *tail)),
+        (f"SELECT * FROM class_ladder_pool WHERE session_id=?{excl} "
+         f"ORDER BY used_count ASC, RANDOM() LIMIT 1", (session_id, *tail)),
+    )
+    for sql, params in queries:
+        row = execute_query_one(sql, params)
+        if row:
+            return row
+    return None
+
+
 def _snapshot_questions(session_id: int) -> list[dict]:
-    """为这一局每关取一题（优先池里没被用过的）。"""
-    picked: list[dict] = []
+    """为这一局每关取一题（优先没被用过的；本关用尽时向同难度其它关借）。
+
+    先选满 15 关再统一落 used_count：中途某关无题时直接返回空，不会把已选题的
+    used_count 白白 +1（那会让下一次开局更难取到题，池子不足时越试越糟）。
+    """
+    chosen: list[tuple[int, dict]] = []
+    used_in_run: set[int] = set()
     for level in range(1, MAX_LEVELS + 1):
-        row = execute_query_one(
-            "SELECT * FROM class_ladder_pool WHERE session_id=? AND level=? "
-            "ORDER BY used_count ASC, RANDOM() LIMIT 1", (session_id, level))
-        if not row:
-            row = execute_query_one(
-                "SELECT * FROM class_ladder_pool WHERE session_id=? ORDER BY used_count ASC, RANDOM() LIMIT 1",
-                (session_id,))
+        row = _pool_row_for_level(session_id, level, _difficulty_of_level(level), used_in_run)
         if not row:
             return []
+        used_in_run.add(int(row["id"]))
+        chosen.append((level, row))
+
+    picked: list[dict] = []
+    for level, row in chosen:
         execute_insert_update("UPDATE class_ladder_pool SET used_count=used_count+1 WHERE id=?", (row["id"],))
         picked.append({
             "level": level,
