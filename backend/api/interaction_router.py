@@ -494,15 +494,14 @@ async def ai_generate_poll(req: AiGeneratePoll, request: Request):
 
 
 def _parse_ai_generated(text: str) -> list[dict[str, Any]]:
-    """解析 AI 返回的 JSON 题目列表（兼容课程练习的解析逻辑）"""
-    data = extract_json_from_text(text)
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict) and "questions" in data:
-        return data["questions"]
-    if not data:
-        logger.warning(f"AI 返回解析失败: {text[:300]}")
-    return []
+    """解析 AI 返回的题目 JSON（统一走 question_parse 的完整容错链路）。
+
+    历史实现只做 extract_json_from_text + list/dict：模型多一句客套话、一个尾逗号
+    或一处截断，整批就 0 道。现在与试题管理共用同一份「快速三策略 + 8.2 容错层 +
+    题干内嵌选项剥离」，课堂抽问/闯关/随堂测验都从这里受益。
+    """
+    from backend.question_parse import parse_question_array
+    return parse_question_array(text, scene="interaction")
 
 
 # ── AI 建议回答提问 ──

@@ -705,78 +705,13 @@ def _ai_fail_detail(exc: Exception, prefix: str = "AI 生成失败") -> str:
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
-    """解析 AI 返回的 JSON 试题列表：先走快速策略，失败再上 8.2 容错层兜底。
+    """解析 AI 返回的 JSON 试题列表（统一实现见 backend/question_parse）。
 
-    兜底层处理：客套话包裹、fence 代码块、尾逗号、非法转义、截断补齐；
-    全部失败时原文留档 LogFiles/ai_raw 便于复盘；
-    解析成功后剥离误写进题干的选项（strip 只在证据充分时动手，不会误伤）。
+    保留本函数名：quick_quiz_router、含配图出题等多处按此名引用；内部委托给公共
+    解析，避免同一份「快速三策略 + 8.2 容错层 + 题干选项剥离」在各入口反复漂移。
     """
-    from backend import ai_json
-    questions = _parse_ai_response_fast(text)
-    if not questions:
-        got, meta = ai_json.extract_json_array2(text, salvage=True)
-        if got:
-            logger.info(f"[题解析] 容错层兜底成功 salvaged={meta.get('salvaged')}，共 {len(got)} 条")
-            questions = got
-        elif (text or "").strip():
-            raw_path = ai_json.dump_failed_raw("questions", text)
-            logger.error(f"[题解析] 全部策略失败（原文留档: {raw_path}）前200字: {text[:200]}")
-    out: list[dict[str, Any]] = []
-    for q in questions or []:
-        if isinstance(q, dict):
-            q, changed, why = ai_json.strip_options_from_stem(q)
-            if changed:
-                logger.info(f"[题解析] 已剥离题干内嵌选项（{why}）")
-        out.append(q)
-    return out
-
-
-def _parse_ai_response_fast(text: str) -> list[dict[str, Any]]:
-    """解析 AI 返回的 JSON 试题列表（多策略鲁棒解析）——快速路径，失败交给上层容错层"""
-    text = text.strip()
-    if not text:
-        return []
-
-    # 策略1：直接解析
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return data
-        elif isinstance(data, dict) and "questions" in data:
-            return data["questions"]
-    except json.JSONDecodeError:
-        pass
-
-    # 策略2：从 ```json ``` 代码块提取
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            if isinstance(data, list):
-                return data
-            elif isinstance(data, dict) and "questions" in data:
-                return data["questions"]
-        except json.JSONDecodeError:
-            pass
-
-    # 策略3：从最外层 [ 到 ] 提取 JSON 数组
-    start = text.find('[')
-    end = text.rfind(']')
-    if start != -1 and end != -1 and end > start:
-        json_str = text[start:end + 1]
-        # 清理代码块标记
-        json_str = json_str.replace("```json", "").replace("```", "").strip()
-        try:
-            data = json.loads(json_str)
-            if isinstance(data, list):
-                return data
-            elif isinstance(data, dict) and "questions" in data:
-                return data["questions"]
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON 解析失败: {e}, 原文前200字: {text[:200]}")
-            return []
-
-    return []
+    from backend.question_parse import parse_question_array
+    return parse_question_array(text, scene="questions")
 
 
 # ── 题库 CRUD ──

@@ -584,10 +584,12 @@ def select_questions(
     if no_kp_constraint:
         audit["skipped"]["no_kp"] = "未指定知识点：按学科/题型整池召回（等同于不限）"
 
-    # 多选时标签切分/规范化只做一遍：_owners_of 还要按知识点各扫一遍，
-    # 不缓存就是 5 遍全库 split_tags+norm。单选/不限知识点不建这份缓存（少干一行活）。
+    # 只要给了 kp_names（哪怕只有 1 个）就建缓存：_owners_of 会按知识点各扫一遍，
+    # 不缓存就是 N 遍全库 split_tags+norm；tier_of 也复用同一份，省下重复计算。
+    # 注意不能写成 len(multi_kps) >= 2 —— 课堂抽问/闯关把单个知识点也包成数组传，
+    # 单元素时缓存为空而 _owners_of 仍会读取，曾在此 KeyError 崩掉题库检索（2026-11-17）。
     tag_cache: dict[int, tuple[list[str], list[str], str]] = {}
-    if len(multi_kps) >= 2:
+    if multi_kps:
         for _r in cand:
             _raw_tags = split_tags(_r.get("knowledge_points"))
             tag_cache[int(_r["id"])] = (_raw_tags, [norm(t) for t in _raw_tags],
@@ -637,7 +639,11 @@ def select_questions(
             if not nn:
                 return hit_ids
             for r in cand:
-                ntags = tag_cache[int(r["id"])][1]
+                # 缓存只覆盖候选池；缺失时现算而非直接下标，避免又一次 KeyError 把
+                # 题库检索整条打挂（调用方 except 后只会静默转 AI）。
+                cached = tag_cache.get(int(r["id"]))
+                ntags = (cached[1] if cached
+                         else [norm(t) for t in split_tags(r.get("knowledge_points"))])
                 if nn in ntags or any(t and len(t) >= 3 and t not in _STOP_WORDS
                                       and (nn in t or t in nn) for t in ntags):
                     hit_ids.add(int(r["id"]))

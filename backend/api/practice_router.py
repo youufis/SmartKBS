@@ -384,9 +384,16 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
             types = (req.question_type,) if req.question_type in _BANK_REUSE_TYPES_MIXED else ()
         if not types:
             return []
+        # 知识点是用户可多选的拼串（"A、B"）：必须还原成数组走并集召回。
+        # 直接把整串当 kp_name 会查不到 ID 关联 —— T0/T1 精确层全丢，只剩 T2/T3
+        # 近似题，题库明明有精确匹配却被判「不够」转 AI（2026-11-17 核实同步练习）。
+        # parse_kp_topics 只在「每段都是全库知识点名」时才拆，含顿号的全名不会被切碎。
+        from backend.question_select import parse_kp_topics
+        kp_names, _ = parse_kp_topics(req.knowledge_points)
         rows = query_bank_questions(
             topic=req.knowledge_points, subject=req.subject,
             question_type=req.question_type, count=need, types=types,
+            kp_names=kp_names,
         )
         return [_format_bank_row(r) for r in rows][: need]
 
@@ -1748,19 +1755,19 @@ async def _get_practice_result(session_id: int, username: str) -> dict[str, Any]
 # ── 共享工具 ──
 
 def _parse_ai_result(text: str) -> list[dict[str, Any]]:
-    """解析 AI 返回的 JSON 题目列表（含条目校验 + 失败诊断日志）"""
-    data = extract_json_from_text(text)
-    if isinstance(data, dict):
-        # 兼容 {"questions": [...]} 包装; 单个题目对象直接包成列表
-        inner = data.get("questions")
-        if isinstance(inner, list):
-            data = inner
-        elif "question" in data:
-            data = [data]
-        else:
-            data = None
-    if not isinstance(data, list):
-        data = []
+    """解析 AI 返回的 JSON 题目列表（统一容错解析 + 同步练习自己的可答性校验）。
+
+    解析本体走 backend.question_parse（与试题管理同一份「快速三策略 + 8.2 容错层 +
+    题干内嵌选项剥离」）；这里额外做同步练习特有的条目校验：截断挽救出来缺答案/
+    缺选项的半道题必须丢弃，否则学生拿到一道判不了分的题。
+    """
+    from backend.question_parse import parse_question_array
+    data = parse_question_array(text, scene="practice")
+    if not data:
+        # 兼容模型只回单个题目对象（统一解析只认数组 / {"questions": [...]} 包装）
+        raw = extract_json_from_text(text)
+        if isinstance(raw, dict) and "question" in raw:
+            data = [raw]
     valid: list[dict[str, Any]] = []
     for q in data:
         if not isinstance(q, dict):
