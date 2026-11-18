@@ -40,7 +40,7 @@
 > - 🖥 **Local model engine (new)**: Ollama integration · cloud / hybrid / local tiers · live model list with resident info · chat engine badge · capability matrix & graded notices · friendly errors
 > - 🧠 **Dual-engine semantics**: hybrid = local generation + cloud KB retrieval · local = fully offline (cloud retrieval/warmup bypassed, local question-bank fallback) · cloud tier passes through unchanged
 > - 🧩 **Settings restructure**: cloud / local model sections · cloud-service attribution labels (KB / TTS / ASR / image gen) · guides collapsed by default · auto-probe on page entry
-> - 📊 **Teaching briefing (new)**: weekly / monthly / yearly auto-draft · nine sections with conclusions · praise-title registry · scheduled generation & in-app notice · mobile read-only with copy-to-share
+> - 📊 **Teaching briefing (new)**: weekly / monthly / yearly auto-draft · nine sections with conclusions · praise-title registry · scheduled checks & in-app notice · mobile read-only with copy-to-share
 > - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
 >
 > - ⚠️ **Breaking changes**: none
@@ -851,7 +851,7 @@ Automatically summarises teaching data by week / month / year into a nine-sectio
 - **Metric rules**: minimum sample sizes, knowledge-point attribution, null vs zero kept distinct; charts and Word export share one source
 - **Composition**: rule-based fallback; AI only writes narrative, checked against a number whitelist and skipped when AI is unavailable
 - **Praise & growth**: 14 student + 8 class praise titles from a registry; platform titles/badges surface under student growth
-- **Delivery**: scheduled generation + in-app notice; paged, deletable history; mobile read-only with copy-to-share
+- **Delivery**: scheduled checks that generate + in-app notice; paged, deletable history; mobile read-only with copy-to-share
 
 > **Available to Teacher and Admin**
 
@@ -1215,7 +1215,7 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 - Weekly / monthly / yearly cycles with nine sections: overview, activity, outcomes, participation, assignments, praise, growth, weak areas, next steps
 - Rule-based fallback + AI narrative; number whitelist; degrades to the rule-based version when AI is unavailable
 - Praise-title registry: 14 student + 8 class titles, no padding; platform titles/badges surface under growth
-- Scheduled generation every 30 minutes for missing cycles with in-app notice; manual regeneration and version history
+- Scheduled **checks** every 30 minutes generate only missing completed cycles (max 2 per run), with in-app notice; manual regeneration and version history
 - Mobile read-only: filter drawer, card-style tables, copy-to-share summary; paged and deletable history
 
 **🖥 Local model engine (new)**
