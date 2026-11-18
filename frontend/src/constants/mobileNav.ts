@@ -46,6 +46,7 @@ const STUDENT_ALLOWED = [
 /** 教师/管理员端：首批仅轻场景（题库/组卷/用户管理等保持桌面专属） */
 const STAFF_ALLOWED = [
   '/dashboard',
+  '/briefing',
   '/chat',
   '/notifications',
   '/announcements',

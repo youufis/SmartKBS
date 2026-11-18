@@ -1,6 +1,7 @@
 {
   "overview": "首页概览",
   "dashboard": "系统首页",
+  "briefing": "教学简报",
   "taskTodo": "任务清单",
   "learnCenter": "学习中心",
   "curriculum": "课程导学",
@@ -192,7 +193,6 @@
   "rb.open": "打开",
   "rb.reshare": "再共享给学生",
   "rb.alsoSharedBy": "另有 {{names}} 也把同一份文件共享了出来（已合并为一张卡片）",
-  "rb.manageShare": "管理共享",
   "mySharesTab": "我共享的",
   "rb.docGroup": "文档",
   "rb.mediaGroup": "视频音频",

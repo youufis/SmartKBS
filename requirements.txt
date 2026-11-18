@@ -1,15 +1,22 @@
 # SmartKB backend dependencies
 # Install: pip install -r requirements.txt
 
-fastapi>=0.104.0
-uvicorn>=0.24.0
+fastapi>=0.139.0,<1.0
+starlette>=1.3.1,<2.0
+# main.py 启动入口显式传 ws="websockets-sansio"（websockets 旧实现的 keepalive ping 与业务 send
+# 存在发送锁竞态，sansio 才安全）并启用 reload=True：裸装 uvicorn 不带 websockets/watchfiles，
+# 必须 [standard]；另把 websockets 单独封顶 <18，防大版本把 sansio 协议或 permessage-deflate 换掉。
+uvicorn[standard]>=0.34.0,<1.0
+websockets>=13.0,<18
 bcrypt>=4.1.0
 PyJWT>=2.8.0
 dashscope>=1.17.0
 python-dotenv>=1.0.0
-httpx>=0.25.0
+# 多个后端模块直接 import httpx；starlette TestClient 与 fastapi standard 都要求 httpx 0.x
+httpx>=0.27.0,<1.0
 requests>=2.31.0
-python-multipart>=0.0.6
+# fastapi 表单/文件上传（UploadFile/File/Form）的运行时依赖，下限对齐 fastapi 0.139 自身声明
+python-multipart>=0.0.18
 PyPDF2>=3.0.0
 python-docx>=1.1.0
 # 导出 Excel 报告（成绩单 / 考试 / 点名 / 课堂互动）的硬依赖，export_router 在启动时即导入

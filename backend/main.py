@@ -444,6 +444,24 @@ async def lifespan(app: FastAPI):
 
         print(f"[main] 启动讨论 AI 自动引导失败: {e}", file=sys.stderr)
 
+    try:
+
+        # 教学简报：定时预生成（每 30 分钟补齐，漏跑自愈）
+
+        from backend.briefing_scheduler import auto_loop as briefing_auto_loop
+
+        _briefing_task = _asyncio.create_task(briefing_auto_loop())
+
+        _briefing_task.set_name("briefing-auto")
+
+        app.state.briefing_auto_task = _briefing_task
+
+    except Exception as e:
+
+        import sys
+
+        print(f"[main] 启动教学简报定时生成失败: {e}", file=sys.stderr)
+
     yield
 
     # ── shutdown ──
@@ -453,6 +471,12 @@ async def lifespan(app: FastAPI):
     if _task is not None:
 
         _task.cancel()
+
+    _briefing_task = getattr(app.state, "briefing_auto_task", None)
+
+    if _briefing_task is not None:
+
+        _briefing_task.cancel()
 
     pass
 
@@ -711,6 +735,10 @@ app.include_router(export_router, prefix="/api/export", tags=["数据导出"])
 app.include_router(portfolio_router, prefix="/api/portfolio", tags=["成长档案"])
 
 app.include_router(analytics_router, prefix="/api/analytics", tags=["学情分析"])
+
+from backend.api.briefing_router import router as briefing_router
+
+app.include_router(briefing_router, prefix="/api/briefing", tags=["教学简报"])
 
 app.include_router(interaction_router, prefix="/api/interaction", tags=["课堂互动"])
 

@@ -42,6 +42,7 @@ const TA = ['admin', 'teacher']
 import AppLayout from './components/AppLayout'
 import MobileGate from './components/MobileGate'
 import DashboardPage from './pages/DashboardPage'
+const BriefingPage = lazy(() => import('./pages/BriefingPage'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const HtmlFilesPage = lazy(() => import('./pages/HtmlFilesPage'))
 const ResourceMgmtPage = lazy(() => import('./pages/ResourceMgmtPage'))
@@ -167,6 +168,7 @@ function App() {
           <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
             <Route index element={<DashboardPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="briefing" element={<RequireRole roles={TA}><BriefingPage /></RequireRole>} />
             <Route path="task-todo" element={user?.role === 'student' ? <TaskTodoPage /> : <Navigate to="/dashboard" />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="html-files" element={<HtmlFilesPage />} />

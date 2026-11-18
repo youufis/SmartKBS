@@ -1,0 +1,102 @@
+{
+  "title": "Teaching Briefing",
+  "subtitle": "Periodic summary of teaching data with conclusions and next steps",
+  "period": {
+    "day": "Day",
+    "week": "Week",
+    "month": "Month",
+    "year": "Year"
+  },
+  "filter": {
+    "current": "Current period",
+    "subject": "Subject",
+    "grade": "Grade",
+    "class": "Class",
+    "teacher": "Teacher",
+    "title": "Filters",
+    "reset": "Reset",
+    "done": "Done",
+    "prev": "Previous period",
+    "next": "Next period",
+    "cancel": "Cancel"
+  },
+  "action": {
+    "history": "History",
+    "export": "Export Word",
+    "generate": "Generate briefing",
+    "regenerate": "Regenerate",
+    "copy": "Copy"
+  },
+  "status": {
+    "done": "Generated",
+    "degraded": "Rule-based (AI unavailable)",
+    "empty": "No data",
+    "generating": "Generating"
+  },
+  "job": {
+    "start": "Preparing data",
+    "hint": "Collecting data and writing the summary, about 10–30 seconds"
+  },
+  "kpi": {
+    "avgRate": "Average score rate",
+    "participation": "Participation",
+    "activities": "Activities",
+    "pending": "Pending grading",
+    "alerts": "At-risk students",
+    "samples": "Score samples",
+    "praise": "Praised",
+    "sampleShort": "Sample too small"
+  },
+  "unit": {
+    "items": "",
+    "times": "",
+    "people": "",
+    "copies": ""
+  },
+  "preview": {
+    "title": "No briefing for this period yet",
+    "desc": "{{activities}} activities and {{samples}} score samples collected. Click below to generate."
+  },
+  "praise": {
+    "coverage": "Coverage {{n}}%",
+    "vacant": "Vacant titles"
+  },
+  "history": {
+    "title": "Briefing history",
+    "empty": "No history yet",
+    "delete": "Delete",
+    "deleteConfirm": "All versions of this briefing will be removed. Continue?",
+    "deleted": "Deleted",
+    "deleteFailed": "Delete failed"
+  },
+  "error": {
+    "load": "Failed to load the briefing",
+    "generate": "Generation failed, please retry",
+    "export": "Export failed",
+    "save": "Failed to save settings"
+  },
+  "settings": {
+    "title": "Briefing settings",
+    "autoWeekly": "Auto-generate weekly",
+    "autoMonthly": "Auto-generate monthly",
+    "autoYearly": "Auto-generate yearly",
+    "notify": "Notify me when generated",
+    "yearMode": "Year definition",
+    "schoolYear": "School year (from Sep 1)",
+    "calendar": "Calendar year",
+    "hint": "Auto-generation only covers teachers with activity in the period, at most 2 per run. Manual generation still works when off."
+  },
+  "compare": {
+    "title": "vs previous",
+    "prev": "prev"
+  },
+  "share": {
+    "next": "Next steps:",
+    "copied": "Summary copied",
+    "failed": "Copy failed"
+  },
+  "version": {
+    "label": "Version {{n}}",
+    "hint": "Each regeneration creates a new version; the last 5 are kept"
+  }
+}

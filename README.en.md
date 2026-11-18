@@ -4,13 +4,13 @@
 >
 > **An AI-powered smart teaching platform for primary, junior secondary and senior secondary schools** — subjects, grades and classes are all configuration-driven, **with no subject hard-coded anywhere**.
 >
-> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 50 feature areas and 60+ capabilities:
+> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 51 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
-> - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
+> - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration (cloud/local dual engine), online incremental upgrade, multi-theme appearance
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang), DeepSeek and a local Ollama engine (cloud / hybrid / local tiers). SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
@@ -40,6 +40,7 @@
 > - 🖥 **Local model engine (new)**: Ollama integration · cloud / hybrid / local tiers · live model list with resident info · chat engine badge · capability matrix & graded notices · friendly errors
 > - 🧠 **Dual-engine semantics**: hybrid = local generation + cloud KB retrieval · local = fully offline (cloud retrieval/warmup bypassed, local question-bank fallback) · cloud tier passes through unchanged
 > - 🧩 **Settings restructure**: cloud / local model sections · cloud-service attribution labels (KB / TTS / ASR / image gen) · guides collapsed by default · auto-probe on page entry
+> - 📊 **Teaching briefing (new)**: weekly / monthly / yearly auto-draft · nine sections with conclusions · praise-title registry · scheduled generation & in-app notice · mobile read-only with copy-to-share
 > - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
 >
 > - ⚠️ **Breaking changes**: none
@@ -125,7 +126,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI lesson cast, AI podcast, AI teaching assistant, question bank and tag maintenance, exams, composing with Word export, AI resources, resource centre and management, file centre | 12 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
-| 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 11 |
+| 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, teaching briefing, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 12 |
 | ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration (cloud/local dual engine), skills, notifications, upgrade, about, other services | 8 |
 
 > The **permission note** at the end of each section states which roles can reach that feature; the full matrix is in the [Permissions Overview](#permissions).
@@ -842,6 +843,20 @@ Utilizes AI for in-depth analysis of teaching data:
 
 ---
 
+### Teaching Briefing
+
+Automatically summarises teaching data by week / month / year into a nine-section briefing with conclusions:
+
+- **Nine sections**: overview, teaching activity, learning outcomes, participation, assignments, praise, student growth, weak areas, next steps
+- **Metric rules**: minimum sample sizes, knowledge-point attribution, null vs zero kept distinct; charts and Word export share one source
+- **Composition**: rule-based fallback; AI only writes narrative, checked against a number whitelist and skipped when AI is unavailable
+- **Praise & growth**: 14 student + 8 class praise titles from a registry; platform titles/badges surface under student growth
+- **Delivery**: scheduled generation + in-app notice; paged, deletable history; mobile read-only with copy-to-share
+
+> **Available to Teacher and Admin**
+
+---
+
 ### AI Classroom Summary
 
 AI comprehensively analyzes classroom interaction data:
@@ -1194,6 +1209,14 @@ Git-based online incremental upgrade system:
 Current version **9.2.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v9.1.0 is merged into one section below.
 
 ### v9.2.0
+
+**📊 Teaching briefing (new)**
+
+- Weekly / monthly / yearly cycles with nine sections: overview, activity, outcomes, participation, assignments, praise, growth, weak areas, next steps
+- Rule-based fallback + AI narrative; number whitelist; degrades to the rule-based version when AI is unavailable
+- Praise-title registry: 14 student + 8 class titles, no padding; platform titles/badges surface under growth
+- Scheduled generation every 30 minutes for missing cycles with in-app notice; manual regeneration and version history
+- Mobile read-only: filter drawer, card-style tables, copy-to-share summary; paged and deletable history
 
 **🖥 Local model engine (new)**
 

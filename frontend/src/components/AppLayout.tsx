@@ -17,6 +17,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   FileAddOutlined,
+  FileTextOutlined,
   BellOutlined,
   BarChartOutlined,
   ThunderboltOutlined,
@@ -127,6 +128,7 @@ function buildTeacherMenu(t: (k: string) => string) {
   const m: TeacherMenuItem[] = [
     { type: 'group', icon: <HomeOutlined />, label: g('overview'), key: 'overview', children: [
       { key: '/dashboard', icon: <HomeOutlined />, label: g('dashboard') },
+      { key: '/briefing', icon: <FileTextOutlined />, label: g('briefing') },
     ]},
     { type: 'group', icon: <BookOutlined />, label: g('teacherMenu.teachingManagement'), key: 'teach', children: [
       { key: '/curriculum', icon: <BookOutlined />, label: g('curriculumManage') },
@@ -488,11 +490,10 @@ const AppLayout: React.FC = () => {
           />
           <Drawer
             placement="left"
-            width="78%"
             open={mobileMenuOpen}
             onClose={() => setMobileMenuOpen(false)}
             title={t('mobileDrawerTitle', { defaultValue: '全部功能' })}
-            styles={{ body: { padding: '8px 0' } }}
+            styles={{ wrapper: { width: '78%' }, body: { padding: '8px 0' } }}
             extra={<span style={{ fontSize: 12, color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)' }}>🟢 {t('onlineCount', { count: onlineCount })}</span>}
           >
             <Menu

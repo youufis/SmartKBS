@@ -1,0 +1,102 @@
+{
+  "title": "教学简报",
+  "subtitle": "按周期汇总教学数据，给出结论与下一步建议",
+  "period": {
+    "day": "日",
+    "week": "周",
+    "month": "月",
+    "year": "年"
+  },
+  "filter": {
+    "current": "当前周期",
+    "subject": "学科",
+    "grade": "年级",
+    "class": "班级",
+    "teacher": "教师",
+    "title": "筛选",
+    "reset": "重置",
+    "done": "完成",
+    "prev": "上一周期",
+    "next": "下一周期",
+    "cancel": "取消"
+  },
+  "action": {
+    "history": "历史",
+    "export": "导出 Word",
+    "generate": "生成本期简报",
+    "regenerate": "重新生成",
+    "copy": "复制摘要"
+  },
+  "status": {
+    "done": "已生成",
+    "degraded": "规则版（AI 不可用）",
+    "empty": "本期无数据",
+    "generating": "生成中"
+  },
+  "job": {
+    "start": "准备采集数据",
+    "hint": "正在采集数据并生成解读，约 10–30 秒"
+  },
+  "kpi": {
+    "avgRate": "平均得分率",
+    "participation": "参与率",
+    "activities": "课堂活动",
+    "pending": "待批改",
+    "alerts": "预警学生",
+    "samples": "得分样本",
+    "praise": "表扬人数",
+    "sampleShort": "样本不足"
+  },
+  "unit": {
+    "items": "项",
+    "times": "人次",
+    "people": "人",
+    "copies": "份"
+  },
+  "preview": {
+    "title": "本期还没有简报",
+    "desc": "本期已采集到 {{activities}} 项活动、{{samples}} 人次得分样本，点击下方按钮生成简报"
+  },
+  "praise": {
+    "coverage": "覆盖率 {{n}}%",
+    "vacant": "本期空缺称号"
+  },
+  "history": {
+    "title": "历史简报",
+    "empty": "暂无历史简报",
+    "delete": "删除",
+    "deleteConfirm": "删除后该期简报的所有版本都会清除，确定？",
+    "deleted": "已删除",
+    "deleteFailed": "删除失败"
+  },
+  "error": {
+    "load": "加载简报失败",
+    "generate": "生成失败，请稍后重试",
+    "export": "导出失败",
+    "save": "保存设置失败"
+  },
+  "settings": {
+    "title": "简报设置",
+    "autoWeekly": "每周自动生成",
+    "autoMonthly": "每月自动生成",
+    "autoYearly": "每年自动生成",
+    "notify": "生成后发站内通知",
+    "yearMode": "学年口径",
+    "schoolYear": "学年（9/1 起）",
+    "calendar": "自然年",
+    "hint": "自动生成只针对本期有活动或积分的教师，单次最多 2 份；关闭后仍可手动生成。"
+  },
+  "compare": {
+    "title": "与上期对比",
+    "prev": "上期"
+  },
+  "share": {
+    "next": "下一步：",
+    "copied": "摘要已复制，可直接粘贴到群里",
+    "failed": "复制失败，请手动选择文本"
+  },
+  "version": {
+    "label": "第 {{n}} 版",
+    "hint": "每次重新生成会新增一个版本，旧版保留可回看（最多 5 个）"
+  }
+}
