@@ -4,6 +4,12 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+// 后端 API 代理端口：默认 8086，可用 SMARTKB_PORT 环境变量覆盖
+// （与 desktop/main.js、backend/config.py 同一口径，改了后端监听端口后开发代理不会指错）
+const API_PORT = process.env.SMARTKB_PORT || '8086'
+const API_TARGET = `http://localhost:${API_PORT}`
+const WS_TARGET = `ws://localhost:${API_PORT}`
+
 /**
  * 翻译文件的缓存破坏值：由 public/locales 的内容本身决定（短哈希），不是构建时间戳。
  *
@@ -69,24 +75,24 @@ export default defineConfig({
     proxy: {
       // 白板 WebSocket 优先匹配，避免 WS 断开影响 HTTP 代理
       '/api/whiteboard/ws': {
-        target: 'ws://localhost:8086',
+        target: WS_TARGET,
         ws: true,
         changeOrigin: true,
       },
       // 其余活动 WS（抢答/讨论/提问…）：/api 兜底代理不转发 WebSocket 升级，
       // 缺这条时开发态 WS 全部静默失败，教师端只能靠轮询兜底
       '/api/ws': {
-        target: 'ws://localhost:8086',
+        target: WS_TARGET,
         ws: true,
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:8086',
+        target: API_TARGET,
         changeOrigin: true,
       },
-      '/score-api': 'http://localhost:8086',
-      '/rollcall-api': 'http://localhost:8086',
-      '/downloads-api': 'http://localhost:8086',
+      '/score-api': API_TARGET,
+      '/rollcall-api': API_TARGET,
+      '/downloads-api': API_TARGET,
     },
   },
 })
