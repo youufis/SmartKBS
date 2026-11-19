@@ -25,17 +25,21 @@
     "export": "Export Word",
     "generate": "Generate briefing",
     "regenerate": "Regenerate",
-    "copy": "Copy"
+    "copy": "Copy",
+    "refresh": "Refresh"
   },
   "status": {
     "done": "Generated",
     "degraded": "Rule-based (AI unavailable)",
     "empty": "No data",
-    "generating": "Generating"
+    "generating": "Generating",
+    "notGenerated": "Not generated",
+    "loading": "Loading…"
   },
   "job": {
     "start": "Preparing data",
-    "hint": "Collecting data and writing the summary, about 10–30 seconds"
+    "hint": "Collecting data and writing the summary, about 10–30 seconds",
+    "stillRunning": "The task is still running in the background. Check History later."
   },
   "kpi": {
     "avgRate": "Average score rate",
@@ -55,7 +59,10 @@
   },
   "preview": {
     "title": "No briefing for this period yet",
-    "desc": "{{activities}} activities and {{samples}} score samples collected. Click below to generate."
+    "desc": "{{activities}} activities and {{samples}} score samples collected. Use “Generate briefing” at the top right.",
+    "noDataTitle": "No data for this period",
+    "noDataDesc": "No activities or score samples were collected. Try another period or adjust the filters.",
+    "mobileHint": "Generate briefings on desktop."
   },
   "praise": {
     "coverage": "Coverage {{n}}%",
@@ -64,6 +71,10 @@
   "history": {
     "title": "Briefing history",
     "empty": "No history yet",
+    "loading": "Loading history…",
+    "all": "All",
+    "viewing": "Viewing history: {{period}} · {{scope}}",
+    "back": "Back to current",
     "delete": "Delete",
     "deleteConfirm": "All versions of this briefing will be removed. Continue?",
     "deleted": "Deleted",
@@ -73,18 +84,10 @@
     "load": "Failed to load the briefing",
     "generate": "Generation failed, please retry",
     "export": "Export failed",
-    "save": "Failed to save settings"
-  },
-  "settings": {
-    "title": "Briefing settings",
-    "autoWeekly": "Auto-generate weekly",
-    "autoMonthly": "Auto-generate monthly",
-    "autoYearly": "Auto-generate yearly",
-    "notify": "Notify me when generated",
-    "yearMode": "Year definition",
-    "schoolYear": "School year (from Sep 1)",
-    "calendar": "Calendar year",
-    "hint": "Auto-generation only covers teachers with activity in the period, at most 2 per run. Manual generation still works when off."
+    "save": "Failed to save settings",
+    "retry": "Retry",
+    "clearFilters": "Clear filters",
+    "emptyReport": "No data for this period, so no briefing content was generated."
   },
   "compare": {
     "title": "vs previous",
@@ -98,5 +101,17 @@
   "version": {
     "label": "Version {{n}}",
     "hint": "Each regeneration creates a new version; the last 5 are kept"
+  },
+  "alerts": {
+    "title": "Students to watch",
+    "red": "High priority",
+    "yellow": "Watch"
+  },
+  "report": {
+    "generatedAt": "Generated {{time}}"
+  },
+  "emptyReport": {
+    "title": "No data for this period",
+    "desc": "No teaching activities or score samples were collected, so no briefing body was generated. Switch period or adjust filters and try again."
   }
 }
