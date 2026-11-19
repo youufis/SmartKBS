@@ -43,11 +43,12 @@
 > - 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafting · nine sections with conclusions · praise-title registry · auto-generation off by default behind one global switch · scheduled checks & in-app notice · admin teacher scoping · mobile read-only with copy-to-share
 > - 👥 **Bulk import speed-up**: off-transaction parallel hashing · identical initial passwords hashed once · thousands of rows in seconds · chunked commits keep partial imports · errors summarized by cause
 > - 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · new "Logs & Archives" section · takes effect on save
+> - 🔌 **Configurable deploy port**: one `SMARTKB_PORT` environment variable shared by the desktop shell, dev proxy, backend and packaging preflight · default `8086` unchanged
 > - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud; briefing auto-generation off; log rotation stays size-based; import password reuse on) so existing behavior is unchanged; briefing auto-drafting is now switched on per week/month/year globally in System Settings → Teaching Briefing (legacy per-teacher switches were disabled once); enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; Git deployments use the usual in-app incremental upgrade.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud; briefing auto-generation off; log rotation stays size-based; import password reuse on) so existing behavior is unchanged; briefing auto-drafting is now switched on per week/month/year globally in System Settings → Teaching Briefing (legacy per-teacher switches were disabled once); enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; to move the port, set the `SMARTKB_PORT` environment variable and restart (one contract for the desktop app and the source-deployed backend); Git deployments use the usual in-app incremental upgrade.
 ---
 
 <a id="intro"></a>
@@ -1217,56 +1218,17 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.2.0
 
-**📊 Teaching briefing (new)**
-
-- Weekly / monthly / yearly cycles with nine sections: overview, activity, outcomes, participation, assignments, praise, growth, weak areas, next steps; plus an attention-required student card (high / watch)
-- Rule-based fallback + AI narrative; number whitelist; degrades to the rule-based version when AI is unavailable
-- Praise-title registry: 14 student + 8 class titles, no padding; platform titles/badges surface under growth
-- Auto-generation off by default (manual only); weekly/month/yearly toggles, in-app notice and the school-year basis became one global admin policy in System Settings → Teaching Briefing (legacy per-teacher switches disabled once)
-- Scheduled **checks** every 30 minutes create only missing completed cycles (max 2 per run); standard cycles key off the period anchor, so no duplicate snapshots
-- Admins can scope filters to one teacher, with grades/classes/subjects narrowed accordingly
-- Page polish: "not generated" and "no data" tabs for the current cycle, still-running notice on timeout, history viewing indicator with back-to-current, manual refresh
-- Mobile read-only: filter drawer, card-style tables, copy-to-share summary, generation stays on desktop; paged and deletable history
-
-**🖥 Local model engine (new)**
-
-- Ollama integration (OpenAI-compatible endpoint): cloud / hybrid / local tiers, effective immediately
-- Live model list (size / quant / resident context), auto-refresh after pull; chat engine badge (cloud / local / local-first)
-- Capability matrix + graded missing-engine notices + install steps; friendly connection/timeout errors
-
-**🧠 Dual-engine semantics**
-
-- Hybrid: local-first generation with cloud fallback on connection failure/timeout; KB retrieval stays on cloud
-- Local: generation and retrieval never leave the machine (cloud retrieval/startup warmup bypassed, local question bank & syllabus fallback); TTS/ASR/image gen use the cloud when a key exists, otherwise fail clearly
-- Cloud: passes through unchanged, zero regression (pass-through assertions + full regression + two live E2E rounds)
-
-**🧩 Settings restructure**
-
-- Cloud Models (DashScope) / Local Models (Ollama) sections; image-understanding routing merged into cloud models
-- Cloud-service attribution labels: KB / TTS / ASR / image gen (DashScope cloud)
-- Guides & capability matrix collapsed by default (auto-expand for the local+unreachable danger combo)
-
-**📚 Assignments (chat / files)**
-
-- Both types unified: deadlines, late handling, full score and grading policy now apply to chat homework too; AI grading always runs as a background job with progress
-- Expected roster computed from the activity scope, so non-submitters still appear; one-click reminders can be narrowed to a grade or class
-- Detail moves from a side drawer to a dialog; student rows collapsed by default with status tabs and pagination; score distribution scaled to the assignment's full score
-- Scores are visible as soon as grading finishes; "Notify grades" now only sends the push and awards the grade bonus (repeat clicks never double-award); resubmitted-needs-regrade is counted separately and folded into the home to-grade badge
-- Duplicate assignment (re-send to another class; an already-passed deadline is cleared automatically); the target scope is editable while no submission exists; "Allow one more attempt" replaces deleting data to grant a second chance
-- Quality: 195 new assignment-track checks (493 repo-wide); the expired / late / needs-regrade predicates each collapsed to one definition; 10 cross-object state leaks and 12 silent failures or duplicated rules fixed
-
-**👤 Bulk user import (speed-up)**
-
-- Password hashing moved out of the write transaction and parallelized across threads; one identical initial password is hashed once (switchable)
-- Thousands of rows import in seconds instead of minutes, and the import no longer blocks writes for the rest of the site
-- Chunked commits: committed batches survive an interruption; errors are summarized by cause (duplicate / out of scope / header mismatch / over-long password) with progress that never stalls
-
-**🗂 Log rotation & retention (configurable)**
-
-- Three rotation modes: by size (default) / daily / daily + size fuse, switchable in System Settings -> Logs & Archives
-- Archive retention days and count are configurable with one shared policy across both cleanup layers; takes effect on save, no restart needed
-- Daily archives are named by date and gzip-compressed; extra same-day rotations automatically avoid name collisions
-
+- 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafts · nine sections · rule-based AI fallback · auto-generation off behind one global policy · 30-min checks · admin teacher scoping · mobile read-only
+- 🖥 **Local engine (new)**: Ollama cloud / hybrid / local tiers · model list & probe · dual-engine semantics · settings sections
+- 📚 **Assignments**: chat / file dual form · background AI grading · expected roster & reminders · class duplication & retry
+- 👥 **Bulk import speed-up**: off-transaction parallel hashing · shared initial-password reuse · thousands of rows in seconds · chunked commits survive interruption · errors summarized by cause
+- 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · takes effect on save
+- 🔌 **Configurable deploy port**: one `SMARTKB_PORT` variable shared by the desktop shell, dev proxy, backend and packaging preflight · default `8086` unchanged
+- 🎯 **Classroom activities**: multi-knowledge-point picking for quiz/ladder · rotating question pools · unified AI parse basis
+- 🧩 **Settings page**: Logs & Archives section · import password-reuse switch · cloud-service attribution labels · auto-probe on entry
+- 🔇 **Log noise reduction**: shape-based reconnect-noise summary · rate-limited handshake / poll 401s
+- 🧭 **Explore canvas**: asset cleanup never corrupts the DB · dry runs made read-only
+- 🧪 **Quality gates**: full regression & offline assertions · import fault injection · LF line endings enforced (.gitattributes) · byte-reproducible dist
 ### v7.x – v9.1.0
 
 > Merged section: v9.1.0 and v7.x – v9.0.0 updates (reverse chronological).
@@ -1439,7 +1401,7 @@ Don't want to install Python or Node.js? Use the desktop installer — double-cl
 1. Download the latest installer: [SmartKBS latest release](https://github.com/youufis/SmartKBS/releases/latest) (redirects to the newest release)
    (file name looks like `SmartKBS-Setup-<version>.exe`, ~120 MB, **Windows x64 only**)
 2. Run it: wizard (Simplified Chinese), pick your install folder, desktop and Start Menu shortcuts are created for you
-3. Launch SmartKBS: the built-in backend starts on its own and the app window opens once port `8086` is ready
+3. Launch SmartKBS: the built-in backend starts on its own and the app window opens once the default port `8086` is ready (if it is taken, set the `SMARTKB_PORT` environment variable to another port — see the Port row below)
 4. Local access at `http://127.0.0.1:8086`; students on the same LAN use `http://LAN-IP-of-this-machine:8086` (e.g. `http://192.168.1.100:8086`)
    (click "Allow access" on the first Windows Firewall prompt, or other devices can't reach it)
 5. Sign in: a fresh install creates one administrator automatically — username `root`, password `root`
@@ -1452,7 +1414,7 @@ Don't want to install Python or Node.js? Use the desktop installer — double-cl
 | Runtime dependencies | None — no Python / Node.js needed (Electron shell + PyInstaller backend + Vite frontend) |
 | Data location | `%APPDATA%\smartkbs-desktop\` (both databases, `system_config.json`, `root/`, `stu/`, `question_media/`, `LogFiles/`) — **survives uninstall and reinstall** |
 | Upgrading | Use 「System Config → Version Management → Check Update」; when a newer build is found, install the new package over the old one (data is kept). The Git-style online incremental upgrade does not apply to the desktop edition. |
-| Port | Fixed `8086`. If the web edition already runs on this machine under IIS, stop it first or the desktop app won't start |
+| Port | Defaults to `8086`. To use another port, set the `SMARTKB_PORT` environment variable and restart the desktop app (the source-deployed web backend reads the same variable). If the web edition already runs on this machine under IIS on the same port, stop it or pick a different one, or the desktop app won't start |
 | Platforms | Only a Windows x64 installer is published today; macOS / Linux packaging is configured but not released |
 
 ### Method 2: Download Source Package (requires Python)
@@ -1534,7 +1496,7 @@ python backend/main.py
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8086 --reload
 ```
 
-The backend listens on `http://localhost:8086` and serves the prebuilt frontend in `frontend/dist`, so no extra setup is needed.
+The backend listens on `http://localhost:8086` by default (override with the `SMARTKB_PORT` environment variable or the `--port` flag; `python backend/main.py` reads the former) and serves the prebuilt frontend in `frontend/dist`, so no extra setup is needed.
 
 ### Step 2: start the frontend dev server (only when developing the frontend)
 
