@@ -51,6 +51,12 @@ APP_VERSION: str = _load_app_version()
 # ── 目录/文件相关 ──
 CHAT_HISTORY_DIR = "ChatHistory"
 LOG_FILES_DIR = str(DATA_DIR / "LogFiles")
+
+# ── 日志轮转/保留默认值（单一来源，2026-11-19）──
+# logger.py 启动期不能 import config_router（config_router 反向依赖 backend.logger，会循环），
+# 只能旁路直读 system_config.json；config_router.DEFAULT_CONFIG 则是配置页/校验口径。
+# 两边默认值都从这里取，改出厂默认只改这一处，杜绝两处漂移。
+LOG_ROTATION_DEFAULTS = {"LOG_ROTATION_MODE": "size", "LOG_KEEP_DAYS": 14, "LOG_KEEP_COUNT": 5}
 ROOT_DIR = "root"
 STU_DIR = "stu"
 SUMMARY_DIR_NAME = "Summary"

@@ -1,26 +1,75 @@
 """
 统一日志配置
 - _SmartLogger: except 块内调用 logger.error 自动附带堆栈(exc_info), 全局免逐处改造
-- SizeRotatingHandler: 延迟打开 + 每 32 条抽样查大小 + rename 轮转归档(.gz)保留 5 份 + 被多实例锁住时退避重试并告警(绝不复制)
+- SizeRotatingHandler: 延迟打开 + 轮转方式/保留量按配置(LOG_ROTATION_MODE/LOG_KEEP_DAYS/LOG_KEEP_COUNT, 默认 size+5 份与历史一致); size=满 5MB 切档, day=跨天后首条日志时切档(归档按日期命名), both=两者取先到; rename 轮转归档(.gz) + 被多实例锁住时退避重试并告警(绝不复制) + 每 32 条顺带重读配置(保存即热生效)
 - 级别策略: logger=DEBUG, 控制台=INFO(现场不刷屏), 文件=DEBUG(排障可查)
 - uvicorn.access/uvicorn.error: 恢复 INFO(可见 4xx/5xx) + 内置噪音路径过滤器(统一配置, main.py 不再重复)
 - 两条 uvicorn 日志: URL 里的 token= 一律打码(_AccessTokenRedactFilter), 超长 query 截断,
   不让 JWT 明文和整份板书 JSON 进日志(WS 握手行出自 uvicorn.error, 以前只过滤了 access)
 - uvicorn.access/uvicorn.error: 反复撞开的 WebSocket 握手按"路径+结果"限流(_WsHandshakeNoiseFilter)
 """
+import json
 import logging
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
-from backend.config import LOG_FILES_DIR
+from backend.config import LOG_FILES_DIR, STORAGE_DIR, LOG_ROTATION_DEFAULTS
 
 _LOG_MAX_BYTES = 5 * 1024 * 1024   # 5 MB
 _LOG_BACKUP_COUNT = 5
 _CHECK_EVERY_N = 32                 # 每 N 条检查一次大小, 降低 stat 频率
+_ROTATION_DEFAULTS = LOG_ROTATION_DEFAULTS   # 出厂口径单一来源在 backend/config.py，config_router.DEFAULT_CONFIG 同源引用
+
+# ── 轮转/保留配置读取（2026-11-19 按天轮转改造）──
+# 不走 config_router.get_config_value：backend.logger 在启动最早期被全站模块 import，
+# 而 config_router 反过来 import backend.logger —— 那时它还没加载完，会形成循环。
+# 这里对 system_config.json 做只读旁路：按 (mtime,size) 缓存整份 JSON，
+# 解析失败一律按出厂默认，绝不让日志模块因配置异常而哑掉。
+_raw_cfg_key: tuple = ()
+_raw_cfg_data: dict = {}
+_raw_cfg_lock = threading.Lock()
+
+
+def _raw_system_config() -> dict:
+    global _raw_cfg_key, _raw_cfg_data
+    path = STORAGE_DIR / "system_config.json"
+    try:
+        st = path.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        with _raw_cfg_lock:
+            if _raw_cfg_key == key:
+                return _raw_cfg_data
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                data = {}
+            _raw_cfg_key, _raw_cfg_data = key, data
+            return data
+    except Exception:
+        return {}
+
+
+def _rotation_settings() -> tuple[str, int, int]:
+    """(mode, keep_days, keep_count)；非法值/缺键一律回落出厂默认"""
+    cfg = _raw_system_config()
+    mode = str(cfg.get("LOG_ROTATION_MODE", _ROTATION_DEFAULTS["LOG_ROTATION_MODE"]) or "size").strip().lower()
+    if mode not in ("size", "day", "both"):
+        mode = "size"
+
+    def _num(key: str, default: int, lo: int, hi: int) -> int:
+        try:
+            v = int(float(cfg.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+        return min(hi, max(lo, v))
+
+    return (mode,
+            _num("LOG_KEEP_DAYS", _ROTATION_DEFAULTS["LOG_KEEP_DAYS"], 0, 365),
+            _num("LOG_KEEP_COUNT", _ROTATION_DEFAULTS["LOG_KEEP_COUNT"], 1, 200))
 
 # 高频噪音路径(健康检查/心跳/静态资源), 访问日志中过滤掉
 _ACCESS_NOISE = (
@@ -417,35 +466,77 @@ class SizeRotatingHandler(logging.FileHandler):
 
     _ROTATE_BACKOFF = 300.0  # rename 失败后的重试间隔(秒)
 
-    def __init__(self, filename, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUP_COUNT, encoding="utf-8"):
-        self.maxBytes = maxBytes
-        self.backupCount = backupCount
+    def __init__(self, filename, maxBytes=None, backupCount=None, encoding="utf-8"):
+        mode, keep_days, keep_count = _rotation_settings()
+        self.rotation_mode = mode   # 不能叫 self.mode：那是 FileHandler 的打开模式(a/w)，_open() 会用；取值 size/day/both
+        self.keep_days = keep_days
+        self.maxBytes = maxBytes or _LOG_MAX_BYTES
+        self.backupCount = backupCount or keep_count
         self._emit_n = 0
         self._rotate_warned = False
         self._next_rotate_at = 0.0
         self._rotate_fail_streak = 0
+        self._cur_date = None                 # 当前文件归属日期（跨天轮转用，延迟自 mtime 初始化）
+        self._pending_archive_date = None     # 本轮要归档到哪天（轮转失败时保留，重试仍归那天）
         super().__init__(filename, encoding=encoding, delay=True)
 
     def emit(self, record):
         try:
             self._emit_n += 1
-            if (self.stream is not None
-                    and self._emit_n % _CHECK_EVERY_N == 0
-                    and time.monotonic() >= self._next_rotate_at):
-                try:
-                    if os.path.getsize(self.baseFilename) >= self.maxBytes:
-                        self.do_rollover()
-                except OSError:
-                    pass
+            if self.stream is not None and time.monotonic() >= self._next_rotate_at:
+                if self._emit_n % _CHECK_EVERY_N == 0:
+                    self._refresh_settings()   # 配置改了最迟 32 条内自动跟上（热应用钩子只是抢先一步）
+                if self._should_rotate_by_date():
+                    self.do_rollover()
+                elif self.rotation_mode != "day" and self._emit_n % _CHECK_EVERY_N == 0:
+                    try:
+                        if os.path.getsize(self.baseFilename) >= self.maxBytes:
+                            self.do_rollover()
+                    except OSError:
+                        pass
         except Exception:
             pass
         super().emit(record)
 
+    def _refresh_settings(self):
+        self.rotation_mode, self.keep_days, self.backupCount = _rotation_settings()
+
+    def _file_date(self):
+        """当前文件归属哪天：读 mtime；读不到按今天（新文件）"""
+        try:
+            return datetime.fromtimestamp(os.path.getmtime(self.baseFilename)).date()
+        except OSError:
+            return datetime.now().date()
+
+    def _should_rotate_by_date(self) -> bool:
+        if self.rotation_mode not in ("day", "both"):
+            return False
+        if self._cur_date is None:
+            self._cur_date = self._file_date()
+            return False
+        today = datetime.now().date()
+        if today > self._cur_date:
+            # 归档归到文件自己所属的那天：低流量系统隔几天才写日志时，陈旧内容不该顶着今天的日期
+            self._pending_archive_date = self._cur_date
+            return True
+        return False
+
     def do_rollover(self):
         """rename 轮转: 只认原子改名; 被其他活句柄锁住时原地续写、退避重试, 绝不复制"""
         self.close()
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        archive = f"{self.baseFilename}.{stamp}"
+        if self.rotation_mode in ("day", "both"):
+            d = self._pending_archive_date or self._file_date()
+            archive = f"{self.baseFilename}.{d.strftime('%Y%m%d')}"
+            if os.path.exists(archive) or os.path.exists(archive + ".gz"):
+                # 同一天第二次切档（both 模式 5MB 保险丝触发）：加时分秒防撞名，仍撞再加序号
+                base_archive = archive
+                for i in range(50):
+                    suffix = datetime.now().strftime("%H%M%S") + (f"-{i}" if i else "")
+                    archive = f"{base_archive}-{suffix}"
+                    if not (os.path.exists(archive) or os.path.exists(archive + ".gz")):
+                        break
+        else:
+            archive = f"{self.baseFilename}.{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         rotated = False
         try:
             os.rename(self.baseFilename, archive)
@@ -465,6 +556,8 @@ class SizeRotatingHandler(logging.FileHandler):
             self._rotate_warned = False
             self._next_rotate_at = 0.0
             self._rotate_fail_streak = 0
+            self._cur_date = datetime.now().date()
+            self._pending_archive_date = None
             self._compress_archive(archive)
             self._prune_archives()
         try:
@@ -489,6 +582,9 @@ class SizeRotatingHandler(logging.FileHandler):
                     pass
                 self.stream = None
             self.baseFilename = new_path
+            self._cur_date = None      # 新文件重新认日子
+            self._pending_archive_date = None   # 旧文件的归档日期作废：不清的话，迁出后首次轮转若由大小保险丝
+                                                # 触发（不走跨天判定），新文件会被冠上迁出前残留的旧日期（2026-11-19 审查修复）
             self.stream = open(self.baseFilename, "a", encoding=self.encoding)
             self._rotate_fail_streak = 0
             self._next_rotate_at = 0.0
@@ -513,20 +609,31 @@ class SizeRotatingHandler(logging.FileHandler):
             pass
 
     def _prune_archives(self):
-        """按 mtime 保留最近 backupCount 份归档(含 .gz), 清理超额"""
+        """按配置清理归档(含 .gz)，两条规则：
+        - 份数封顶：任何模式都生效；day/both 下自动抬高到不低于保留天数（防"配 14 天却只留 5 份"）；
+        - 按天过期：仅 day/both 且 keep_days>0 时生效——size 模式维持纯份数口径，与历史零差异。
+        """
         try:
             d = os.path.dirname(self.baseFilename) or "."
             base = os.path.basename(self.baseFilename)
-            archives = sorted(
-                (f for f in os.listdir(d) if f.startswith(base + ".")),
-                key=lambda f: os.path.getmtime(os.path.join(d, f)),
-                reverse=True,
-            )
-            for old in archives[self.backupCount:]:
+            entries = []
+            for f in os.listdir(d):
+                if not f.startswith(base + "."):
+                    continue
                 try:
-                    os.remove(os.path.join(d, old))
+                    entries.append((os.path.getmtime(os.path.join(d, f)), f))
                 except OSError:
-                    pass
+                    continue
+            entries.sort(reverse=True)
+            cap = self.backupCount if self.rotation_mode == "size" else max(self.backupCount, self.keep_days or 0)
+            cutoff = (time.time() - self.keep_days * 86400
+                      if (self.rotation_mode in ("day", "both") and self.keep_days > 0) else None)
+            for i, (mt, f) in enumerate(entries):
+                if i >= cap or (cutoff is not None and mt < cutoff):
+                    try:
+                        os.remove(os.path.join(d, f))
+                    except OSError:
+                        pass
         except Exception:
             pass
 
@@ -548,7 +655,7 @@ def setup_logger(name: str = "smartkb") -> logging.Logger:
     ))
     logger.addHandler(console_handler)
 
-    # 文件 handler: DEBUG 起, 5MB 轮转 + 保留 5 份日期归档
+    # 文件 handler: DEBUG 起, 轮转/保留按 LOG_ROTATION_MODE / LOG_KEEP_DAYS / LOG_KEEP_COUNT（默认 size+5 份=历史行为）
     try:
         log_dir = Path(LOG_FILES_DIR)
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -569,6 +676,23 @@ logging.setLoggerClass(_SmartLogger)
 
 # 全局默认 logger
 logger = setup_logger()
+
+
+def rotation_settings_snapshot() -> dict:
+    """当前生效的轮转/保留口径（log_retention 的家族硬顶与配置页响应共用）"""
+    mode, keep_days, keep_count = _rotation_settings()
+    return {"mode": mode, "keep_days": keep_days, "keep_count": keep_count}
+
+
+def apply_log_rotation() -> dict:
+    """配置保存后的热应用钩子：立刻刷新在跑的 handler；没赶上也没关系，emit 每 32 条会自查重读。"""
+    mode, keep_days, keep_count = _rotation_settings()
+    updated = 0
+    for h in logging.getLogger("smartkb").handlers:
+        if isinstance(h, SizeRotatingHandler):
+            h.rotation_mode, h.keep_days, h.backupCount = mode, keep_days, keep_count
+            updated += 1
+    return {"mode": mode, "keep_days": keep_days, "keep_count": keep_count, "handlers": updated}
 
 # uvicorn 日志去噪/脱敏: HTTP 访问日志(uvicorn.access) + WebSocket 握手与协议行
 # (uvicorn.error —— websockets 实现把 logger 直接绑在它上面, 握手行里的 ?token=

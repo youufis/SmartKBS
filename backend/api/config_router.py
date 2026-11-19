@@ -22,7 +22,7 @@ from backend.docx_fonts import FONT_CHOICES
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
-from backend.config import BASE_DIR, STORAGE_DIR
+from backend.config import BASE_DIR, STORAGE_DIR, LOG_ROTATION_DEFAULTS
 from backend.logger import logger
 # 模型默认值只认 model_catalog 一份。以前这四行是手写字面量（注释还写着"由 model_catalog 维护"），
 # 改清单默认模型时这里不会跟着变，升级后配置缺键就补出旧模型名 —— 正是 404 的来源。
@@ -108,6 +108,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 文件大小限制
     "MAX_DOC_SIZE_MB": 10,
     "MAX_IMAGE_SIZE_MB": 5,
+    # ── 批量导入用户（2026-11-19 提速改造）──
+    # 开：同一批 CSV 里相同的初始密码只哈希一次并复用（5000 行统一初始密码 → 秒级完成）；
+    # 关：逐行独立加盐哈希（最保守口径），仍走线程池并行（约 5 倍）。
+    "USER_IMPORT_PWD_DEDUP": True,
+    # ── 日志轮转与保留（backend/logger.py SizeRotatingHandler；保存即热生效，无需重启）──
+    # size=满 5MB 切档(现行为)；day=每天一份(跨天后首条日志时切，归档按日期命名)；
+    # both=按天归档 + 5MB 保险丝取先到(推荐日常)。
+    "LOG_ROTATION_MODE": LOG_ROTATION_DEFAULTS["LOG_ROTATION_MODE"],
+    "LOG_KEEP_DAYS": LOG_ROTATION_DEFAULTS["LOG_KEEP_DAYS"],      # 归档按天过期：早于 N 天的删除(仅 day/both 生效；0=不按天删)
+    "LOG_KEEP_COUNT": LOG_ROTATION_DEFAULTS["LOG_KEEP_COUNT"],    # 归档最多 N 份(任何模式兜底；day/both 下自动不低于 LOG_KEEP_DAYS)
     # JWT
     "JWT_EXPIRATION_HOURS": 24,
     # 令牌滑动续期阈值（分钟）：剩余有效期低于该值时，随响应头 X-Renew-Token 下发新令牌。
@@ -616,6 +626,8 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "EXPLORE_CANVAS_MAX": (0, 500),
     "CHAT_ASSET_QUOTA_MB": (0, 102400),
     "CHAT_ASSET_GC_DAYS": (0, 3650),
+    # 日志归档保留（logger.py 轮转与 log_retention 家族硬顶共用）
+    "LOG_KEEP_DAYS": (0, 365), "LOG_KEEP_COUNT": (1, 200),
     "EXPLORE_CONTINUOUS_REMIND_MIN": (5, 180), "EXPLORE_ASSET_ORPHAN_DAYS": (1, 365),
     "EXPLORE_ASSET_TRASH_DAYS": (1, 90), "EXPLORE_TMP_HOURS": (1, 168), "EXPLORE_CANVAS_TRASH_DAYS": (7, 365), "EXPLORE_SHARE_EXPIRE_DAYS": (1, 90),
     "EXPLORE_PAGE_TRASH_DAYS": (1, 365),
@@ -712,6 +724,7 @@ _BOOL_KEYS = {
     "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER", "LOGIN_BLOCK_EXTERNAL",
     "HOMEWORK_ENABLE_VL",
     "OLLAMA_FALLBACK_TO_CLOUD",
+    "USER_IMPORT_PWD_DEDUP",
 }
 _STR_LIMITS: dict[str, int] = {
     "EXPLORE_ASR_MODEL": 60,
@@ -741,6 +754,7 @@ _ENUM_KEYS: dict[str, tuple[str, ...]] = {
     "OLLAMA_THINKING": ("off", "on"),
     "MULTIPLE_CHOICE_SCORING": ("strict", "partial"),
     "BRIEFING_YEAR_MODE": ("school_year", "calendar"),
+    "LOG_ROTATION_MODE": ("size", "day", "both"),
     "DOCX_FONT_BODY": FONT_CHOICES,
     "DOCX_FONT_HEADING": FONT_CHOICES,
 }
@@ -1386,6 +1400,14 @@ async def update_config(req: ConfigUpdate, request: Request):
             clear_api_key_cache()
         except Exception:
             pass
+
+    # 日志轮转/保留：热应用到在跑的 handler（handler 每 32 条也会自查，这里是即时生效路径）
+    if any(k in known for k in ("LOG_ROTATION_MODE", "LOG_KEEP_DAYS", "LOG_KEEP_COUNT")):
+        try:
+            from backend.logger import apply_log_rotation
+            logger.info(f"[日志] 轮转配置已热应用: {apply_log_rotation()}")
+        except Exception as e:
+            logger.warning(f"[日志] 轮转配置热应用失败(最迟下一批日志自动重读): {e}")
 
     # C3: 响应同样掩码, 不回传明文密钥
     return {"status": "ok", "config": _mask_config(current), "updated": sorted(known.keys())}

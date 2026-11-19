@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -1185,6 +1186,17 @@ IMPORT_REQUIRED_COLUMNS = ("username", "password")
 IMPORT_ERROR_PREVIEW = 100
 # 进度事件上限：再多就把中间的行合并掉，避免 5000 行发 5000 个 SSE 事件
 IMPORT_PROGRESS_TICKS = 200
+# ── 2026-11-19 导入提速（本机实测：bcrypt cost12 每行约 250ms，占单行耗时 99.99%；
+#    原实现把哈希放在写事务里、事件循环上串行跑 → 导入几分钟，全站跟着卡）──
+# 方案一：哈希挪出写事务、进线程池并行（bcrypt 释放 GIL，8 线程实测吞吐约 5 倍）；
+#         查重同时改为事务外批量 IN 预检，写事务里只剩纯 INSERT。
+# 方案二：同一批里相同初始密码只哈希一次并复用（配置开关 USER_IMPORT_PWD_DEDUP，默认开）。
+# 方案三：分批提交，每批一个独立事务（块内原子，中断时已提交批次保留）。
+IMPORT_COMMIT_CHUNK = 500
+IMPORT_HASH_WORKERS = max(1, min(8, os.cpu_count() or 1))
+IMPORT_HASH_BATCH = 400
+# 进度管道：最坏情形（每行密码都不同）时间几乎全花在哈希，故哈希阶段占前 70%、写库占后 30%
+IMPORT_HASH_STAGE_SHARE = 70
 
 IMPORT_ERR_LABELS = {
     "EMPTY_USERNAME": "username 列为空，该行没有账号可用",
@@ -1192,6 +1204,7 @@ IMPORT_ERR_LABELS = {
     "DUPLICATE": "该账号已存在，已跳过（要改信息请到「用户列表」编辑，不要重复导入）",
     "OUT_OF_SCOPE": "该年级/班级不在您的任教范围内，无权建号",
     "PREPARE_FAILED": "年级/班级准备失败",
+    "INVALID_PASSWORD": "密码无法完成哈希（超长或含非法字节）",
     "DB_ERROR": "写入数据库失败",
 }
 
@@ -1201,10 +1214,32 @@ def _norm_col(name: Optional[str]) -> str:
     return str(name or "").replace("\ufeff", "").strip().strip('"').strip("'").lower()
 
 
+def _iter_chunks(seq: list, size: int):
+    """按 size 切片：批量 IN 查重、哈希批次、分批提交共用"""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def _pwd_dedup_enabled() -> bool:
+    """方案二开关（配置键 USER_IMPORT_PWD_DEDUP，默认开）：
+    开——同一批导入里相同初始密码只哈希一次并复用，全校统一初始密码的几千行只需算一次；
+    关——逐行独立加盐哈希（最保守口径），仍吃方案一的线程池并行（约 5 倍）。
+    代价说明：开启时库里相同密码的账号哈希值一致，能读库的人可推断其密码相同；
+    对“教师统一设置的初始密码”场景这点泄露面接近零（本来整班都知道），学生改密后即恢复逐行加盐。"""
+    from backend.api.config_router import get_config_value
+    val = get_config_value("USER_IMPORT_PWD_DEDUP", True)
+    if isinstance(val, str):
+        return val.strip().lower() not in ("0", "false", "off", "no")
+    return bool(val)
+
+
 @router.post("/import")
 async def import_users(request: Request, file: UploadFile = File(...)):
     """CSV 批量导入用户（流式进度返回）
 
+    2026-11-19 提速改造（瓶颈实测是 bcrypt：每行约 250ms，占单行耗时 99.99%）：哈希挪出写事务、线程池并行，
+    相同初始密码默认只哈希一次（USER_IMPORT_PWD_DEDUP 可关），查重改事务外批量预检，
+    写入按 500 行一批提交——已提交批次在中断时保留，不再“跑了几分钟全部重来”。
     2026-10-28 重构，针对"导入失败只知道数量、不知道为什么"：
     - 表头缺列/带 BOM 直接 400 说清列名，不再把列名没匹配摊成 N 条"用户名或密码为空"；
     - 每条错误带 code/field/message，同时保留 errors: string[] 兼容老前端；
@@ -1410,7 +1445,7 @@ async def import_users(request: Request, file: UploadFile = File(...)):
             warnings.append("CSV 里这些列不在模板中，已忽略：" + "、".join(unknown_cols))
 
         # ① 事务外先把每行解析成计划；年级/班级在这里就建好（此时没有写事务，不会撞锁）
-        rows_ready: list[tuple[int, Optional[dict], Optional[dict]]] = []
+        planned: list[tuple[int, dict]] = []
         for row_num, cells in entries:
             try:
                 plan, err = _plan_row(row_num, cells)
@@ -1422,27 +1457,103 @@ async def import_users(request: Request, file: UploadFile = File(...)):
                 assert plan is not None
                 if plan["clamped"]:
                     role_clamped += 1
-                rows_ready.append((row_num, plan, None))
+                planned.append((row_num, plan))
 
-        # ② 事务内只做 INSERT；错误行同样计入进度（原来错误行 continue 把进度吞了）
-        step = max(1, -(-total // IMPORT_PROGRESS_TICKS))
-        processed = 0
+        # ② 查重预检（方案一）：事务外按批 IN 查询一次问完已存在账号；CSV 内部同名也在这里识别。
+        #    之后写事务里只剩纯 INSERT；原先靠撞主键报出来的那行"UNIQUE constraint failed"
+        #    现在变成体面的 DUPLICATE 明细。
+        existing: set[str] = set()
+        for batch in _iter_chunks([plan["username"] for _, plan in planned], 900):
+            marks = ",".join("?" * len(batch))
+            for (hit,) in execute_query(
+                f"SELECT username FROM users WHERE username IN ({marks})", tuple(batch),
+            ):
+                existing.add(str(hit))
+        writable: list[tuple[int, dict]] = []
+        seen: dict[str, int] = {}
+        for row_num, plan in planned:
+            name = plan["username"]
+            if name in existing:
+                error_items.append(_err_item(row_num, name, "DUPLICATE"))
+            elif name in seen:
+                error_items.append(_err_item(row_num, name, "DUPLICATE", f"与 CSV 第 {seen[name]} 行是同一账号"))
+            else:
+                seen[name] = row_num
+                writable.append((row_num, plan))
+
+        # 进度合并计数：哈希、写库两阶段共用一条单调不回退的 current（0→total）
+        reported = 0
+
+        def _progress_payload(hash_frac: float, write_frac: float) -> str:
+            nonlocal reported
+            pct = IMPORT_HASH_STAGE_SHARE * hash_frac + (100 - IMPORT_HASH_STAGE_SHARE) * write_frac
+            reported = min(total, max(reported, int(round(total * pct / 100))))
+            return "data: " + json.dumps({
+                "type": "progress",
+                "current": reported,
+                "total": total,
+                "imported": imported,
+                "error_count": len(error_items),
+                "percent": round(min(99.9, max(0.0, pct)), 1),
+            }, ensure_ascii=False) + "\n\n"
+
+        # ③ 密码哈希（方案一+方案二）：挪出写事务、进线程池并行；开关开启时相同初始密码只哈希一次。
+        #    这一步是导入耗时的本体——进度条前 70% 归它，几千个各不相同的密码也不会让界面"卡死"。
+        dedup = _pwd_dedup_enabled()
+        row_passwords = [plan["password"] for _, plan in writable]
+        keys = sorted(set(row_passwords)) if dedup else row_passwords
+        key_hash: dict[str, bytes] = {}
+        key_error: dict[str, Exception] = {}
+        per_row_results: list = []          # 关闭复用时逐行结果按序收集（与 writable 对齐）
+        done_keys = 0
         aborted = False
-        try:
-            with get_transaction() as conn:
-                cursor = conn.cursor()
-                for row_num, plan, _ in rows_ready:
-                    username = plan["username"]
-                    try:
-                        cursor.execute("SELECT username FROM users WHERE username=?", (username,))
-                        if cursor.fetchone():
-                            error_items.append(_err_item(row_num, username, "DUPLICATE"))
-                        else:
-                            hashed = hash_password(plan["password"])
+        resolved: list[tuple[int, dict, bytes]] = []
+        if keys:
+            # 批次自适应放大：超大 CSV 下两阶段进度事件各 ≤100，总量守住 IMPORT_PROGRESS_TICKS=200 的约定
+            hash_batch = max(IMPORT_HASH_BATCH, -(-len(keys) // 100))
+            loop = asyncio.get_running_loop()
+            with ThreadPoolExecutor(max_workers=min(IMPORT_HASH_WORKERS, len(keys))) as pool:
+                for batch in _iter_chunks(keys, hash_batch):
+                    futs = [loop.run_in_executor(pool, hash_password, pw) for pw in batch]
+                    results = await asyncio.gather(*futs, return_exceptions=True)
+                    for pw, res in zip(batch, results):
+                        done_keys += 1
+                        if isinstance(res, Exception):
+                            key_error[pw] = res
+                        elif dedup:
+                            key_hash[pw] = res
+                        if not dedup:
+                            per_row_results.append(res)
+                    yield _progress_payload(1.0 * done_keys / len(keys), 0.0)
+        for idx, (row_num, plan) in enumerate(writable):
+            if dedup:
+                res, err = key_hash.get(plan["password"]), key_error.get(plan["password"])
+            else:
+                res = per_row_results[idx] if idx < len(per_row_results) else None
+                err = res if isinstance(res, Exception) else None
+            if err is not None or res is None:
+                # 兜底：哈希结果缺失也不许行无声蒸发，必须给一条看得见的错误明细
+                error_items.append(_err_item(row_num, plan["username"], "INVALID_PASSWORD",
+                                             str(err) if err is not None else "哈希结果缺失（请重新导入本行）"))
+            else:
+                resolved.append((row_num, plan, res))
+
+        # ④ 分批提交（方案三）：每批一个独立事务、块内原子。之前批次已落库不回滚，
+        #    中途失败只损失"当前批 + 未执行行"——不再出现跑到 99% 几分钟白干全部重来。
+        write_total = max(1, len(resolved))
+        written_rows = 0
+        commit_chunk = max(IMPORT_COMMIT_CHUNK, -(-len(resolved) // 100))
+        for batch in _iter_chunks(resolved, commit_chunk):
+            chunk_start = imported
+            try:
+                with get_transaction() as conn:
+                    cursor = conn.cursor()
+                    for row_num, plan, hashed in batch:
+                        try:
                             cursor.execute(
                                 "INSERT INTO users (username, password, class, name, gender, role, grade, grade_id, class_id)"
                                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                (username, hashed, plan["class"], plan["name"], plan["gender"],
+                                (plan["username"], hashed, plan["class"], plan["name"], plan["gender"],
                                  plan["role"], plan["grade"], plan["grade_id"], plan["class_id"]),
                             )
                             for gid, cid, subj in plan["assignments"]:
@@ -1450,37 +1561,34 @@ async def import_users(request: Request, file: UploadFile = File(...)):
                                     cursor.execute(
                                         "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id, subject)"
                                         " VALUES (?, ?, ?, ?)",
-                                        (username, gid, cid, subj),
+                                        (plan["username"], gid, cid, subj),
                                     )
                                 else:
                                     cursor.execute(
                                         "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id)"
                                         " VALUES (?, ?, ?)",
-                                        (username, gid, cid),
+                                        (plan["username"], gid, cid),
                                     )
                             imported += 1
-                    except Exception as exc:
-                        error_items.append(_err_item(row_num, username, "DB_ERROR", str(exc)))
-                    processed += 1
-                    if processed % step == 0 or processed >= total:
-                        await asyncio.sleep(0)
-                        yield "data: " + json.dumps({
-                            'type': 'progress',
-                            'current': min(processed, total),
-                            'total': total,
-                            'imported': imported,
-                            'error_count': len(error_items),
-                            'percent': round(min(processed, total) / total * 100, 1),
-                        }, ensure_ascii=False) + "\n\n"
-                processed = total
-        except Exception as exc:  # 事务本身失败 = 全部回滚，也必须把原因告诉前端
-            logger.error(f"批量导入用户事务失败: {exc}", exc_info=True)
-            aborted = True
-            error_items.append(_err_item(0, "", "DB_ERROR", f"整批写入失败，本次已导入的 {imported} 个账号全部回滚：{exc}"))
-            imported = 0
-            processed = total
+                        except Exception as exc:  # 单行约束冲突等只记这一行的错，不拖垮整批
+                            error_items.append(_err_item(row_num, plan["username"], "DB_ERROR", str(exc)))
+                written_rows += len(batch)
+            except Exception as exc:  # 整批失败（写锁超时/磁盘等）：本批回滚，后续批次不再执行
+                logger.error(f"批量导入用户写入批次失败: {exc}", exc_info=True)
+                aborted = True
+                imported = chunk_start
+                first_row, last_row = batch[0][0], batch[-1][0]
+                error_items.append(_err_item(first_row, "", "DB_ERROR",
+                    f"第 {first_row}~{last_row} 行整批写入失败，本批 {len(batch)} 行已全部回滚：{exc}"))
+                remaining = len(resolved) - written_rows - len(batch)
+                if remaining > 0:
+                    warnings.append(f"另有 {remaining} 行因导入中断未执行（未写入）")
+                written_rows = len(resolved)
+            yield _progress_payload(1.0, min(1.0, 1.0 * written_rows / write_total))
+            if aborted:
+                break
 
-        # ③ 完成事件：明细 + 按原因汇总，并说明是否被截断
+        # ⑤ 完成事件：明细 + 按原因汇总，并说明是否被截断
         error_items.sort(key=lambda it: it["row"])
         by_code: dict[str, int] = {}
         for it in error_items:
@@ -1497,7 +1605,8 @@ async def import_users(request: Request, file: UploadFile = File(...)):
         if truncated:
             done_msg += f"（明细回传前 {len(shown)} 条）"
         if aborted:
-            done_msg = "导入失败，本次未写入任何账号：" + str(error_items[-1]["message"] if error_items else "事务回滚")
+            done_msg = (f"导入中断：已成功导入并保留 {imported} 个账号（分批提交，之前批次不回滚），"
+                        "失败批次及剩余行未写入")
 
         logger.info(f"批量导入用户: imported={imported}, errors={len(error_items)}, aborted={aborted}")
         yield "data: " + json.dumps({

@@ -125,7 +125,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'storage',
     titleKey: 'zone_storage',
     descKey: 'zone_storage_desc',
-    sections: ['upload', 'quota', 'session', 'guard', 'upgrade'],
+    sections: ['upload', 'quota', 'session', 'guard', 'logs', 'upgrade'],
   },
 ]
 
@@ -163,6 +163,7 @@ const SECTION_TITLES: Record<string, string> = {
   quota: 'group_quota',
   session: 'group_session',
   guard: 'group_guard',
+  logs: 'group_logs',
   upgrade: 'group_upgrade',
 }
 
@@ -234,6 +235,12 @@ const RANK_MODE_OPTIONS: FieldOption[] = [
   { value: 'top10', labelKey: 'optRankTop10' },
   { value: 'all', labelKey: 'optRankAll' },
   { value: 'none', labelKey: 'optRankNone' },
+]
+
+const LOG_ROTATION_OPTIONS: FieldOption[] = [
+  { value: 'size', labelKey: 'optLogRotationSize' },
+  { value: 'day', labelKey: 'optLogRotationDay' },
+  { value: 'both', labelKey: 'optLogRotationBoth' },
 ]
 const MC_SCORING_OPTIONS: FieldOption[] = [
   { value: 'strict', labelKey: 'optMcStrict' },
@@ -560,6 +567,13 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 考场防护：默认关，管理员按考场场景开；关掉时前端不挂监听、不注入水印
   { key: 'EXAM_ANTI_COPY', labelKey: 'field_EXAM_ANTI_COPY', descKey: 'field_EXAM_ANTI_COPY_desc', longDescKey: 'field_EXAM_ANTI_COPY_tip', type: 'boolean', group: 'guard', required: false },
   { key: 'EXAM_WATERMARK', labelKey: 'field_EXAM_WATERMARK', descKey: 'field_EXAM_WATERMARK_desc', longDescKey: 'field_EXAM_WATERMARK_tip', type: 'boolean', group: 'guard', required: false },
+  // 批量导入用户提速（api/users_router.py _pwd_dedup_enabled）：相同初始密码复用哈希的开关，
+  // 改它需要懂 bcrypt 加盐与耗时口径，默认收在高级参数里
+  { key: 'USER_IMPORT_PWD_DEDUP', labelKey: 'field_USER_IMPORT_PWD_DEDUP', descKey: 'field_USER_IMPORT_PWD_DEDUP_desc', longDescKey: 'field_USER_IMPORT_PWD_DEDUP_tip', type: 'boolean', group: 'guard', required: false },
+  // ══ 日志与归档（backend/logger.py SizeRotatingHandler；保存即热生效，无需重启）══
+  { key: 'LOG_ROTATION_MODE', labelKey: 'field_LOG_ROTATION_MODE', descKey: 'field_LOG_ROTATION_MODE_desc', longDescKey: 'field_LOG_ROTATION_MODE_tip', type: 'radio', group: 'logs', level: 'basic', options: LOG_ROTATION_OPTIONS },
+  { key: 'LOG_KEEP_DAYS', labelKey: 'field_LOG_KEEP_DAYS', descKey: 'field_LOG_KEEP_DAYS_desc', type: 'number', group: 'logs', level: 'basic', unitKey: 'unitDay' },
+  { key: 'LOG_KEEP_COUNT', labelKey: 'field_LOG_KEEP_COUNT', descKey: 'field_LOG_KEEP_COUNT_desc', longDescKey: 'field_LOG_KEEP_COUNT_tip', type: 'number', group: 'logs', level: 'basic', unitKey: 'unitArchive' },
   // 版本与自动同步（升级/回滚操作在「版本与升级」标签页）
   { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade', level: 'basic', danger: true },
   // 升级前自动留底（backend/api/upgrade_router.py Step 1d）：默认关，关掉只保留配置守护快照

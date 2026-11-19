@@ -537,7 +537,15 @@ def _prune_log_files() -> None:
                     pass
             entries.append((mt, path))
         entries.sort(reverse=True)
-        for _mt, path in entries[8:]:
+        # 家族硬顶跟着配置走：份数 + (day/both 下的)天数 + 6 份余量（迁出的 pid 文件及其归档），
+        # 保底 8 与历史一致——否则按天保留 14 天会被这层第二天悄悄删到只剩 8 个（2026-11-19 实测）。
+        try:
+            from backend.logger import rotation_settings_snapshot
+            _snap = rotation_settings_snapshot()
+            cap = max(8, _snap["keep_count"] + (_snap["keep_days"] if _snap["mode"] in ("day", "both") else 0) + 6)
+        except Exception:
+            cap = 8
+        for _mt, path in entries[cap:]:
             try:
                 _os.remove(path)
                 removed += 1
