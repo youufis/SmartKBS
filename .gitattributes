@@ -11,3 +11,18 @@ frontend/** text eol=lf
 *.html text eol=lf
 *.svg text eol=lf
 *.md text eol=lf
+# ── 二进制例外（必须排在 frontend/** text 规则之后，后者以规则顺序覆盖前者）──
+# 字体/图片 blob 被上面的 text 规则误伤：status/diff 按 CRLF→LF 归一后与干净 blob 不符，
+# 41 个字体文件永远假性 modified；此时若 git add -A 会把二进制里的 0x0D0A 剃成 0x0A，
+# 真正把产物提交坏。`-text` 双向禁用换行转换，二进制按原样进出。
+*.ttf -text
+*.otf -text
+*.woff -text
+*.woff2 -text
+*.eot -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.webp -text
+*.ico -text
