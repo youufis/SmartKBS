@@ -24,6 +24,7 @@ from backend.database import (
 )
 
 _READY = False
+_AUTO_OFF_MIGRATION = "2026-11-19-auto-off-defaults"
 
 
 def ensure_tables() -> None:
@@ -112,17 +113,50 @@ def ensure_tables() -> None:
     execute_insert_update(
         """CREATE TABLE IF NOT EXISTS briefing_settings (
                owner_username TEXT PRIMARY KEY,
-               auto_daily INTEGER DEFAULT 1,
-               auto_weekly INTEGER DEFAULT 1,
-               auto_monthly INTEGER DEFAULT 1,
+               auto_daily INTEGER DEFAULT 0,
+               auto_weekly INTEGER DEFAULT 0,
+               auto_monthly INTEGER DEFAULT 0,
                auto_yearly INTEGER NOT NULL DEFAULT 0,
                notify INTEGER DEFAULT 1,
                year_mode TEXT DEFAULT 'school_year',
                updated_at TEXT
            )"""
     )
+    execute_insert_update(
+        """CREATE TABLE IF NOT EXISTS briefing_migrations (
+               name TEXT PRIMARY KEY,
+               applied_at TEXT NOT NULL
+           )"""
+    )
+    _apply_auto_off_migration()
     expire_stale_jobs()
     _READY = True
+
+
+def _apply_auto_off_migration() -> None:
+    """把旧版本“默认自动开启”的设置一次性关掉。
+
+    旧版本建表默认 auto_weekly/monthly=1；只在代码里改 DEFAULT 不会影响
+    已经存在的行。迁移只执行一次，之后用户主动开启不会被重置。
+    """
+    row = execute_query_one(
+        "SELECT name FROM briefing_migrations WHERE name=?",
+        (_AUTO_OFF_MIGRATION,),
+    )
+    if row:
+        return
+    now = _now()
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO briefing_migrations(name, applied_at) VALUES (?, ?)",
+            (_AUTO_OFF_MIGRATION, now),
+        )
+        if cur.rowcount:
+            conn.execute(
+                "UPDATE briefing_settings SET "
+                "auto_daily=0, auto_weekly=0, auto_monthly=0, auto_yearly=0"
+            )
+        conn.commit()
 
 
 def _now() -> str:
@@ -471,8 +505,8 @@ def get_settings(owner: str) -> dict[str, Any]:
     ensure_tables()
     row = execute_query_one("SELECT * FROM briefing_settings WHERE owner_username=?", (owner,))
     return row or {
-        "owner_username": owner, "auto_daily": 0, "auto_weekly": 1,
-        "auto_monthly": 1, "auto_yearly": 0, "notify": 1, "year_mode": "school_year",
+        "owner_username": owner, "auto_daily": 0, "auto_weekly": 0,
+        "auto_monthly": 0, "auto_yearly": 0, "notify": 1, "year_mode": "school_year",
     }
 
 
@@ -481,8 +515,8 @@ def save_settings(owner: str, data: dict[str, Any]) -> dict[str, Any]:
     cur = get_settings(owner)
     merged = {
         "auto_daily": int(bool(data.get("auto_daily", cur.get("auto_daily", 0)))),
-        "auto_weekly": int(bool(data.get("auto_weekly", cur.get("auto_weekly", 1)))),
-        "auto_monthly": int(bool(data.get("auto_monthly", cur.get("auto_monthly", 1)))),
+        "auto_weekly": int(bool(data.get("auto_weekly", cur.get("auto_weekly", 0)))),
+        "auto_monthly": int(bool(data.get("auto_monthly", cur.get("auto_monthly", 0)))),
         "auto_yearly": int(bool(data.get("auto_yearly", cur.get("auto_yearly", 0)))),
         "notify": int(bool(data.get("notify", cur.get("notify", 1)))),
         "year_mode": "calendar" if str(data.get("year_mode") or cur.get("year_mode")) == "calendar"

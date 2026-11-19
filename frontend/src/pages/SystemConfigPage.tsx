@@ -113,7 +113,7 @@ const CONFIG_ZONES: ConfigZone[] = [
     id: 'teaching',
     titleKey: 'zone_teaching',
     descKey: 'zone_teaching_desc',
-    sections: ['incentive', 'reward', 'wrongbook', 'portrait', 'classdrill', 'classladder', 'news'],
+    sections: ['incentive', 'reward', 'wrongbook', 'portrait', 'classdrill', 'classladder', 'news', 'briefing'],
   },
   {
     id: 'ai',
@@ -157,6 +157,7 @@ const SECTION_TITLES: Record<string, string> = {
   classdrill: 'group_classdrill',
   classladder: 'group_classladder',
   news: 'group_news',
+  briefing: 'group_briefing',
   portrait: 'group_portrait',
   upload: 'group_upload',
   quota: 'group_quota',
@@ -263,6 +264,10 @@ const LADDER_SKIN_OPTIONS: FieldOption[] = [
 const PORTRAIT_PERIOD_OPTIONS: FieldOption[] = [
   { value: false, labelKey: 'optPeriodWeekly' },
   { value: true, labelKey: 'optPeriodMonthly' },
+]
+const BRIEFING_YEAR_MODE_OPTIONS: FieldOption[] = [
+  { value: 'school_year', labelKey: 'optBriefingSchoolYear' },
+  { value: 'calendar', labelKey: 'optBriefingCalendar' },
 ]
 
 // ── 列表型字段的候选值 ──
@@ -393,6 +398,12 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 热点新闻源清单（后端 news_router 现读现用；留空 = 走内置默认；详见 /api/news/diagnose）
   { key: 'news_rss_feeds', labelKey: 'field_news_rss_feeds', descKey: 'field_news_rss_feeds_desc', longDescKey: 'field_news_rss_feeds_tip', type: 'kv', group: 'news', level: 'basic', required: false, placeholderKey: 'placeholder_news_rss' },
   { key: 'news_rss_reserves', labelKey: 'field_news_rss_reserves', descKey: 'field_news_rss_reserves_desc', longDescKey: 'field_news_rss_reserves_tip', type: 'kv', group: 'news', required: false, placeholderKey: 'placeholder_news_rss', action: 'news_discover' },
+  // 教学简报（backend/briefing_scheduler.py）：全局策略，默认全部不自动生成
+  { key: 'BRIEFING_AUTO_WEEKLY', labelKey: 'field_BRIEFING_AUTO_WEEKLY', descKey: 'field_BRIEFING_AUTO_WEEKLY_desc', type: 'boolean', group: 'briefing', level: 'basic', required: false },
+  { key: 'BRIEFING_AUTO_MONTHLY', labelKey: 'field_BRIEFING_AUTO_MONTHLY', descKey: 'field_BRIEFING_AUTO_MONTHLY_desc', type: 'boolean', group: 'briefing', level: 'basic', required: false },
+  { key: 'BRIEFING_AUTO_YEARLY', labelKey: 'field_BRIEFING_AUTO_YEARLY', descKey: 'field_BRIEFING_AUTO_YEARLY_desc', type: 'boolean', group: 'briefing', level: 'basic', required: false },
+  { key: 'BRIEFING_NOTIFY', labelKey: 'field_BRIEFING_NOTIFY', descKey: 'field_BRIEFING_NOTIFY_desc', type: 'boolean', group: 'briefing', level: 'basic', required: false },
+  { key: 'BRIEFING_YEAR_MODE', labelKey: 'field_BRIEFING_YEAR_MODE', descKey: 'field_BRIEFING_YEAR_MODE_desc', type: 'radio', group: 'briefing', level: 'basic', required: false, options: BRIEFING_YEAR_MODE_OPTIONS },
 
   // ══ ③ AI 能力 ══
   // 服务接入

@@ -78,6 +78,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # GET /api/config 会把两键回填为"当前生效清单"，页面里看到什么就抓什么。
     "news_rss_feeds": {},
     "news_rss_reserves": {},
+    # ── 教学简报全局策略（默认全部不自动生成，仅手动生成）──
+    "BRIEFING_AUTO_WEEKLY": False,
+    "BRIEFING_AUTO_MONTHLY": False,
+    "BRIEFING_AUTO_YEARLY": False,
+    "BRIEFING_NOTIFY": True,
+    "BRIEFING_YEAR_MODE": "school_year",
     # ── 文件提交类作业（上传 + AI 批改）──
     "HOMEWORK_MAX_FILE_MB": 10,        # 单文件上限，同时是教师可设值的天花板
     "HOMEWORK_MAX_FILES": 3,           # 一次提交最多几个文件（教师未按作业设时）
@@ -698,6 +704,8 @@ _BOOL_KEYS = {
     "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED", "CLASS_LADDER_AI_ENABLED", "CLASS_LADDER_SOUND_ENABLED",
     "PORTRAIT_ENABLED", "PORTRAIT_PERIOD_MONTHLY", "PORTRAIT_AUTO_PUSH",
     "SHOWCASE_AUTO_ENABLED",
+    "BRIEFING_AUTO_WEEKLY", "BRIEFING_AUTO_MONTHLY", "BRIEFING_AUTO_YEARLY",
+    "BRIEFING_NOTIFY",
     "CHAT_META_GUARD_ENABLED", "CHAT_IDENTITY_GUARD_ENABLED",
     "AI_JSON_OBJECT_MODE", "AI_STRICT_PARSE",
     "EXAM_ANTI_COPY", "EXAM_WATERMARK",
@@ -732,6 +740,7 @@ _ENUM_KEYS: dict[str, tuple[str, ...]] = {
     "AI_MODE": ("cloud", "hybrid", "local"),
     "OLLAMA_THINKING": ("off", "on"),
     "MULTIPLE_CHOICE_SCORING": ("strict", "partial"),
+    "BRIEFING_YEAR_MODE": ("school_year", "calendar"),
     "DOCX_FONT_BODY": FONT_CHOICES,
     "DOCX_FONT_HEADING": FONT_CHOICES,
 }

@@ -193,10 +193,14 @@ async def _call_ai(m: dict[str, Any], scope: dict[str, Any], period: dict[str, A
 # ── 选项与周期 ────────────────────────────────────────────────
 
 @router.get("/options", summary="简报筛选器可选值")
-async def briefing_options(request: Request):
+async def briefing_options(request: Request, teacher: str = Query("")):
     user = _user(request)
     role = int(user.get("role", 2))
-    owner = user["username"] if role != 0 else ""
+    # 兼容测试脚本直接调用端点（此时默认值是 Query 对象，不是 str）
+    req_teacher = teacher.strip() if isinstance(teacher, str) else ""
+    # 管理员选了某位教师时，年级/班级/学科都收敛到该教师范围；
+    # 不传 teacher 则保持全校选项。
+    owner = user["username"] if role != 0 else req_teacher
     pairs = _allowed_pairs(role, owner)
     grades: dict[int, str] = {}
     classes: list[dict[str, Any]] = []
@@ -205,9 +209,9 @@ async def briefing_options(request: Request):
         classes.append({"grade": p["grade_name"], "name": p["class_display"],
                         "id": p["class_id"]})
     subjects: list[str] = []
-    if role != 0:
+    if role != 0 or owner:
         from backend.permission_service import get_teacher_assignments
-        for r in get_teacher_assignments(user["username"]):
+        for r in get_teacher_assignments(owner):
             s = str(r.get("subject") or "").strip()
             if s and s not in subjects:
                 subjects.append(s)
@@ -227,8 +231,17 @@ async def briefing_options(request: Request):
         "classes": sorted(classes, key=lambda x: (x["grade"], x["name"])),
         "subjects": subjects,
         "teachers": teachers,
-        "year_mode": store.get_settings(user["username"]).get("year_mode", "school_year"),
+        "year_mode": _briefing_year_mode(),
     }
+
+
+def _briefing_year_mode() -> str:
+    try:
+        from backend.api.config_router import get_config_value
+        v = str(get_config_value("BRIEFING_YEAR_MODE", "school_year") or "school_year")
+        return "calendar" if v == "calendar" else "school_year"
+    except Exception:  # noqa: BLE001
+        return "school_year"
 
 
 def _pick_type(type_: Any, period_type: Any) -> str:
@@ -397,6 +410,8 @@ async def briefing_regenerate(report_id: int, request: Request):
     f = report.get("filter") or {}
     target = int(user.get("role", 2)) == 0 and report["owner_username"] != user["username"]
     is_custom = "@" in str(report.get("period_key") or "")
+    year_mode = str(((report.get("metrics") or {}).get("period") or {}).get("year_mode")
+                    or _briefing_year_mode())
     # 标准周期只能用 anchor：传 start/end 会走自定义分支，生成出另一个 key 的快照
     body = GenerateBody(
         period_type=report["period_type"],
@@ -407,10 +422,11 @@ async def briefing_regenerate(report_id: int, request: Request):
         grade=",".join(f.get("grades") or []),
         class_filter=",".join(f.get("classes") or []),
         subject=",".join(f.get("subjects") or []),
+        year_mode="calendar" if year_mode == "calendar" else "school_year",
         force=True,
     )
     period = resolve_period(body.period_type, anchor=body.anchor or None,
-                            start=body.start, end=body.end)
+                            start=body.start, end=body.end, year_mode=body.year_mode)
     scope_key = report["scope_key"]
     running = store.running_job(period["type"], period["key"], scope_key)
     if running:

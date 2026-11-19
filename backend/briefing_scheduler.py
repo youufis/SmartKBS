@@ -23,25 +23,37 @@ from backend.question_db import execute_query as q_execute_query
 
 TICK_SECONDS = 1800
 MAX_PER_TICK = 2
-# 优先级：周/月最有价值，日最频繁放后面，年默认关闭
+# 优先级：周/月最有价值，年报默认关闭
 AUTO_TYPES = ("week", "month", "year")
-SETTINGS_KEY = {"day": "auto_daily", "week": "auto_weekly",
-                "month": "auto_monthly", "year": "auto_yearly"}
+AUTO_CONFIG_KEY = {"week": "BRIEFING_AUTO_WEEKLY",
+                   "month": "BRIEFING_AUTO_MONTHLY",
+                   "year": "BRIEFING_AUTO_YEARLY"}
 _SCOPE_CACHE: dict[str, dict[str, Any]] = {}
 
 
-def _enabled() -> bool:
+def _cfg(key: str, default: Any = None) -> Any:
     try:
         from backend.api.config_router import get_config_value
-        v = get_config_value("BRIEFING_AUTO_ENABLED", 1)
-        return str(v).strip().lower() not in ("0", "false", "off", "no", "")
-    except Exception:
-        return True
+        return get_config_value(key, default)
+    except Exception:  # noqa: BLE001
+        return default
 
 
-def _last_completed(period_type: str, now: datetime) -> dict[str, Any]:
+def _bool_cfg(key: str, default: bool = False) -> bool:
+    v = _cfg(key, default)
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _enabled() -> bool:
+    v = _cfg("BRIEFING_AUTO_ENABLED", 1)
+    return str(v).strip().lower() not in ("0", "false", "off", "no", "")
+
+
+def _last_completed(period_type: str, now: datetime, year_mode: str) -> dict[str, Any]:
     """最近一个已经结束的周期（当前周期永远不算）。"""
-    return previous_period(resolve_period(period_type, anchor=now.date()))
+    return previous_period(resolve_period(period_type, anchor=now.date(), year_mode=year_mode))
 
 
 def _teacher_usernames() -> list[str]:
@@ -104,14 +116,16 @@ def plan(now: datetime | None = None, limit: int = MAX_PER_TICK) -> list[dict[st
     now = now or datetime.now()
     planned: list[dict[str, Any]] = []
     teachers = _teacher_usernames()
+    year_mode = str(_cfg("BRIEFING_YEAR_MODE", "school_year") or "school_year")
     _SCOPE_CACHE.clear()
     for ptype in AUTO_TYPES:
-        period = _last_completed(ptype, now)
+        # 全局策略：默认全关。管理员在「系统配置 → 教学与激励 → 教学简报」统一开启。
+        if not _bool_cfg(AUTO_CONFIG_KEY[ptype], False):
+            continue
+        period = _last_completed(ptype, now, year_mode)
         for owner in teachers:
             if len(planned) >= limit:
                 return planned
-            if not int(store.get_settings(owner).get(SETTINGS_KEY[ptype], 0) or 0):
-                continue
             scope = _scope(owner)
             if not scope:
                 continue
@@ -125,6 +139,8 @@ def plan(now: datetime | None = None, limit: int = MAX_PER_TICK) -> list[dict[st
                 "owner": owner, "period_type": period["type"], "period_key": period["key"],
                 "start": period["start_date"], "end": period["end_date"],
                 "scope_key": scope["scope_key"], "label": period["label"],
+                "anchor": period["start_date"],
+                "year_mode": year_mode,
             })
     return planned
 
@@ -150,7 +166,10 @@ async def _run_once_locked(now: datetime | None = None, limit: int = MAX_PER_TIC
         job_id = uuid.uuid4().hex[:12]
         store.create_job(job_id, item["period_type"], item["period_key"], item["scope_key"],
                          item["owner"], trigger="auto")
-        body = GenerateBody(period_type=item["period_type"], start=item["start"], end=item["end"])
+        # 标准周期用 anchor，不能传 start/end：resolve_period 会把 start/end
+        # 当成自定义区间，生成带 @ 后缀的另一份快照，调度器下一轮又认为没生成。
+        body = GenerateBody(period_type=item["period_type"], anchor=item["anchor"],
+                            year_mode=item.get("year_mode", "school_year"))
         try:
             await _run_job(job_id, body, {"username": item["owner"], "role": 1})
         except Exception as exc:  # noqa: BLE001
@@ -166,7 +185,7 @@ async def _run_once_locked(now: datetime | None = None, limit: int = MAX_PER_TIC
 
 def _notify(item: dict[str, Any], report_id: int) -> None:
     try:
-        if not int(store.get_settings(item["owner"]).get("notify", 1) or 0):
+        if not _bool_cfg("BRIEFING_NOTIFY", True):
             return
         from backend.api.notification_router import create_notification
         create_notification(

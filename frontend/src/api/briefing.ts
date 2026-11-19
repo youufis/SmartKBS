@@ -12,6 +12,18 @@ export interface BriefingSection {
   actions?: { text: string; basis: string }[]
 }
 
+export interface BriefingPeriod {
+  type: string
+  key: string
+  start: string
+  end: string
+  start_date: string
+  end_date: string
+  label: string
+  custom?: boolean
+  year_mode?: string
+}
+
 export interface BriefingPraiseStudent {
   username?: string
   title: string
@@ -47,7 +59,7 @@ export interface BriefingMetrics {
     vacant: { title: string; reason: string }[]
     coverage?: number | null
   }
-  alerts?: { level: string; student: string; reason: string }[]
+  alerts?: { level: string; student: string; class?: string; reason: string }[]
   is_empty?: boolean
 }
 
@@ -79,6 +91,30 @@ export interface BriefingOptions {
   year_mode: string
 }
 
+export interface BriefingPreview {
+  period: BriefingPeriod
+  scope: {
+    total_students: number
+    filter_label: string
+    classes: string[]
+    grades: string[]
+    subjects: string[]
+  }
+  summary: {
+    activity_total: number
+    samples: number
+    avg_rate: number | null
+    delta: number | null
+    participation_rate: number | null
+    silent_count: number
+    pending_grading: number
+    praise_count: number
+    alert_count: number
+  }
+  is_empty: boolean
+  facts?: { id: string; kind: string; text: string; value?: unknown }[]
+}
+
 export interface BriefingJob {
   id: string
   status: string
@@ -100,15 +136,17 @@ export interface BriefingFilter {
   subject?: string
 }
 
-export const getOptions = () =>
-  apiClient.get<BriefingOptions>('/api/briefing/options').then(r => r.data)
+export const getOptions = (teacher = '') =>
+  apiClient.get<BriefingOptions>('/api/briefing/options', {
+    params: teacher ? { teacher } : undefined,
+  }).then(r => r.data)
 
 export const getLatest = (f: BriefingFilter) =>
-  apiClient.get<{ exists: boolean; report?: BriefingReport; period?: any; scope?: string }>(
+  apiClient.get<{ exists: boolean; report?: BriefingReport; period?: BriefingPeriod; scope?: string }>(
     '/api/briefing/latest', { params: f }).then(r => r.data)
 
 export const getPreview = (f: BriefingFilter) =>
-  apiClient.get<any>('/api/briefing/preview', { params: f }).then(r => r.data)
+  apiClient.get<BriefingPreview>('/api/briefing/preview', { params: f }).then(r => r.data)
 
 export const generate = (f: BriefingFilter & { force?: boolean }) =>
   apiClient.post<{ job_id?: string; report_id?: number; existed: boolean; status: string }>(
