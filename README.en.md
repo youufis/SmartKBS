@@ -11,7 +11,7 @@
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
-> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration (cloud/local dual engine + briefing policy), online incremental upgrade, multi-theme appearance
+> - ⚙️ **Manage · System Management** — users and permissions (CSV import in seconds), announcements, notification centre, AI skill management, system configuration (cloud/local dual engine + briefing policy + log rotation), online incremental upgrade, multi-theme appearance
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang), DeepSeek and a local Ollama engine (cloud / hybrid / local tiers). SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
@@ -41,11 +41,13 @@
 > - 🧠 **Dual-engine semantics**: hybrid = local generation + cloud KB retrieval · local = fully offline (cloud retrieval/warmup bypassed, local question-bank fallback) · cloud tier passes through unchanged
 > - 🧩 **Settings restructure**: cloud / local model sections · cloud-service attribution labels (KB / TTS / ASR / image gen) · guides collapsed by default · auto-probe on page entry
 > - 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafting · nine sections with conclusions · praise-title registry · auto-generation off by default behind one global switch · scheduled checks & in-app notice · admin teacher scoping · mobile read-only with copy-to-share
+> - 👥 **Bulk import speed-up**: off-transaction parallel hashing · identical initial passwords hashed once · thousands of rows in seconds · chunked commits keep partial imports · errors summarized by cause
+> - 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · new "Logs & Archives" section · takes effect on save
 > - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud; briefing auto-generation off) so existing behavior is unchanged; briefing auto-drafting is now switched on per week/month/year globally in System Settings → Teaching Briefing (legacy per-teacher switches were disabled once); enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; Git deployments use the usual in-app incremental upgrade.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud; briefing auto-generation off; log rotation stays size-based; import password reuse on) so existing behavior is unchanged; briefing auto-drafting is now switched on per week/month/year globally in System Settings → Teaching Briefing (legacy per-teacher switches were disabled once); enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; Git deployments use the usual in-app incremental upgrade.
 ---
 
 <a id="intro"></a>
@@ -1087,7 +1089,7 @@ Complete account management system:
 - **✏️ Update Information**: Modify username, class, grade, name, gender, role, teaching subjects
 - **🔑 Change Password**: All users can change their own password; Admin can reset others' passwords
 - **🗑️ Delete Users**: Single or batch delete
-- **📤 CSV Import**: Batch import users
+- **📤 CSV Import**: Batch import users — thousands of rows in seconds; errors grouped by cause, chunked commits keep partial imports
 - **🔍 Filter & Search**: Filter by role/grade/class, search by username/name
 - **🏫 Teacher Assignment**: Set teacher's teaching grades, classes, and subjects
 - **🧩 Class Management**: review per-class student and teacher counts, clean up empty shell classes (Admin only)
@@ -1124,6 +1126,7 @@ Centralized management of all system configuration parameters:
 - **📊 Teaching Briefing**: weekly/month/yearly auto-generation (all off by default), in-app notice, school-year basis — a single global policy, no longer set per teacher
 - **💬 AI Chat Settings**: Chat permission roles, daily request quota (switch plus limit)
 - **⚙️ System Limits**: File size limit, token validity, online timeout, IP protection and login gates
+- **🗂 Logs & Archives**: rotation mode (size / daily / daily + size fuse), archive retention days and count — takes effect on save
 - **🛡️ Classroom Guard**: question copy protection and answer-page watermark (off by default; only the question block is affected)
 - **🧪 AI Output & Parsing**: strict parsing, image extraction token budget, class error review question cap and accuracy threshold
 - **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test; duration options plus length and page caps for both AI podcast and AI lesson cast live here too
@@ -1251,6 +1254,18 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 - Scores are visible as soon as grading finishes; "Notify grades" now only sends the push and awards the grade bonus (repeat clicks never double-award); resubmitted-needs-regrade is counted separately and folded into the home to-grade badge
 - Duplicate assignment (re-send to another class; an already-passed deadline is cleared automatically); the target scope is editable while no submission exists; "Allow one more attempt" replaces deleting data to grant a second chance
 - Quality: 195 new assignment-track checks (493 repo-wide); the expired / late / needs-regrade predicates each collapsed to one definition; 10 cross-object state leaks and 12 silent failures or duplicated rules fixed
+
+**👤 Bulk user import (speed-up)**
+
+- Password hashing moved out of the write transaction and parallelized across threads; one identical initial password is hashed once (switchable)
+- Thousands of rows import in seconds instead of minutes, and the import no longer blocks writes for the rest of the site
+- Chunked commits: committed batches survive an interruption; errors are summarized by cause (duplicate / out of scope / header mismatch / over-long password) with progress that never stalls
+
+**🗂 Log rotation & retention (configurable)**
+
+- Three rotation modes: by size (default) / daily / daily + size fuse, switchable in System Settings -> Logs & Archives
+- Archive retention days and count are configurable with one shared policy across both cleanup layers; takes effect on save, no restart needed
+- Daily archives are named by date and gzip-compressed; extra same-day rotations automatically avoid name collisions
 
 ### v7.x – v9.1.0
 
