@@ -11,7 +11,7 @@
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
-> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration (cloud/local dual engine), online incremental upgrade, multi-theme appearance
+> - ⚙️ **Manage · System Management** — users and permissions, announcements, notification centre, AI skill management, system configuration (cloud/local dual engine + briefing policy), online incremental upgrade, multi-theme appearance
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang), DeepSeek and a local Ollama engine (cloud / hybrid / local tiers). SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
@@ -40,12 +40,12 @@
 > - 🖥 **Local model engine (new)**: Ollama integration · cloud / hybrid / local tiers · live model list with resident info · chat engine badge · capability matrix & graded notices · friendly errors
 > - 🧠 **Dual-engine semantics**: hybrid = local generation + cloud KB retrieval · local = fully offline (cloud retrieval/warmup bypassed, local question-bank fallback) · cloud tier passes through unchanged
 > - 🧩 **Settings restructure**: cloud / local model sections · cloud-service attribution labels (KB / TTS / ASR / image gen) · guides collapsed by default · auto-probe on page entry
-> - 📊 **Teaching briefing (new)**: weekly / monthly / yearly auto-draft · nine sections with conclusions · praise-title registry · scheduled checks & in-app notice · mobile read-only with copy-to-share
+> - 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafting · nine sections with conclusions · praise-title registry · auto-generation off by default behind one global switch · scheduled checks & in-app notice · admin teacher scoping · mobile read-only with copy-to-share
 > - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud) so existing behavior is unchanged; enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; Git deployments use the usual in-app incremental upgrade.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud; briefing auto-generation off) so existing behavior is unchanged; briefing auto-drafting is now switched on per week/month/year globally in System Settings → Teaching Briefing (legacy per-teacher switches were disabled once); enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; Git deployments use the usual in-app incremental upgrade.
 ---
 
 <a id="intro"></a>
@@ -140,7 +140,7 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 | Role | Count | Pages |
 | --- | --- | --- |
 | Student | 28 | dashboard, AI companion, wrong questions, daily picks, hot news, notifications, announcements, classroom questions, quick quiz, to-dos, homework, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction, classroom polls, group discussions and rooms, file centre, growth portfolio, showcase, my resources, resource centre, explore canvas, about |
-| Teacher / admin | 23 | dashboard, AI assistant, notifications, announcements, question management, AI class summary, learning analytics, assignment grading confirmation, classroom points, weekly AI profile, group discussions and monitor, quest records, summary export, file centre, growth portfolio, showcase, my resources, resource centre, resource management, explore canvas, about |
+| Teacher / admin | 24 | dashboard, teaching briefing (read-only), AI assistant, notifications, announcements, question management, AI class summary, learning analytics, assignment grading confirmation, classroom points, weekly AI profile, group discussions and monitor, quest records, summary export, file centre, growth portfolio, showcase, my resources, resource centre, resource management, explore canvas, about |
 
 #### How it behaves on a phone
 
@@ -845,13 +845,15 @@ Utilizes AI for in-depth analysis of teaching data:
 
 ### Teaching Briefing
 
-Automatically summarises teaching data by week / month / year into a nine-section briefing with conclusions:
+Summarises teaching data by week / month / year into a nine-section briefing with conclusions:
 
-- **Nine sections**: overview, teaching activity, learning outcomes, participation, assignments, praise, student growth, weak areas, next steps
-- **Metric rules**: minimum sample sizes, knowledge-point attribution, null vs zero kept distinct; charts and Word export share one source
+- **Nine sections**: overview, teaching activity, learning outcomes, participation, assignments, praise, student growth, weak areas, next steps; plus an attention-required student card (high / watch)
+- **Metric rules**: minimum sample sizes, knowledge-point attribution, null vs zero kept distinct; charts and Word export share one source; the school-year basis (academic vs calendar) is global
 - **Composition**: rule-based fallback; AI only writes narrative, checked against a number whitelist and skipped when AI is unavailable
 - **Praise & growth**: 14 student + 8 class praise titles from a registry; platform titles/badges surface under student growth
-- **Delivery**: scheduled checks that generate + in-app notice; paged, deletable history; mobile read-only with copy-to-share
+- **Automation**: off by default (manual only); admins switch weekly/month/yearly generation on globally in System Settings → Teaching Briefing; checks every 30 minutes create only missing cycles, with optional in-app notice
+- **Filtering**: admins can scope a briefing to one teacher, with grades/classes/subjects narrowed accordingly; paged, deletable history with viewing indicator and refresh
+- **Delivery**: mobile is read-only — filters, card-style browsing and copy-to-share; generation stays on desktop
 
 > **Available to Teacher and Admin**
 
@@ -1118,6 +1120,8 @@ Centralized management of all system configuration parameters:
 - **🏷️ Brand Info**: Platform version name, organization name
 - **🔑 API Keys**: DashScope API Key
 - **🤖 Model Configuration**: APPID, API address, default chat model, long-text model, vision model, multimodal switch (all chosen from dropdowns)
+- **🖥️ AI Engines**: cloud / hybrid / local tiers (Ollama), live model list with auto-probe on entry, capability matrix notes
+- **📊 Teaching Briefing**: weekly/month/yearly auto-generation (all off by default), in-app notice, school-year basis — a single global policy, no longer set per teacher
 - **💬 AI Chat Settings**: Chat permission roles, daily request quota (switch plus limit)
 - **⚙️ System Limits**: File size limit, token validity, online timeout, IP protection and login gates
 - **🛡️ Classroom Guard**: question copy protection and answer-page watermark (off by default; only the question block is affected)
@@ -1212,11 +1216,14 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 
 **📊 Teaching briefing (new)**
 
-- Weekly / monthly / yearly cycles with nine sections: overview, activity, outcomes, participation, assignments, praise, growth, weak areas, next steps
+- Weekly / monthly / yearly cycles with nine sections: overview, activity, outcomes, participation, assignments, praise, growth, weak areas, next steps; plus an attention-required student card (high / watch)
 - Rule-based fallback + AI narrative; number whitelist; degrades to the rule-based version when AI is unavailable
 - Praise-title registry: 14 student + 8 class titles, no padding; platform titles/badges surface under growth
-- Scheduled **checks** every 30 minutes generate only missing completed cycles (max 2 per run), with in-app notice; manual regeneration and version history
-- Mobile read-only: filter drawer, card-style tables, copy-to-share summary; paged and deletable history
+- Auto-generation off by default (manual only); weekly/month/yearly toggles, in-app notice and the school-year basis became one global admin policy in System Settings → Teaching Briefing (legacy per-teacher switches disabled once)
+- Scheduled **checks** every 30 minutes create only missing completed cycles (max 2 per run); standard cycles key off the period anchor, so no duplicate snapshots
+- Admins can scope filters to one teacher, with grades/classes/subjects narrowed accordingly
+- Page polish: "not generated" and "no data" tabs for the current cycle, still-running notice on timeout, history viewing indicator with back-to-current, manual refresh
+- Mobile read-only: filter drawer, card-style tables, copy-to-share summary, generation stays on desktop; paged and deletable history
 
 **🖥 Local model engine (new)**
 
