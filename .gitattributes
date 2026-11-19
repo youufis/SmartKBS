@@ -1,0 +1,13 @@
+# 行尾策略：前端源码与产物统一 LF（打包 preflight 做字节级探测，CRLF 漂移会误报 dist 落后；
+# 2026-11-19 实测：一次分支 checkout 往返就让 180 个 chunk 全部改名）。
+frontend/** text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.svg text eol=lf
+*.md text eol=lf
