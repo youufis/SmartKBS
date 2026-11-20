@@ -1,4 +1,4 @@
-/** AI 学伴留言卡：展示最新推送 + 未读角标，点击进入学伴对话 */
+/** AI 学伴留言卡：只展示最新一条推送（每日问候会累积，两条同模板显冗余）+ 未读角标，进对话看全部 */
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -17,7 +17,7 @@ const CompanionCard: React.FC = () => {
   const pushes = useCompanionStore((s) => s.pushes)
   const unreadCount = useCompanionStore((s) => s.unreadCount)
 
-  const latest = pushes.slice(0, 2)
+  const latest = pushes.slice(0, 1)
 
   return (
     <Card

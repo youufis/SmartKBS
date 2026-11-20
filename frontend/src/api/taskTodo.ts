@@ -22,6 +22,12 @@ export interface TaskTodoItem {
   live?: boolean;
   /** 推荐看看：非硬待办（未浏览的共享资源、可回答的同学提问） */
   suggest?: boolean;
+  /** 发起教师（P2 下发）：提问/闯关/错题/通知等无单一发起者为 null，筛选归"无归属" */
+  teacher?: { username: string; name: string } | null;
+  /** 锚定课程（学科→课程两级，宁缺勿错：匹不上为 null） */
+  course?: { id: number; name: string; subject: string } | null;
+  /** 活动开始时间（live 类透出，时间线/看板次级排序用） */
+  start_at?: string | null;
 }
 
 /** 已完成记录（近 30 天） */
@@ -52,6 +58,11 @@ export interface TaskTodoResponse {
   suggest_count?: number;
   /** 近 30 天已完成记录 */
   recent_done?: DoneRecord[];
+  /** 筛选选项源：课程不依赖当前待办（没作业也选得了课）；教师=全体教职工快照 */
+  facets?: {
+    teachers?: { username: string; name: string }[];
+    courses?: { id: number; name: string; subject: string }[];
+  };
 }
 
 /** 获取学生任务清单 */

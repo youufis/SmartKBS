@@ -2,6 +2,7 @@
 首页仪表盘 API 路由
 聚合展示系统关键数据：考试、积分、任务、点名、用户统计等
 """
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -195,6 +196,121 @@ def _set_cache(key: str, data: dict[str, Any]):
         keys_to_del = [k for k, v in _dashboard_cache.items() if now - v[0] > _DASHBOARD_CACHE_TTL * 2]
         for k in keys_to_del:
             del _dashboard_cache[k]
+
+
+# ── task-todo 下发字段辅助（教师/学科/课程/开始时间） ──
+
+def _teacher_names_map() -> dict[str, str]:
+    """username → 姓名（教师+管理员）；任务清单透出"发起教师"用，30s 缓存。"""
+    cached = _get_cached("teachers:names")
+    if cached is not None:
+        return {k: str(v) for k, v in cached.items()}
+    out: dict[str, str] = {}
+    for r in execute_query("SELECT username, name FROM users WHERE role IN (0,1)") or []:
+        out[str(r[0])] = str(r[1] or r[0])
+    _set_cache("teachers:names", out)
+    return out
+
+
+def _tk(username, name=None, names: dict[str, str] | None = None) -> dict[str, str] | None:
+    """teacher 对象：优先表内已存的 creator_name，否则查显示名；两者皆无返回 None（前端归"无归属"）。"""
+    u = str(username or "").strip()
+    n = str(name or "").strip()
+    if not n and u:
+        n = (names or {}).get(u, "")
+    if u == "system" and n in ("", "system"):
+        n = "系统"
+    if not u and not n:
+        return None
+    return {"username": u, "name": n or u}
+
+
+def _kp_tokens(raw) -> list[str]:
+    """各活动表 knowledge_points 存的是知识点名称文本（逗号/顿号/分号分隔，或 JSON 串残片）→ 候选名列表。"""
+    s = str(raw or "").strip()
+    if not s:
+        return []
+    s = s.replace("[", "").replace("]", "").replace('"', "").replace("'", "")
+    parts = [p.strip() for p in re.split(r"[,;，、；\n]+", s)]
+    return [p for p in parts if p][:12]
+
+
+def _kp_course_map(tokens: list[str], grade: str) -> dict[str, tuple]:
+    """知识点名称 → (course_id, 课程名, 学科)。精确按名称匹配；多课程命中优先学生年级，
+    匹不上留空（宁缺勿错——课程维度只做筛选导航，不做统计口径）。"""
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return {}
+    cache_key = "kp2course:" + (grade or "*")
+    all_map = dict(_get_cached(cache_key) or {})
+    missing = [t for t in tokens if t not in all_map]
+    if missing:
+        ph = ",".join("?" for _ in missing)
+        rows = execute_query(
+            f"""SELECT kp.name, c.id, c.name, c.subject, c.grade
+                FROM knowledge_points kp
+                JOIN chapters ch ON kp.chapter_id = ch.id
+                JOIN courses c ON ch.course_id = c.id
+                WHERE c.status='active' AND kp.name IN ({ph})""",
+            tuple(missing),
+        ) or []
+        best: dict[str, list] = {}
+        for name, cid, cname, csubject, cgrade in rows:
+            k = str(name or "")
+            cur = best.get(k)
+            if cur is None:
+                best[k] = [cid, cname, csubject, cgrade]
+            elif grade and str(cgrade or "") == grade and str(cur[3] or "") != grade:
+                best[k] = [cid, cname, csubject, cgrade]
+        for k, v in best.items():
+            all_map[k] = (v[0], str(v[1] or ""), str(v[2] or ""))
+        _set_cache(cache_key, all_map)
+    return {t: all_map[t] for t in tokens if t in all_map}
+
+
+def _course_from_kps(raw, grade: str) -> dict | None:
+    """知识点文本 → 第一个能锚定的课程（顺序稳定：按传入 token 先后）。"""
+    toks = _kp_tokens(raw)
+    m = _kp_course_map(toks, grade)
+    for t in toks:
+        hit = m.get(t)
+        if hit:
+            return {"id": hit[0], "name": hit[1], "subject": hit[2]}
+    return None
+
+
+def _course_of_kp_id(kp_id) -> tuple | None:
+    """knowledge_point id → (course_id, 课程名, 学科)（白板 course_kp_id 走这条精确路径）。"""
+    kid = str(kp_id or "").strip()
+    if not kid or not kid.isdigit():
+        return None
+    rows = execute_query(
+        """SELECT c.id, c.name, c.subject
+           FROM knowledge_points kp
+           JOIN chapters ch ON kp.chapter_id = ch.id
+           JOIN courses c ON ch.course_id = c.id
+           WHERE kp.id=? AND c.status='active'""",
+        (int(kid),),
+    )
+    if not rows:
+        return None
+    return (rows[0][0], str(rows[0][1] or ""), str(rows[0][2] or ""))
+
+
+def _course_facets(grade: str) -> list[dict]:
+    """学生可见课程（学科→课程两级选项源）：年级口径与课程练习一致（grade='' 全量）。"""
+    if grade:
+        rows = execute_query(
+            """SELECT id, name, subject FROM courses
+               WHERE status='active' AND (grade='' OR INSTR(grade, ?) > 0)
+               ORDER BY sort_order, id""",
+            (grade,),
+        ) or []
+    else:
+        rows = execute_query(
+            "SELECT id, name, subject FROM courses WHERE status='active' ORDER BY sort_order, id"
+        ) or []
+    return [{"id": r[0], "name": str(r[1] or ""), "subject": str(r[2] or "")} for r in rows]
 
 
 def _q_count(sql: str, params: tuple[Any, ...] = ()) -> int:
@@ -2069,6 +2185,7 @@ async def get_task_todo(request: Request):
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
     items: list[dict[str, Any]] = []
+    names_map = _teacher_names_map()
 
     # 获取学生年级班级信息
     grade, cls = get_user_grade_class(username)
@@ -2081,7 +2198,8 @@ async def get_task_todo(request: Request):
     try:
         pending_exams = q_execute_query(
             """SELECT e.id, e.title, e.subject, e.duration, e.total_score,
-                      e.pass_score, e.start_time, e.end_time
+                      e.pass_score, e.start_time, e.end_time,
+                      e.creator_username, e.creator_name
                FROM exams e
                WHERE e.status = 'published'
                AND (e.start_time IS NULL OR e.start_time <= ?)
@@ -2106,6 +2224,8 @@ async def get_task_todo(request: Request):
                 "deadline": deadline,
                 "url": f"/exam-take/{ex['id']}",
                 "action_label": "开始考试",
+                "teacher": _tk(ex.get("creator_username"), ex.get("creator_name"), names_map),
+                "start_at": ex.get("start_time"),
                 "meta": {"duration": ex["duration"], "total_score": ex["total_score"]},
             })
     except Exception as e:
@@ -2136,6 +2256,7 @@ async def get_task_todo(request: Request):
                     "deadline": deadline,
                     "url": "/tasks",
                     "action_label": "去交文件" if mode in ("file", "mixed") else "去提交",
+                    "teacher": _tk(tk.get("creator"), None, names_map),
                     "meta": {"submit_mode": mode,
                              "max_files": tk.get("max_files"),
                              "total_score": tk.get("total_score")},
@@ -2147,7 +2268,8 @@ async def get_task_todo(request: Request):
     try:
         pending_practices = q_execute_query(
             """SELECT ps.id, ps.title, ps.subject, ps.question_count, ps.total_score,
-                      ps.source, ps.target_students
+                      ps.source, ps.target_students,
+                      ps.creator_username, ps.knowledge_points
                FROM practice_sessions ps
                WHERE ps.status='active'
                  AND ps.id NOT IN (
@@ -2187,6 +2309,8 @@ async def get_task_todo(request: Request):
                 # 深链直达这份练习，省得学生在同步练习列表里翻找
                 "url": f"/practice?open={pp['id']}",
                 "action_label": "去巩固" if is_wrong_practice else "开始练习",
+                "teacher": _tk(pp.get("creator_username"), None, names_map),
+                "course": _course_from_kps(pp.get("knowledge_points"), str(grade or "")),
                 "meta": {"question_count": pp["question_count"], "source": pp.get("source") or ""},
             })
     except Exception as e:
@@ -2209,7 +2333,8 @@ async def get_task_todo(request: Request):
             if aa:
                 ph = ",".join("?" for _ in aa)
                 pending_codes = q_execute_query(
-                    f"""SELECT cp.id, cp.title, cp.subject, cp.difficulty, cp.language
+                    f"""SELECT cp.id, cp.title, cp.subject, cp.difficulty, cp.language,
+                           cp.creator_username, cp.creator_name, cp.knowledge_points
                         FROM code_problems cp
                         WHERE cp.status='active'
                           AND cp.creator_username IN ({ph})
@@ -2232,6 +2357,8 @@ async def get_task_todo(request: Request):
                         "deadline": None,
                         "url": "/code-practice",
                         "action_label": "去练习",
+                        "teacher": _tk(pc.get("creator_username"), pc.get("creator_name"), names_map),
+                        "course": _course_from_kps(pc.get("knowledge_points"), str(grade or "")),
                         "meta": {"difficulty": pc.get("difficulty")},
                     })
     except Exception as e:
@@ -2254,7 +2381,8 @@ async def get_task_todo(request: Request):
             raw = execute_query(
                 """SELECT cb.id, cb.knowledge_point_id, kp.name, c.name,
                           COALESCE(sr.file_path, '') as fp,
-                          COALESCE(sr.file_name, '') as fn
+                          COALESCE(sr.file_name, '') as fn,
+                          c.id, c.subject, COALESCE(sr.owner_username, '')
                    FROM curriculum_bindings cb
                    JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
                    JOIN chapters ch ON kp.chapter_id = ch.id
@@ -2271,7 +2399,8 @@ async def get_task_todo(request: Request):
             raw = execute_query(
                 """SELECT cb.id, cb.knowledge_point_id, kp.name, c.name,
                           COALESCE(sr.file_path, '') as fp,
-                          COALESCE(sr.file_name, '') as fn
+                          COALESCE(sr.file_name, '') as fn,
+                          c.id, c.subject, COALESCE(sr.owner_username, '')
                    FROM curriculum_bindings cb
                    JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
                    JOIN chapters ch ON kp.chapter_id = ch.id
@@ -2304,12 +2433,15 @@ async def get_task_todo(request: Request):
                 "type": "course_practice",
                 "title": practice_name,
                 "description": "知识点练习 · HTML 资源",
-                "subject": "",
+                "subject": str(b[7] or ""),
                 "status": "pending",
                 "priority": 45,
                 "deadline": None,
                 "url": resource_url,
                 "action_label": "去练习",
+                "teacher": _tk(b[8], None, names_map),
+                "course": ({"id": b[6], "name": str(b[3] or ""), "subject": str(b[7] or "")}
+                           if b[6] is not None else None),
                 "meta": {"resource_url": resource_url},
             })
     except Exception as e:
@@ -2339,7 +2471,8 @@ async def get_task_todo(request: Request):
             if all_creators:
                 ph = ",".join("?" for _ in all_creators)
                 quiz_rows = execute_query(
-                    f"""SELECT q.id, q.title, q.description FROM interaction_quizzes q
+                    f"""SELECT q.id, q.title, q.description, q.creator_username, q.subject,
+                              q.knowledge_points, q.created_at FROM interaction_quizzes q
                         WHERE q.status = 'active'
                         AND q.creator_username IN ({ph})
                         AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)
@@ -2347,19 +2480,24 @@ async def get_task_todo(request: Request):
                     tuple(all_creators + [username]),
                 )
                 for qr in quiz_rows:
-                    active_quizzes.append({"id": qr[0], "title": qr[1], "description": qr[2] or ""})
+                    active_quizzes.append({"id": qr[0], "title": qr[1], "description": qr[2] or "",
+                                           "creator": qr[3], "subject": qr[4],
+                                           "kp": qr[5], "created_at": qr[6]})
         for aq in active_quizzes:
             items.append({
                 "id": f"quiz-{aq['id']}",
                 "type": "quiz",
                 "title": aq["title"],
                 "description": aq["description"] or "随堂测验",
-                "subject": "",
+                "subject": str(aq["subject"] or ""),
                 "status": "pending",
                 "priority": 60,
                 "deadline": None,
                 "url": "/interaction",
                 "action_label": "去作答",
+                "teacher": _tk(aq["creator"], None, names_map),
+                "course": _course_from_kps(aq["kp"], str(grade or "")),
+                "start_at": str(aq["created_at"] or "") or None,
                 "meta": {},
             })
     except Exception as e:
@@ -2374,7 +2512,7 @@ async def get_task_todo(request: Request):
             )
         )
         active_polls = execute_query(
-            """SELECT id, question FROM interaction_polls
+            """SELECT id, question, creator_username, subject, created_at FROM interaction_polls
                WHERE status='active' ORDER BY created_at DESC""",
         )
         for ap in active_polls:
@@ -2384,12 +2522,14 @@ async def get_task_todo(request: Request):
                     "type": "poll",
                     "title": ap[1],
                     "description": "课堂投票 · 进行中",
-                    "subject": "",
+                    "subject": str(ap[3] or ""),
                     "status": "pending",
                     "priority": 55,
                     "deadline": None,
                     "url": "/quick-poll",
                     "action_label": "去投票",
+                    "teacher": _tk(ap[2], None, names_map),
+                    "start_at": str(ap[4] or "") or None,
                     "meta": {},
                 })
     except Exception as e:
@@ -2406,7 +2546,8 @@ async def get_task_todo(request: Request):
             )
         )
         active_discussions = execute_query(
-            """SELECT id, title, description, creator_username, target_scope, grade, classes
+            """SELECT id, title, description, creator_username, target_scope, grade, classes,
+                      subject, created_at
                FROM discussions WHERE status='active' ORDER BY created_at DESC""",
         )
         for ad in active_discussions:
@@ -2420,12 +2561,14 @@ async def get_task_todo(request: Request):
                     "type": "discussion",
                     "title": ad[1],
                     "description": ad[2] or "分组讨论 · 进行中",
-                    "subject": "",
+                    "subject": str(ad[7] or ""),
                     "status": "pending",
                     "priority": 60,
                     "deadline": None,
                     "url": f"/discussion-room/{ad[0]}",
                     "action_label": "加入讨论",
+                    "teacher": _tk(ad[3], None, names_map),
+                    "start_at": str(ad[8] or "") or None,
                     "meta": {},
                 })
     except Exception as e:
@@ -2440,7 +2583,8 @@ async def get_task_todo(request: Request):
             )
         )
         active_rooms = execute_query(
-            """SELECT id, title, creator_username, target_scope, target_grade, target_class
+            """SELECT id, title, creator_username, target_scope, target_grade, target_class,
+                      subject, knowledge_points, created_at
                FROM quick_quiz_rooms
                WHERE status IN ('waiting','playing','active')
                ORDER BY created_at DESC""",
@@ -2456,12 +2600,15 @@ async def get_task_todo(request: Request):
                     "type": "quick_quiz",
                     "title": ar[1],
                     "description": "抢答竞赛 · 进行中",
-                    "subject": "",
+                    "subject": str(ar[6] or ""),
                     "status": "pending",
                     "priority": 70,
                     "deadline": None,
                     "url": f"/quick-quiz/lobby/{ar[0]}",
                     "action_label": "去参与",
+                    "teacher": _tk(ar[2], None, names_map),
+                    "course": _course_from_kps(ar[7], str(grade or "")),
+                    "start_at": str(ar[8] or "") or None,
                     "meta": {},
                 })
     except Exception as e:
@@ -2476,12 +2623,13 @@ async def get_task_todo(request: Request):
             )
         )
         active_whiteboards = execute_query(
-            """SELECT id, title, creator_username, grade, class_name
+            """SELECT id, title, creator_username, grade, class_name, course_kp_id, created_at
                FROM whiteboard_rooms WHERE status='active' ORDER BY created_at DESC""",
         )
         for aw in active_whiteboards:
             # 白板房间用 grade/class_name 表达范围；两者都为空则回落到创建者任教范围
             _wb_g, _wb_c = str(aw[3] or "").strip(), str(aw[4] or "").strip()
+            _wb_course = _course_of_kp_id(aw[5])
             if aw[0] not in joined_whiteboards and check_activity_visibility(
                 username, grade, cls, str(aw[2] or ""),
                 "class" if (_wb_g or _wb_c) else "teacher_classes", _wb_g, _wb_c,
@@ -2491,12 +2639,16 @@ async def get_task_todo(request: Request):
                     "type": "whiteboard",
                     "title": aw[1],
                     "description": "白板互动 · 进行中",
-                    "subject": "",
+                    "subject": (_wb_course[2] if _wb_course else ""),
                     "status": "pending",
                     "priority": 50,
                     "deadline": None,
                     "url": f"/whiteboard-room/{aw[0]}",
                     "action_label": "加入白板",
+                    "teacher": _tk(aw[2], None, names_map),
+                    "course": ({"id": _wb_course[0], "name": _wb_course[1], "subject": _wb_course[2]}
+                               if _wb_course else None),
+                    "start_at": str(aw[6] or "") or None,
                     "meta": {},
                 })
     except Exception as e:
@@ -2505,7 +2657,7 @@ async def get_task_todo(request: Request):
     # ── 12. 我提出的待回答问题 ──
     try:
         my_pending_qs = execute_query(
-            """SELECT id, content FROM interaction_questions
+            """SELECT id, content, subject, knowledge_point FROM interaction_questions
                WHERE student_username=? AND status='pending'
                ORDER BY created_at DESC""",
             (username,),
@@ -2516,12 +2668,13 @@ async def get_task_todo(request: Request):
                 "type": "question_waiting",
                 "title": f"等待回答：{pq[1][:60]}{'...' if len(pq[1])>60 else ''}",
                 "description": "你提出的问题等待老师回答",
-                "subject": "",
+                "subject": str(pq[2] or ""),
                 "status": "pending",
                 "priority": 75,
                 "deadline": None,
                 "url": "/student-questions",
                 "action_label": "查看",
+                "course": _course_from_kps(pq[3], str(grade or "")),
                 "meta": {},
             })
     except Exception as e:
@@ -2536,7 +2689,7 @@ async def get_task_todo(request: Request):
             )
         )
         peer_questions = execute_query(
-            """SELECT id, content, student_username FROM interaction_questions
+            """SELECT id, content, student_username, subject, knowledge_point FROM interaction_questions
                WHERE status='pending' AND student_username!=?
                ORDER BY created_at DESC LIMIT 10""",
             (username,),
@@ -2548,12 +2701,13 @@ async def get_task_todo(request: Request):
                     "type": "question_can_answer",
                     "title": f"可回答：{pqq[2]} 提问「{pqq[1][:60]}{'...' if len(pqq[1])>60 else ''}」",
                     "description": "同学提问，你可以帮助回答",
-                    "subject": "",
+                "subject": str(pqq[3] or ""),
                     "status": "pending",
                     "priority": 35,
                     "deadline": None,
                     "url": "/student-questions",
                     "action_label": "去回答",
+                    "course": _course_from_kps(pqq[4], str(grade or "")),
                     "meta": {},
                 })
     except Exception as e:
@@ -2562,7 +2716,7 @@ async def get_task_todo(request: Request):
     # ── 14. 进行中的知识闯关 ──
     try:
         ongoing_quest = execute_query(
-            """SELECT id, score, current_question_index, total_questions
+            """SELECT id, score, current_question_index, total_questions, created_at
                FROM quest_records
                WHERE student_username=? AND completed=0
                ORDER BY created_at DESC LIMIT 1""",
@@ -2581,6 +2735,7 @@ async def get_task_todo(request: Request):
                 "deadline": None,
                 "url": "/quest",
                 "action_label": "继续闯关",
+                "start_at": str(oq[4] or "") or None,
                 "meta": {"progress": f"{oq[2]}/{oq[3]}", "score": oq[1]},
             })
     except Exception as e:
@@ -2668,6 +2823,24 @@ async def get_task_todo(request: Request):
                 (username,),
             )
         from backend.api.sharing_router import _build_url_path, is_dir_share_path
+        # HTML 类共享资源若绑定了课程体系（curriculum_bindings），反查所属课程/学科，
+        # 让学生按课程筛选时也能命中"老师挂出来的练习页/资料页"
+        res_course_map: dict[str, tuple] = {}
+        html_ids = [str(si[0]) for si in shared_items if str(si[3] or '') == 'html']
+        if html_ids:
+            ph_h = ",".join("?" for _ in html_ids)
+            for r in execute_query(
+                f"""SELECT cb.resource_id, c.id, c.name, c.subject
+                    FROM curriculum_bindings cb
+                    JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                    JOIN chapters ch ON kp.chapter_id = ch.id
+                    JOIN courses c ON ch.course_id = c.id
+                    WHERE cb.resource_type='html' AND c.status='active'
+                      AND cb.resource_id IN ({ph_h})
+                    ORDER BY c.sort_order, cb.id""",
+                tuple(html_ids),
+            ) or []:
+                res_course_map.setdefault(str(r[0]), (r[1], str(r[2] or ""), str(r[3] or "")))
         for si in shared_items:
             file_path = str(si[2] or '').lstrip('/')
             res_type = str(si[3] or '')
@@ -2682,18 +2855,23 @@ async def get_task_todo(request: Request):
                 # file_path 存的是相对共享者目录的路径，必须补 owner/html|downloads 前缀，
                 # 否则 /api/files/xxx.mp4 丢了归属目录，学生点了必 404
                 resource_url = f"/api/files/{_build_url_path(owner_name, res_type, file_path)}"
+            _res_course = res_course_map.get(str(si[0]))
             items.append({
                 "id": f"shared_resource-{si[0]}",
                 "type": "shared_resource",
                 "title": str(si[1] or si[2] or f'资源#{si[0]}'),
                 "description": f"{'HTML 资源' if res_type=='html' else ('共享目录' if is_dir else '共享文件')} · 点击查看",
-                "subject": "",
+                "subject": (_res_course[2] if _res_course else ""),
                 "status": "pending",
                 "priority": 30,
                 "deadline": None,
                 "url": resource_url,
                 "action_label": "查看",
-                "meta": {"resource_url": resource_url},
+                "teacher": _tk(owner_name, None, names_map),
+                "course": ({"id": _res_course[0], "name": _res_course[1], "subject": _res_course[2]}
+                           if _res_course else None),
+                "meta": {"resource_url": resource_url,
+                         "kind": 'html' if res_type == 'html' else ('dir' if is_dir else 'file')},
             })
     except Exception as e:
         logger.warning(f"[task-todo] 查询共享资源失败: {e}")
@@ -2889,6 +3067,11 @@ async def get_task_todo(request: Request):
         "live_count": live_count,
         "suggest_count": suggest_count,
         "recent_done": _recent_done(username),
+        # 筛选选项源：课程不依赖当前待办（没作业也选得了课）；教师=全体教职工快照
+        "facets": {
+            "teachers": [{"username": u, "name": n} for u, n in sorted(names_map.items())],
+            "courses": _course_facets(str(grade or "")),
+        },
     }
     _set_cache(cache_key, result)
     return result

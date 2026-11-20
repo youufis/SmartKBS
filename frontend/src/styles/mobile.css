@@ -336,3 +336,32 @@
 
 
 
+
+/* ── 任务清单 v9.4/v9.5 手机端触控补偿（小控件 ≥32，理由同 antd v6 CSS-in-JS 注入顺序，全部 !important） ── */
+@media (max-width: 560px) {
+  /* 筛选面板 pill：28 → ≥34 高，横向 padding 保证短词也好按 */
+  .todo-pill-row .ant-tag-checkable {
+    padding: 7px 12px !important;
+    line-height: 20px !important;
+  }
+  /* 已选条件条 chip（含关闭按钮）：关闭图标 16px 太小，整 chip 抬到 ≥32 */
+  .todo-cond-bar .ant-tag {
+    padding: 5px 8px !important;
+    line-height: 20px !important;
+  }
+  /* 行内 学科·教师·课程 元数据可点段：inline-block + 上下留白把命中区撑到 ~32 */
+  .todo-meta-part {
+    display: inline-block !important;
+    padding: 7px 3px !important;
+    margin: -7px 0 !important;
+  }
+  /* 组头"只看这一类"点击位同样给到 32+ */
+  .todo-sec-title {
+    padding: 6px 6px !important;
+    margin-left: -6px !important;
+  }
+}
+@media (max-width: 560px) {
+  /* 图标型分段器项（视图切换等）宽度补到 36，高度本就 ≥32 */
+  .ant-segmented-item { min-width: 36px !important; }
+}

@@ -6,7 +6,7 @@
 >
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 51 feature areas and 60+ capabilities:
 >
-> - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student to-do list
+> - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
@@ -37,6 +37,8 @@
 
 > 📌 **Highlights of V9.2.0** (outline)
 >
+> - 🎒 **Student to-do upgrade (new)**: multi-facet filters (teacher / subject-course / type / due window / resource kind) · group-axis + deadline timeline views · inline filter panel · focus mode · deep links & state memory
+> - 🏠 **Student home de-noise (new)**: "N to do today" badge · my-progress four cards (today / week / streak / title) · condensed exam reminders · single companion message · 390/320 mobile verified
 > - 🖥 **Local model engine (new)**: Ollama integration · cloud / hybrid / local tiers · live model list with resident info · chat engine badge · capability matrix & graded notices · friendly errors
 > - 🧠 **Dual-engine semantics**: hybrid = local generation + cloud KB retrieval · local = fully offline (cloud retrieval/warmup bypassed, local question-bank fallback) · cloud tier passes through unchanged
 > - 🧩 **Settings restructure**: cloud / local model sections · cloud-service attribution labels (KB / TTS / ASR / image gen) · guides collapsed by default · auto-probe on page entry
@@ -197,10 +199,11 @@ After login, the smart dashboard is displayed by default, aggregating key data b
 
 Student-specific task aggregation board:
 
-- 🗂 Five semantic groups: overdue / due soon / live class / after-class / suggested (suggestions excluded from hard to-dos)
-- ⚡ Persistent today-focus bar; live pulse badge; failure retryable, never disguised as empty
-- 🏆 Done review (last 30 days, semantic score colors); collapsible learning progress
-- 🚀 One-click jump to target pages; filter preferences remembered; auto re-check on return to foreground
+- 🎒 Multi-facet filters: status chips / category / type / teacher / subject-course (2-level) / due window / resource kind / keyword — AND across facets, click to apply
+- 🗂 Multi-view: grouped list (status / type / teacher / course axis) + deadline timeline + compact density; inline filter panel, collapse state & checks all remembered
+- 🧘 Focus mode (on by default): only overdue + due-in-3-days + live items, long tail collapsed to one line; home shows the same "N to do today"
+- 🔗 URL deep links (?f_teacher=…&view=timeline&simple=0…) override preferences without writing them back; filtered-empty vs truly-empty separated
+- ⚡ Persistent today-focus bar; live pulse badge; retryable failures; auto re-check on foreground; done review (30 days, semantic score colors)
 
 > **Available to students**
 
@@ -1218,6 +1221,8 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.2.0
 
+- 🎒 **Student to-do (new)**: multi-facet filters (teacher / subject-course / type / due window / resource kind) · group-axis + timeline views · inline filter panel · focus mode · deep links & state memory
+- 🏠 **Student home de-noise (new)**: "N to do today" badge · my-progress four cards · condensed exam reminders · single companion message · mobile touch targets met
 - 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafts · nine sections · rule-based AI fallback · auto-generation off behind one global policy · 30-min checks · admin teacher scoping · mobile read-only
 - 🖥 **Local engine (new)**: Ollama cloud / hybrid / local tiers · model list & probe · dual-engine semantics · settings sections
 - 📚 **Assignments**: chat / file dual form · background AI grading · expected roster & reminders · class duplication & retry

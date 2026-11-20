@@ -167,8 +167,6 @@
   background: linear-gradient(90deg, transparent, var(--bg-container));
 }
 
-/* 分类瓦片 hover（激活格由内联背景接管） */
-.todo-cat-cell:hover { background: rgba(128, 128, 128, 0.06); }
 
 /* 课堂进行中：脉冲点，"正在发生"一眼可辨 */
 .todo-live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; line-height: 16px; }
@@ -181,3 +179,25 @@
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.35; transform: scale(0.8); }
 }
+
+/* ── 任务清单 v9.3：多维筛选 + 多视图 ── */
+/* 已选条件条：标签去右距（gap 控距），390 下整条自然换行 */
+.todo-cond-bar .ant-tag { margin-inline-end: 0; }
+/* 分区轴组头：点击即"只看这一类"的可点性提示 */
+.todo-sec-title { cursor: pointer; border-radius: 6px; padding: 0 4px; margin-left: -4px; }
+.todo-sec-title:hover { background: rgba(128, 128, 128, 0.12); }
+/* 行内 教师/课程 标签：点击=快捷筛选，hover 有反馈 */
+.todo-tag-click { cursor: pointer; }
+.todo-tag-click:hover { filter: brightness(1.08); text-decoration: underline dotted; }
+
+/* ── 任务清单 v9.4：首屏降噪 + 内联筛选面板 ── */
+.todo-panel { border: 1px dashed rgba(128, 128, 128, 0.32); border-radius: 8px; background: var(--bg-container); }
+.todo-panel-bar { display: flex; align-items: center; gap: 8px; padding: 5px 12px; min-width: 0; }
+.todo-panel-sec { padding: 6px 12px 8px; border-top: 1px dashed rgba(128, 128, 128, 0.2); }
+.todo-panel-sec-head { display: flex; align-items: center; gap: 4px; cursor: pointer; border-radius: 6px; }
+.todo-panel-sec-head:hover { background: rgba(128, 128, 128, 0.08); }
+.todo-panel-sec-body { margin-top: 6px; }
+.todo-pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; align-items: center; }
+.todo-pill-row .ant-tag-checkable { border-radius: 10px; margin-inline-end: 0; }
+.todo-meta-part { cursor: pointer; }
+.todo-meta-part:hover { text-decoration: underline dotted; }

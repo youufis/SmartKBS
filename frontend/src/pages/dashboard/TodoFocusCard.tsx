@@ -1,10 +1,13 @@
-/** 学生"今日要事"卡：逾期/紧急优先 Top 项 + 直达按钮 */
-import React from 'react'
+/** 学生"今日要事"卡（降噪版）：徽标只报「今天要做 N 项」（与任务清单同口径），露 3 行，
+ *  底部分布行删除、换成一句规则化鼓励；"完整清单"进任务清单简化态。 */
+import React, { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Button, Card, Empty, Space, Tag, Tooltip, Typography } from 'antd'
 import { ArrowRightOutlined, FireOutlined, PushpinOutlined } from '@ant-design/icons'
 import type { TaskTodoItem, TaskTodoResponse } from '../../api/taskTodo'
+import type { EncouragePick } from './encourage'
+import { parseMs } from './encourage'
 import { deadlineInfo } from './fmt'
 import { useNow } from './useNow'
 import { useChartTheme } from './chartTheme'
@@ -14,62 +17,61 @@ const { Text } = Typography
 interface Props {
   todo: TaskTodoResponse | null
   loading?: boolean
+  todayMust: number
+  enc: EncouragePick | null
 }
 
-const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
+const TodoFocusCard: React.FC<Props> = ({ todo, loading, todayMust, enc }) => {
   const navigate = useNavigate()
   const { t } = useTranslation('dashboard')
   const ct = useChartTheme()
   const now = useNow()
 
-  const items: TaskTodoItem[] = React.useMemo(() => {
+  const items = useMemo<TaskTodoItem[]>(() => {
     if (!todo?.items?.length) return []
     const active = todo.items.filter((i) => i.status !== 'completed')
+    // 紧迫度优先：逾期 → 今天截止 → 课堂进行中 → 其余按截止时间
+    const rank = (it: TaskTodoItem) => {
+      const dl = deadlineInfo(it.deadline, new Date(now))
+      if (dl?.level === 'overdue') return 0
+      if (dl?.level === 'today') return 1
+      if (it.live && !it.suggest) return 2
+      return 3
+    }
     return [...active]
       .sort((a, b) => {
-        const da = a.deadline ? new Date(a.deadline.replace(' ', 'T')).getTime() : Infinity
-        const db = b.deadline ? new Date(b.deadline.replace(' ', 'T')).getTime() : Infinity
+        const r = rank(a) - rank(b)
+        if (r) return r
+        const da = parseMs(a.deadline) || Number.MAX_SAFE_INTEGER
+        const db = parseMs(b.deadline) || Number.MAX_SAFE_INTEGER
         if (da !== db) return da - db
         return (b.priority ?? 0) - (a.priority ?? 0)
       })
-      .slice(0, 6)
-  }, [todo])
+      .slice(0, 3)
+  }, [todo, now])
 
   const streak = todo?.stats?.streak_days ?? 0
-  const totalActive = todo?.items?.filter((i) => i.status !== 'completed').length ?? 0
-  // 分类分布按"未完成的要事"自己统计：todo.counts 是各板块计数，与标题的 N 项不同口径，
-  // 两个数并排显示只会让人以为数据错了
-  const allTypes = Object.entries(
-    (todo?.items ?? [])
-      .filter((x) => x.status !== 'completed')
-      .reduce<Record<string, number>>((acc, x) => {
-        acc[x.type] = (acc[x.type] ?? 0) + 1
-        return acc
-      }, {}),
-  )
-    .filter(([, c]) => Number(c) > 0)
-    .sort((x, y) => y[1] - x[1])
-  const typeSummary = allTypes.slice(0, 6)
-  const restTypes = allTypes.slice(6)
-  const restCount = restTypes.reduce((a, [, c]) => a + Number(c), 0)
 
   return (
     <Card
       size="small"
-      style={{ height: '100%' }}
       title={
         <Space>
           <PushpinOutlined style={{ color: ct.primary }} />
           <span>{t('todoCard.title')}</span>
-          {totalActive > 0 && <Tag color="blue" style={{ margin: 0 }}>{t('todoCard.count', { n: totalActive })}</Tag>}
+          {todayMust > 0 && (
+            <Tag color="orange" style={{ margin: 0 }}>{t('todoCard.todayMust', { n: todayMust })}</Tag>
+          )}
         </Space>
       }
       extra={
         <Space size={8}>
           {streak > 0 && (
-            <Tag color="volcano" style={{ margin: 0 }}><FireOutlined /> {t('todoCard.streak', { n: streak })}</Tag>
+            <Tooltip title={t('statsS2.streakTip')}>
+              <Tag color="volcano" style={{ margin: 0 }}><FireOutlined /> {t('todoCard.streak', { n: streak })}</Tag>
+            </Tooltip>
           )}
-          <Button type="link" size="small" onClick={() => navigate('/task-todo')}>
+          <Button type="link" size="small" onClick={() => navigate('/task-todo?simple=1')}>
             {t('todoCard.viewAll')} <ArrowRightOutlined style={{ fontSize: 10 }} />
           </Button>
         </Space>
@@ -81,7 +83,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
-            <Text type="secondary" style={{ fontSize: 13 }}>{t('todoCard.empty')}</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>{t('enc.todayCalm')}</Text>
           }
         />
       ) : (
@@ -107,7 +109,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
               role="button"
               tabIndex={0}
               aria-label={item.title}
-              onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); navigate(item.url) } }}
+              onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); navigate(item.url) } }}
               onClick={() => navigate(item.url)}
             >
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
@@ -132,25 +134,12 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
           )
         })
       )}
-      {items.length > 0 && (typeSummary.length > 0 || restCount > 0) && (
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, color: ct.tick }}>
-          {typeSummary.map(([k, c]) => (
-            <span key={k}>
-              {t(`todo.type.${k}`, { defaultValue: k })}
-              <strong style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{c}</strong>
-            </span>
-          ))}
-          {restCount > 0 && (
-            <Tooltip title={restTypes.map(([kk, cc]) => `${t(`todo.type.${kk}`, { defaultValue: kk })} ${cc}`).join('、')}>
-              <span style={{ cursor: 'help' }}>
-                {t('todoCard.others')}
-                <strong style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{restCount}</strong>
-              </span>
-            </Tooltip>
-          )}
+      {/* 分布行已删：换成一句规则化鼓励（全页鼓励句≤2 处，此处占其一） */}
+      {items.length > 0 && enc && (
+        <div style={{ marginTop: 10 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t(`enc.${enc.key}`, enc.params ?? {})}</Text>
         </div>
       )}
-
     </Card>
   )
 }

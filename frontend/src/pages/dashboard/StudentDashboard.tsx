@@ -4,8 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Button, Col, Empty, Row } from 'antd'
 import {
-  BookOutlined, CheckCircleOutlined, FileAddOutlined, ThunderboltOutlined,
+  CheckCircleOutlined, FireOutlined, RiseOutlined, TrophyOutlined,
 } from '@ant-design/icons'
+import { computeTodayDone, computeTodayMust, computeWeeklyDone, pickEncouragement } from './encourage'
 import { getTaskTodo, type TaskTodoResponse } from '../../api/taskTodo'
 import { useCompanionStore } from '../../stores/companionStore'
 import { useDashboardData } from './useDashboardData'
@@ -59,15 +60,21 @@ const StudentDashboard: React.FC = () => {
 
   // 逾期/紧急随时间走动（原来在数据回调里算一次，长开页面冻结）
   const now = useNow()
-  const urgentStats = useMemo(() => {
-    if (!todo) return { overdue: 0, urgent: 0 }
-    const withDl = todo.items.filter((i) => i.status !== 'completed' && i.deadline)
-      .map((i) => ({ diff: new Date(i.deadline!.replace(' ', 'T')).getTime() - now }))
-    return {
-      overdue: withDl.filter((x) => x.diff < 0).length,
-      urgent: withDl.filter((x) => x.diff >= 0 && x.diff < 24 * 3600000).length,
-    }
-  }, [todo, now])
+  /** 降噪口径（与任务清单一致）：今天要做 N / 本周完成 X / 鼓励句 */
+  const todayMust = useMemo(() => (todo ? computeTodayMust(todo.items, now) : 0), [todo, now])
+  const weekly = useMemo(() => computeWeeklyDone(todo, now), [todo, now])
+  const todayDone = useMemo(() => computeTodayDone(todo, now), [todo, now])
+  const enc = useMemo(() => (todo && summary ? pickEncouragement({
+    todayMust,
+    activeTotal: todo.items.filter((i) => i.status !== 'completed').length,
+    weeklyDone: weekly.thisWeek,
+    streak: summary.streak_days ?? 0,
+    titleProgress: summary.title_progress ?? 0,
+    nextTitle: summary.next_title_name,
+    wrongPending: summary.wrong_book_pending ?? 0,
+    wrongTotal: summary.wrong_book_total ?? 0,
+    approvedAnswers: summary.my_approved_answers_count ?? 0,
+  }) : null), [todo, summary, todayMust, weekly])
 
   if (loading) return <DashboardSkeleton isStudent />
   if (!summary) return (
@@ -83,41 +90,46 @@ const StudentDashboard: React.FC = () => {
       <WelcomeBanner summary={summary} todoTotal={todoTotal} isStudent isTeacher={false} isAdmin={false} />
       <RefreshHint updatedAt={updatedAt} refreshing={refreshing} onRefresh={refresh} />
 
-      {/* 今日要事 + 成长档案：两列各自高度，不互相拉齐（原来左卡被右卡撑高，4 条待办下方留了 100px 空白） */}
+      {/* 今日要事 + "我的进展"四卡（2×2）占左列，成长档案占右列：
+          四卡上移填掉"今日要事只露 3 行"后的大块空白，左右两列高度自然对齐 */}
       <Row gutter={[16, 16]} align="top" className="dash-stagger" style={{ marginBottom: 16 }}>
         <Col xs={24} lg={16}>
-          <TodoFocusCard todo={todo} loading={todoLoading} />
+          <TodoFocusCard todo={todo} loading={todoLoading} todayMust={todayMust} enc={enc} />
+          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+            {/* 今日完成：与"今天要做 N 项"徽标形成投入→产出闭环，不再重复库存数 */}
+            <StatCard
+              span={{ xs: 12, md: 12, lg: 12 }}
+              title={t('statsS2.todayDone')} value={todayDone} zeroText={t('statsS2.todayDoneZero')}
+              color={ct.primary} icon={<CheckCircleOutlined />} onGo={() => navigate('/task-todo?tab=done')}
+            />
+            <StatCard
+              span={{ xs: 12, md: 12, lg: 12 }}
+              title={t('statsS2.weekDone')} value={weekly.thisWeek} zeroText={t('statsS2.weekDoneZero')}
+              parts={[weekly.deltaVsLastWeek > 0 && t('statsS2.weekVs', { n: weekly.deltaVsLastWeek })]}
+              color={ct.success} icon={<RiseOutlined />} onGo={() => navigate('/task-todo')}
+            />
+            <StatCard
+              span={{ xs: 12, md: 12, lg: 12 }}
+              title={t('statsS2.streak')} value={summary.streak_days ?? 0} zeroText={t('statsS2.streakZero')}
+              parts={[(summary.streak_days ?? 0) > 0 && t('statsS2.streakDayUnit')]}
+              color={ct.warning} icon={<FireOutlined />} onGo={() => navigate('/task-todo?simple=1')}
+            />
+            <StatCard
+              span={{ xs: 12, md: 12, lg: 12 }}
+              title={t('statsS2.title')}
+              textValue={`${summary.title_emoji ?? '🏅'} ${summary.title_name || t('statsS2.titleNone')}`}
+              progress={summary.title_progress ?? 0}
+              parts={[summary.next_title_name
+                ? t('statsS2.titleGap', { next: summary.next_title_name, p: Math.max(1, 100 - (summary.title_progress ?? 0)) })
+                : t('statsS2.titleMax')]}
+              tip={t('statsS2.badgesTip', { a: summary.badges_unlocked ?? 0, b: summary.badges_total ?? 0 })}
+              color={ct.gold} icon={<TrophyOutlined />} onGo={() => navigate('/score')}
+            />
+          </Row>
         </Col>
         <Col xs={24} lg={8}>
           <GrowthCard summary={summary} />
         </Col>
-      </Row>
-
-      {/* 关键数字：错题卡讲「还没巩固的」，这里讲「已经掌握的」，不重复同一组数字 */}
-      <Row gutter={[16, 16]} className="dash-stagger" style={{ marginBottom: 16 }}>
-        <StatCard
-          title={t('statsS.todoExams')} value={summary.pending_exam_count ?? 0} color={ct.primary}
-          icon={<FileAddOutlined />} onGo={() => navigate('/exam')}
-          parts={[(summary.completed_exam_count ?? 0) > 0 && t('statsS.unitDone', { n: summary.completed_exam_count ?? 0 })]}
-        />
-        <StatCard
-          title={t('statsS.pendingTodo')} value={todoTotal} color={ct.gold}
-          icon={<CheckCircleOutlined />} onGo={() => navigate('/task-todo')}
-          parts={[
-            urgentStats.overdue > 0 && t('statsS.unitOverdue', { n: urgentStats.overdue }),
-            urgentStats.urgent > 0 && t('statsS.unitUrgent', { n: urgentStats.urgent }),
-          ]}
-        />
-        <StatCard
-          title={t('statsS.wrongMastered')} value={summary.wrong_book_mastered ?? 0} color={ct.success}
-          icon={<BookOutlined />} onGo={() => navigate('/wrong-book')}
-          parts={[(summary.wrong_book_total ?? 0) > 0 && t('statsS.unitTotal', { n: summary.wrong_book_total ?? 0 })]}
-        />
-        <StatCard
-          title={t('statsS.practiceDone')} value={summary.completed_practice_count ?? 0} color={ct.purple}
-          icon={<ThunderboltOutlined />} onGo={() => navigate('/practice')}
-          parts={[(summary.pending_practice_count ?? 0) > 0 && t('statsS.unitPending', { n: summary.pending_practice_count ?? 0 })]}
-        />
       </Row>
 
       {/* 数据看板：三张卡等宽。雷达图原来只有 1/4 宽，四个轴标签挤在一起、图形缩成小三角 */}
@@ -136,10 +148,10 @@ const StudentDashboard: React.FC = () => {
         </Col>
         <Col xs={24} lg={8}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* 每日一句上移到侧栏首位（用户反馈垫底不合适）：与左列今日要事顶部对齐，学伴、动态随后 */}
+            <DailyQuoteCard />
             <CompanionCard />
             <ActivityTimelineCard activities={activities} loading={activityLoading} error={activityError} onRefresh={fetchActivities} />
-            {/* 每日一句没有操作价值，放最末：先看到学伴留言与动态，装饰性内容垫底 */}
-            <DailyQuoteCard />
           </div>
         </Col>
       </Row>
