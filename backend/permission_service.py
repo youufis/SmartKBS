@@ -1482,3 +1482,25 @@ def can_view_bound_resource(
         logger.warning(f"can_view_bound_resource 查询失败 ({resource_type}:{rid}): {e}")
         return False
     return bool(rows)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 知识点可达性（课程停用 = 对学生下架）
+# ═══════════════════════════════════════════════════════════════
+
+def kp_access_state(kp_id: int) -> str:
+    """知识点所在课程是否还开着：'missing' | 'closed' | 'open'。
+
+    课程「停用」的语义是下架——文案写着"学生端和课程树里都不会出现这门课"，
+    所以学生拿着旧的 kp_id 走接口也不该读到内容或写进进度/成绩。
+    """
+    rows = execute_query(
+        """SELECT COALESCE(c.status, 'active') FROM knowledge_points kp
+           JOIN chapters ch ON ch.id = kp.chapter_id
+           JOIN courses c ON c.id = ch.course_id
+           WHERE kp.id = ?""",
+        (kp_id,),
+    )
+    if not rows:
+        return "missing"
+    return "open" if str(rows[0][0] or "active") == "active" else "closed"

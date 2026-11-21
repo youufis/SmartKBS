@@ -296,10 +296,24 @@ def _course_edit_denial(user: dict[str, Any], course: dict[str, Any] | None) -> 
         return (f"该课程属于「{c_subject}」，不在您的任教学科"
                 f"（{('、'.join(sorted(subjects)) or '未设置')}）范围内")
     grades = {g["name"] for g in (get_teacher_grades(teacher) or [])}
-    c_grades = [x.strip() for x in str(course.get("grade") or "").replace("，", ",").split("|") if x.strip()]
+    c_grades = _split_grades(course.get("grade"))
     if grades and c_grades and not (set(c_grades) & grades):
         return f"该课程面向 {'、'.join(c_grades)}，不在您的任教年级（{'、'.join(sorted(grades))}）范围内"
     return None
+
+
+def _guard_kp_for_student(user: dict[str, Any], kp_id: int) -> None:
+    """学生访问知识点前先问一句：这门课还开着吗。
+
+    课程「停用」= 下架，对学生一律关闭——读详情、看资源、写进度、交成绩都不行；
+    教师/管理员不受限，回收站开关进去还得能恢复或彻底删除。
+    """
+    from backend.permission_service import kp_access_state
+    state = kp_access_state(kp_id)
+    if state == "missing":
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    if state == "closed" and user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="该课程已停用，内容暂不可用")
 
 
 def _assert_can_edit_course(user: dict[str, Any], course: dict[str, Any] | None,
@@ -546,7 +560,7 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 2. ⚠️ 知识点名称绝不能与节名相同
 3. 每个节至少拆出 1~2 个知识点
 
-学科：{req.subject}，年级：{req.grade}，{course_hint}
+学科：{req.subject}，年级：{req.grade.replace('|', '、')}，{course_hint}
 
 ✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法"]
 ❌ 禁止: 节="机器学习基础" → 知识点=["机器学习基础"]  ← 完全重复！
@@ -668,7 +682,7 @@ async def ai_generate_from_file(request: Request):
 2. ⚠️ 知识点名称绝不能与节名相同
 3. 每个节至少拆出 1~2 个知识点
 
-学科：{subject}，年级：{grade}，{course_hint}
+学科：{subject}，年级：{grade.replace('|', '、')}，{course_hint}
 
 ✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法"]
 ❌ 禁止: 节="机器学习基础" → 知识点=["机器学习基础"]  ← 完全重复！
@@ -1350,6 +1364,7 @@ async def delete_chapter(chapter_id: int, request: Request):
 async def get_knowledge_point(kp_id: int, request: Request):
     """获取知识点详情（含绑定的资源列表）"""
     user = get_current_user(request)
+    _guard_kp_for_student(user, kp_id)
     kp = execute_query_one("SELECT * FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
@@ -1531,6 +1546,7 @@ async def get_kp_resources(kp_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+    _guard_kp_for_student(user, kp_id)
     kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
@@ -1588,8 +1604,19 @@ async def get_kp_resources(kp_id: int, request: Request):
     return {"resources": resources, "total": len(resources)}
 
 
+def _split_grades(value: Any) -> list[str]:
+    """课程适用年级 → 列表。
+
+    约定用 | 分隔（表单里 tags 多选、保存时 join('|')），但库里历史数据出现过
+    , / ， / 、 混用，这里一律兼容拆开——否则「高一|高二」会被当成一个年级名，
+    学生练习提交会因「高一 not in ['高一|高二']」被 403 拒掉。
+    """
+    raw = str(value or "").replace("，", ",").replace("、", ",").replace("|", ",")
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
 def _course_grade_names(kp_id: int) -> list[str]:
-    """知识点所属课程的年级名（课程可能是多年级共用，逗号分隔）。"""
+    """知识点所属课程的年级名（课程可能是多年级共用）。"""
     rows = execute_query(
         """SELECT c.grade FROM knowledge_points kp
            JOIN chapters ch ON ch.id = kp.chapter_id
@@ -1599,7 +1626,7 @@ def _course_grade_names(kp_id: int) -> list[str]:
     )
     if not rows:
         return []
-    return [g.strip() for g in str(rows[0]["grade"] or "").split(",") if g.strip()]
+    return _split_grades(rows[0]["grade"])
 
 
 def _auto_open_file_share(username: str, kp_id: int, resource_type: str, resource_id: str) -> dict | None:
@@ -2333,6 +2360,7 @@ async def update_progress(kp_id: int, req: ProgressUpdate, request: Request):
         except (TypeError, ValueError):
             req.score = None
 
+    _guard_kp_for_student(user, kp_id)
     kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
@@ -4964,6 +4992,7 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     # ── H3: 前置校验 —— 仅学生、知识点必须存在、课程设了年级时学生须在范围内 ──
     if user.get("role", 2) != 2:
         raise HTTPException(status_code=403, detail="仅学生可提交练习成绩")
+    _guard_kp_for_student(user, kp_id)
     # 注意: 本函数局部 import 了 question_db.execute_query_one, 主库查询必须走 execute_query
     _kp_scope_rows = execute_query(
         """SELECT kp.id, co.grade FROM knowledge_points kp
@@ -4971,7 +5000,7 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
            JOIN courses co ON co.id = ch.course_id WHERE kp.id=?""", (kp_id,))
     if not _kp_scope_rows:
         raise HTTPException(status_code=404, detail="知识点不存在")
-    _course_grades = [g.strip() for g in str(_kp_scope_rows[0]["grade"] or "").replace("，", ",").split(",") if g.strip()]
+    _course_grades = _split_grades(_kp_scope_rows[0]["grade"])
     if _course_grades:
         _stu_rows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
         _stu_grade = str((_stu_rows[0] if _stu_rows else {}).get("grade") or "").strip()
@@ -5127,6 +5156,7 @@ async def get_my_ai_practice_result(kp_id: int, request: Request):
     """获取当前用户在指定知识点上的AI练习历史成绩（独立存储）"""
     user = get_current_user(request)
     username = user["username"]
+    _guard_kp_for_student(user, kp_id)
 
     from backend.question_db import execute_query_one, execute_query as q_query
     import json

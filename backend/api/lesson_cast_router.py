@@ -90,6 +90,12 @@ def _kp_of(kp_id: int) -> dict[str, Any]:
     return row
 
 
+def _guard_kp_open(user: dict[str, Any], kp_id: int) -> None:
+    """课程停用后，学生连讲演也一并关掉（与知识点详情、进度、练习同一口径）。"""
+    from backend.api.curriculum_router import _guard_kp_for_student
+    _guard_kp_for_student(user, kp_id)
+
+
 def _cast_of(cast_id: int) -> dict[str, Any]:
     row = execute_query_one("SELECT * FROM lesson_casts WHERE id = ?", (cast_id,))
     if not row:
@@ -851,6 +857,7 @@ async def list_casts(kp_id: int, request: Request):
 async def get_cast(kp_id: int, request: Request, mode: str = Query("duo"),
                    include_draft: int = Query(0)):
     user = get_current_user(request)
+    _guard_kp_open(user, kp_id)
     # 草稿只给教师看；学生永远只能拿到 published
     allow_draft = bool(include_draft) and _can_manage(user)
     row, fallback = _pick_cast(kp_id, L.normalize_mode(mode), include_draft=allow_draft)
@@ -906,6 +913,7 @@ async def save_progress(body: PlaybackIn, request: Request):
     """
     user = get_current_user(request)
     username = user["username"]
+    _guard_kp_open(user, body.kp_id)
     now = _now()
 
     execute_insert_update(
@@ -970,4 +978,5 @@ def _mark_kp_completed(username: str, kp_id: int) -> bool:
 @router.get("/progress/{kp_id}", summary="取播放断点")
 async def read_progress(kp_id: int, request: Request):
     user = get_current_user(request)
+    _guard_kp_open(user, kp_id)
     return {"kp_id": kp_id, "playback": _get_playback(kp_id, user["username"])}
