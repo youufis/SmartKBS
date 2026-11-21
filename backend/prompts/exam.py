@@ -13,7 +13,7 @@ AI_EXAM_COMPOSE_PROMPT = """正在为一场考试设计试卷。请根据以下�
 
 ## 考试信息
 - 考试名称：{exam_title}
-- 科目：{subject}
+- 学科：{subject}
 - 总分：{total_score} 分
 - 目标题数：{target_count} 道
 - 知识点要求：{knowledge_focus}
@@ -25,7 +25,7 @@ AI_EXAM_COMPOSE_PROMPT = """正在为一场考试设计试卷。请根据以下�
 ## 组卷要求
 1. **知识点覆盖**：尽量覆盖所有要求的知识点
 2. **难度分布**：建议简单:中等:困难 = 2:5:3 的比例
-3. **题型搭配**：根据科目特点合理搭配题型
+3. **题型搭配**：根据学科特点合理搭配题型
 4. **题目质量**：优先选择表述清晰、考点明确的题目
 
 ## 输出格式
@@ -48,7 +48,7 @@ AI_EXAM_COMPOSE_PROMPT = """正在为一场考试设计试卷。请根据以下�
 EXAM_ANALYSIS_PROMPT = """{ai_role}请根据以下考试数据，生成专业的考试分析报告。
 
 考试名称：{title}
-科目：{subject}
+学科：{subject}
 参考人数：{total_count}
 平均分：{avg_score}/{exam_total}
 最高分：{max_score}

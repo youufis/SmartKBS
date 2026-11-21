@@ -952,7 +952,7 @@ def get_activity_completion_status(
         activity_rec = {**activity_rec, "total_score": _cent_total,
                         "pass_score": round(_cent_total * 0.6, 1),
                         "raw_total_score": _q_total}
-        # 科目：优先用建卷时选的（已落库），老测验才按题目反查题库（与活动列表同一口径）
+        # 学科：优先用建卷时选的（已落库），老测验才按题目反查题库（与活动列表同一口径）
         activity_rec["subject"] = ((activity_rec.get("subject") or "").strip()
                                    or quiz_stats.quiz_subjects([activity_rec]).get(activity_rec.get("id"), ""))
 

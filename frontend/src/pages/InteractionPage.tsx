@@ -178,7 +178,7 @@ const InteractionPage: React.FC = () => {
           title: t('ipQuizSuffix', { topic: aiQuizForm.getFieldValue('topic') }),
           questions: JSON.stringify(aiQuizResult.questions),
           knowledge_points: aiQuizForm.getFieldValue('topic') || '',
-          // 学科：AI 弹窗里选过（图一那个下拉），必须一起落库 —— 否则活动监控/列表显示不出科目
+          // 学科：AI 弹窗里选过（图一那个下拉），必须一起落库 —— 否则活动监控/列表显示不出学科
           subject: aiQuizForm.getFieldValue('subject') || '',
           target_scope: aiQuizScope.target_scope,
           target_grade: aiQuizScope.target_grade,

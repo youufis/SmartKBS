@@ -7,7 +7,7 @@ AI_CHAT_SYSTEM_ROLE = "请用你的学科知识回答用户的问题。"
 
 QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为试题配图**以及**使用 LaTeX 公式标记**。
 
-科目：{subject}
+学科：{subject}
 知识点范围：{knowledge_points}
 题型：{type_desc}
 数量：{count}道
@@ -23,7 +23,7 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为
 
 QUESTION_GENERATE_WITH_MEDIA_PROMPT = """请根据以下要求生成试题，并**自动为试题配图**以及**使用 LaTeX 公式标记**。
 
-科目：{subject}
+学科：{subject}
 知识点范围：{knowledge_points}
 题型：{type_desc}
 数量：{count}道
@@ -41,7 +41,7 @@ QUESTION_GENERATE_WITH_MEDIA_PROMPT = """请根据以下要求生成试题，并
 SVG_GENERATE_PROMPT = """你是一位 SVG 绘图专家。请根据以下描述生成教学用 SVG 配图。
 
 描述：{description}
-科目：{subject}
+学科：{subject}
 尺寸：600×400（viewBox="0 0 600 400"）
 要求：
 - 中文标注

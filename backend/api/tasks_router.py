@@ -287,7 +287,7 @@ class SubmitTaskRequest(BaseModel):
 class CreateTaskRequest(BaseModel):
     name: str
     description: str = ""
-    subject: str = ""          # 学科（对话作业的创建弹窗里选的，落库后活动监控/列表才显示得出科目）
+    subject: str = ""          # 学科（对话作业的创建弹窗里选的，落库后活动监控/列表才显示得出学科）
     target_scope: str = "teacher_classes"
     target_grade: str = ""
     target_class: str = ""

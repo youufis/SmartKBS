@@ -5,7 +5,7 @@
 CLASS_SUMMARY_PROMPT = """请根据以下课堂活动数据，生成一份专业的课堂总结。
 
 ## 课堂基本信息
-- 课程：{subject}
+- 学科：{subject}
 - 时间：{time_range}
 - 参与学生数：{student_count} 人
 

@@ -217,7 +217,7 @@ The teacher's full path from preparation to shared resources: syllabus, AI lesso
 
 ### Course Syllabus (Course Guide)
 
-Course → Chapter → Section → Knowledge Point four-level tree structure:
+Subject → Course → Chapter → Section → Knowledge Point five-level tree structure:
 
 - **🤖 AI Smart Generation**: Paste text or upload files (txt/md/pdf/docx), AI automatically extracts course structure
 - **✏️ Manual Management**: Add, edit, delete courses/chapters/knowledge points
@@ -1134,7 +1134,7 @@ Centralized management of all system configuration parameters:
 - **🛡️ Classroom Guard**: question copy protection and answer-page watermark (off by default; only the question block is affected)
 - **🧪 AI Output & Parsing**: strict parsing, image extraction token budget, class error review question cap and accuracy threshold
 - **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test; duration options plus length and page caps for both AI podcast and AI lesson cast live here too
-- **📚 Course Settings**: Course name list, question types
+- **📚 Subjects & Question Types**: Subject list, question types
 - **🔔 Notifications**: Enabled notification types
 - **📁 File Type Whitelist**: Image/document extensions
 - **🎨 Image Generation**: toggle, model (dropdown, endpoint dispatched automatically), size (defaults to auto, options follow the model), per-question auto-image cap, image self-test

@@ -393,7 +393,7 @@ async def create_exam(req: ExamCreate, request: Request):
 async def list_exams(
     request: Request,
     status: str = Query(None, description="筛选状态"),
-    subject: str = Query(None, description="筛选科目"),
+    subject: str = Query(None, description="筛选学科"),
     keyword: str = Query(None, description="搜索标题"),
     pending_grading: int = Query(0, description="1=仅看仍有待批改答卷的考试"),
     scope: str = Query("all", description="all/my"),
@@ -3207,7 +3207,7 @@ async def export_wrong_analysis(exam_id: int, request: Request):
 
     return docx_response(
         f"错因讲评 - {exam['title']}",
-        f"科目：{exam.get('subject', '')}  生成时间：{report.get('created_at', '')}",
+        f"学科：{exam.get('subject', '')}  生成时间：{report.get('created_at', '')}",
         report.get("content") or "",
         f"错因讲评_{exam['title']}.docx",
         tables)

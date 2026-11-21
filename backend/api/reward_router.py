@@ -405,7 +405,7 @@ def my_title(request: Request):
 
 @router.get("/rewards/title-config", summary="获取称号配置列表")
 def title_config(request: Request):
-    """获取全部称号配置（主称号+学科称号+徽章+科目列表）"""
+    """获取全部称号配置（主称号+学科称号+徽章+学科列表）"""
     return {
         "main_titles": get_title_config(),
         "subject_titles": get_subject_title_config(),

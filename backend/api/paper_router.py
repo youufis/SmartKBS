@@ -453,7 +453,7 @@ async def get_default_compose_config(
     request: Request,
     exam_id: int = Query(..., description="考试ID"),
 ):
-    """根据考试科目和题库情况，返回推荐组卷配置"""
+    """根据考试学科和题库情况，返回推荐组卷配置"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)

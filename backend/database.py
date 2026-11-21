@@ -687,7 +687,7 @@ def init_db():
                 ("target_grade", "TEXT DEFAULT ''"),
                 ("target_class", "TEXT DEFAULT ''"),
                 ("target_users", "TEXT DEFAULT ''"),
-                # 学科：对话作业的创建弹窗原先没有这一项，活动监控/列表的"科目"只能显示"-"
+                # 学科：对话作业的创建弹窗原先没有这一项，活动监控/列表的"学科"只能显示"-"
                 ("subject", "TEXT DEFAULT ''"),
                 # ── 文件提交类作业（方案 A：提交形态是同一类作业的一个维度，不新建活动类型）──
                 # 注意：只能往末尾追加。_task_row_to_dict 与各查询都按「显式列清单」的顺序取值，
@@ -939,7 +939,7 @@ def init_db():
                 ("target_class", "TEXT DEFAULT ''"),
                 ("target_users", "TEXT DEFAULT ''"),
                 # 学科：AI 建测验的弹窗里一直有"学科"下拉，但以前没落库，
-                # 于是活动监控/测验列表都显示不出科目（只能显示"-"）。这里补列。
+                # 于是活动监控/测验列表都显示不出学科（只能显示"-"）。这里补列。
                 ("subject", "TEXT DEFAULT ''"),
                 # 知识点：AI 建测验的"主题"就是知识点（2026-10-17 起统一成一个字段），
                 # 手动建卷也加了这个字段 —— 落库后可按知识点统计/复用
@@ -997,7 +997,7 @@ def init_db():
                 ("target_grade", "TEXT DEFAULT ''"),
                 ("target_class", "TEXT DEFAULT ''"),
                 ("target_users", "TEXT DEFAULT ''"),
-                # 学科：投票的创建弹窗原先没有这一项，活动监控/列表的"科目"只能显示"-"
+                # 学科：投票的创建弹窗原先没有这一项，活动监控/列表的"学科"只能显示"-"
                 ("subject", "TEXT DEFAULT ''"),
                 # 课堂投票增强：匿名展示、截止时间、多选上限（0=不限）
                 ("anonymous", "INTEGER DEFAULT 0"),
@@ -1348,7 +1348,7 @@ def init_db():
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )""")
-            # 兼容旧表：添加 subject 列（课程大类）
+            # 兼容旧表：添加 subject 列（学科）
             try:
                 c.execute("ALTER TABLE courses ADD COLUMN subject TEXT DEFAULT ''")
             except sqlite3.OperationalError:

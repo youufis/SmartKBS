@@ -109,7 +109,7 @@ def get_question_pool(
     """获取候选题目池（走统一分层召回：T0 关联 > T1 标签相等 > … > T5 同学科兜底）。
 
     Args:
-        subject: 科目（严格限族，绝不跨学科给题）
+        subject: 学科（严格限族，绝不跨学科给题）
         exclude_ids: 需要排除的题目 ID 集合
         knowledge_points: 知识点列表（为空则全部）
         types: 允许入池的题型，默认不含作文/主观（组卷页沿用旧默认）

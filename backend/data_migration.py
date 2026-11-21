@@ -123,7 +123,7 @@ def score_config(cfg: dict | None) -> int:
         s += 2
     subjects = cfg.get("SUBJECTS")
     if isinstance(subjects, list) and len(subjects) > 1:
-        s += 3        # 课程被收回只剩「人工智能」正是配置被重置的第一个表象
+        s += 3        # 学科被收回只剩「人工智能」正是配置被重置的第一个表象
     for key in ("TTS_ENABLED", "ENABLE_MULTIMODAL", "AGENT_ENABLED", "ENABLE_REQUEST_LIMIT"):
         if cfg.get(key) is True:
             s += 1

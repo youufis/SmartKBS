@@ -95,9 +95,9 @@ DEFAULT_BADGE_CONFIG = [
      "desc": "累计阅读 365 篇新闻", "condition_type": "news_views", "condition_value": 365},
 ]
 
-# ── 主题科目列表（动态加载） ──
+# ── 主题学科列表（动态加载） ──
 def get_subject_list() -> list[str]:
-    """从系统配置动态获取科目列表"""
+    """从系统配置动态获取学科列表"""
     try:
         from backend.subject_config import get_subjects
         return get_subjects()
@@ -360,7 +360,7 @@ def get_subject_title(subject: str, question_count: int,
     只看题数会被"乱答"刷到大师，所以正确率 <60% 最高"进阶"、
     60~75% 最高"精通"、75% 以上才放开到"大师"。
 
-    注意：question_count 必须一并返回。学科称号列表里“没有答题记录”的科目走的是这里
+    注意：question_count 必须一并返回。学科称号列表里“没有答题记录”的学科走的是这里
     的兜底分支，早期版本漏了该字段，前端（成长档案 / 荣誉页）会渲染出 undefined。
     """
     config = _load_subject_title_config()
@@ -407,7 +407,7 @@ def check_subject_title_upgrade(student_username: str, subject: str,
 
 
 def get_student_subject_titles(student_username: str) -> list[dict[str, Any]]:
-    """获取学生所有科目的称号（等级直接读存量，不再按题数反算）
+    """获取学生所有学科的称号（等级直接读存量，不再按题数反算）
 
     按题数反算会把"只升不降"的等级打回原形：学生靠正确率拿到 Lv4 后，
     题数一少就显示掉级，而升级历史与徽章又不会回退，界面与台账自相矛盾。
@@ -947,7 +947,7 @@ def _subject_stats(student_username: str) -> dict[str, dict[str, float]]:
       3. 代码练习  code_problems.subject × 提交过的题目（取最佳一次）
       4. 课堂提问  interaction_questions.subject ×（提问数 + 回答数）
       5. 随堂测验  题目以 JSON 快照存库、没有学科字段，只在"该教师唯一任教学科"时
-                   归属；跨学科或未填任教科目的测验不计入任何学科
+                   归属；跨学科或未填任教学科的测验不计入任何学科
     课程练习(ai_practice_results) 挂在知识点上，而 knowledge_points 不带学科，
     归属要跨课程结构反查，暂不计入。
     """
@@ -958,7 +958,7 @@ def _subject_stats(student_username: str) -> dict[str, dict[str, float]]:
     def bump(subject: Any, questions: int = 0, score: float = 0.0, max_: float = 0.0) -> None:
         row = out.get(str(subject or "").strip())
         if row is None:
-            return        # 不在科目列表里的不强行塞进去，避免学科称号多出未知科目
+            return        # 不在学科列表里的不强行塞进去，避免学科称号多出未知学科
         row["questions"] += int(questions or 0)
         row["score"] += float(score or 0)
         row["max"] += float(max_ or 0)

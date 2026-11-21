@@ -16,7 +16,7 @@ export async function createTask(name: string, description?: string, scope?: {
   const { data } = await apiClient.post('/api/tasks/create', {
     name,
     description,
-    // 学科：落库后活动监控/作业列表才显示得出科目
+    // 学科：落库后活动监控/作业列表才显示得出学科
     subject: subject || '',
     target_scope: scope?.target_scope || 'teacher_classes',
     target_grade: scope?.target_grade || '',

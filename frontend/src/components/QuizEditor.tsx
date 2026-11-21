@@ -75,7 +75,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     }
   }, [open, initialTitle, initialDescription, initialQuestions])
 
-  // 学科默认取第一个（与 AI 建测验弹窗一致）：留空太容易漏填，落库就是空科目
+  // 学科默认取第一个（与 AI 建测验弹窗一致）：留空太容易漏填，落库就是空学科
   useEffect(() => {
     if (open && !subject && subjects.length > 0) setSubject(subjects[0])
   }, [open, subjects, subject])
@@ -250,7 +250,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               placeholder={t('qeDescPh')}
             />
           </Form.Item>
-          {/* 学科：与 AI 建测验弹窗一致 —— 落库后测验列表与活动监控的"科目"列才显示得出来 */}
+          {/* 学科：与 AI 建测验弹窗一致 —— 落库后测验列表与活动监控的"学科"列才显示得出来 */}
           <Form.Item label={t('subject')}>
             <Select
               allowClear
@@ -260,7 +260,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               options={subjects.map(s => ({ value: s, label: s }))}
             />
           </Form.Item>
-          {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输），科目联动过滤 */}
+          {/* 知识点：与试题管理同款控件（下拉选课程知识点 + 手输），学科联动过滤 */}
           <Form.Item label={t('knowledgePoint')}>
             <KnowledgePointSelect subject={subject} value={kps}
               onChange={(v) => setKps(Array.isArray(v) ? v : [])} />

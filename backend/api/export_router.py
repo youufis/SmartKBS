@@ -354,7 +354,7 @@ def export_exam_result(exam_id: int, request: Request):
 
     # 考试信息
     info = [
-        ("科目", exam["subject"]),
+        ("学科", exam["subject"]),
         ("总分", str(exam["total_score"])),
         ("及格分", str(exam["pass_score"])),
         ("考试时长", f"{exam['duration']} 分钟"),

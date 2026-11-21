@@ -388,7 +388,7 @@ const CodePracticePage: React.FC = () => {
   }
 
   // ── AI 生成题目 ──
-  // 打开 AI 弹窗时对齐创建表单当前的语言/难度/科目，避免两处选择漂移
+  // 打开 AI 弹窗时对齐创建表单当前的语言/难度/学科，避免两处选择漂移
   const openAiGenModal = () => {
     setAiGenLanguage(createForm.language || 'python')
     setAiGenDifficulty(createForm.difficulty || 'medium')

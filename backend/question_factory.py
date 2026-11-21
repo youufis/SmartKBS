@@ -355,7 +355,7 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
       stats       {requested, saved, duplicated, rejected, by_type, by_difficulty,
                    normalize_notes, dup_index_size}
     """
-    # 题库学科只允许当前课程配置中的学科；历史别名在这里统一归一。
+    # 题库学科只允许学科配置（SUBJECTS）中的取值；历史别名在这里统一归一。
     subject = require_subject(subject or get_default_subject())
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not creator_name:

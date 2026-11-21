@@ -435,7 +435,7 @@ async def exam_analytics(exam_id: int, request: Request):
     prompt = f"""{ai_role}请根据以下考试数据，生成专业的考试分析报告。
 
 考试名称：{exam['title']}
-科目：{exam['subject']}
+学科：{exam['subject']}
 参考人数：{stats['submitted_count']}（其中 {stats['pending_count']} 份仍在批改中，下列统计均不含）
 平均分：{avg_score}/{exam['total_score']}（平均得分率 {stats['avg_rate']}%）
 最高分：{max_score}
@@ -781,7 +781,7 @@ async def export_exam_report_docx(
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     info = doc.add_paragraph()
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = info.add_run(f"科目：{exam['subject']}  生成时间：{report.get('created_at', '')}")
+    run = info.add_run(f"学科：{exam['subject']}  生成时间：{report.get('created_at', '')}")
     run.font.size = Pt(10)
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 

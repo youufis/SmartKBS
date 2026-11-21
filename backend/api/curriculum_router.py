@@ -228,7 +228,7 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-# 课程名称 → 所属大类的推断映射（用于已有课程回填）
+# 课程 → 所属学科的推断映射（用于已有课程回填）
 _SUBJECT_KEYWORDS: list[tuple[list[str], str]] = [
     (["技术与设计"], "通用技术"),
     (["数据与计算", "信息系统与社会"], "信息科技"),
@@ -237,7 +237,7 @@ _SUBJECT_KEYWORDS: list[tuple[list[str], str]] = [
 
 
 def _infer_subject(course_name: str) -> str:
-    """根据课程名称推断所属大类，无法推断时返回空字符串"""
+    """根据课程名称推断所属学科，无法推断时返回空字符串"""
     for keywords, subject in _SUBJECT_KEYWORDS:
         for kw in keywords:
             if kw in course_name:
@@ -517,7 +517,7 @@ def _get_resource_info(resource_type: str, resource_id: int, include_stats: bool
 class AIGenerateRequest(BaseModel):
     """AI 生成课程请求"""
     content: str = ""           # 文本内容
-    subject: str = ""  # 科目（由前端传递）
+    subject: str = ""  # 学科（由前端传递）
     grade: str = ""    # 年级（由前端传递）
     course_name: str = ""       # 课程名称（留空由 AI 推断）
     auto_save: bool = False     # 是否自动保存到数据库
@@ -546,7 +546,7 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 2. ⚠️ 知识点名称绝不能与节名相同
 3. 每个节至少拆出 1~2 个知识点
 
-科目：{req.subject}，年级：{req.grade}，{course_hint}
+学科：{req.subject}，年级：{req.grade}，{course_hint}
 
 ✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法"]
 ❌ 禁止: 节="机器学习基础" → 知识点=["机器学习基础"]  ← 完全重复！
@@ -668,7 +668,7 @@ async def ai_generate_from_file(request: Request):
 2. ⚠️ 知识点名称绝不能与节名相同
 3. 每个节至少拆出 1~2 个知识点
 
-科目：{subject}，年级：{grade}，{course_hint}
+学科：{subject}，年级：{grade}，{course_hint}
 
 ✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法"]
 ❌ 禁止: 节="机器学习基础" → 知识点=["机器学习基础"]  ← 完全重复！

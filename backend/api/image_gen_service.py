@@ -536,7 +536,7 @@ async def generate_placeholders_batch(
 
     Args:
         placeholders: 占位符列表（原地更新 status）
-        subject: 科目名称
+        subject: 学科名称
         media_dir: 图片保存目录
         qid: 题目 ID（只用于拼 URL）
         now: 当前时间字符串

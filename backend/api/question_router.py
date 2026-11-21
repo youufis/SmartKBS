@@ -54,7 +54,7 @@ router = APIRouter()
 
 
 def _question_subject(subject: str) -> str:
-    """题库学科只允许当前课程配置中的学科（兼容历史别名）。"""
+    """题库学科只允许学科配置（SUBJECTS）中的取值（兼容历史别名）。"""
     try:
         return require_subject(subject)
     except ValueError as e:
@@ -65,7 +65,7 @@ def _question_subject(subject: str) -> str:
 
 class GenerateRequest(BaseModel):
     """AI 生成试题请求"""
-    subject: str = Field("", max_length=100)  # 科目（由前端传递）
+    subject: str = Field("", max_length=100)  # 学科（由前端传递）
     knowledge_points: str = Field("", max_length=2000)         # 知识点
     question_type: str = "single"      # single | multiple | true_false | short
     count: int = 5                     # 生成数量
@@ -81,7 +81,7 @@ class QuestionUpdate(BaseModel):
     knowledge_points: str | None = Field(None, max_length=2000)
     difficulty: str | None = Field(None, max_length=20)
     type: str | None = Field(None, max_length=20)          # Q8: 题型录错应可修正
-    subject: str | None = Field(None, max_length=100)       # Q8: 科目挂错应可修正
+    subject: str | None = Field(None, max_length=100)       # Q8: 学科挂错应可修正
 
 
 class CreatorTransferRequest(BaseModel):
@@ -723,7 +723,7 @@ async def list_questions(
     keyword: str = Query(None, description="关键词搜索(题目/知识点)"),
     creator: str = Query(None, description="筛选创建者"),
     difficulty: str = Query(None, description="筛选难度"),
-    subject: str = Query(None, description="筛选科目"),
+    subject: str = Query(None, description="筛选学科"),
     knowledge_points: str = Query(None, description="筛选知识点（多个用逗号/顿号分隔）"),
     kp_state: str = Query(None, description="筛选知识点标注状态：none=未标注、tagged=已标注"),
     start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
@@ -1957,7 +1957,7 @@ def _build_batch_extract_prompt(subject: str, difficulty: str, chunk: str,
 你的任务是从上面的文本中提取其中**真实存在**的全部试题。
 请严格按照 JSON 数组格式输出，只输出 JSON，不得有任何其他文字。
 
-科目：{subject}
+学科：{subject}
 难度：{difficulty_desc}
 
 要求：
@@ -2178,7 +2178,7 @@ def _build_image_extract_prompt(subject: str, difficulty_desc: str,
     return f"""你是一个试题提取助手。请从图片中识别并提取出所有试题。
 按照 JSON 格式输出。
 
-科目：{subject}
+学科：{subject}
 难度：{difficulty_desc}
 
 要求：
@@ -2536,7 +2536,7 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 你的唯一任务是从上面的文本数据中提取或生成试题。
 请严格按照 JSON 数组格式输出，只输出 JSON，不得有任何其他文字。
 
-科目：{subject}
+学科：{subject}
 难度：{difficulty_desc}
 
 要求：

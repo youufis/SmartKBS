@@ -102,7 +102,7 @@ const TaskPage: React.FC = () => {
     else next.delete('grading')
     setSearchParams(next, { replace: true })
   }
-  // 列表查找/分类：关键词（名称/要求）+ 状态（进行中/已结束）+ 科目
+  // 列表查找/分类：关键词（名称/要求）+ 状态（进行中/已结束）+ 学科
   const [taskKw, setTaskKw] = useState('')
   const [taskFilter, setTaskFilter] = useState('all')
   const [taskSubjectFilter, setTaskSubjectFilter] = useState('')
@@ -137,7 +137,7 @@ const TaskPage: React.FC = () => {
   const [createModal, setCreateModal] = useState(false)
   const [taskName, setTaskName] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
-  // 学科：与其它活动一致（默认取系统配置的第一个），落库后列表/活动监控才显示科目
+  // 学科：与其它活动一致（默认取系统配置的第一个），落库后列表/活动监控才显示学科
   const [taskSubject, setTaskSubject] = useState('')
   // 正在编辑的作业 id（null = 新建）：同一个弹窗两用
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
@@ -147,7 +147,7 @@ const TaskPage: React.FC = () => {
   // 复制模式下的源作业 id：非空时"确定"走 /duplicate，范围选择器一定可编辑
   const [copySourceId, setCopySourceId] = useState<string | null>(null)
   const { subjects: subjectOptions } = useSubjectOptions()
-  // 学科清单到位后补默认值（留空太容易漏填，作业就没有科目了）
+  // 学科清单到位后补默认值（留空太容易漏填，作业就没有学科了）
   useEffect(() => {
     if (subjectOptions.length > 0) setTaskSubject(prev => prev || subjectOptions[0])
   }, [subjectOptions])
@@ -733,7 +733,7 @@ const TaskPage: React.FC = () => {
         </Space>
       ),
     },
-    // 科目：创建作业时选的（tasks.subject），列表以前没展示
+    // 学科：创建作业时选的（tasks.subject），列表以前没展示
     { title: t('subject'), dataIndex: 'subject', key: 'subject', width: 90,
       render: (v: string) => v || '-' },
     {
@@ -935,7 +935,7 @@ const TaskPage: React.FC = () => {
               />
             </Tooltip>
           )}
-          {/* 编辑：名称/要求/学科（老作业的科目也在这里补） */}
+          {/* 编辑：名称/要求/学科（老作业的学科也在这里补） */}
 
           {/* 批改入口一律在场。以前按"有没有人交"决定显不显示，同一列里图标忽有忽无，
               教师只会以为功能坏了（实测反馈正是"少了一个批改图标"）；没人可批时置灰并
@@ -1067,7 +1067,7 @@ const TaskPage: React.FC = () => {
         <Spin spinning={loading}>
           {isMobile ? (
             /* 窄屏：师生一律改卡片。教师端原来保持表格，实测「作业要求」长文把表撑到
-               6794px 宽（10 列），首屏只剩「作业名称 + 半个科目」，横滑也读不出来。 */
+               6794px 宽（10 列），首屏只剩「作业名称 + 半个学科」，横滑也读不出来。 */
             <>
               <MobileCardTable
                 dataSource={visibleTasks.slice((mPage - 1) * MOBILE_CARD_PAGE, mPage * MOBILE_CARD_PAGE)}
@@ -1134,7 +1134,7 @@ const TaskPage: React.FC = () => {
           onChange={setHw}
           modeLocked={!!editingTaskId && editModeLocked}
         />
-        {/* 学科：落库后作业列表与活动监控的"科目"列才显示得出来 */}
+        {/* 学科：落库后作业列表与活动监控的"学科"列才显示得出来 */}
         <div style={{ marginTop: 12 }}>
           <Select
             value={taskSubject || undefined}

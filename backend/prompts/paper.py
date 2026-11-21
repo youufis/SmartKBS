@@ -7,7 +7,7 @@ AI_PAPER_COMPOSE_PROMPT = """正在为一场考试设计试卷。请根据以下
 
 ## 考试信息
 - 考试名称：{exam_title}
-- 科目：{subject}
+- 学科：{subject}
 - 总分：{total_score} 分
 - 考试年级：{grade}
 

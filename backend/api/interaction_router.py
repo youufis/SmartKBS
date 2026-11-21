@@ -59,7 +59,7 @@ class QuizCreate(BaseModel):
     title: str
     description: str = ""
     questions: str  # JSON 字符串 [{type, question, options, answer, score}]
-    subject: str = ""      # 学科（AI 建测验的弹窗里选的那个，落库后活动监控/列表才显示得出科目）
+    subject: str = ""      # 学科（AI 建测验的弹窗里选的那个，落库后活动监控/列表才显示得出学科）
     knowledge_points: str = ""   # 知识点（AI 弹窗的"主题"即知识点；手动建卷也可填）
     target_scope: str = "teacher_classes"
     target_grade: str = ""
@@ -80,7 +80,7 @@ class PollCreate(BaseModel):
     question: str
     options: list[str]
     poll_type: str = "single"  # single / multiple
-    subject: str = ""          # 学科（投票创建弹窗里选的，落库后活动监控/列表才显示得出科目）
+    subject: str = ""          # 学科（投票创建弹窗里选的，落库后活动监控/列表才显示得出学科）
     target_scope: str = "teacher_classes"
     target_grade: str = ""
     target_class: str = ""
