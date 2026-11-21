@@ -171,7 +171,7 @@
     },
     "columns": {
       "activityName": "活动名称",
-      "subject": "科目",
+      "subject": "学科",
       "creator": "发布者",
       "status": "状态",
       "submitted": "已提交",
@@ -595,7 +595,7 @@
       "title": " 今日必须完成",
       "empty": "今天没有紧急任务，按计划推进就好 🎈"
     },
-    "searchPh": "搜索任务名称 / 科目",
+    "searchPh": "搜索任务名称 / 学科",
     "sortLabel": "排序",
     "sort": {
       "deadline": "按截止时间",

@@ -626,6 +626,7 @@
   "field_TEACHER_DOWNLOAD_QUOTA_GB_desc": "Storage cap for non-admin accounts in the File Center (admins are unlimited). When it is full, files must be deleted there before new downloads can be saved",
   "field_SUBJECTS": "Subject Names",
   "field_SUBJECTS_desc": "Subjects used by the system: pick a suggestion or type and press Enter. The name is what questions and resources belong to, so renaming leaves old data under the old name",
+  "field_SUBJECTS_tip": "Hierarchy: Subject -> Course -> Chapter -> Section -> Knowledge point. This list only covers the top-level subject; courses are created under Curriculum and pick their subject there. Subject names are text keys, so renaming leaves old questions and course data under the old name.",
   "field_QUESTION_TYPES": "Question Types",
   "field_QUESTION_TYPES_desc": "Internal key and display name for each question type. Use the button to add or remove, no manual format needed.",
   "field_enabled_notification_types": "Enabled Notification Types",
