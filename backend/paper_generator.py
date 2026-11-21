@@ -299,6 +299,9 @@ def _latex_to_unicode(latex_str: str) -> str:
     # 清理多余空格（保留单个空格）
     text = re.sub(r'  +', ' ', text)
 
+    # 三级都认不出的命令最后兜底剥离，绝不让原始 \命令 上卷面
+    text = _strip_unknown_commands(text)
+
     return text.strip()
 
 
@@ -346,13 +349,32 @@ def _bare_latex_to_unicode(text: str) -> str:
     # \sqrt 被命令表变成 √ 后残留的 {…}：√{2} → √(2)
     text = re.sub(r"√\{([^{}]*)\}", r"√(\1)", text)
     # 多位上下标（选项常见裸写法：Na_{2}CO_{3}、Ca^{2+}）
-    return _sup_sub_unicode(text)
+    text = _sup_sub_unicode(text)
+    # 未知命令兜底剥离（裸选项里也可能混 \ce{...} 之类）
+    return _strip_unknown_commands(text)
 
 
 _OMML_NSDECL = (
     'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
     'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"'
 )
+
+
+def _strip_unknown_commands(text: str) -> str:
+    """把三级通道都认不出的命令降级成可读文字，**绝不留反斜杠**：
+    \\ce{H2O} → H2O（保留参数），裸 \\foo → 删除命令名。反复剥离以吃下嵌套花括号。
+
+    这是"支持所有学科"的关键：latex2mathml 遇到未知命令不报错，而是把 \\foo
+    原样吐进 <m:t>，OMML 因此假装成功、跳过降级、把原始 LaTeX 印到卷面上。
+    mhchem \\ce、自定义宏、拼写错误、任何教材的新记号都从这里兜住。"""
+    # LaTeX 转义标点先还原成字面字符（\% \$ \& \# \_ \{ \} \~ \^），否则漏反斜杠
+    text = re.sub(r"\\([%$&#_{}~^])", r"\1", text)
+    prev = None
+    while prev != text:
+        prev = text
+        text = re.sub(r"\\[a-zA-Z@]+\*?\s*\{([^{}]*)\}", r"\1", text)
+    text = re.sub(r"\\[a-zA-Z@]+\*?", "", text)
+    return text
 
 
 def _latex_to_omml_xml(latex_str: str) -> str | None:
@@ -369,6 +391,11 @@ def _latex_to_omml_xml(latex_str: str) -> str | None:
         return None
     # 必须含 oMath 容器且有实际文字 run，否则视为转换失败
     if omml and "oMath" in omml and "<m:t>" in omml:
+        # latex2mathml 会把认不出的命令原样塞进 <m:t>（如 \ce、\foo、\mydegree），
+        # Word 里就显示成字面反斜杠。就地清洗每个 m:t 文本，保住其余数学结构。
+        omml = re.sub(r"(<m:t[^>]*>)([^<]*)(</m:t>)",
+                      lambda m: m.group(1) + _strip_unknown_commands(m.group(2)) + m.group(3),
+                      omml)
         return omml
     return None
 
