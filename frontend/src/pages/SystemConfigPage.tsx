@@ -279,7 +279,6 @@ const BRIEFING_YEAR_MODE_OPTIONS: FieldOption[] = [
 
 // ── 列表型字段的候选值 ──
 // 只作"点一下就能加"的快捷项，清单外的值一律允许自填（与后端 _STRLIST_KEYS 的语义一致）。
-const SUBJECT_PRESETS = ['信息科技', '通用技术', '人工智能', '物理']
 const IMAGE_EXT_PRESETS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff']
 const DOC_EXT_PRESETS = ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm']
 const HOMEWORK_EXT_PRESETS = ['.docx', '.pdf', '.txt', '.md', '.xlsx', '.pptx', '.jpg', '.jpeg', '.png', '.webp', '.bmp']
@@ -309,6 +308,8 @@ interface ConfigMeta {
   strlist_keys: Record<string, number>
   /** 通知类型目录（后端单一来源）：value = 存储值，in_use = 当前代码里是否真有调用点 */
   notification_types?: { value: string; in_use?: boolean }[]
+  /** 标签候选（后端单一来源）：key = 配置键（如 SUBJECTS），前端不再自己抄一份 */
+  presets?: Record<string, string[]>
 }
 
 // 语音合成可选音色（后端只下发**实测出声成功**的音色，跨模型混用会报 411）
@@ -361,7 +362,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', longDescKey: 'field_AGENT_EDITION_tip', type: 'text', group: 'brand', level: 'basic', required: false, placeholderKey: 'placeholder_agentEdition' },
   { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', level: 'basic', required: false, placeholderKey: 'placeholder_ORG_NAME' },
   // 课程与题型
-  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags_select', group: 'curriculum', level: 'basic', presets: SUBJECT_PRESETS },
+  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', longDescKey: 'field_SUBJECTS_tip', type: 'tags_select', group: 'curriculum', level: 'basic' },
   { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'curriculum', level: 'basic' },
   // 消息通知
   { key: 'enabled_notification_types', labelKey: 'field_enabled_notification_types', descKey: 'field_enabled_notification_types_desc', type: 'notifications', group: 'notify', level: 'basic' },
@@ -791,7 +792,7 @@ const toApiValues = (raw: Record<string, unknown>): Record<string, unknown> => {
   for (const key of TAG_FIELD_KEYS) {
     if (typeof v[key] === 'string') {
       // 分隔符与后端 _STRLIST_KEYS 的容错保持一致（中/英逗号、顿号、分号）；
-      // 不按空格拆，避免把「AI 基础」这类含空格的科目名切断
+      // 不按空格拆，避免把「AI 基础」这类含空格的学科名切断
       v[key] = (v[key] as string).split(/[,，、;；]+/).map((item) => item.trim()).filter(Boolean)
     }
   }
@@ -3029,7 +3030,7 @@ const SystemConfigPage: React.FC = () => {
                   extra={descNode(field)}
                 >
                   <TagListInput
-                    presets={field.presets}
+                    presets={field.presets ?? meta?.presets?.[field.key]}
                     placeholder={field.placeholderKey ? t(field.placeholderKey) : t('placeholder_tagsSelect')}
                     max={meta?.strlist_keys?.[field.key]}
                     normalize={field.extMode ? normalizeExt : undefined}

@@ -32,6 +32,7 @@ import KpDetailPanel from '../components/KpDetailPanel'
 import { CastGenerateModal } from '../components/lessoncast/CastGenerateModal'
 import { getCastBatch, type CastBatch } from '../api/lessonCast'
 import { reportLoadError } from '../utils/loadError'
+import { getSubjectEmoji } from '../utils/subjectEmoji'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -98,7 +99,7 @@ const CurriculumPage: React.FC = () => {
   const screens = Grid.useBreakpoint()
   const wideKpPanel = !!screens.xxl
 
-  // ── 从系统配置加载课程名称列表 ──
+  // ── 从系统配置加载学科列表（SUBJECTS，不是 courses 表的课程） ──
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
   const [gradeOptions, setGradeOptions] = useState<string[]>([])
   useEffect(() => {
@@ -898,7 +899,7 @@ const CurriculumPage: React.FC = () => {
         for (const [key, value] of Object.entries(values)) {
           if (value !== undefined) (patch as Record<string, unknown>)[key] = value
         }
-        // 只改名称/描述/科目等展示字段时局部更新；改排序号会影响侧栏顺序，退回一次全量
+        // 只改名称/描述/学科等展示字段时局部更新；改排序号会影响侧栏顺序，退回一次全量
         if (values.sort_order !== undefined && Number(values.sort_order) !== Number(editingCourse.sort_order)) {
           await loadTree()
         } else {
@@ -1884,13 +1885,8 @@ const CurriculumPage: React.FC = () => {
                 <div style={{ padding: '8px 0' }}>
                   {groupedCourses.map(({ subject, courses: subjectCourses }) => {
                     const isExpanded = expandedSubjects.includes(subject)
-                    // 为每个大类选择一个图标
-                    const subjectIcons: Record<string, string> = {
-                      '通用技术': '🔧',
-                      '信息科技': '💻',
-                      '人工智能': '🤖',
-                    }
-                    const subjectIcon = subjectIcons[subject] || '📂'
+                    // 学科图标：全站共用一份映射；未配置的「未分类」桶保持中性 📂
+                    const subjectIcon = subjectOptions.includes(subject) ? getSubjectEmoji(subject) : '📂'
 
                     return (
                       <div key={subject} style={{ marginBottom: 2 }}>
@@ -2038,12 +2034,7 @@ const CurriculumPage: React.FC = () => {
             {siderCollapsed && (
               <div style={{ padding: '8px 0' }}>
                 {groupedCourses.map(({ subject, courses: subjectCourses }) => {
-                  const subjectIcons: Record<string, string> = {
-                    '通用技术': '🔧',
-                    '信息科技': '💻',
-                    '人工智能': '🤖',
-                  }
-                  const subjectIcon = subjectIcons[subject] || '📂'
+                  const subjectIcon = subjectOptions.includes(subject) ? getSubjectEmoji(subject) : '📂'
                   const isActive = subjectCourses.some((c) => c.id === activeCourseId)
 
                   return (

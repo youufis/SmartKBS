@@ -32,6 +32,9 @@ from backend.model_catalog import (
 )
 # 语音模型/音色同样只有一份清单（tts_voices），配置默认值跟着它走
 from backend.tts_voices import DEFAULT_MODEL as TTS_DEFAULT_MODEL, DEFAULT_VOICE as TTS_DEFAULT_VOICE
+# 学科出厂默认值同样只有一份（subject_config），以前这里再写字面量 ["人工智能"]，
+# 改兜底值时配置页候选和"疑似退回出厂值"告警会各拿一套，永远对不上
+from backend.subject_config import DEFAULT_SUBJECTS
 
 router = APIRouter()
 
@@ -166,8 +169,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "chat": {"include": ["chat-conversation", "language-control", "safety-guard", "example-driven"]},
         "companion": {"include": ["chat-conversation", "language-control", "safety-guard", "socratic-tutor"]},
     },
-    # 课程名称列表
-    "SUBJECTS": ["人工智能"],
+    # 学科列表（顶层学科，不是 courses 表的课程）
+    "SUBJECTS": list(DEFAULT_SUBJECTS),
     # 启用的试题题型（可在此增删，前端自动同步）
     "QUESTION_TYPES": [
         {"key": "single", "label": "单选题"},
@@ -380,7 +383,7 @@ def load_config() -> dict[str, Any]:
 
     - 带 (mtime,size) 缓存, 配置改动即时生效但不再每次读盘解析;
     - 文件缺失或损坏时先回退上一次备份, 并记录可见状态, 不再静默丢配置
-      （缺文件曾被当成"用默认值"悄悄放过：课程只剩「人工智能」就是这么来的）;
+      （缺文件曾被当成"用默认值"悄悄放过：学科只剩「人工智能」就是这么来的）;
     - 合并默认值保证新字段存在。
     """
     global _cfg_cache, _cfg_cache_key
@@ -398,7 +401,7 @@ def load_config() -> dict[str, Any]:
                            "detail": "配置文件无法读取（被占用或无访问权限）"}
             else:
                 # C1: 文件不存在 ≠ 正常。先捞 .bak，捞不到才认"用默认值"，两种都要报错，
-                #     否则整站配置会静默变成出厂值，用户只会看到"课程列表少了几门"
+                #     否则整站配置会静默变成出厂值，用户只会看到"学科列表少了几门"
                 backup = _read_json_config(_backup_file())
                 if backup is not None:
                     data = backup
@@ -546,7 +549,7 @@ def config_health() -> dict[str, Any]:
     """C1: 配置健康状态(供 /config/health 与启动自检使用)
 
     除了"文件在不在、解析成不成"，还要能回答"这份配置是不是其实已经退回出厂默认值"——
-    配置被重置时文件存在、JSON 合法，光看 exists 完全正常（课程只剩「人工智能」
+    配置被重置时文件存在、JSON 合法，光看 exists 完全正常（学科只剩「人工智能」
     就是这样被放过好几轮的），所以额外给出健康分与出厂默认判定。
     """
     cfg = load_config()
@@ -1027,7 +1030,7 @@ async def get_config(request: Request):
 
 
 # ── 配置备份与恢复（管理员在页面上操作，不必登服务器） ──
-# 场景：升级或误操作把整份配置打回出厂默认值（课程只剩「人工智能」、APPID/知识库为空）。
+# 场景：升级或误操作把整份配置打回出厂默认值（学科只剩「人工智能」、APPID/知识库为空）。
 # 历史副本散落在根目录 / backend/ / 各种备份目录里，页面按"健康分"排序列出来，选一份覆盖即可。
 # 关键：出厂默认值同样是 111 个键、约 5KB，光看大小和键数分不出好坏，
 # 所以用 score_config 的指纹（APPID / 版本号 / 知识库）判断哪份"像真实配置"。
@@ -1162,7 +1165,7 @@ async def restore_config_from_source(req: ConfigRestoreRequest, request: Request
     if not isinstance(data, dict) or not data:
         raise HTTPException(status_code=400, detail="该文件不是有效配置（JSON 解析失败）")
     if not isinstance(data.get("SUBJECTS"), list) or not data["SUBJECTS"]:
-        raise HTTPException(status_code=400, detail="该文件缺少课程列表（SUBJECTS），可能不是系统配置")
+        raise HTTPException(status_code=400, detail="该文件缺少学科列表（SUBJECTS），可能不是系统配置")
 
     before = load_config()
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1261,7 +1264,7 @@ def notify_admins_config_risk() -> dict[str, Any]:
             usernames=admins, type_="system", title=title,
             content=f"{health.get('detail') or ''}\n"
                     f"配置文件：{health.get('file')}\n"
-                    f"课程数：{health.get('subjects')}，健康分：{health.get('score')}"
+                    f"学科数：{health.get('subjects')}，健康分：{health.get('score')}"
                     f"（0~2 分基本就是出厂默认值）\n"
                     "请到「系统配置 → 备份与恢复」查看数据位置并从历史副本恢复，"
                     "不要在被重置的状态上继续点保存。",
@@ -1305,6 +1308,12 @@ async def get_config_health(request: Request):
     return config_health()
 
 
+def _subject_presets() -> list[str]:
+    """延迟导入：subject_config 在函数里读 config，避免模块级循环依赖。"""
+    from backend.subject_config import get_subject_presets
+    return get_subject_presets()
+
+
 @router.get("/meta", summary="配置项类型与取值范围元数据（管理员）")
 async def get_config_meta(request: Request):
     """下发后端的校验规则(数值范围/布尔键/文本长度/列表上限), 供前端表单直接复用。
@@ -1324,6 +1333,8 @@ async def get_config_meta(request: Request):
         "strlist_keys": _STRLIST_KEYS,
         # 通知类型目录：页面的勾选项由它渲染，避免"代码在发、页面勾不到"
         "notification_types": notification_type_catalog(),
+        # 学科候选：常用清单 ∪ 当前已配置，后端单一来源（前端 SUBJECT_PRESETS 已删）
+        "presets": {"SUBJECTS": _subject_presets()},
     }
 
 
@@ -1810,11 +1821,11 @@ async def update_title_config_api(req: ConfigUpdate, request: Request):
     return {"status": "ok"}
 
 
-@router.get("/subjects", summary="获取启用的课程列表")
+@router.get("/subjects", summary="获取启用的学科列表")
 async def get_subjects(request: Request):
     # U-CFG: 这些枚举页仅供已登录页面使用(匿名只有 /config/public)
     get_current_user(request)
-    """从系统配置返回课程列表"""
+    """从系统配置返回学科列表"""
     from backend.subject_config import get_subjects, get_default_subject
     return {
         "subjects": get_subjects(),

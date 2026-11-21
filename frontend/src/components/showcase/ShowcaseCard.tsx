@@ -7,6 +7,7 @@ import { updateShowcaseTheme } from '../../api/showcase'
 import { useAuthStore } from '../../stores/authStore'
 import type { ShowcaseCard as ShowcaseCardType } from '../../api/showcase'
 import LikeButton from './LikeButton'
+import { getSubjectEmoji } from '../../utils/subjectEmoji'
 
 interface Props {
   card: ShowcaseCardType;
@@ -25,14 +26,6 @@ const COLOR_MAP: Record<string, string> = {
   volcano: '#fa541c', red: '#f5222d', default: '#d9d9d9',
 }
 
-const SUBJECT_EMOJI_MAP: Record<string, string> = {
-  信息科技: '💻', 通用技术: '🔧', 人工智能: '🤖',
-  信息技术: '💻', 数学: '📐', 语文: '📖', 英语: '🌍',
-  物理: '⚛️', 化学: '🧪', 生物: '🧬', 历史: '📜',
-  地理: '🌏', 政治: '⚖️',
-}
-const FALLBACK_EMOJIS = ['📚', '🔬', '🎨', '🎵', '🏛️', '🧮', '🗺️', '🔭', '⚗️', '🖥️']
-
 const THEME_DOTS = [
   { key: 'golden',  color: '#faad14' },
   { key: 'ocean',   color: '#1677ff' },
@@ -46,12 +39,6 @@ const THEME_DOTS = [
   { key: 'flame',   color: '#f5222d' },
   { key: 'minimal', color: '#8c8c8c' },
 ]
-
-function getSubjectEmoji(subject: string): string {
-  if (SUBJECT_EMOJI_MAP[subject]) return SUBJECT_EMOJI_MAP[subject]
-  const hash = subject.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
-  return FALLBACK_EMOJIS[hash % FALLBACK_EMOJIS.length]
-}
 
 /** 根据积分计算星级（最多 5 星）。
  *  断点跟的是主称号阶梯（backend/title_system.DEFAULT_TITLE_CONFIG，2026-10 重标定）：

@@ -18,6 +18,7 @@ import { reportLoadError } from '../utils/loadError'
 import { PointsCell } from '../components/PointsCell'
 import NarrowTable from '../components/NarrowTable'
 import { relativeTime, fullTime } from '../utils/relativeTime'
+import { getSubjectEmoji } from '../utils/subjectEmoji'
 
 const { Text } = Typography
 
@@ -47,33 +48,6 @@ const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   spend: <GiftOutlined style={{ color: '#8c8c8c' }} />,
   penalty: <ThunderboltOutlined style={{ color: '#ff4d4f' }} />,
   refund: <ReloadOutlined style={{ color: '#1677ff' }} />,
-}
-
-// 学科 emoji 映射（可扩展，不在列表中的科目按名称 hash 分配）
-const SUBJECT_EMOJI_MAP: Record<string, string> = {
-  '信息科技': '💻',
-  '通用技术': '🔧',
-  '人工智能': '🤖',
-  '信息技术': '💻',
-  '通用': '🔧',
-  '数学': '📐',
-  '语文': '📖',
-  '英语': '🌍',
-  '物理': '⚛️',
-  '化学': '🧪',
-  '生物': '🧬',
-  '历史': '📜',
-  '地理': '🌏',
-  '政治': '⚖️',
-}
-
-const FALLBACK_EMOJIS = ['📚', '🔬', '🎨', '🎵', '🏛️', '🧮', '🗺️', '🔭', '⚗️', '🖥️']
-
-function getSubjectEmoji(subject: string): string {
-  if (SUBJECT_EMOJI_MAP[subject]) return SUBJECT_EMOJI_MAP[subject]
-  // 按名称 hash 分配 fallback emoji
-  const hash = subject.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
-  return FALLBACK_EMOJIS[hash % FALLBACK_EMOJIS.length]
 }
 
 const COLOR_MAP: Record<string, string> = {
