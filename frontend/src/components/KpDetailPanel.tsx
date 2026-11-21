@@ -23,6 +23,7 @@ import {
   NodeIndexOutlined, SettingOutlined, FormOutlined, BulbOutlined, DownOutlined,
   CheckCircleOutlined, ClockCircleOutlined, PlusOutlined, EditOutlined, CloseOutlined,
   RobotOutlined, FileOutlined, SoundOutlined, PlayCircleOutlined, EyeOutlined,
+  LeftOutlined, RightOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { KnowledgePoint, CurriculumResource } from '../types'
@@ -56,6 +57,10 @@ interface KpDetailPanelProps {
   castEditable?: boolean
   /** card = 自带标题与收起按钮的内联卡片；plain = 只出内容，交给外层 Drawer */
   variant?: 'card' | 'plain'
+  /** 本知识点在当前课程树里的位置：{index 从 1 起, total, prev, next} */
+  kpNav?: { index: number; total: number; prev: boolean; next: boolean }
+  /** 上一个 / 下一个知识点（delta = -1 | 1）；逐个配资源时省掉「关面板→点树→开面板」 */
+  onStepKp?: (delta: number) => void
   onClose: () => void
   onEdit: (kp: KnowledgePoint) => void
   onLink: (kp: KnowledgePoint) => void
@@ -74,6 +79,7 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
   hasCast = false,
   castEditable = true,
   variant = 'card',
+  kpNav, onStepKp,
   onClose, onEdit, onLink, onAiPractice, onAiTool, onProgress, onManageBindings, onResourcesChanged,
 }) => {
   const { t } = useTranslation('curriculum')
@@ -164,6 +170,21 @@ const KpDetailPanel: React.FC<KpDetailPanelProps> = ({
 
   const body = (
     <>
+      {/* ── 知识点导航：树里逐个过的时候，靠它省掉来回开合面板 ── */}
+      {kpNav && kpNav.total > 1 && onStepKp && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Button size="small" disabled={!kpNav.prev} onClick={() => onStepKp(-1)}>
+            <LeftOutlined /> {t('prevKp')}
+          </Button>
+          <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+            {kpNav.index} / {kpNav.total}
+          </Typography.Text>
+          <Button size="small" disabled={!kpNav.next} onClick={() => onStepKp(1)}>
+            {t('nextKp')} <RightOutlined />
+          </Button>
+        </div>
+      )}
+
       {/* ── 操作条 ── */}
       <Space wrap size={4} style={{ marginBottom: 16 }}>
         {isTeacherOrAdmin && (

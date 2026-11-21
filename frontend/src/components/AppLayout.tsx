@@ -414,6 +414,7 @@ const AppLayout: React.FC = () => {
       >
         {!isMobile && (
         <Sider
+          className="app-nav-sider"
           width={200}
           collapsedWidth={64}
           collapsible

@@ -194,7 +194,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       const formData = new FormData()
       formData.append('file', uploadFile)
       formData.append('subject', values.subject)
-      formData.append('grade', values.grade || '')
+      formData.append('grade', Array.isArray(values.grade) ? values.grade.join('|') : (values.grade || ''))
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'false')
       const data = await callApi('/api/curriculum/ai-generate-from-file', formData)
@@ -220,7 +220,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       const formData = new FormData()
       formData.append('file', uploadFile!)
       formData.append('subject', values.subject || subjects[0] || '')
-      formData.append('grade', values.grade || '')
+      formData.append('grade', Array.isArray(values.grade) ? values.grade.join('|') : (values.grade || ''))
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'true')
       const data = await callApi('/api/curriculum/ai-generate-from-file', formData)
@@ -368,7 +368,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
 
       {/* ── 步骤 0：输入 ── */}
       {step === 0 && (
-        <Form form={form} layout="vertical" initialValues={{ subject: '', grade: '' }}>
+        <Form form={form} layout="vertical" initialValues={{ subject: '', grade: [] as string[] }}>
           <Form.Item label={t('aiGenerator.uploadLabel')} required>
             <Dragger
               accept=".txt,.md,.pdf,.docx"
@@ -398,8 +398,10 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
                 )}
               </Select>
             </Form.Item>
-            <Form.Item name="grade" label={t('aiGenerator.gradeLabel')} style={{ width: 160 }}>
-              <Select placeholder={t('aiGenerator.gradePlaceholder')} allowClear>
+            <Form.Item name="grade" label={t('aiGenerator.gradeLabel')} style={{ width: 230 }}>
+              {/* 一门课可以面向多个年级；多选后拼成 "高一|高二"，与 courses.grade 的约定一致。
+                  不用 maxTagCount=responsive：年级名很短，折叠反而在窄框里挤出空的「+ 0 ...」标签 */}
+              <Select mode="multiple" allowClear placeholder={t('aiGenerator.gradePlaceholder')}>
                 {gradeOptions.map(g => <Option key={g} value={g}>{g}</Option>)}
               </Select>
             </Form.Item>

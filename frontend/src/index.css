@@ -76,3 +76,20 @@ body {
   0% { transform: translateY(0) rotate(0deg); opacity: 1; }
   100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
 }
+
+/* ── 课程大纲·专注模式（CurriculumPage）──
+   一次拿回约 400px：隐藏全局顶栏与导航侧栏；学科侧栏由页面自己折叠成 64px 图标条
+   （折叠而非隐藏，课程仍能在条上切）。思路同 ladder.css 的 body.cl-fs，
+   但用独立类名 cur-zen，两个页面互不影响。 */
+body.cur-zen .ant-layout-header,
+body.cur-zen .app-nav-sider {
+  display: none !important;
+}
+body.cur-zen .ant-layout.ant-layout-has-sider {
+  padding: 0 !important;
+  gap: 0 !important;
+}
+body.cur-zen .ant-layout-content {
+  padding: 8px !important;
+  border-radius: 0 !important;
+}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchGrades } from '../api/gradeClass'
 import { useTranslation } from 'react-i18next'
@@ -19,6 +19,7 @@ import {
   ArrowUpOutlined, ArrowDownOutlined,
   EyeOutlined, BulbOutlined, SoundOutlined, ThunderboltOutlined, PlayCircleOutlined,
   RestOutlined, InboxOutlined, StopOutlined,
+  ExpandAltOutlined, CompressOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import * as curriculumApi from '../api/curriculum'
@@ -94,10 +95,27 @@ const CurriculumPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
-  // 知识点详情：宽屏（≥1600）走右栏内联卡片；更窄时改右侧 Drawer，
-  // 免得被压成窄条、或整块堆在长目录下面要找半天
+  // 知识点详情两种形态：内容区够宽 → 右栏内联卡片并排；不够宽 → 右侧**非模态**浮层。
+  // 判据必须是实测宽度而不是窗口断点：全局导航 200 + 学科侧栏 260 会先吃掉 460px，
+  // 1536（1920 @125%）实测只剩 1064，按 xxl=1600 判等于主流笔记本全都退化成遮罩抽屉。
   const screens = Grid.useBreakpoint()
-  const wideKpPanel = !!screens.xxl
+  const [gridW, setGridW] = useState(0)
+  const roRef = useRef<ResizeObserver | null>(null)
+  // 回调 ref：Row 挂载/卸载时自动接上，不依赖任何在其之后声明的状态（早先用
+  // useEffect + [activeCourseId] 会踩 TDZ——那段代码比 activeCourseId 的声明更靠前）
+  const measureGrid = useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect()
+    roRef.current = null
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => setGridW(entries[0].contentRect.width))
+    ro.observe(el)
+    roRef.current = ro
+  }, [])
+  useEffect(() => () => roRef.current?.disconnect(), [])
+  // 分栏下限 1100：13/24 给树约 590px，刚好容下「标题 + 3 个徽标 + 时长」。
+  // 注意：这里只能用 span，不能写成 xs={24} span={13}——antd v6 的断点类是 min-width，
+  // ant-col-xs-24 从 0px 起就覆盖 span，实测两列会竖着堆叠（flex: 0 0 100%）
+  const splitKp = gridW >= 1100
 
   // ── 从系统配置加载学科列表（SUBJECTS，不是 courses 表的课程） ──
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
@@ -684,10 +702,56 @@ const CurriculumPage: React.FC = () => {
   // 正在恢复 / 彻底删除的课程 id：按钮 loading，顺带防重复点击
   const [courseBusyId, setCourseBusyId] = useState<number | null>(null)
 
+  // 专注模式：CSS 隐藏全局顶栏与导航侧栏，学科侧栏折叠成图标条（不是隐藏——课程还得能切）。
+  // 纯视图开关，不动任何数据；Esc 或再点一次退出，档位记进 localStorage。
+  const [zen, setZen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('curriculum_zen') || 'false') === true } catch { return false }
+  })
+  const preZenSiderRef = useRef<boolean | null>(null)
+
   // 持久化侧栏折叠状态
   useEffect(() => {
     localStorage.setItem('curriculum_sider_collapsed', JSON.stringify(siderCollapsed))
   }, [siderCollapsed])
+
+  useEffect(() => { localStorage.setItem('curriculum_zen', JSON.stringify(zen)) }, [zen])
+
+  useLayoutEffect(() => {
+    document.body.classList.toggle('cur-zen', zen)
+    if (zen) {
+      if (preZenSiderRef.current === null) preZenSiderRef.current = siderCollapsed
+      setSiderCollapsed(true)
+    } else if (preZenSiderRef.current !== null) {
+      setSiderCollapsed(preZenSiderRef.current)   // 退回来时还原用户原来的折叠选择
+      preZenSiderRef.current = null
+    }
+    if (!zen) return
+    return () => document.body.classList.remove('cur-zen')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zen])
+
+  // 窄屏（<960）没有侧栏可收，专注只会把顶栏藏掉、退出按钮又不在，平板上没 Esc 就出不去
+  useEffect(() => {
+    if (zen && Object.keys(screens).length > 0 && !screens.md) setZen(false)
+  }, [zen, screens.md])
+
+  // 有二级弹层时 Esc 归弹层自己处理，别顺手把视野档位也改了
+  useEffect(() => {
+    if (!zen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // 只看「有没有还看得见的弹层」：关闭后的 .ant-modal-wrap 会以 display:none 残留
+      const overlayVisible = ['.ant-modal-wrap', '.ant-drawer-open'].some((sel) =>
+        [...document.querySelectorAll(sel)].some((el) => {
+          const cs = getComputedStyle(el)
+          return cs.display !== 'none' && cs.visibility !== 'hidden'
+        }))
+      if (overlayVisible) return
+      setZen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [zen])
 
   // 持久化分类展开状态
   useEffect(() => {
@@ -848,6 +912,22 @@ const CurriculumPage: React.FC = () => {
     setKpResources([])
   }, [activeCourseId])
 
+  // ── 选中知识点并拉关联资源（树点击、上一个/下一个都走这里） ──
+  const selectKp = (kpData: KnowledgePoint) => {
+    setKpLoading(true)
+    setSelectedKp(kpData)
+    ;(async () => {
+      try {
+        const res = await curriculumApi.getKpResources(kpData.id)
+        setKpResources(res.resources)
+      } catch {
+        setKpResources([])
+      } finally {
+        setKpLoading(false)
+      }
+    })()
+  }
+
   // ── 树节点选择 ──
   const handleTreeSelect = (_selectedKeys: React.Key[], info: Record<string, unknown>) => {
     const node = info.node as Record<string, unknown> | undefined
@@ -859,19 +939,7 @@ const CurriculumPage: React.FC = () => {
         setKpResources([])
         return
       }
-      // 加载知识点详情
-      setKpLoading(true)
-      setSelectedKp(kpData)
-      ;(async () => {
-        try {
-          const res = await curriculumApi.getKpResources(kpData.id)
-          setKpResources(res.resources)
-        } catch {
-          setKpResources([])
-        } finally {
-          setKpLoading(false)
-        }
-      })()
+      selectKp(kpData)
     }
   }
 
@@ -884,19 +952,26 @@ const CurriculumPage: React.FC = () => {
 
   const handleEditCourse = (course: Course) => {
     setEditingCourse(course)
-    courseForm.setFieldsValue(course)
+    // grade 存的是 "高一|高二" 字符串；tags 模式的 Select 必须给数组，
+    // 否则整串会显示成一个粘住的标签，并且 antd 会报 value-should-be-array
+    courseForm.setFieldsValue({
+      ...course,
+      grade: String(course.grade || '').split('|').map((s) => s.trim()).filter(Boolean),
+    })
     setCourseModal(true)
   }
 
   const handleSaveCourse = async () => {
     try {
       const values = await courseForm.validateFields()
+      // 表单里 grade 是数组，入库/本地 patch 统一回 "高一|高二"（后端 _split_grades 认这个格式）
+      const payload = { ...values, grade: Array.isArray(values.grade) ? values.grade.join('|') : values.grade }
       setSavingCourse(true)
       if (editingCourse) {
-        await curriculumApi.updateCourse(editingCourse.id, values)
+        await curriculumApi.updateCourse(editingCourse.id, payload)
         // 只改当前课程对象：侧栏名称、课程头、分组都会跟着变，章节树不重拉
         const patch: Partial<Course> = {}
-        for (const [key, value] of Object.entries(values)) {
+        for (const [key, value] of Object.entries(payload)) {
           if (value !== undefined) (patch as Record<string, unknown>)[key] = value
         }
         // 只改名称/描述/学科等展示字段时局部更新；改排序号会影响侧栏顺序，退回一次全量
@@ -907,7 +982,7 @@ const CurriculumPage: React.FC = () => {
         }
         message.success(t('courseUpdated'))
       } else {
-        await curriculumApi.createCourse(values)
+        await curriculumApi.createCourse(payload)
         message.success(t('courseCreated'))
       }
       setCourseModal(false)
@@ -1710,6 +1785,33 @@ const CurriculumPage: React.FC = () => {
   }
 
   // 知识点详情面板的公共 props（宽屏内联 / 窄屏 Drawer 共用一份）
+  // 知识点在当前课程树里的显示顺序（子章节在前、本章知识点在后，与 buildChapterNode 同序），
+  // 连同祖先章节 key —— 跳转后要把路径展开，否则会"跳到了一个看不见的节点"
+  const kpSequence = useMemo(() => {
+    const list: KnowledgePoint[] = []
+    const ancestors: Record<number, React.Key[]> = {}
+    const walk = (chapters: ChapterTreeNode[] | undefined, chain: React.Key[]) => {
+      for (const ch of chapters || []) {
+        const myChain = [...chain, `ch_${ch.id}`]
+        walk(ch.children, myChain)
+        for (const kp of ch.knowledge_points || []) {
+          list.push(kp)
+          ancestors[kp.id] = myChain
+        }
+      }
+    }
+    walk(activeCourse?.chapters, [])
+    return { list, ancestors }
+  }, [activeCourse])
+
+  const stepKp = (delta: number) => {
+    const idx = kpSequence.list.findIndex((k) => k.id === selectedKp?.id)
+    const target = kpSequence.list[idx + delta]
+    if (idx < 0 || !target) return
+    setExpandedKeys((prev) => Array.from(new Set([...prev, ...(kpSequence.ancestors[target.id] || [])])))
+    selectKp(target)
+  }
+
   const kpPanelProps = selectedKp ? {
     kp: selectedKp,
     resources: kpResources,
@@ -1724,6 +1826,13 @@ const CurriculumPage: React.FC = () => {
       if (!b?.duo && !b?.single) return true
       return !!(b.duo?.mine || b.single?.mine)
     })(),
+    kpNav: (() => {
+      const i = kpSequence.list.findIndex((k) => k.id === selectedKp.id)
+      return i < 0
+        ? undefined
+        : { index: i + 1, total: kpSequence.list.length, prev: i > 0, next: i < kpSequence.list.length - 1 }
+    })(),
+    onStepKp: stepKp,
     onClose: handleCloseKpPanel,
     onEdit: handleEditKp,
     onLink: openKpLink,
@@ -2084,9 +2193,9 @@ const CurriculumPage: React.FC = () => {
                 </Typography.Text>
               </div>
             ) : (
-              <Row gutter={16}>
+              <Row gutter={16} ref={measureGrid}>
                 {/* ── 课程树区域 ── */}
-                <Col xs={24} xxl={selectedKp ? 14 : 24}>
+                <Col span={splitKp && selectedKp ? 13 : 24}>
                   {/* 停用课程：先说清楚"学生看不到"，再就地给恢复 / 彻底删除两个出口 */}
                   {activeCourse.status === 'inactive' && (
                     <Alert
@@ -2147,7 +2256,18 @@ const CurriculumPage: React.FC = () => {
                               icon={allChaptersExpanded ? <RightOutlined /> : <DownOutlined />}
                               onClick={() => setExpandedKeys(allChaptersExpanded ? [] : allChapterKeys)}
                             >
-                              {allChaptersExpanded ? t('collapseAll') : t('expandAll')}
+                              {allChaptersExpanded ? t('collapseShort') : t('expandShort')}
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {screens.md && (
+                          <Tooltip title={zen ? t('exitZenTip') : t('zenTip')}>
+                            <Button
+                              size="small"
+                              icon={zen ? <CompressOutlined /> : <ExpandAltOutlined />}
+                              onClick={() => setZen((v) => !v)}
+                            >
+                              {zen ? t('exitZen') : t('zenMode')}
                             </Button>
                           </Tooltip>
                         )}
@@ -2176,9 +2296,11 @@ const CurriculumPage: React.FC = () => {
                             >
                               {t('delete')}
                             </Button>
-                            <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(activeCourse.id)}>
-                              {t('addChapterSection')}
-                            </Button>
+                            <Tooltip title={t('addChapterSection')}>
+                              <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(activeCourse.id)}>
+                                {t('addChapterShort')}
+                              </Button>
+                            </Tooltip>
                             <Tooltip title={showActions ? t('hideActionTooltip') : t('showActionTooltip')}>
                               <Button
                                 size="small"
@@ -2186,7 +2308,7 @@ const CurriculumPage: React.FC = () => {
                                 type={showActions ? 'primary' : 'default'}
                                 onClick={() => setShowActions(!showActions)}
                               >
-                                {showActions ? t('hideActions') : t('nodeActions')}
+                                {t('nodeActionsShort')}
                               </Button>
                             </Tooltip>
                           </>
@@ -2214,6 +2336,7 @@ const CurriculumPage: React.FC = () => {
                     <Tree
                       treeData={buildTreeData(activeCourse)}
                       expandedKeys={expandedKeys}
+                      selectedKeys={selectedKp ? [`kp_${selectedKp.id}`] : []}
                       onExpand={(keys) => setExpandedKeys(keys)}
                       showLine={{ showLeafIcon: false }}
                       onSelect={handleTreeSelect}
@@ -2268,15 +2391,18 @@ const CurriculumPage: React.FC = () => {
 
                 {/* ── 知识点详情：宽屏内联右栏；窄屏右侧抽屉（见 components/KpDetailPanel.tsx） ── */}
                 {selectedKp && kpPanelProps && (
-                  wideKpPanel ? (
-                    <Col xs={24} xxl={10}>
+                  splitKp ? (
+                    <Col span={11}>
                       <KpDetailPanel {...kpPanelProps} />
                     </Col>
                   ) : (
                     <Drawer
                       open
                       placement="right"
-                      width={screens.sm ? 480 : '88%'}
+                      // 非模态：antd v6 抽屉根节点 pointerEvents:none、面板 auto，
+                      // 所以不遮罩时目录照常可点，切知识点一下到位（旧版遮罩要先点掉才能选下一个）
+                      mask={false}
+                      size={screens.sm ? 520 : '88%'}   // antd v6：width 已废弃，size 支持数字/百分比
                       title={
                         <Space size={6}>
                           <NodeIndexOutlined />
@@ -2324,10 +2450,7 @@ const CurriculumPage: React.FC = () => {
             <Select
               mode="tags"
               placeholder={t('gradePlaceholder')}
-              tokenSeparators={[',', '|']}
-              onChange={(vals: string[]) => {
-                courseForm.setFieldValue('grade', vals.join('|'))
-              }}
+              tokenSeparators={[',', '|', '，', '、']}
             >
               {gradeOptions.map(g => <Option key={g} value={g}>{g}</Option>)}
             </Select>
