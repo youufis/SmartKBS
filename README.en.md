@@ -7,7 +7,7 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 51 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -46,6 +46,7 @@
 > - 👥 **Bulk import speed-up**: off-transaction parallel hashing · identical initial passwords hashed once · thousands of rows in seconds · chunked commits keep partial imports · errors summarized by cause
 > - 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · new "Logs & Archives" section · takes effect on save
 > - 🔌 **Configurable deploy port**: one `SMARTKB_PORT` environment variable shared by the desktop shell, dev proxy, backend and packaging preflight · default `8086` unchanged
+> - 🧮 **Formula export upgrade**: exam / answer-key / report Word files embed **native Word formulas (OMML)** · Chinese inside formulas, equation systems and piecewise functions render correctly · auto-degrades to matplotlib images / Unicode text when optional deps are missing · fill-blank underline fixed
 > - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
 >
 > - ⚠️ **Breaking changes**: none
@@ -306,7 +307,7 @@ Step-by-step guided paper generation wizard supporting smart selection and profe
   - **Exam Paper**: For students, with answer lines
   - **Answer Key**: Red-annotated answers + blue explanations
   - **Answer Sheet**: Standard answer sheet format
-- **📐 LaTeX Formula Rendering**: Rendered as images via matplotlib for embedding
+- **📐 LaTeX Formula Rendering**: Embedded as native Word formulas (OMML), editable in place; Chinese, equation systems and piecewise functions supported; degrades to matplotlib images / Unicode text when optional deps are missing
 - **🖼️ SVG Auto-Convert to PNG**: Ensures Word compatibility
 - **📦 Question Type Ordering**: Multiple-choice → Multi-select → True/False → Fill-in-the-blank → Short answer → Essay → Subjective
 
@@ -1230,6 +1231,7 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 - 🏠 **Student home de-noise (new)**: "N to do today" badge · my-progress four cards · condensed exam reminders · single companion message · mobile touch targets met
 - 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafts · nine sections · rule-based AI fallback · auto-generation off behind one global policy · 30-min checks · admin teacher scoping · mobile read-only
 - 🖥 **Local engine (new)**: Ollama cloud / hybrid / local tiers · model list & probe · dual-engine semantics · settings sections
+- 🧮 **Formula export**: native Word formulas (OMML) in exam / answer-key / report exports · Chinese, equation systems & piecewise functions · three-tier fallback (image / Unicode) · fill-blank underline fixed
 - 📚 **Assignments**: chat / file dual form · background AI grading · expected roster & reminders · class duplication & retry
 - 👥 **Bulk import speed-up**: off-transaction parallel hashing · shared initial-password reuse · thousands of rows in seconds · chunked commits survive interruption · errors summarized by cause
 - 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · takes effect on save
@@ -1724,7 +1726,7 @@ SmartKBS/
 | Speech synthesis | DashScope TTS (roll-call voice, optional) |
 | Streaming and realtime | Server-Sent Events (AI streams) · WebSocket (whiteboard / discussions / buzzer) |
 | Export | python-docx (Word) · openpyxl (Excel) |
-| Formula images | matplotlib (optional enhancement, degrades to Unicode text) |
+| Formula export | latex2mathml + mathml2omml → native Word OMML; degrades to matplotlib images / Unicode text |
 | Code sandbox | AST static analysis + subprocess isolation |
 | Desktop edition | Electron + PyInstaller + Vite bundle (Windows x64 installer only) |
 
