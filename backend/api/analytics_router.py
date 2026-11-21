@@ -559,6 +559,26 @@ async def teaching_suggestions(
 # 导出 WORD 文档
 # ═══════════════════════════════════════════════════════════
 
+def _md_has_math(line: str) -> bool:
+    """正文行里是否有 $...$ 包裹的公式（与试卷导出同一判定口径）。"""
+    import re
+    return '$' in line and bool(re.search(r"\$[^$]+\$", line))
+
+
+def _md_math_paragraph(doc, text: str, style: str | None):
+    """报告/讲义正文含公式的行：复用试卷的三级降级渲染（OMML→图片→Unicode）。
+
+    错题讲解/错因讲评等 AI 报告正文里 $U=IR$ 这类公式此前原样输出，
+    与试卷导出（paper_generator）口径不一致 —— 用户拿到的两份 Word 一个
+    是标准公式一个是 LaTeX 源码。
+    """
+    from docx.shared import Pt
+    from backend.docx_fonts import docx_font_body
+    from backend.paper_generator import _render_latex_inline
+    p = doc.add_paragraph(style=style) if style else doc.add_paragraph()
+    _render_latex_inline(p, text, docx_font_body(), Pt(11))
+
+
 def _markdown_to_docx(doc, text: str):
     """将 Markdown 文本写入 docx 文档"""
     from docx.shared import Pt, RGBColor
@@ -586,9 +606,16 @@ def _markdown_to_docx(doc, text: str):
             else:
                 p.add_run(content)
         elif line.startswith('- '):
-            doc.add_paragraph(line[2:], style='List Bullet')
+            _md = line[2:]
+            if _md_has_math(_md):
+                _md_math_paragraph(doc, _md, 'List Bullet')
+            else:
+                doc.add_paragraph(_md, style='List Bullet')
         elif any(line.startswith(f'{i}. ') for i in range(1, 10)):
-            doc.add_paragraph(line, style='List Number')
+            if _md_has_math(line):
+                _md_math_paragraph(doc, line, 'List Number')
+            else:
+                doc.add_paragraph(line, style='List Number')
         else:
             if '**' in line:
                 p = doc.add_paragraph()
@@ -598,6 +625,8 @@ def _markdown_to_docx(doc, text: str):
                         run = p.add_run(part)
                         if i % 2 == 1:
                             run.bold = True
+            elif _md_has_math(line):
+                _md_math_paragraph(doc, line, None)
             else:
                 doc.add_paragraph(line)
 

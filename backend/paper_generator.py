@@ -50,6 +50,17 @@ try:
 except ImportError:
     pass
 
+# ── 原生公式（OMML）：LaTeX → MathML（latex2mathml）→ OMML（mathml2omml） ──
+# 保真度最高：Word 内建公式对象，支持公式内中文、方程组/分段函数（mathtext 不认的
+# \begin{array}/cases 这里都行）。缺库或单条转换失败自动降级 matplotlib/Unicode。
+_HAS_OMML = False
+try:
+    from latex2mathml.converter import convert as _latex_to_mathml
+    from mathml2omml import convert as _mathml_to_omml
+    _HAS_OMML = True
+except ImportError:
+    logger.warning("latex2mathml/mathml2omml 未安装，公式将退回图片/Unicode 渲染")
+
 # ═══════════════════════════════════════════════════════════════
 # 样式常量
 # ═══════════════════════════════════════════════════════════════
@@ -295,12 +306,111 @@ def _bare_latex_to_unicode(text: str) -> str:
     return re.sub(r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"(\1)/(\2)", text)
 
 
+_OMML_NSDECL = (
+    'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+    'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"'
+)
+
+
+def _latex_to_omml_xml(latex_str: str) -> str | None:
+    """LaTeX → OMML XML 字符串；任何一步失败返回 None（调用方走降级链）"""
+    if not _HAS_OMML:
+        return None
+    # \underline 转换产物是细线空框，学生没法填：留给 Unicode 链（专门转成 ______）
+    if "\\underline" in latex_str:
+        return None
+    try:
+        mathml = _latex_to_mathml(latex_str.strip())
+        omml = _mathml_to_omml(mathml) if mathml else None
+    except Exception:
+        return None
+    # 必须含 oMath 容器且有实际文字 run，否则视为转换失败
+    if omml and "oMath" in omml and "<m:t>" in omml:
+        return omml
+    return None
+
+
+def _omml_rpr_xml(color, bold: bool, font_size) -> str | None:
+    """拼 m:r 用的 w:rPr（WordprocessingML 顺序：b → color → sz）。"""
+    parts = []
+    if bold:
+        parts.append("<w:b/>")
+    if color is not None:
+        parts.append(f'<w:color w:val="{color}"/>')
+    if font_size is not None:
+        try:
+            half = int(round(font_size.pt * 2))
+            parts.append(f'<w:sz w:val="{half}"/><w:szCs w:val="{half}"/>')
+        except (AttributeError, TypeError):
+            pass
+    if not parts:
+        return None
+    return ('<w:rPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            + "".join(parts) + "</w:rPr>")
+
+
+def _append_omml(paragraph, omml_xml: str, color=None, bold: bool = False,
+                 font_size=None) -> bool:
+    """把 OMML 片段插入段落。m:oMath 是 w:p 的行内内容，与 w:r 平级。
+
+    答案卷的公式必须跟随答案文字变红/加粗：OMML 本身不带文字样式
+    （mathml2omml 只产出 m:rPr 数学样式），给每个 m:r 注入 w:rPr。
+    """
+    try:
+        wrapper = parse_xml(f"<w:p {_OMML_NSDECL}>{omml_xml}</w:p>")
+        nodes = [c for c in list(wrapper)
+                 if c.tag.endswith("}oMath") or c.tag.endswith("}oMathPara")]
+        rpr_xml = _omml_rpr_xml(color, bold, font_size)
+        if rpr_xml:
+            for node in nodes:
+                for el in node.iter(qn("m:r")):
+                    kids = list(el)
+                    pos = 1 if (kids and kids[0].tag == qn("m:rPr")) else 0
+                    el.insert(pos, parse_xml(rpr_xml))
+        for node in nodes:
+            paragraph._p.append(node)
+        return bool(nodes)
+    except Exception as e:
+        logger.debug(f"OMML 插入失败，走降级链: {e}")
+        return False
+
+
+def _render_math_segment(paragraph, latex_content: str, font_name: str, font_size,
+                         color=None, bold: bool = False, block: bool = False) -> bool:
+    """单条公式三级降级：OMML 原生公式 → matplotlib PNG → Unicode 近似文本
+
+    Returns:
+        是否渲染成功（三种方式全失败返回 False，公式将被丢弃并告警）
+    """
+    omml = _latex_to_omml_xml(latex_content)
+    if omml and _append_omml(paragraph, omml, color=color, bold=bold,
+                             font_size=font_size):
+        return True
+    # \underline 填空位不走图片：OMML 转成细空框、mathtext 画的横线太窄，
+    # 学生没地方写字；统一交给 Unicode 链（转成 ______，宽且可编辑）
+    img_buf = None if "\\underline" in latex_content else _latex_to_png(
+        latex_content, fontsize=12 if block else 11)
+    if img_buf:
+        run = paragraph.add_run()
+        if block:
+            run.add_picture(img_buf, width=Cm(6))
+        else:
+            run.add_picture(img_buf, height=Cm(0.8))
+        return True
+    unicode_text = _latex_to_unicode(latex_content)
+    if unicode_text:
+        _style_run(paragraph.add_run(unicode_text), font_name, font_size, color, bold)
+        return True
+    logger.warning(f"公式三级渲染全部失败，已跳过: {latex_content[:60]!r}")
+    return False
+
+
 def _render_latex_inline(paragraph, text: str, font_name: str, font_size, doc=None,
                          color=None, bold: bool = False):
     """渲染包含 LaTeX 公式的文本到段落
 
     支持 $...$（行内公式）和 $$...$$（独立公式）
-    会尝试用 matplotlib 渲染为图片；失败时回退到 Unicode 文本
+    单条公式三级降级：OMML 原生公式 → matplotlib 图片 → Unicode 近似文本
     """
     # 先处理 $$...$$（独立公式，块级）
     parts = re.split(r'(\$\$[^$]+\$\$)', text)
@@ -309,20 +419,11 @@ def _render_latex_inline(paragraph, text: str, font_name: str, font_size, doc=No
             latex_content = part[2:-2].strip()
             if not latex_content:
                 continue
-            # 尝试渲染为图片
-            img_buf = _latex_to_png(latex_content, fontsize=12)
-            if img_buf:
-                run = paragraph.add_run()
-                run.add_picture(img_buf, width=Cm(6))
-                # 添加换行
+            # 三级降级：OMML 原生公式 → matplotlib PNG → Unicode 近似
+            if _render_math_segment(paragraph, latex_content, font_name, font_size,
+                                    color, bold, block=True):
                 run2 = paragraph.add_run()
                 run2.add_break(WD_BREAK.LINE)
-            else:
-                # 回退到 Unicode
-                unicode_text = _latex_to_unicode(latex_content)
-                if unicode_text:
-                    _style_run(paragraph.add_run(f" {unicode_text} "),
-                               font_name, font_size, color, bold)
         else:
             # 处理行内 $...$
             _render_latex_inline_inner(paragraph, part, font_name, font_size, color, bold)
@@ -337,16 +438,8 @@ def _render_latex_inline_inner(paragraph, text: str, font_name: str, font_size,
             latex_content = part[1:-1].strip()
             if not latex_content:
                 continue
-            # 尝试渲染为图片
-            img_buf = _latex_to_png(latex_content, fontsize=11)
-            if img_buf:
-                run = paragraph.add_run()
-                run.add_picture(img_buf, height=Cm(0.8))
-            else:
-                # 回退到 Unicode
-                unicode_text = _latex_to_unicode(latex_content)
-                if unicode_text:
-                    _style_run(paragraph.add_run(unicode_text), font_name, font_size, color, bold)
+            # 三级降级：OMML 原生公式 → matplotlib PNG → Unicode 近似
+            _render_math_segment(paragraph, latex_content, font_name, font_size, color, bold)
         else:
             if part.strip():
                 _style_run(paragraph.add_run(_bare_latex_to_unicode(part)),
@@ -681,7 +774,7 @@ def _render_options(paragraph, options_dict: dict[str, str] | None, doc=None):
                 k = keys[i + j]
                 opt_text = options_dict[k]
                 # 检查是否含公式：$...$ 包裹的，或没包裹的裸命令（"约 \mu A 级"）
-                if ('$' in str(opt_text) or "\\" in str(opt_text)) and _HAS_MPL:
+                if ('$' in str(opt_text) or "\\" in str(opt_text)) and (_HAS_MPL or _HAS_OMML):
                     run = paragraph.add_run("\n")
                     run.font.size = Pt(4)  # 微小的换行间隔
                     # 渲染选项标签
@@ -782,7 +875,7 @@ def _render_question_text(paragraph, q_text: str, doc=None, color=None,
     """渲染题目文本（解析、答案也用这一套，别再退回纯文本 run）
 
     支持:
-    - LaTeX 公式 $...$ 和 $$...$$（渲染为图片嵌入）
+    - LaTeX 公式 $...$ 和 $$...$$（OMML 原生公式，缺库/失败降级图片、Unicode）
     - Markdown **加粗**（转为普通加粗）
     - 纯文本直接输出
     """
@@ -800,7 +893,7 @@ def _render_question_text(paragraph, q_text: str, doc=None, color=None,
         # 是否含公式：$...$ 包裹的，或没包裹的裸命令（\mu、\beta 等）
         # 代码段已经在上面走掉，bash 提示符里的 $ 不会再被误当公式
         has_math = ('$' in seg) or bool(re.search(r"\\[a-zA-Z]{2,}", seg))
-        if has_math and _HAS_MPL:
+        if has_math and (_HAS_MPL or _HAS_OMML):
             _render_latex_inline(paragraph, seg, docx_font_body(), font_size, doc, color, bold)
             continue
         parts = re.split(r'(\*\*.*?\*\*)', seg)

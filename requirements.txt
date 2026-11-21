@@ -22,10 +22,16 @@ python-docx>=1.1.0
 # 导出 Excel 报告（成绩单 / 考试 / 点名 / 课堂互动）的硬依赖，export_router 在启动时即导入
 openpyxl>=3.1.0
 latex2mathml>=3.80
+# LaTeX → MathML → OMML 原生 Word 公式（题干/选项/答案含中文公式、方程组、分段函数）。
+# 单条转换失败会自动降级 matplotlib 图片/Unicode 文本，但要保真度请务必装上：
+mathml2omml>=0.0.2
 svglib>=1.6.0
 # 试卷/讲义导出 Word·PDF 时把 SVG 配图栅格化。缺它也能跑（自动降级到 svglib），
 # 但 svglib 对中文标注与渐变的还原度差很多，配图的自部署请务必装上：
 cairosvg>=2.7.0
+# 试卷/讲义导出 Word/PDF 时把 LaTeX 公式渲染成公式图片（mathtext 引擎，无需装 LaTeX 系统）。
+# 缺它则公式退化为 Unicode 近似文本，嵌套分式/根号会输出错误（如求根公式）：
+matplotlib>=3.8
 # 上传图片与 AI 配图入库前的格式校验（缺则只按扩展名判断，不阻断安装）
 pillow>=10.0.0
 feedparser>=6.0.0
