@@ -127,6 +127,17 @@ _LATEX_UNICODE_MAP = {
     r'\circ': '∘', r'\cdot': '·', r'\cdots': '…', r'\vdots': '⋮', r'\ddots': '⋱',
     r'\emptyset': '∅',
     r'\to': '→',
+    # 比较类简写别名：题库/模型两种写法混用（\le 与 \leq），Unicode 表都要收
+    r'\le': '≤', r'\ge': '≥', r'\ne': '≠', r'\lt': '<', r'\gt': '>',
+    r'\mid': '|', r'\mp': '∓', r'\checkmark': '✓', r'\angstrom': 'Å',
+    # 化学：可逆反应 / 气体沉淀箭头 / 条件箭头 / LaTeX 转义符
+    r'\rightleftharpoons': '⇌', r'\uparrow': '↑', r'\downarrow': '↓',
+    r'\xrightarrow': '→', r'\xleftarrow': '←',
+    r'\%': '%', r'\$': '$', r'\&': '&',
+    # 大写希腊补全
+    r'\Epsilon': 'Ε', r'\Zeta': 'Ζ', r'\Eta': 'Η', r'\Iota': 'Ι',
+    r'\Kappa': 'Κ', r'\Mu': 'Μ', r'\Nu': 'Ν', r'\Rho': 'Ρ',
+    r'\Upsilon': 'Υ', r'\Chi': 'Χ',
     # 函数名
     r'\sin': 'sin', r'\cos': 'cos', r'\tan': 'tan',
     r'\log': 'log', r'\ln': 'ln', r'\lg': 'lg',
@@ -141,6 +152,10 @@ _SUPERSCRIPTS = {
     '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
     '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
     'n': 'ⁿ', 'i': 'ⁱ',
+    'a': 'ᵃ', 'b': 'ᵇ', 'c': 'ᶜ', 'd': 'ᵈ', 'e': 'ᵉ', 'f': 'ᶠ', 'g': 'ᵍ',
+    'h': 'ʰ', 'j': 'ʲ', 'k': 'ᵏ', 'l': 'ˡ', 'm': 'ᵐ', 'o': 'ᵒ', 'p': 'ᵖ',
+    'r': 'ᵣ', 's': 'ˢ', 't': 'ᵗ', 'u': 'ᵘ', 'v': 'ᵛ', 'w': 'ʷ', 'x': 'ˣ',
+    'y': 'ʸ', 'z': 'ᶻ',
 }
 
 _SUBSCRIPTS = {
@@ -148,7 +163,24 @@ _SUBSCRIPTS = {
     '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
     '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
     'a': 'ₐ', 'e': 'ₑ', 'o': 'ₒ', 'x': 'ₓ',
+    'h': 'ₕ', 'j': 'ⱼ', 'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ', 'p': 'ₚ',
+    's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ', 'v': 'ᵥ', 'z': 'ᶻ',
 }
+
+
+def _sup_sub_unicode(text: str) -> str:
+    """x^{...} / x_{...} 逐字符映射成 Unicode 上下标（化学物理常见多位：
+    Ca^{2+}→Ca²⁺、C_6H_{12}O_6→C₆H₁₂O₆）；有一个字符映射不到就整组保留花括号。"""
+    for marker, table in (("^", _SUPERSCRIPTS), ("_", _SUBSCRIPTS)):
+        def _f(m, _t=table, _mk=marker):
+            base, grp = m.group(1), m.group(2)
+            chars = [_t.get(c) for c in grp]
+            if grp and all(chars):
+                return base + "".join(chars)
+            return f"{base}{_mk}{{{grp}}}"
+        pat = r"([a-zA-Z0-9\)\]}])" + re.escape(marker) + r"\{([^{}]*)\}"
+        text = re.sub(pat, _f, text)
+    return text
 
 
 def _latex_to_png(latex_str: str, fontsize: int = 12, dpi: int = 150) -> io.BytesIO | None:
@@ -171,8 +203,11 @@ def _latex_to_png(latex_str: str, fontsize: int = 12, dpi: int = 150) -> io.Byte
         buf = io.BytesIO()
         fig, ax = plt.subplots(figsize=(0.01, 0.01), dpi=dpi)
         ax.axis('off')
+        # mathtext 只认 \leq/\geq/\neq 系，题库简写先归一；\lt \gt 直接用 < >
+        norm = re.sub(r"\\(le|ge|ne)(?![a-zA-Z])", r"\\\1q", latex_str)
+        norm = norm.replace(r"\lt", "<").replace(r"\gt", ">")
         # 确保内容以 $ 包裹以触发 mathtext 渲染
-        display_text = f'${latex_str}$'
+        display_text = f'${norm}$'
         text_obj = ax.text(0, 0, display_text, fontsize=fontsize,
                            verticalalignment='bottom', horizontalalignment='left')
         fig.savefig(buf, format='png', bbox_inches='tight',
@@ -207,6 +242,9 @@ def _latex_to_unicode(latex_str: str) -> str:
     # 处理 \quad, \qquad → 空格
     text = re.sub(r'\\quad|\\qquad', ' ', text)
 
+    # 细空格 \, \; \: 与反斜杠空格 → 普通空格（物理单位间常见 100\,\text{W}）
+    text = re.sub(r"\\[,;: ]", " ", text)
+
     # 剥掉排版类命令的花括号：\mathrm{mA} / \textbf{甲} → mA / 甲
     # （配图里常见 $I_C=2\mathrm{mA}$，不处理就会输出 "\mathrmmA" 这种粘连串）
     _STYLE_CMD = (r"\\(?:mathrm|mathbf|mathbb|mathcal|mathit|mathsf|mathtt|operatorname"
@@ -216,6 +254,11 @@ def _latex_to_unicode(latex_str: str) -> str:
         if nxt == text:
             break
         text = nxt
+
+    # 条件箭头 \xrightarrow{通电} → —通电→（化学方程式上方条件，保留条件文字；
+    # 必须放在 \text 剥壳之后，否则 {通电} 嵌套花括号匹配不上）
+    text = re.sub(r"\\xrightarrow\s*\{([^{}]*)\}", r"—\1→", text)
+    text = re.sub(r"\\xleftarrow\s*\{([^{}]*)\}", r"—\1←", text)
 
     # 处理 \frac{a}{b}
     # 用 [^{}]* 而不是 [^}]*：后者会把嵌套分式 \frac{\frac{a}{b}}{c} 从中间切错，
@@ -235,35 +278,23 @@ def _latex_to_unicode(latex_str: str) -> str:
     text = re.sub(r'\\sqrt\[([^}]*)\]\{([^}]*)\}', r'√[\1](\2)', text)
     text = re.sub(r'\\sqrt\{([^}]*)\}', r'√(\1)', text)
 
-    # 处理上标 x^y
-    def _replace_super(m):
-        base = m.group(1)
-        exp = m.group(2)
-        # 尝试用 Unicode 上标
-        if len(exp) == 1 and exp in _SUPERSCRIPTS:
-            return f'{base}{_SUPERSCRIPTS[exp]}'
-        return f'{base}^{{{exp}}}'
+    # 处理上标 x^y（多位逐字符映射：Ca^{2+}→Ca²⁺；函数兼顾下标，重复调用无害）
+    text = _sup_sub_unicode(text)
+    text = re.sub(r'([a-zA-Z0-9\)\]}])\^([a-zA-Z0-9+\-])', lambda m: f'{m.group(1)}{_SUPERSCRIPTS.get(m.group(2), "^"+m.group(2))}', text)
 
-    text = re.sub(r'([a-zA-Z0-9\)\]}])\^\{([^}]*)\}', _replace_super, text)
-    text = re.sub(r'([a-zA-Z0-9\)\]}])\^([a-zA-Z0-9])', lambda m: f'{m.group(1)}{_SUPERSCRIPTS.get(m.group(2), "^"+m.group(2))}', text)
-
-    # 处理下标 x_y
-    def _replace_sub(m):
-        base = m.group(1)
-        sub = m.group(2)
-        if len(sub) == 1 and sub in _SUBSCRIPTS:
-            return f'{base}{_SUBSCRIPTS[sub]}'
-        return f'{base}_{{{sub}}}'
-
-    text = re.sub(r'([a-zA-Z0-9\)\]}])\_\{([^}]*)\}', _replace_sub, text)
-    text = re.sub(r'([a-zA-Z0-9\)\]}])\_([a-zA-Z0-9])', lambda m: f'{m.group(1)}{_SUBSCRIPTS.get(m.group(2), "_"+m.group(2))}', text)
+    # 处理下标 x_y（同上）
+    text = _sup_sub_unicode(text)
+    text = re.sub(r'([a-zA-Z0-9\)\]}])\_([a-zA-Z0-9+\-])', lambda m: f'{m.group(1)}{_SUBSCRIPTS.get(m.group(2), "_"+m.group(2))}', text)
 
     # 替换 LaTeX 命令为 Unicode
     for cmd, unicode_char in sorted(_LATEX_UNICODE_MAP.items(), key=lambda x: -len(x[0])):
         text = text.replace(cmd, unicode_char)
 
-    # 清理残余的 {}
+    # 清理残余的 {}（分组括号）。但集合定界符 \{ \} 是内容本身（{x | 2≤x≤3}），
+    # 先换成哨兵、清完再还原，否则解集类选项会被啃成 "\x| 2≤x≤3\"
+    text = text.replace("\\{", "\x01").replace("\\}", "\x02")
     text = text.replace('{', '').replace('}', '')
+    text = text.replace("\x01", "{").replace("\x02", "}")
 
     # 清理多余空格（保留单个空格）
     text = re.sub(r'  +', ' ', text)
@@ -286,7 +317,7 @@ def _style_run(run, font_name: str, font_size, color=None, bold: bool = False):
 # 命令名按长度倒序排列，保证 \theta 不被更短的前缀抢走。
 _BARE_LATEX_RE = re.compile(
     "(?:" + "|".join(sorted((re.escape(k) for k in _LATEX_UNICODE_MAP), key=len, reverse=True))
-    + "|\\\\(?:mathrm|mathbf|mathbb|mathcal|textbf|textit|emph|textrm|mathsf|mathtt)"
+    + "|\\\\(?:mathrm|mathbf|mathbb|mathcal|textbf|textit|emph|textrm|mathsf|mathtt|operatorname|mathit|text)"
     + "(?:\\{([^{}]*)\\})?)(?![A-Za-z])")
 
 
@@ -299,11 +330,23 @@ def _bare_latex_to_unicode(text: str) -> str:
     只替换符号表里登记过的命令，且要求命令后不再跟字母，所以 "C:\tools" 不会被
     误伤成 "C:→ols"（\to 命中但后面还有 ols）。
     """
-    if not text or "\\" not in text:
+    if not text:
         return text
+    # 提前返回只挡"既无反斜杠命令、也无 _{ }^{ 上下标"的纯文本 ——
+    # Na_{2}CO_{3}、Ca^{2+} 这类裸化学式不含反斜杠，旧写法直接原样返回
+    if "\\" not in text and "_{" not in text and "^{" not in text:
+        return text
+    # 细空格与条件箭头先处理，避免命令表替换后残留花括号
+    text = re.sub(r"\\[,;: ]", " ", text)
+    text = re.sub(r"\\xrightarrow\s*\{([^{}]*)\}", r"—\1→", text)
+    text = re.sub(r"\\xleftarrow\s*\{([^{}]*)\}", r"—\1←", text)
     text = _BARE_LATEX_RE.sub(lambda m: (m.group(1) or "") if m.group(1) is not None
                               else _LATEX_UNICODE_MAP.get(m.group(0), m.group(0)), text)
-    return re.sub(r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"(\1)/(\2)", text)
+    text = re.sub(r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"(\1)/(\2)", text)
+    # \sqrt 被命令表变成 √ 后残留的 {…}：√{2} → √(2)
+    text = re.sub(r"√\{([^{}]*)\}", r"√(\1)", text)
+    # 多位上下标（选项常见裸写法：Na_{2}CO_{3}、Ca^{2+}）
+    return _sup_sub_unicode(text)
 
 
 _OMML_NSDECL = (
