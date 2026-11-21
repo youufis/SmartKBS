@@ -7,7 +7,7 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 51 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus, AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank with tag maintenance, online exams, paper composing with Word export, AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -61,7 +61,7 @@
 
 The platform is **subject-agnostic**. The subject list, grades, classes, question types, titles, AI models and prompt templates all come from configuration (`backend/system_config.json` plus the database master tables), so switching curricula means changing configuration, not code. SmartKBS itself grew out of a single subject (Artificial Intelligence) and was later generalised — "no hard-coded subject" is an implemented fact, not a marketing line.
 
-Built-in grade master data covers **primary, junior secondary and senior secondary** stages: twelve preset grades from Grade 1 (一年级) to Senior 3 (高三). A teacher account can hold a multi-grade teaching scope such as `高一|高二` (Senior 1 | Senior 2), and every read and write is filtered by that scope. Preschool and higher-education stages have no built-in stage rules; they require extending the grade master data.
+Built-in grade master data covers **primary, junior secondary and senior secondary** stages: twelve preset grades from Grade 1 (一年级) to Senior 3 (高三). A teacher account can hold a multi-grade teaching scope such as `高一|高二` (Senior 1 | Senior 2), and every read and write is filtered by that scope. A course itself can also target several grades at once (`高一|高二`); exercise submission and resource sharing match on the grade intersection. Preschool and higher-education stages have no built-in stage rules; they require extending the grade master data.
 
 AI capabilities go through a single invocation service offering three modes, taken over by priority and degrading step by step:
 
@@ -219,6 +219,8 @@ The teacher's full path from preparation to shared resources: syllabus, AI lesso
 
 Subject → Course → Chapter → Section → Knowledge Point five-level tree structure:
 
+> Terminology: **subject** = the `SUBJECTS` list in System Configuration (it owns the question bank and course resources); **course** = one entry in the `courses` table (a textbook volume or a school-designed course, e.g. *Data and Computation*). The two are parent and child and are never interchangeable.
+
 - **🤖 AI Smart Generation**: Paste text or upload files (txt/md/pdf/docx), AI automatically extracts course structure
 - **✏️ Manual Management**: Add, edit, delete courses/chapters/knowledge points
 - **🔀 Drag-and-Drop Sorting**: Sort within and across levels for flexible organization
@@ -226,6 +228,9 @@ Subject → Course → Chapter → Section → Knowledge Point five-level tree s
 - **✅ Learning Progress Tracking**: Students learn knowledge points one by one, mark completion status, real-time progress bar
 - **📊 Course Progress Overview (Teacher)**: Knowledge point completion progress matrix for all students in a class, filterable by grade/class
 - **🏋️ Course Exercises**: Teachers generate 10 multiple-choice questions per knowledge point with one click; students answer online
+- **🖥 Three view modes**: Focus (hides the top bar and navigation) / split / non-modal overlay, switched by the measured width of the content area; step through knowledge points with Previous / Next
+- **🎯 Multi-grade courses**: one course can target several grades at once, and the grade separator is parsed the same way everywhere
+- **🚪 Disabled means withdrawn**: disabling a course closes every student-facing entry point, while teachers and admins can still open it to restore or delete it
 
 > **Admin/Teacher can manage; Student can view and mark progress**
 
@@ -1233,7 +1238,9 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 - 🧩 **Settings page**: Logs & Archives section · import password-reuse switch · cloud-service attribution labels · auto-probe on entry
 - 🔇 **Log noise reduction**: shape-based reconnect-noise summary · rate-limited handshake / poll 401s
 - 🧭 **Explore canvas**: asset cleanup never corrupts the DB · dry runs made read-only
-- 🧪 **Quality gates**: full regression & offline assertions · import fault injection · LF line endings enforced (.gitattributes) · byte-reproducible dist
+- 🧭 **Course syllabus**: three view modes (focus / split / overlay) · previous & next knowledge point · multi-grade picking · disabled means withdrawn · shorter toolbar labels
+- 🏷 **Master-data terminology**: subject → course → chapter → section → knowledge point unified · one source for the subject list · shared subject icons and grade separators
+- 🧪 **Quality gates**: full regression & offline assertions · import fault injection · inactive-course & terminology regressions · LF line endings enforced (.gitattributes) · byte-reproducible dist
 ### v7.x – v9.1.0
 
 > Merged section: v9.1.0 and v7.x – v9.0.0 updates (reverse chronological).
