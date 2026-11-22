@@ -308,6 +308,7 @@
   "wbView": "查看",
   "wbModeInterHint": "互动模式 — 教师授权后可操作",
   "wbConnected": "已连接",
+  "wbOutboxPending": "有 {{n}} 条改动待同步",
   "wbPollTip": "HTTP轮询模式不稳定，延迟严重，建议使用WebSocket模式",
   "wbPollConnected": "已连接（HTTP轮询）",
   "wbRevoke": "收回",

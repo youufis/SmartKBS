@@ -32,6 +32,14 @@ const NON_RETRYABLE_CODES = new Set([4001, 4003, 4401, 4403, 4404, 4410])
 const RETRY_BASE_MS = 2000
 const RETRY_MAX_MS = 30000
 /** 心跳间隔/失联阈值：半开连接（代理空闲回收、断网）不会触发 onclose，只能靠没回音发现 */
+/**
+ * 掉线期间的出站队列：只收"状态型"消息（整份快照 op / 翻页），按 type+page 合并只留最新一条。
+ * 增量 patch 不入队 —— 断号期间补放旧补丁比丢掉它更危险（会把别人的改动抹掉），
+ * 改为在重连后广播 ws_recovered，让业务层补发权威快照或重新对齐。
+ */
+const STATEFUL_OUTBOX_TYPES = new Set(['op', 'page_switch', 'clear_page'])
+const OUTBOX_MAX = 8
+
 const HEARTBEAT_INTERVAL = 15000
 const HEARTBEAT_STALE = 35000
 /**
@@ -49,8 +57,22 @@ export function useWhiteboardWS({ roomId, enabled = true }: UseWhiteboardWSOptio
   const lastPongRef = useRef(0)
   const pongCapableRef = useRef(false) // 服务端回过 pong = 心跳可用，才允许按失联掐线
   const [attempt, setAttempt] = useState(0)
+  const outboxRef = useRef<Map<string, WhiteboardWSMessage>>(new Map())
+  const lostIncrementalRef = useRef(false)   // 掉线期间是否丢过增量（需要重连后重新对齐）
   const [state, setState] = useState<WsConnectionState>('connecting')
   const [rejection, setRejection] = useState<WsRejection | null>(null)
+  const [outboxSize, setOutboxSize] = useState(0)
+
+  // 把收到的消息派发给业务监听器（重连时的恢复通知也走同一条路）
+  const dispatch = useCallback((msg: WhiteboardWSMessage) => {
+    listenersRef.current.forEach((fn) => {
+      try {
+        fn(msg)
+      } catch {
+        // 忽略单个监听器错误
+      }
+    })
+  }, [])
 
   const clearTimer = () => {
     if (reconnectTimerRef.current) {
@@ -91,6 +113,17 @@ export function useWhiteboardWS({ roomId, enabled = true }: UseWhiteboardWSOptio
           lastPongRef.current = Date.now()
           pongCapableRef.current = false   // 新连接：重新确认服务端是否会回 pong
           setState('open')
+          // 先把掉线期间攒下的状态型消息按"最新一条"补发，再通知业务层重新对齐
+          const pending = [...outboxRef.current.values()]
+          outboxRef.current.clear()
+          setOutboxSize(0)
+          pending.forEach((m) => {
+            try { ws.send(JSON.stringify(m)) } catch { /* 连接可能已再次断开，交给下一轮 */ }
+          })
+          if (lostIncrementalRef.current) {
+            lostIncrementalRef.current = false
+            dispatch({ type: 'ws_recovered' })
+          }
         }
 
         ws.onmessage = (event) => {
@@ -110,13 +143,7 @@ export function useWhiteboardWS({ roomId, enabled = true }: UseWhiteboardWSOptio
             setRejection({ code: Number(data.code) || 0, reason: String(data.reason || '') })
             return
           }
-          listenersRef.current.forEach((fn) => {
-            try {
-              fn(data)
-            } catch {
-              // 忽略单个监听器错误
-            }
-          })
+          dispatch(data)
         }
 
         ws.onclose = (e) => {
@@ -180,12 +207,26 @@ export function useWhiteboardWS({ roomId, enabled = true }: UseWhiteboardWSOptio
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [roomId, enabled, attempt])
+  }, [roomId, enabled, attempt, dispatch])
 
-  // 发送消息
+  // 发送消息：连接可用直接发；不可用时状态型消息入队、增量消息标记待对齐
+  // （旧实现是"没开就什么都不做"，师生画了半天其实一条都没送出去，还看不见任何提示）
   const send = useCallback((data: WhiteboardWSMessage) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(data))
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(data))
+      return
+    }
+    if (STATEFUL_OUTBOX_TYPES.has(String(data.type))) {
+      const key = `${data.type}:${String((data as { page?: unknown }).page ?? '')}`
+      outboxRef.current.set(key, data)          // 同类别只留最新一条（后写覆盖前写，符合直觉）
+      if (outboxRef.current.size > OUTBOX_MAX) {
+        const oldest = outboxRef.current.keys().next().value
+        if (oldest !== undefined) outboxRef.current.delete(oldest)
+      }
+      setOutboxSize(outboxRef.current.size)
+    } else if (data.type === 'patch') {
+      lostIncrementalRef.current = true         // 重连后由 ws_recovered 触发权威快照/重新对齐
     }
   }, [])
 
@@ -208,7 +249,7 @@ export function useWhiteboardWS({ roomId, enabled = true }: UseWhiteboardWSOptio
 
   // ★ 使用 useMemo 稳定对象引用，防止每次渲染生成新对象导致 effects 反复重跑
   return useMemo(
-    () => ({ send, onMessage, reconnect, isConnected, state, rejection }),
-    [send, onMessage, reconnect, isConnected, state, rejection],
+    () => ({ send, onMessage, reconnect, isConnected, state, rejection, outboxSize }),
+    [send, onMessage, reconnect, isConnected, state, rejection, outboxSize],
   )
 }

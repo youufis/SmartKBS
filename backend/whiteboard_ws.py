@@ -100,6 +100,7 @@ class WhiteboardManager:
             "write_done": None,     # 上面这批写完的哨兵
             "last_persist": 0.0,
             "persisting": False,
+            "nonauth_warn_at": 0.0,   # 非权威写者提示的节流时戳
         }
         # 房间可能已因全员离开/结束而被回收，尝试从数据库恢复最新快照，避免白板内容丢失
         try:
@@ -490,6 +491,20 @@ class WhiteboardManager:
             except Exception as e:
                 logger.warning(f"[白板] 实时快照落库失败 room={room_id} page={page}: {e}")
 
+    @staticmethod
+    def _is_authoritative_writer(room: dict, username: str) -> bool:
+        """谁有权用整份快照覆盖房间的权威副本。
+
+        控制器在场时只认控制器：其余连接（同账号的另一个标签页、互动模式下已授权的学生）
+        的快照仍然照常广播，但不改写 last_snapshot、不落库 —— 否则"谁后发谁赢"，
+        一个空板标签页一提交就把老师刚写的内容顶掉（现场复现过）。
+        控制器不在场时放开：任何有操作权限的人都可落库，保证内容不丢。
+        """
+        ctrl = (room.get("controller") or "").strip()
+        if ctrl and ctrl in room.get("connections", {}):
+            return username == ctrl
+        return True
+
     # ── 白板操作处理 ──
     async def handle_op(self, room_id: int, username: str, data: dict):
         op_id = data.get("op_id", "")
@@ -502,11 +517,21 @@ class WhiteboardManager:
         snap = data.get("data", {}).get("snapshot", "")
         if snap and isinstance(snap, str) and len(snap) > 100:
             room = self.rooms.get(room_id)
-            if room is not None:
-                room["last_snapshot"] = snap        # 内存里立刻是最新的，广播与兜底都读它
-                # seq 由服务端统一分配：多端同时写也不会撞号，重连后也不用重新对齐。
-                room["last_snapshot_seq"] = room.get("patch_seq", 0)
-            self._mark_dirty(room_id, data.get("page", 1), snap)
+            # 整份快照会覆盖权威副本：控制器在场时只认控制器的那一份，其余连接只广播。
+            # 控制器不在场时放开，保证任何一端的内容都不会丢。
+            if room is None or self._is_authoritative_writer(room, username):
+                if room is not None:
+                    room["last_snapshot"] = snap        # 内存里立刻是最新的，广播与兜底都读它
+                    # seq 由服务端统一分配：多端同时写也不会撞号，重连后也不用重新对齐。
+                    room["last_snapshot_seq"] = room.get("patch_seq", 0)
+                self._mark_dirty(room_id, data.get("page", 1), snap)
+            else:
+                # 提示按房间节流（每分钟一条），避免 compat 通道下刷屏
+                now = time.monotonic()
+                if now - room.get("nonauth_warn_at", 0.0) > 60:
+                    room["nonauth_warn_at"] = now
+                    logger.info(f"[白板] 非权威写者 {username} 的整份快照只广播不覆盖 room={room_id}"
+                                f"（控制者={room.get('controller')}）")
         t0 = time.monotonic()
         seq = self.rooms.get(room_id, {}).get("last_snapshot_seq", -1)
         await self.broadcast(room_id, {

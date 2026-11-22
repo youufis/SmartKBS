@@ -393,8 +393,6 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       editor.updateInstanceState({ isReadonly: true })
     }
 
-    // 同步写 ref：子组件 effect 先于本组件 effect 跑，这里赋值后监听 effect 立刻能拿到实例
-    editorRef.current = editor
     setReady(true)
     setTldrawEditor(editor)
 
@@ -537,6 +535,13 @@ ws.send({ type: 'request_sync' })
         serverSupportsDiffRef.current = true
         return
       }
+      // 重连恢复：掉线期间有增量没送到。广播端补一份权威快照（顺带落库），
+      // 其他人重新对齐基线，避免在缺记录的副本上继续叠补丁。
+      if (msg.type === 'ws_recovered') {
+        if (isBroadcaster) sendKeyframeRef.current(true)
+        else requestKeyframeRef.current()
+        return
+      }
 
       // ── 增量补丁：只改变化的记录，不再整篇重建 ──
       if (msg.type === 'patch_broadcast') {
@@ -613,6 +618,16 @@ ws.send({ type: 'request_sync' })
     })
     return unsub
   }, [ws, setCurrentPage, isBroadcaster])
+
+  // 能力协商补一次：hello 与消息监听在同一批提交里注册，服务端回执可能正好落在
+  // "监听还没挂上"的窗口（同账号开多个标签时更容易出现）；漏了 ack，本会话就会一直
+  // 退回整份快照通道（~20KB / 400ms），既费带宽又更容易在重连窗口里丢改动。
+  // 编辑器就绪后再确认一次；拿到 ack 之后不再重复发。
+  useEffect(() => {
+    if (!ready || ws.state !== 'open') return
+    if (serverSupportsDiffRef.current) return
+    ws.send({ type: 'hello', caps: ['diff'] })
+  }, [ready, ws, ws.state])
 
   if (tlState === 'blocked') return <TLDrawLicenseBlocked reasons={tlReasons} onRecheck={tlRecheck} />
 

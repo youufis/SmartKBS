@@ -481,7 +481,9 @@ const WhiteboardRoomPage: React.FC = () => {
         </span>
         <span>
           {ws.state === 'open'
-            ? '\ud83d\udfe2 ' + t('wbConnected')
+            ? ws.outboxSize > 0
+              ? '\ud83d\udfe0 ' + t('wbOutboxPending', { n: ws.outboxSize })
+              : '\ud83d\udfe2 ' + t('wbConnected')
             : ws.state === 'connecting' || ws.state === 'retrying'
               ? '\ud83d\udd04 ' + t(ws.state === 'connecting' ? 'wbConnecting' : 'wbRetrying')
               : boardReadOnly
