@@ -109,8 +109,8 @@ Conversations and their attachments share one lifetime: images and documents upl
 
 | Purpose | URL |
 | --- | --- |
-| Development | [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) · [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085) |
-| Deployment | [http://183.239.51.37:8086](http://183.239.51.37:8086) · [https://183.239.51.37:8085](https://183.239.51.37:8085) |
+| Development | [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086)  |
+| Deployment | [http://183.239.51.37:8086](http://183.239.51.37:8086)  |
 
 **Test accounts**
 
@@ -1749,6 +1749,15 @@ This project is released under the **AGPL-3.0**; the full text lives in [LICENSE
 - ✅ You may use, modify and distribute it freely, including deploying it inside a school;
 - ⚠️ If you modify it and **offer it over a network**, you must publish your modified source under the same licence;
 - ℹ️ Systems that only talk to SmartKBS through its API and are independent of it are not affected.
+
+### Third-party components
+
+| Component | Licence | Notes |
+| --- | --- | --- |
+| tldraw SDK 5.1.1 (collaborative whiteboard / exploration canvas) | [tldraw licence](https://github.com/tldraw/tldraw/blob/main/LICENSE.md) | **Not open source** — source available, commercially licensed. Production use requires a valid license key; SmartKBS runs on a free key issued by tldraw because it is a personal, non-commercial project. The watermark and licence enforcement are kept intact (hiding them with CSS/JS is prohibited by the licence); the verbatim licence ships at `frontend/dist/THIRD-PARTY-NOTICES/tldraw-LICENSE.md`. **This component is not covered by AGPL-3.0 — its own terms prevail.** |
+| Remaining frontend/backend dependencies | MIT / Apache-2.0 / BSD etc. | See their own repositories |
+
+> Pre-release guard: `.venv\Scripts\python.exe scripts\check_tldraw_license.py --strict` (already wired into `build-desktop.bat`, which refuses to package when it fails).
 
 Copyright © 2026 youufis (UNET)
 

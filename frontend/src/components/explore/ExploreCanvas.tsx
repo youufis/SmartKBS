@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { getPage, savePage, uploadAsset, type SaveState } from '../../api/explore'
 import { AskCardUtil } from './AskCardShape'
 import { TLUI_ZH_OVERRIDES } from '../../constants/tldrawUiZh'
+import { TL_LICENSE_KEY } from '../../constants/tldrawLicense'
 import { saveDraft, loadDraft, clearDraft } from '../../utils/exploreDraft'
 
 const minimalComponents: TLComponents = {
@@ -224,17 +225,7 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Tldraw onMount={handleMount} components={minimalComponents}
-        assets={assetStore} shapeUtils={[AskCardUtil]} licenseKey="oss" overrides={TLUI_ZH_OVERRIDES} />
-      {/* 隐藏 TLDraw 右下角许可水印（与协作白板同一处理） */}
-      <style>{`
-        .tl-watermark,
-        [class*="watermark"],
-        [class*="license"],
-        .tlui-debug-panel,
-        .tlui-share-panel,
-        a[href*="tldraw"][href*="license"],
-        a[href*="tldraw"][href*="pricing"] { display: none !important; }
-      `}</style>
+        assets={assetStore} shapeUtils={[AskCardUtil]} licenseKey={TL_LICENSE_KEY} overrides={TLUI_ZH_OVERRIDES} />
       {!ready && (
         <div style={{
           position: 'absolute', inset: 0,

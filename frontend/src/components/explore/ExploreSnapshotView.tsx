@@ -6,6 +6,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { Tldraw, type TLComponents, type TLStoreSnapshot } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { AskCardUtil } from './AskCardShape'
+import { TL_LICENSE_KEY } from '../../constants/tldrawLicense'
 
 const minimalComponents: TLComponents = {
   SharePanel: null,
@@ -30,17 +31,7 @@ const ExploreSnapshotView: React.FC<{ snapshot: string }> = ({ snapshot }) => {
   }, [snapshot])
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Tldraw onMount={handleMount} components={minimalComponents} shapeUtils={[AskCardUtil]} licenseKey="oss" />
-      {/* 隐藏 TLDraw 右下角许可水印（与画布同一处理） */}
-      <style>{`
-        .tl-watermark,
-        [class*="watermark"],
-        [class*="license"],
-        .tlui-debug-panel,
-        .tlui-share-panel,
-        a[href*="tldraw"][href*="license"],
-        a[href*="tldraw"][href*="pricing"] { display: none !important; }
-      `}</style>
+      <Tldraw onMount={handleMount} components={minimalComponents} shapeUtils={[AskCardUtil]} licenseKey={TL_LICENSE_KEY} />
       {!ready && (
         <div style={{
           position: 'absolute', inset: 0,
