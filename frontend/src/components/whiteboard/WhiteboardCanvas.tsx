@@ -14,7 +14,8 @@ import { useWhiteboardWS } from '../../hooks/useWhiteboardWS'
 import apiClient from '../../api/client'
 import { reportLoadError } from '../../utils/loadError'
 import { TLUI_ZH_OVERRIDES } from '../../constants/tldrawUiZh'
-import { TL_LICENSE_KEY } from '../../constants/tldrawLicense'
+import { useTLDrawLicense } from '../../hooks/useTLDrawLicense'
+import { TLDrawLicenseBlocked } from '../TLDrawLicenseGate'
 import { startPoller, stopPoller } from '../../utils/poller'
 
 // 使用自建 WebSocket 后端，屏蔽 TLDraw 默认的云同步面板（水印按授权状态由 SDK 自行显示）
@@ -50,6 +51,11 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   const internalEditorRef = useRef<Editor | null>(null)
   const editorRef = externalEditorRef || internalEditorRef
   const [ready, setReady] = useState(false)
+  // 编辑器实例：下面的 store 监听 effect 依赖它，声明必须在那个 effect 之前（依赖数组在 render 体内求值）
+  const [tldrawEditor, setTldrawEditor] = useState<Editor | null>(null)
+  // 授权闸门：未授权/过期/域名不符时，SDK 会在 5 秒后把画布整体替换成空白 div，
+  // 所以判定没通过之前不挂载白板组件，改渲染自有说明页（详见 components/TLDrawLicenseGate.tsx）
+  const { state: tlState, key: tlKey, reasons: tlReasons, recheck: tlRecheck } = useTLDrawLicense()
 
   // 图片先上传成 URL 再进快照：TLDraw 默认会把 File 转成 data URL 塞进 asset.props.src，
   // 一张 500KB 的截图会让之后每一笔笔迹的整份快照都变成 600KB+。
@@ -127,7 +133,11 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
 
   // 监听 TLDraw store 变更：只收用户操作、只收文档记录（不含相机/session）
   useEffect(() => {
-    const editor = editorRef.current
+    // 用 state 里的实例，不读 editorRef：ref 由下面 [tldrawEditor] 那个 effect 维护，
+    // 同一批提交里它的清理函数先跑、会把 ref 置空；读 ref 就会漏注册监听 ——
+    // 监听漏了 → pendingDiffs 恒空 → patch / keyframe / HTTP 兜底全部跳过 → 改动出不了浏览器，
+    // 服务端与库里仍是旧快照，重进白板内容"复活"。
+    const editor = tldrawEditor
     if (!editor || !ready) return
     // 仅在广播端（教师/互动模式已授权学生）注册监听
     if (!isBroadcaster && store.mode !== 'interactive') {
@@ -149,7 +159,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       cleanup()
       pendingDiffsRef.current = []
     }
-  }, [isBroadcaster, store.mode, ready])
+  }, [isBroadcaster, store.mode, ready, tldrawEditor])
   // ═══════════════════════════════════════════════════════════
 
   // 快照内容哈希缓存，避免无变化时重复序列化/同步
@@ -364,12 +374,15 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   }, [isBroadcaster])
 
 
-  const [tldrawEditor, setTldrawEditor] = useState<Editor | null>(null)
 
   // 将 editor 实例同步到 ref（供外部和定时器访问），避免在 useCallback 中直接修改 ref
   useEffect(() => {
     editorRef.current = tldrawEditor
-    return () => { editorRef.current = null }
+    return () => {
+      // 只有 ref 仍是本次赋的那个实例时才清：null→editor 那次提交的清理先于赋值跑，
+      // 无条件置 null 会把 handleMount 刚写好的实例抹掉
+      if (editorRef.current === tldrawEditor) editorRef.current = null
+    }
   }, [tldrawEditor])
 
   const drawWatchRef = useRef<(() => void) | null>(null)
@@ -380,6 +393,8 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       editor.updateInstanceState({ isReadonly: true })
     }
 
+    // 同步写 ref：子组件 effect 先于本组件 effect 跑，这里赋值后监听 effect 立刻能拿到实例
+    editorRef.current = editor
     setReady(true)
     setTldrawEditor(editor)
 
@@ -599,10 +614,14 @@ ws.send({ type: 'request_sync' })
     return unsub
   }, [ws, setCurrentPage, isBroadcaster])
 
+  if (tlState === 'blocked') return <TLDrawLicenseBlocked reasons={tlReasons} onRecheck={tlRecheck} />
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Tldraw onMount={handleMount} components={minimalComponents}
-        assets={assetStore} licenseKey={TL_LICENSE_KEY} overrides={TLUI_ZH_OVERRIDES} />
+      {tlState === 'ok' && (
+        <Tldraw onMount={handleMount} components={minimalComponents}
+          assets={assetStore} licenseKey={tlKey} overrides={TLUI_ZH_OVERRIDES} />
+      )}
       {!ready && (
         <div style={{
           position: 'absolute', inset: 0,
