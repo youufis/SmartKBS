@@ -1747,9 +1747,6 @@ SmartKBS/
 | 组件 | 许可 | 说明 |
 | --- | --- | --- |
 | tldraw SDK 5.1.1（协作白板 / 探索画布） | [tldraw license](https://github.com/tldraw/tldraw/blob/main/LICENSE.md) | **非开源**：源码可见但按商业授权。生产环境需携带有效 license key（本项目使用 tldraw 免费发放的 hobby/评估授权，因为它是个人非商业项目）；按条款要求保留其水印与授权校验，不得用 CSS/JS 遮蔽；许可原文随包在 `frontend/dist/THIRD-PARTY-NOTICES/tldraw-LICENSE.md`。**该组件不受 AGPL-3.0 覆盖，其自身条款优先。** |
-| 其余前后端依赖 | MIT / Apache-2.0 / BSD 等 | 见各自仓库 |
-
-> 出包前自动校验：`.venv\Scripts\python.exe scripts\check_tldraw_license.py --strict`（`build-desktop.bat` 已挂此断言，不通过就不出包）。
 
 Copyright © 2026 youufis (UNET)
 

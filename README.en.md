@@ -1755,9 +1755,6 @@ This project is released under the **AGPL-3.0**; the full text lives in [LICENSE
 | Component | Licence | Notes |
 | --- | --- | --- |
 | tldraw SDK 5.1.1 (collaborative whiteboard / exploration canvas) | [tldraw licence](https://github.com/tldraw/tldraw/blob/main/LICENSE.md) | **Not open source** — source available, commercially licensed. Production use requires a valid license key; SmartKBS runs on a free key issued by tldraw because it is a personal, non-commercial project. The watermark and licence enforcement are kept intact (hiding them with CSS/JS is prohibited by the licence); the verbatim licence ships at `frontend/dist/THIRD-PARTY-NOTICES/tldraw-LICENSE.md`. **This component is not covered by AGPL-3.0 — its own terms prevail.** |
-| Remaining frontend/backend dependencies | MIT / Apache-2.0 / BSD etc. | See their own repositories |
-
-> Pre-release guard: `.venv\Scripts\python.exe scripts\check_tldraw_license.py --strict` (already wired into `build-desktop.bat`, which refuses to package when it fails).
 
 Copyright © 2026 youufis (UNET)
 
