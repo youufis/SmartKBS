@@ -403,5 +403,14 @@
   "previewWinExitFull": "Exit fullscreen",
   "previewWinReset": "Reset size & position",
   "previewWinResizeHint": "Drag to resize the window",
-  "previewWinClose": "Close"
+  "previewWinClose": "Close",
+  "tlBlockedTitle": "Whiteboard unavailable",
+  "tlBlockedDesc": "The whiteboard engine needs a valid licence key to run over HTTPS. Rather than letting the canvas go blank mid-lesson, the board is not loaded.",
+  "tlBlockedReasonNoKey": "No whiteboard licence key configured, and none is built into the installer",
+  "tlBlockedReasonInvalidKey": "The whiteboard licence key is malformed (a wrong key is the same as no key)",
+  "tlBlockedReasonExpired": "The whiteboard licence key has expired",
+  "tlBlockedReasonHost": "The current host is not covered by the whiteboard licence key",
+  "tlBlockedHintAdmin": "Set it under System settings → Credentials → Whiteboard licence key; leave it empty to keep using the built-in key.",
+  "tlBlockedHintStudent": "Please forward this to your school administrator; reload the page once it is configured.",
+  "tlBlockedRetry": "Re-check"
 }
