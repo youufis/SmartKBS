@@ -308,6 +308,7 @@
   "wbView": "View",
   "wbModeInterHint": "Interactive — act after teacher grants",
   "wbConnected": "Connected",
+  "wbOutboxPending": "{{n}} change(s) pending sync",
   "wbPollTip": "HTTP polling is unstable with high latency; WebSocket recommended",
   "wbPollConnected": "Connected (HTTP polling)",
   "wbRevoke": "Revoke",
