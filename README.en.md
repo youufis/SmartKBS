@@ -47,11 +47,13 @@
 > - 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · new "Logs & Archives" section · takes effect on save
 > - 🔌 **Configurable deploy port**: one `SMARTKB_PORT` environment variable shared by the desktop shell, dev proxy, backend and packaging preflight · default `8086` unchanged
 > - 🧮 **Formula export upgrade**: exam / answer-key / report Word files embed **native Word formulas (OMML)** · Chinese inside formulas, equation systems and piecewise functions render correctly · auto-degrades to matplotlib images / Unicode text when optional deps are missing · fill-blank underline fixed
-> - 🛡 **Zero-regression gate**: cloud pass-through assertions · full regression + two live E2E rounds · offline no-egress assertions
+> - 🛡 **Stability & privacy**: upgrade keeps existing behaviour · fully usable offline, no network required · student data stays on campus
+> - 🧭 **Syllabus Ordering & Recycle Bin (new)**: drag to order subjects (admins only, school-wide) · drag courses (incl. cross-subject move) · recycle-bin view (restore / delete permanently)
+> - 🛡 **Master-data protection (new)**: subjects with courses cannot be removed or renamed · built-in question types are locked · custom types protected by active questions · default subject derived from teaching scope
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); new config keys auto-fill defaults (AI_MODE=cloud; briefing auto-generation off; log rotation stays size-based; import password reuse on) so existing behavior is unchanged; briefing auto-drafting is now switched on per week/month/year globally in System Settings → Teaching Briefing (legacy per-teacher switches were disabled once); enabling the local engine requires installing Ollama and switching the mode in System Settings → AI; to move the port, set the `SMARTKB_PORT` environment variable and restart (one contract for the desktop app and the source-deployed backend); Git deployments use the usual in-app incremental upgrade.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); to enable the local engine, install Ollama yourself and switch the mode in System Configuration → AI Capabilities; to change the port, set the system environment variable `SMARTKB_PORT` and restart (same convention for desktop and source deployments); Git deployments keep in-site incremental upgrades.
 ---
 
 <a id="intro"></a>
@@ -60,7 +62,7 @@
 
 **SmartKBS** puts lesson preparation, question authoring, classroom activities, practice, exams, learning analytics, honours and operations inside one account system and one data pipeline. A whole school, a single teaching group or one teacher can use it directly instead of stitching several tools together.
 
-The platform is **subject-agnostic**. The subject list, grades, classes, question types, titles, AI models and prompt templates all come from configuration (`backend/system_config.json` plus the database master tables), so switching curricula means changing configuration, not code. SmartKBS itself grew out of a single subject (Artificial Intelligence) and was later generalised — "no hard-coded subject" is an implemented fact, not a marketing line.
+The platform is **subject-agnostic**. The subject list, grades, classes, question types, titles, AI models and prompt templates all come from configuration (`backend/system_config.json` and the master-data tables), so switching the course system means changing configuration, not code; the **display order of subjects** can be dragged in the Curriculum sidebar (admins only, applies school-wide). The platform itself started from a single "Artificial Intelligence" subject and was generalised into a multi-subject layout, so "zero subject hard-coding" is a delivered fact rather than a slogan.
 
 Built-in grade master data covers **primary, junior secondary and senior secondary** stages: twelve preset grades from Grade 1 (一年级) to Senior 3 (高三). A teacher account can hold a multi-grade teaching scope such as `高一|高二` (Senior 1 | Senior 2), and every read and write is filtered by that scope. A course itself can also target several grades at once (`高一|高二`); exercise submission and resource sharing match on the grade intersection. Preschool and higher-education stages have no built-in stage rules; they require extending the grade master data.
 
@@ -129,7 +131,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Syllabus, AI lesson cast, AI podcast, AI teaching assistant, question bank and tag maintenance, exams, composing with Word export, AI resources, resource centre and management, file centre | 12 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre | 12 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, teaching briefing, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 12 |
@@ -225,6 +227,7 @@ Subject → Course → Chapter → Section → Knowledge Point five-level tree s
 - **🤖 AI Smart Generation**: Paste text or upload files (txt/md/pdf/docx), AI automatically extracts course structure
 - **✏️ Manual Management**: Add, edit, delete courses/chapters/knowledge points
 - **🔀 Drag-and-Drop Sorting**: Sort within and across levels for flexible organization
+- **🧭 Subject order**: subject groups in the sidebar can be drag-ordered (admins only, students see the same order); course order is open to teachers within their teaching scope
 - **🔗 Resource Binding**: Bind 7 types of resources to knowledge points (HTML courseware, downloadable files, questions, exams, discussions, class quizzes, tasks)
 - **✅ Learning Progress Tracking**: Students learn knowledge points one by one, mark completion status, real-time progress bar
 - **📊 Course Progress Overview (Teacher)**: Knowledge point completion progress matrix for all students in a class, filterable by grade/class
@@ -253,13 +256,14 @@ AI-powered teaching tool assistant for teachers and administrators:
 ---
 
 ### Question Bank Management (Smart Question Bank)
+- **🗑 Recycle bin**: soft-deleted questions can be **restored** to the bank from the recycle-bin view (media folders and knowledge-point links come back with them), or **deleted permanently** (a preview lists what will be removed together and what cannot be removed)
 
 AI-powered smart question management system supporting multiple question types and multimedia:
 
 - **🤖 One-Click AI Generation**: Automatically generate questions by subject, type, knowledge point, difficulty, and quantity
 - **📤 Smart Extraction**: Supports pasting text or uploading .docx/JSON files, automatically identifies types, options, and answers
 - **🧱 One door into the bank**: AI generation, smart extraction and every practice / quiz backfill share the same entry point — validate, dedup, one transaction, link knowledge points after commit; ungradeable questions are turned away at the door with a reason. One write path per question, so grading, duplicate checks and question selection agree from the source onward, and a future gate only has to be added in one place
-- **📋 Supported Types**: Multiple-choice, multi-select, true/false, short answer, fill-in-the-blank, essay, subjective
+- **📋 Supported Types**: built-in types (single choice, multiple choice, true/false, short answer, fill-in-the-blank, essay, subjective) cannot be edited or removed; custom types follow the enabled list and are protected while active questions exist
 - **📐 Formula Support**: Full support for LaTeX formula ($...$) rendering display
 - **🖼️ Image System**:
   - SVG drawing for technical diagrams
@@ -1140,7 +1144,7 @@ Centralized management of all system configuration parameters:
 - **🛡️ Classroom Guard**: question copy protection and answer-page watermark (off by default; only the question block is affected)
 - **🧪 AI Output & Parsing**: strict parsing, image extraction token budget, class error review question cap and accuracy threshold
 - **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test; duration options plus length and page caps for both AI podcast and AI lesson cast live here too
-- **📚 Subjects & Question Types**: Subject list, question types
+- **📚 Subjects & Question Types**: the subject list and the question-type list; display order is dragged in the Curriculum centre, and removal is protected by references
 - **🔔 Notifications**: Enabled notification types
 - **📁 File Type Whitelist**: Image/document extensions
 - **🎨 Image Generation**: toggle, model (dropdown, endpoint dispatched automatically), size (defaults to auto, options follow the model), per-question auto-image cap, image self-test
@@ -1242,7 +1246,11 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 - 🧭 **Explore canvas**: asset cleanup never corrupts the DB · dry runs made read-only
 - 🧭 **Course syllabus**: three view modes (focus / split / overlay) · previous & next knowledge point · multi-grade picking · disabled means withdrawn · shorter toolbar labels
 - 🏷 **Master-data terminology**: subject → course → chapter → section → knowledge point unified · one source for the subject list · shared subject icons and grade separators
-- 🧪 **Quality gates**: full regression & offline assertions · import fault injection · inactive-course & terminology regressions · LF line endings enforced (.gitattributes) · byte-reproducible dist
+- 🧪 **Stability & privacy**: existing behaviour survives the upgrade · fully usable offline · interrupted bulk imports keep what already succeeded and group errors by cause
+- 🧭 **Syllabus ordering**: drag to order subjects (admins only, school-wide) · drag courses (incl. cross-subject move) · recycle-bin view (restore / delete permanently)
+- 🗑 **Question recycle bin**: soft delete is restorable · preview before permanent delete · media folders and KP links cleaned up together
+- 🛡 **Master-data protection**: subjects with courses are protected · built-in question types locked · custom types protected by active questions
+- 🧠 **Default subject**: derived from the user's teaching scope instead of the first list item (consumed from the API `default` field)
 ### v7.x – v9.1.0
 
 > Merged section: v9.1.0 and v7.x – v9.0.0 updates (reverse chronological).

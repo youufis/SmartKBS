@@ -66,12 +66,16 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const [saveDone, setSaveDone] = useState(false)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [subjects, setSubjects] = useState<string[]>([])
+  const [subjectDefault, setSubjectDefault] = useState('')
   const [gradeOptions, setGradeOptions] = useState<string[]>([])
 
   // 从后端加载课程列表和年级列表
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
-      if (data?.subjects?.length > 0) setSubjects(data.subjects)
+      if (data?.subjects?.length > 0) {
+        setSubjects(data.subjects)
+        setSubjectDefault(data.default || data.subjects[0])
+      }
     }).catch(() => {})
     // 年级下拉取实际有在读学生的年级（/config/grades 是 K12 主数据，含本校没有的年级）
     fetchGrades().then((list) => { if (list.length > 0) setGradeOptions(list) }).catch(() => {})
@@ -219,7 +223,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     try {
       const formData = new FormData()
       formData.append('file', uploadFile!)
-      formData.append('subject', values.subject || subjects[0] || '')
+      formData.append('subject', values.subject || subjectDefault || subjects[0] || '')
       formData.append('grade', Array.isArray(values.grade) ? values.grade.join('|') : (values.grade || ''))
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'true')

@@ -97,11 +97,15 @@ const InteractionPage: React.FC = () => {
   const [quizPage, setQuizPage] = useState(1)
   const [quizPageSize, setQuizPageSize] = useState(10)
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+  const [subjectDefault, setSubjectDefault] = useState('')
 
   // 从系统配置加载课程列表
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
-      if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
+      if (data?.subjects?.length > 0) {
+        setSubjectOptions(data.subjects)
+        setSubjectDefault(data.default || data.subjects[0])
+      }
     }).catch((err) => { reportLoadError(err, { key: 'interaction.subjects' }) })
   }, [])
 
@@ -686,7 +690,7 @@ const InteractionPage: React.FC = () => {
             <Button icon={<RobotOutlined />} onClick={() => {
               setAiQuizModal(true); setAiQuizResult(null)
               aiQuizForm.resetFields()
-              aiQuizForm.setFieldValue('subject', subjectOptions[0] || '')
+              aiQuizForm.setFieldValue('subject', subjectDefault || subjectOptions[0] || '')
             }}>
               AI {t('createQuiz')}
             </Button>
@@ -1189,7 +1193,7 @@ const InteractionPage: React.FC = () => {
               subject={aiQuizSubject}
             />
           </Form.Item>
-          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
+          <Form.Item name="subject" label={t('subject')} initialValue={subjectDefault || subjectOptions[0] || ''}>
             <Select>
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>

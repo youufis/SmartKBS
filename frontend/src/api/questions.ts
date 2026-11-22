@@ -31,6 +31,87 @@ export async function generateQuestions(req: QuestionGenerateRequest): Promise<Q
   return runAiTask<QuestionGenerateResponse>('/api/questions/generate-async', req);
 }
 
+/* ══════════ 彻底删除（回收站 → 物理删除）══════════ */
+
+export interface PurgeCleanup {
+  /** 会连带清掉的知识点连边条数 */
+  kp_edges: number;
+  live_files: number;
+  archived_dirs: number;
+  archived_files: number;
+}
+
+export interface PurgeBlocker {
+  /** not_found | not_in_recycle_bin | not_owner | in_use | in_wrong_book */
+  kind: string;
+  exams?: string[];
+  practices?: string[];
+  entries?: number;
+  students?: number;
+}
+
+export interface PurgeItem {
+  id: number;
+  type?: string;
+  subject?: string;
+  status?: string;
+  creator_username?: string;
+  updated_at?: string;
+  title?: string;
+  purgeable: boolean;
+  blockers: PurgeBlocker[];
+  cleanup: PurgeCleanup;
+}
+
+export interface PurgePreviewResponse {
+  items: PurgeItem[];
+  purgeable: number;
+  blocked: number;
+}
+
+export interface PurgeResponse {
+  success: boolean;
+  deleted: number;
+  deleted_ids: number[];
+  skipped: { id: number; kind: string; blockers: PurgeBlocker[] }[];
+  media: { live_removed: number; archived_removed: number; files: number };
+}
+
+/** 彻底删除前把"能删哪些、为什么删不掉、连带清什么"摊开（判定与执行同源） */
+export async function purgePreview(ids: number[]): Promise<PurgePreviewResponse> {
+  const { data } = await apiClient.post('/api/questions/purge/preview', { ids });
+  return data;
+}
+
+/** 物理删除回收站题目（后端要求 confirm，不可撤销） */
+export interface QuestionRestoreSkipped {
+  id: number;
+  /** not_found | already_active | not_owner */
+  kind: string;
+}
+
+export interface QuestionRestoreResponse {
+  success: boolean;
+  restored: number;
+  restored_ids: number[];
+  skipped: QuestionRestoreSkipped[];
+  /** 搬回本题目录的归档配图目录数 */
+  media_dirs_restored: number;
+  /** 按题目知识点标签重新连上边的题数 */
+  kp_relinked: number;
+}
+
+/** 从回收站还原试题（status 改回 active，配图目录搬回、知识点连边重建） */
+export async function restoreQuestions(ids: number[]): Promise<QuestionRestoreResponse> {
+  const { data } = await apiClient.post('/api/questions/restore', { ids });
+  return data;
+}
+
+export async function purgeQuestions(ids: number[]): Promise<PurgeResponse> {
+  const { data } = await apiClient.post('/api/questions/purge', { ids, confirm: true });
+  return data;
+}
+
 /** AI 生成试题（含SVG配图+公式+自动生图，异步任务版） */
 export async function generateQuestionsWithMedia(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
   return runAiTask<QuestionGenerateResponse>('/api/questions/generate-with-media-async', req);
@@ -46,6 +127,8 @@ export async function listQuestions(params?: {
   kp_state?: string;
   start_date?: string;
   end_date?: string;
+  /** active=在用（默认）、deleted=回收站、all=全部 */
+  status?: string;
   page?: number;
   page_size?: number;
 }, opts?: { signal?: AbortSignal }): Promise<QuestionListResponse> {

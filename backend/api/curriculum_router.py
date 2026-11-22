@@ -2210,12 +2210,13 @@ async def list_bindable_candidates(
 # ═══════════════════════════════════════════════════════════
 
 class ReorderItem(BaseModel):
-    """排序项：parent_id / chapter_id 只有显式传了才改，不传就是"只改序号"。"""
-    type: str  # "chapter" | "knowledge_point"
+    """排序项：parent_id / chapter_id / subject 只有显式传了才改，不传就是"只改序号"。"""
+    type: str  # "chapter" | "knowledge_point" | "course"
     id: int
     sort_order: int
-    parent_id: int | None = None   # 章节新父级ID（显式传 null = 移到顶层）
+    parent_id: int | None = None   # 章节新父级ID（显式传 null = 顶层）
     chapter_id: int | None = None  # 知识点新所属章节ID
+    subject: str | None = None     # 课程新学科（跨学科拖动课程时才传）
 
     def sets_parent(self) -> bool:
         return "parent_id" in self.model_fields_set
@@ -2223,15 +2224,21 @@ class ReorderItem(BaseModel):
     def sets_chapter(self) -> bool:
         return "chapter_id" in self.model_fields_set
 
+    def sets_subject(self) -> bool:
+        return "subject" in self.model_fields_set
+
 
 class ReorderRequest(BaseModel):
     """拖动排序请求"""
     items: list[ReorderItem]
 
 
-@router.put("/reorder", summary="拖动排序章节/知识点")
+@router.put("/reorder", summary="拖动排序课程/章节/知识点")
 async def reorder_nodes(req: ReorderRequest, request: Request):
-    """拖动树节点后批量更新排序（教师/管理员），支持同级重排与跨层级移动。
+    """拖动后批量更新排序（教师/管理员），支持同级重排与跨层级移动。
+
+    type 支持 course（左侧栏课程）、chapter、knowledge_point（右侧树）。课程这一支
+    还允许显式带 subject，用来表达"把这门课拖到别的学科里"这个手势。
 
     两条修正（都是"章节一拖就错乱"的直接原因）：
     1. 旧实现无条件 `SET parent_id=?`，而前端同级重排只发序号，一次拖动就把整组
@@ -2299,6 +2306,42 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
                 "UPDATE knowledge_points SET sort_order=?, chapter_id=?, updated_at=? WHERE id=?",
                 (item.sort_order, chapter_id, now, item.id),
             ))
+        elif item.type == "course":
+            co = execute_query_one(
+                "SELECT id, name, subject, grade, status FROM courses WHERE id=?", (item.id,))
+            if not co:
+                rejected.append({"id": item.id, "type": "course", "reason": "课程不存在"})
+                continue
+            denial = _course_edit_denial(user, co)
+            if denial:
+                rejected.append({"id": item.id, "type": "course", "reason": denial})
+                continue
+            subject = str(co.get("subject") or "")
+            sql = "UPDATE courses SET sort_order=?, updated_at=? WHERE id=?"
+            params: tuple = (item.sort_order, now, item.id)
+            if item.sets_subject():
+                # 跨学科拖动 = 顺手改归属，会连带影响这门课之后 AI 出题落到哪个学科、
+                # 题库与统计的学科筛选，以及"谁还有权维护它"，所以必须校验到目标学科。
+                target = str(item.subject or "").strip()
+                if not target:
+                    rejected.append({"id": item.id, "type": "course",
+                                     "reason": "跨学科移动必须给出目标学科（清空学科请走课程编辑）"})
+                    continue
+                try:
+                    from backend.subject_config import require_subject
+                    target = require_subject(target)
+                except ValueError as e:
+                    rejected.append({"id": item.id, "type": "course", "reason": str(e)})
+                    continue
+                denial = _course_edit_denial(user, {**co, "subject": target})
+                if denial:
+                    rejected.append({"id": item.id, "type": "course",
+                                     "reason": f"移动到「{target}」后被拒：{denial}"})
+                    continue
+                subject = target
+                sql = "UPDATE courses SET sort_order=?, subject=?, updated_at=? WHERE id=?"
+                params = (item.sort_order, subject, now, item.id)
+            plans.append((sql, params))
         else:
             rejected.append({"id": item.id, "type": item.type, "reason": "类型无效"})
 
@@ -2313,9 +2356,68 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
             cur.execute(sql, params)
 
     updated = {"chapters": sum(1 for sql, _ in plans if sql.startswith("UPDATE chapters")),
-               "knowledge_points": sum(1 for sql, _ in plans if sql.startswith("UPDATE knowledge_points"))}
+               "knowledge_points": sum(1 for sql, _ in plans if sql.startswith("UPDATE knowledge_points")),
+               "courses": sum(1 for sql, _ in plans if sql.startswith("UPDATE courses"))}
     logger.info(f"用户 {user['username']} 拖动排序: {updated}")
     return {"message": "排序已更新", "updated": updated}
+
+
+class SubjectReorderRequest(BaseModel):
+    """学科显示顺序（完整清单，按想要的先后排好）"""
+    subjects: list[str]
+
+
+@router.put("/subjects/reorder", summary="拖动排序学科分组（管理员）")
+async def reorder_subjects(req: SubjectReorderRequest, request: Request):
+    """写入学科显示顺序。
+
+    为什么只给管理员：这个顺序学生端课程中心、进度总览和全站约 20 处学科下拉都会跟随，
+    属于全校口径；课程顺序则按任教范围放开给教师（走 _course_edit_denial）。
+
+    成员的真相仍然是 system_config.json 的 SUBJECTS，subject_order 表只回答"谁排在前面"：
+      · 传进来的名字必须都是已配置学科 —— 否则等于绕过配置页凭空造学科；
+      · 本次没提到的学科（侧栏只显示有课的分组，没课的那些看不见）按现有顺序追加在末尾；
+      · 整表重写顺带清掉已删学科的孤儿行。
+    """
+    user = get_current_user(request)
+    if user.get("role", 2) != 0:
+        raise HTTPException(status_code=403,
+                            detail="仅管理员可以调整学科顺序（该顺序对全校学生和教师同时生效）")
+    from backend.subject_config import (get_subject_members, get_subjects,
+                                        invalidate_subject_order_cache)
+
+    names: list[str] = []
+    for raw in req.subjects or []:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        if name in names:
+            raise HTTPException(status_code=400, detail=f"学科重复：{name}")
+        names.append(name)
+    if not names:
+        raise HTTPException(status_code=400, detail="学科列表为空")
+
+    members = get_subject_members()
+    unknown = [n for n in names if n not in members]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"以下学科不在系统学科配置中，请先在系统配置里添加：{'、'.join(unknown)}")
+
+    ordered = names + [m for m in get_subjects() if m not in set(names)]
+    now = _now()
+    with get_transaction() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM subject_order")
+        for idx, name in enumerate(ordered):
+            cur.execute(
+                "INSERT INTO subject_order (name, sort_order, updated_at) VALUES (?, ?, ?)",
+                (name, idx * 100, now),
+            )
+    invalidate_subject_order_cache()
+    logger.info(f"管理员 {user['username']} 调整学科顺序: {ordered}")
+    return {"message": "学科顺序已更新", "subjects": ordered}
+
 
 # ═══════════════════════════════════════════════════════════
 # 学习进度

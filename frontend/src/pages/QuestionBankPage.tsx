@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Layout, Card, Table, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image, DatePicker, Dropdown, Badge } from 'antd'
+import { Layout, Card, Table, Button, Modal, Form, Input, Select, Segmented, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image, DatePicker, Dropdown, Badge } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
   LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined, TagsOutlined,
-  BarChartOutlined, ExclamationCircleOutlined,
+  BarChartOutlined, ExclamationCircleOutlined, UndoOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -74,6 +74,7 @@ const DIFFICULTY_LABELS: Record<string, string> = {
 }
 
 let subjectOptions: string[] = []
+let subjectDefault = ''
 
 /** 列表筛选条件（同时是 URL 下钻参数的载体，见 filtersFromQuery） */
 interface QBFilters {
@@ -86,10 +87,12 @@ interface QBFilters {
   keyword?: string
   start_date?: string
   end_date?: string
+  /** 回收站视图：'deleted' = 只看已软删的题；不设 = 在用题 */
+  status?: string
 }
 
 const FILTER_KEYS: (keyof QBFilters)[] = [
-  'type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'kp_state', 'keyword', 'start_date', 'end_date',
+  'type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'kp_state', 'keyword', 'start_date', 'end_date', 'status',
 ]
 
 /** 支持从统计页下钻：/question-bank?type=...&creator=...&keyword=... */
@@ -144,6 +147,7 @@ const QuestionBankPage: React.FC = () => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) {
         subjectOptions = data.subjects
+        subjectDefault = data.default || data.subjects[0]
       }
     }).catch((err) => { reportLoadError(err, { key: 'questionBank.subjects' }) })
   }, [])
@@ -202,6 +206,10 @@ const QuestionBankPage: React.FC = () => {
   // 多选批量删除：只作用于当前页可见行（翻页后自动剔除不可见 id，见下方 effect）
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [batchDeleting, setBatchDeleting] = useState(false)
+  // 回收站：计数只用来在视图切换上标出积压量，彻底删除时才用
+  const [recycleTotal, setRecycleTotal] = useState(0)
+  const [purging, setPurging] = useState(false)
+  const [restoring, setRestoring] = useState(false)
 
   // ── 编辑弹窗 ──
   const [editModal, setEditModal] = useState(false)
@@ -252,6 +260,15 @@ const QuestionBankPage: React.FC = () => {
   useEffect(() => {
     loadQuestions()
   }, [loadQuestions])
+
+  // 回收站积压多少道：只查 total（page_size=1），标在视图切换上，别让人靠猜
+  const loadRecycleTotal = useCallback(async () => {
+    try {
+      const res = await questionsApi.listQuestions({ status: 'deleted', page: 1, page_size: 1 })
+      setRecycleTotal(res.total ?? 0)
+    } catch { /* 次要数据：拿不到就不显示数字，不影响列表 */ }
+  }, [])
+  useEffect(() => { void loadRecycleTotal() }, [loadRecycleTotal])
 
   // 列表一变（翻页/改筛选/删完刷新）就把不在这一页的 id 从选择里剔掉：
   // 否则"已选 30 道"里混着一屏看不见的题，删除结果永远对不上号
@@ -717,6 +734,173 @@ const QuestionBankPage: React.FC = () => {
     })
   }
 
+  // ── 彻底删除（回收站 → 物理删除，不可撤销）──
+  /** 后端按条返回 kind，文案在前端拼：英文界面才不会露出中文兜底 */
+  const describePurgeBlocker = (b?: questionsApi.PurgeBlocker): string => {
+    if (!b) return t('purgeSkipOther')
+    switch (b.kind) {
+      case 'not_found':
+        return t('purgeSkipNotFound')
+      case 'not_in_recycle_bin':
+        return t('purgeSkipNotRecycle')
+      case 'not_owner':
+        return t('purgeSkipNotOwner')
+      case 'in_use':
+        return t('purgeSkipInUse', {
+          names: [...(b.exams || []), ...(b.practices || [])].slice(0, 3).join('、') || '-',
+        })
+      case 'in_wrong_book':
+        return t('purgeSkipWrongBook', { entries: b.entries ?? 0, students: b.students ?? 0 })
+      default:
+        return t('purgeSkipOther')
+    }
+  }
+
+  /**
+   * 先拉预览再弹确认：判定与执行共用后端同一份函数，所以这里列出的"能删/不能删"
+   * 与点确认后的结果一致。彻底删除不可撤销，绝不能凭勾选数直接删。
+   */
+  const handlePurge = async (ids: number[]) => {
+    if (ids.length === 0) {
+      message.warning(t('bulkDeleteSelectFirst'))
+      return
+    }
+    setPurging(true)
+    let preview: questionsApi.PurgePreviewResponse
+    try {
+      preview = await questionsApi.purgePreview(ids)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('purgePreviewFailed'))
+      setPurging(false)
+      return
+    }
+    setPurging(false)
+
+    const ok = preview.items.filter((i) => i.purgeable)
+    const blocked = preview.items.filter((i) => !i.purgeable)
+    const edges = ok.reduce((n, i) => n + (i.cleanup?.kp_edges || 0), 0)
+    const files = ok.reduce(
+      (n, i) => n + (i.cleanup?.live_files || 0) + (i.cleanup?.archived_files || 0), 0)
+
+    modalApi.confirm({
+      title: t('purgeConfirmTitle', { count: ok.length }),
+      icon: <ExclamationCircleOutlined />,
+      width: 620,
+      okText: t('purgeOk'),
+      okType: 'danger',
+      cancelText: t('cancel'),
+      okButtonProps: { disabled: ok.length === 0 },
+      content: (
+        <div style={{ maxHeight: 340, overflow: 'auto' }}>
+          <Typography.Paragraph type="danger" style={{ fontSize: 12, marginBottom: 6 }}>
+            {t('purgeConfirmDesc')}
+          </Typography.Paragraph>
+          {ok.length > 0 && (
+            <ul style={{ paddingLeft: 18, margin: '0 0 6px' }}>
+              {ok.slice(0, 12).map((i) => (
+                <li key={i.id} style={{ fontSize: 12 }}>
+                  #{i.id} {(i.title || '-').slice(0, 40)}
+                  <Typography.Text type="secondary">
+                    （{TYPE_LABELS[i.type || ''] || i.type || '-'}·{i.subject || '-'}）
+                  </Typography.Text>
+                </li>
+              ))}
+              {ok.length > 12 && (
+                <li style={{ fontSize: 12 }}>{t('purgeMore', { n: ok.length - 12 })}</li>
+              )}
+            </ul>
+          )}
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('purgeCleanup', { edges, files })}
+          </Typography.Text>
+          {blocked.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <Typography.Text style={{ fontSize: 12 }}>
+                {t('purgeBlockedNote', { count: blocked.length })}
+              </Typography.Text>
+              <ul style={{ paddingLeft: 18, margin: '2px 0 0' }}>
+                {blocked.slice(0, 8).map((i) => (
+                  <li key={i.id} style={{ fontSize: 12 }}>
+                    #{i.id} {(i.title || '').slice(0, 24) || '-'} — {i.blockers.map(describePurgeBlocker).join('；')}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      ),
+      onOk: async () => {
+        if (ok.length === 0) return
+        setPurging(true)
+        try {
+          const res = await questionsApi.purgeQuestions(ids)
+          const skipped = res.skipped || []
+          const why = skipped
+            .map((x) => `#${x.id} ${describePurgeBlocker(x.blockers?.[0] || { kind: x.kind })}`)
+            .join('；')
+          if (res.deleted > 0 && skipped.length === 0) {
+            message.success(t('purgeDone', { count: res.deleted, files: res.media?.files ?? 0 }))
+          } else if (res.deleted > 0) {
+            message.warning(t('purgePartial', { count: res.deleted, detail: why }), 10)
+          } else {
+            message.warning(t('purgeNone', { detail: why }), 10)
+          }
+          setSelectedRowKeys([])
+          loadQuestions()
+          void loadRecycleTotal()
+        } catch (err: any) {
+          message.error(err?.response?.data?.detail || t('purgeFailed'))
+        } finally {
+          setPurging(false)
+        }
+      },
+    })
+  }
+
+  // ── 从回收站还原 ──
+  /**
+   * 还原比彻底删除轻：不改内容，只把 status 改回 active，后端顺手把归档的配图目录搬回、
+   * 按题目自带标签重建知识点连边，所以这里不需要预览清单，说清数量即可。
+   */
+  const handleRestore = (ids: number[]) => {
+    if (ids.length === 0) {
+      message.warning(t('bulkDeleteSelectFirst'))
+      return
+    }
+    modalApi.confirm({
+      title: t('restoreConfirmTitle', { count: ids.length }),
+      icon: <ExclamationCircleOutlined />,
+      content: t('restoreConfirmDesc'),
+      okText: t('restoreOk'),
+      cancelText: t('cancel'),
+      onOk: async () => {
+        setRestoring(true)
+        try {
+          const res = await questionsApi.restoreQuestions(ids)
+          const skipped = res.skipped || []
+          const why = skipped
+            .map((x) => `#${x.id} ${x.kind === 'already_active' ? t('restoreSkipAlready')
+              : x.kind === 'not_owner' ? t('restoreSkipNotOwner') : t('restoreSkipGone')}`)
+            .join('；')
+          if (res.restored > 0 && skipped.length === 0) {
+            message.success(t('restoreDone', { count: res.restored }))
+          } else if (res.restored > 0) {
+            message.warning(t('restorePartial', { count: res.restored, detail: why }), 10)
+          } else {
+            message.warning(t('restoreNone', { detail: why }), 10)
+          }
+          setSelectedRowKeys([])
+          loadQuestions()
+          void loadRecycleTotal()
+        } catch (err: any) {
+          message.error(err?.response?.data?.detail || t('restoreFailed'))
+        } finally {
+          setRestoring(false)
+        }
+      },
+    })
+  }
+
   // ── 表格列定义 ──
   const rawColumns = [
     {
@@ -857,6 +1041,32 @@ const QuestionBankPage: React.FC = () => {
         // 权限：管理员（role=0）可操作全部，教师只能操作自己的（与勾选框同一口径）
         const canEdit = canOperate(record)
         if (!canEdit) return <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('onlyCreatorCanOperate')}</span>
+        if (filters.status === 'deleted') {
+          // 回收站里不给"编辑/配图/再软删"，只给还原与彻底删除这两个真实可用的动作
+          return (
+            <Space size="small">
+              <Tooltip title={t('restore')}>
+                <Button
+                  type="link"
+                  size="small"
+                  loading={restoring}
+                  icon={<UndoOutlined />}
+                  onClick={() => handleRestore([record.id])}
+                />
+              </Tooltip>
+              <Tooltip title={t('purge')}>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  loading={purging}
+                  icon={<DeleteOutlined />}
+                  onClick={() => { void handlePurge([record.id]) }}
+                />
+              </Tooltip>
+            </Space>
+          )
+        }
         return (
           <Space size="small">
             <Tooltip title={t('editQuestion')}>
@@ -954,7 +1164,7 @@ const QuestionBankPage: React.FC = () => {
                         form={generateForm}
                         layout="vertical"
                         initialValues={{
-                          subject: extractSubject || subjectOptions[0] || '',
+                          subject: extractSubject || subjectDefault || subjectOptions[0] || '',
                           question_type: 'single',
                           count: 5,
                           difficulty: 'medium',
@@ -1156,7 +1366,7 @@ const QuestionBankPage: React.FC = () => {
                             beforeUpload={async (file) => {
                               const fd = new FormData()
                               fd.append('file', file)
-                              fd.append('subject', extractSubject || subjectOptions[0] || '')
+                              fd.append('subject', extractSubject || subjectDefault || subjectOptions[0] || '')
                               fd.append('difficulty', extractDifficulty)
                               setExtracting(true)
                               setExtractError(null)
@@ -1263,6 +1473,21 @@ const QuestionBankPage: React.FC = () => {
         <Row gutter={12} align="middle" style={{ marginTop: 8 }}>
           <Col>
             <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}><FilterOutlined /> {t('filter')}：</span>
+          </Col>
+          <Col>
+            {/* 在用 / 回收站两个视图：回收站里的题不会出现在题库列表、组卷与练习中 */}
+            <Segmented
+              value={filters.status === 'deleted' ? 'deleted' : 'active'}
+              onChange={(v) => {
+                setFilters(f => ({ ...f, status: v === 'deleted' ? 'deleted' : undefined }))
+                setSelectedRowKeys([])
+                setPage(1)
+              }}
+              options={[
+                { value: 'active', label: t('viewActive') },
+                { value: 'deleted', label: recycleTotal > 0 ? t('viewRecycleCount', { n: recycleTotal }) : t('viewRecycle') },
+              ]}
+            />
           </Col>
           <Col span={3}>
             <Select
@@ -1382,11 +1607,24 @@ const QuestionBankPage: React.FC = () => {
               <Typography.Text style={{ fontSize: 13 }}>
                 <DeleteOutlined /> {t('selectedCount', { count: selectedRowKeys.length })}
               </Typography.Text>
-              <Button danger size="small" loading={batchDeleting} onClick={handleBulkDelete}>
-                {t('bulkDelete')}
-              </Button>
+              {filters.status === 'deleted' ? (
+                <>
+                  <Button size="small" loading={restoring} icon={<UndoOutlined />} onClick={() => handleRestore(selectedRowKeys.map(Number))}>
+                    {t('bulkRestore')}
+                  </Button>
+                  <Button danger size="small" loading={purging} onClick={() => { void handlePurge(selectedRowKeys.map(Number)) }}>
+                    {t('bulkPurge')}
+                  </Button>
+                </>
+              ) : (
+                <Button danger size="small" loading={batchDeleting} onClick={handleBulkDelete}>
+                  {t('bulkDelete')}
+                </Button>
+              )}
               <Button size="small" onClick={() => setSelectedRowKeys([])}>{t('clearSelection')}</Button>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('bulkDeleteScopeTip')}</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {filters.status === 'deleted' ? t('bulkPurgeScopeTip') : t('bulkDeleteScopeTip')}
+              </Typography.Text>
             </Space>
           </Card>
         )}

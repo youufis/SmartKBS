@@ -2803,6 +2803,15 @@ def init_db():
             )""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_pctp_pub ON pc_templates(publisher_username, created_at)")
 
+            # 学科显示顺序（课程中心拖动排序，仅管理员可写）。
+            # 成员真相仍在 system_config.json 的 SUBJECTS，本表只回答「谁排在前面」：
+            # 没拖过时表是空的，顺序与引入本功能前逐位一致，因此可安全灰度。
+            c.execute("""CREATE TABLE IF NOT EXISTS subject_order (
+                name TEXT PRIMARY KEY,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )""")
+
             c.execute("""CREATE TABLE IF NOT EXISTS system_state (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT '',

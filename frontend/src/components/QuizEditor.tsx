@@ -47,7 +47,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   initialTitle = '', initialDescription = '', initialQuestions,
 }) => {
   const { t } = useTranslation('interaction')
-  const { subjects } = useSubjectOptions()      // 学科（与 AI 建测验同一份清单）
+  const { subjects, defaultSubject } = useSubjectOptions()      // 学科（与 AI 建测验同一份清单）
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState(initialDescription)
   const [subject, setSubject] = useState('')
@@ -77,7 +77,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
   // 学科默认取第一个（与 AI 建测验弹窗一致）：留空太容易漏填，落库就是空学科
   useEffect(() => {
-    if (open && !subject && subjects.length > 0) setSubject(subjects[0])
+    if (open && !subject && subjects.length > 0) setSubject(defaultSubject || subjects[0])
   }, [open, subjects, subject])
 
   /** 自动模式下的每题分值(合计恒为 100); 手动模式用题目自身的 score */

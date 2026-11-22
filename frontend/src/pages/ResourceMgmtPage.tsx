@@ -181,7 +181,7 @@ const ResourceMgmtPage: React.FC = () => {
       if (data?.subjects?.length > 0) {
         setAiSubjectOptions(data.subjects)
         // 默认带出首个学科（与同步练习一致，方便知识点下拉按学科联动过滤）；已有选择则不覆盖
-        setAiSubject((prev) => prev || data.subjects[0])
+        setAiSubject((prev) => prev || data.default || data.subjects[0])
       }
     }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.subjects' }) })
     apiClient.get('/api/scores/my-grades').then(({ data }) => {

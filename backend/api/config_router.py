@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from backend.docx_fonts import FONT_CHOICES
 from pydantic import BaseModel
 
@@ -831,6 +831,147 @@ def _validate_title_config(key: str, value: Any) -> None:
         prev_level, prev_points = level, points
 
 
+def _subject_course_counts() -> dict[str, dict[str, int]]:
+    """每个学科名下挂了几门课程：{学科: {"total": n, "active": n}}。
+
+    停用（inactive）的课程也算：它只是下架，恢复回来照样挂在这个学科名下。
+    """
+    out: dict[str, dict[str, int]] = {}
+    try:
+        from backend.database import execute_query
+        for name, total, active in execute_query(
+                """SELECT subject, COUNT(*), SUM(CASE WHEN status='active' THEN 1 ELSE 0 END)
+                   FROM courses WHERE subject IS NOT NULL AND subject != ''
+                   GROUP BY subject""") or []:
+            out[str(name).strip()] = {"total": int(total or 0), "active": int(active or 0)}
+    except Exception as e:
+        logger.warning(f"[学科] 统计各学科课程数失败，本次不做删除保护: {e}")
+    return out
+
+
+def _assert_subjects_keep_courses(new_subjects: list[str], source_label: str = "") -> None:
+    """有课程的学科不能从配置里消失 —— 删除和"改名"（删了重打）都算消失。
+
+    学科名是文本主键，改名入口本来就不该存在；把"删掉还挂着课程的学科"堵住，
+    等于同时堵住了误改名：想改名必须先把它下面的课程挪到别的学科。
+    """
+    from backend.subject_config import get_subject_members
+    removed = [x for x in get_subject_members() if x not in set(new_subjects)]
+    if not removed:
+        return
+    counts = _subject_course_counts()
+    blocked = [(n, counts[n]) for n in removed if counts.get(n, {}).get("total")]
+    if not blocked:
+        return
+    detail = "；".join(
+        f"「{n}」还有 {c['total']} 门课程（在用 {c['active']} 门）" for n, c in blocked)
+    prefix = source_label or "学科"
+    raise HTTPException(
+        status_code=400,
+        detail=f"{prefix}不能删除：{detail}。学科名是数据主键，删除会让这些课程变成「未分类」"
+               "孤儿、后续 AI 出题也会被拒；请先在「课程中心」把这些课程改到其它学科"
+               "（或彻底删除课程）再改这里。")
+
+
+def _question_type_counts() -> dict[str, dict[str, int]]:
+    """题型 → 题库题目数：{"total": 含回收站, "active": 在用}。
+
+    拦配置只看 active，total 用来在报错里说清"回收站还有几道"，避免老师以为数字对不上。
+    """
+    out: dict[str, dict[str, int]] = {}
+    try:
+        from backend.question_db import execute_query as q_exec
+        # question_db.execute_query 返回的是字典行（不是元组），列名必须显式起别名再按名取
+        for row in q_exec(
+                """SELECT type AS k, COUNT(*) AS n,
+                          SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_n
+                   FROM question_bank GROUP BY type""") or []:
+            key = str(row.get("k") or "").strip()
+            if not key:
+                continue
+            out[key] = {"total": int(row.get("n") or 0), "active": int(row.get("active_n") or 0)}
+    except Exception as e:
+        logger.warning(f"[题型] 统计各题型题目数失败，本次不做引用保护: {e}")
+    return out
+
+
+def _norm_qtypes(raw: Any) -> list[dict[str, str]]:
+    """把 QUESTION_TYPES 的多种写法统一成 [{"key":..,"label":..}]（老部署可能存成文本行）。"""
+    if isinstance(raw, str):
+        rows = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            k, sep, v = line.partition(":")
+            rows.append({"key": k.strip(), "label": (v.strip() if sep else k.strip()) or k.strip()})
+        return rows
+    out = []
+    for item in raw or []:
+        if isinstance(item, dict) and str(item.get("key", "")).strip():
+            k = str(item["key"]).strip()
+            out.append({"key": k, "label": str(item.get("label", "")).strip() or k})
+    return out
+
+
+def _assert_question_types_intact(new_types: list[dict[str, str]], source_label: str = "") -> None:
+    """默认题型不许改删；自定义题型只有题库里没题时才许改删。
+
+    三条口径：
+      · 默认题型（DEFAULT_CONFIG 那 7 项）只要当前配置里还有，就必须原样留着 ——
+        key 与显示名都不许动。删掉或改 key 都算"改名"，会让前端下拉、导出文档、
+        组卷评分的口径一起漂。
+      · 自定义题型被"在用题目"引用时不许改 key、不许改显示名、不许删：question_bank.type
+        存的就是这个 key，一改这些题就显示成未知题型、组卷也选不到。
+        回收站里的题只记日志不拦 —— 试题没有物理清除入口，拿待清理的行锁配置会成死循环；
+        残留行的题型标签由 question_labels 兜底表负责，不会显示成空白。
+      · 当前配置里已经没有的默认题型不强制补回 —— 规则只管"别把它删掉"，
+        不逼历史部署回填（有的学校本来就没有作文题）。
+    """
+    current = _norm_qtypes(load_config().get("QUESTION_TYPES"))
+    cur_by_key = {r["key"]: r for r in current}
+    new_by_key = {r["key"]: r for r in new_types}
+    defaults = {r["key"]: r["label"] for r in _norm_qtypes(DEFAULT_CONFIG["QUESTION_TYPES"])}
+
+    bad: list[str] = []
+    for key, label in defaults.items():
+        if key not in cur_by_key or key not in new_by_key:
+            if key in cur_by_key:
+                bad.append(f"默认题型「{cur_by_key[key]['label']}({key})」不能删除或改名")
+            continue
+        if new_by_key[key]["label"] != label and new_by_key[key]["label"] != cur_by_key[key]["label"]:
+            bad.append(f"默认题型「{key}」的显示名不能改（当前 {cur_by_key[key]['label']}，配置基准 {label}）")
+
+    counts = _question_type_counts()
+    for key, row in cur_by_key.items():
+        if key in defaults:
+            continue
+        c = counts.get(key, {})
+        n = int(c.get("active") or 0)          # 只按"在用题目"拦，理由见函数 docstring
+        trashed = max(int(c.get("total") or 0) - n, 0)
+        changed = key not in new_by_key or new_by_key[key]["label"] != row["label"]
+        if not n:
+            if trashed and changed:
+                logger.info(f"[题型] 「{row['label']}({key})」被移出/改名，回收站仍有 {trashed} 道"
+                            "该题型的题（不参与判分，标签走 question_labels 兜底表）")
+            continue
+        if key not in new_by_key:
+            bad.append(f"自定义题型「{row['label']}({key})」还有 {n} 道在用题目"
+                       + (f"（回收站另有 {trashed} 道）" if trashed else "") + "，不能删除")
+        elif new_by_key[key]["label"] != row["label"]:
+            bad.append(f"自定义题型「{row['label']}({key})」还有 {n} 道在用题目"
+                       + (f"（回收站另有 {trashed} 道）" if trashed else "") + "，显示名不能改")
+
+    if bad:
+        prefix = source_label or "题型"
+        raise HTTPException(
+            status_code=400,
+            detail=f"{prefix}不能这样改：" + "；".join(bad[:5])
+                   + ("…" if len(bad) > 5 else "")
+                   + "。默认题型是系统内置口径；自定义题型要改删，请先把该题型的在用题目"
+                     "改到别的题型或删除。")
+
+
 def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
     """C2: 校验并规范化配置更新; 未知键忽略(与旧行为一致)"""
     out: dict[str, Any] = {}
@@ -889,6 +1030,9 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                     raise HTTPException(
                         status_code=400,
                         detail="wrong_book_sources 必须包含 " + "、".join(missing) + "（考试是错题本的基本盘，不可关闭）")
+            # 学科：有课程的学科不能删（详见 _assert_subjects_keep_courses）
+            if key == "SUBJECTS":
+                _assert_subjects_keep_courses([x.strip() for x in value])
             # 关怀提醒是安全通道：服务端强制开启（notification_router.ALWAYS_ON_TYPES），
             # 保存时把 care 补回去，避免出现"列表里没有它、页面显示未勾选，但其实一直在发"的口径错乱
             if key == "enabled_notification_types" and "care" not in value:
@@ -912,6 +1056,8 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
             for i, item in enumerate(value):
                 if not isinstance(item, dict) or not str(item.get("key", "")).strip() or not str(item.get("label", "")).strip():
                     raise HTTPException(status_code=400, detail=f"QUESTION_TYPES 第 {i + 1} 项需包含 key 与 label")
+            # 默认题型不可改删、被引用的自定义题型不可改删（详见 _assert_question_types_intact）
+            _assert_question_types_intact(_norm_qtypes(value))
             out[key] = value
         elif key in ("news_rss_feeds", "news_rss_reserves"):
             # NW20: 名称→URL 字典（所见即所得）；停用=删行，空 URL 行读取时会被忽略
@@ -1166,6 +1312,12 @@ async def restore_config_from_source(req: ConfigRestoreRequest, request: Request
         raise HTTPException(status_code=400, detail="该文件不是有效配置（JSON 解析失败）")
     if not isinstance(data.get("SUBJECTS"), list) or not data["SUBJECTS"]:
         raise HTTPException(status_code=400, detail="该文件缺少学科列表（SUBJECTS），可能不是系统配置")
+    # 恢复也不能绕过"有课程的学科不能删"与"默认题型不能改删"：一次恢复就甩出孤儿数据
+    _assert_subjects_keep_courses(
+        [str(x).strip() for x in data["SUBJECTS"] if str(x).strip()],
+        source_label="这份备份")
+    if isinstance(data.get("QUESTION_TYPES"), (list, str)) and data.get("QUESTION_TYPES"):
+        _assert_question_types_intact(_norm_qtypes(data["QUESTION_TYPES"]), source_label="这份备份")
 
     before = load_config()
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1821,26 +1973,45 @@ async def update_title_config_api(req: ConfigUpdate, request: Request):
     return {"status": "ok"}
 
 
-@router.get("/subjects", summary="获取启用的学科列表")
-async def get_subjects(request: Request):
-    # U-CFG: 这些枚举页仅供已登录页面使用(匿名只有 /config/public)
-    get_current_user(request)
-    """从系统配置返回学科列表"""
+@router.get("/subjects", summary="获取启用的学科列表（含拖动后的显示顺序）")
+async def get_subjects(request: Request, counts: bool = Query(False)):
+    """从系统配置返回学科列表。
+
+    U-CFG: 这些枚举页仅供已登录页面使用(匿名只有 /config/public)
+
+    default 按"这个人教什么"算，不再等于 subjects 首位。前端约 14 处新建表单以前各自
+    抓 subjects[0] 当默认学科，于是配置数组的偶然顺序决定了 AI 出题、题库导入把题落到
+    哪门课；课程中心开放学科拖动排序后这个耦合必须断开，统一改读这里的 default。
+    """
+    user = get_current_user(request)
     from backend.subject_config import get_subjects, get_default_subject
-    return {
+    out = {
         "subjects": get_subjects(),
-        "default": get_default_subject(),
+        "default": get_default_subject(user.get("username")),
     }
+    if counts:
+        # 学科 → 挂课数：只有系统配置页需要（它据此把有课程的学科渲染成不可移除），
+        # 这个聚合要扫 courses 表，别绑在每个页面挂载都要打的请求上
+        out["course_counts"] = {n: c["total"] for n, c in _subject_course_counts().items()}
+    return out
 
 @router.get("/question-types", summary="获取启用的题型列表")
-async def get_question_types():
-    """从系统配置返回题型列表（管理员可在系统配置页面修改）"""
+async def get_question_types(counts: bool = Query(False)):
+    """从系统配置返回题型列表（管理员可在系统配置页面修改）。
+
+    counts=1 时额外下发每个题型在题库里的题目数与默认题型清单 —— 只有系统配置页需要，
+    这个聚合要扫 question_bank，别绑在每道题、每个页面挂载都要打的请求上。
+    """
     cfg = load_config()
     types = cfg.get("QUESTION_TYPES", [])
-    return {
+    out = {
         "types": types,
         "default": types[0] if types else {"key": "single", "label": "单选题"},
     }
+    if counts:
+        out["counts"] = {k: v["total"] for k, v in _question_type_counts().items()}
+        out["defaults"] = [r["key"] for r in _norm_qtypes(DEFAULT_CONFIG["QUESTION_TYPES"])]
+    return out
 
 @router.get("/grades", summary="获取年级列表")
 async def get_grades(request: Request, stage: str | None = None):

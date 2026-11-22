@@ -19,7 +19,7 @@ import {
   ArrowUpOutlined, ArrowDownOutlined,
   EyeOutlined, BulbOutlined, SoundOutlined, ThunderboltOutlined, PlayCircleOutlined,
   RestOutlined, InboxOutlined, StopOutlined,
-  ExpandAltOutlined, CompressOutlined,
+  ExpandAltOutlined, CompressOutlined, HolderOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import * as curriculumApi from '../api/curriculum'
@@ -95,6 +95,9 @@ const CurriculumPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
+  // 学科顺序是全校口径（学生端课程中心与全站学科下拉都会跟随），只放开给管理员；
+  // 课程顺序按任教范围放开给教师，越界由后端 _course_edit_denial 拒绝。
+  const isAdmin = user?.role === 'admin'
   // 知识点详情两种形态：内容区够宽 → 右栏内联卡片并排；不够宽 → 右侧**非模态**浮层。
   // 判据必须是实测宽度而不是窗口断点：全局导航 200 + 学科侧栏 260 会先吃掉 460px，
   // 1536（1920 @125%）实测只剩 1064，按 xxl=1600 判等于主流笔记本全都退化成遮罩抽屉。
@@ -1271,8 +1274,10 @@ const CurriculumPage: React.FC = () => {
 
   /** 目标顺序数组 -> 最小改动计划（缝隙不够时整组按步长重排，且只提交有变化的行） */
   const planForMove = (
-    type: 'chapter' | 'knowledge_point',
+    type: 'chapter' | 'knowledge_point' | 'course',
     targetList: any[], movedId: number, parentId: number | null,
+    /** 仅 type='course' 且真的在改归属时传：跨学科移动课程 */
+    subject?: string,
   ): curriculumApi.ReorderItem[] => {
     const idx = targetList.findIndex(x => x.id === movedId)
     if (idx < 0) return []
@@ -1281,7 +1286,9 @@ const CurriculumPage: React.FC = () => {
     const mk = (id: number, order: number): curriculumApi.ReorderItem => (
       type === 'chapter'
         ? { type: 'chapter', id, sort_order: order, parent_id: parentId }
-        : { type: 'knowledge_point', id, sort_order: order, chapter_id: parentId }
+        : type === 'knowledge_point'
+          ? { type: 'knowledge_point', id, sort_order: order, chapter_id: parentId }
+          : (subject ? { type: 'course', id, sort_order: order, subject } : { type: 'course', id, sort_order: order })
     )
     const want = orderBetween(prev, next)
     const fits = (prev === null || want > prev) && (next === null || want < next)
@@ -1784,6 +1791,219 @@ const CurriculumPage: React.FC = () => {
     groupedCourses.push({ subject: t('uncategorized'), courses: unmatchedCourses })
   }
 
+  // ── 侧栏拖动排序：学科（仅管理员）+ 课程（教师/管理员，可跨学科）──
+  // 与右侧章节树共用同一套中值算法（orderBetween/planForMove）。课程顺序只影响侧栏
+  // 和各处课程下拉，不必整树重拉，所以成功就地把新序号写回本地 courses（顺序判据与
+  // /tree 的 ORDER BY sort_order, id 一致）；失败才 loadTree 以服务端为准回滚。
+  type SideDrag =
+    | { kind: 'subject'; name: string }
+    | { kind: 'course'; id: number; subject: string }
+  const [sideDrag, setSideDrag] = useState<SideDrag | null>(null)
+  const [sideDrop, setSideDrop] = useState<{ key: string; pos: 'before' | 'after' | 'into' } | null>(null)
+  // 上移/下移默认不显示：满屏箭头既难看又抢宽度，悬停或键盘聚焦才出现
+  const [sideHover, setSideHover] = useState<string | null>(null)
+  const endSideDrag = () => { setSideDrag(null); setSideDrop(null) }
+  const uncategorizedLabel = t('uncategorized')
+  /** 可排序的学科分组：「未分类」是前端合成的桶，不在 SUBJECTS 里，
+   *  混进顺序表会被后端整批拒绝（"以下学科不在系统学科配置中：未分类"） */
+  const sortableSubjects = () =>
+    groupedCourses.map((g) => g.subject).filter((x) => x !== uncategorizedLabel)
+
+  /** 一门课当前落在哪个分组（与上面 groupedCourses 的判据保持同一份逻辑） */
+  const courseGroupOf = (course: Course): string => getCourseSubject(course) || uncategorizedLabel
+
+  /** 手柄/整行的拖起属性：key 用 kind 区分，落点判定只看 sideDrag，不读 dataTransfer */
+  const sideHandle = (payload: SideDrag) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      setSideDrag(payload)
+      e.dataTransfer.effectAllowed = 'move'
+      // Firefox 不给 setData 就不认这次拖拽
+      e.dataTransfer.setData('text/plain', payload.kind === 'subject' ? `s:${payload.name}` : `c:${payload.id}`)
+    },
+    onDragEnd: endSideDrag,
+  })
+
+  /** 落点没变就别 setState：dragover 每移动一像素都触发，整页重渲染会拖成卡顿 */
+  const markDrop = (key: string, pos: 'before' | 'after' | 'into') => {
+    setSideDrop((prev) => (prev && prev.key === key && prev.pos === pos ? prev : { key, pos }))
+  }
+
+  /** 落点：拖学科时按标题行上下半区插入；拖课程时标题行整体是「并入该组」，课程行按上下半区 */
+  const sideOver = (key: string, zone: 'subject' | 'course') => (e: React.DragEvent) => {
+    const payload = sideDrag
+    if (!payload) return
+    if (zone === 'subject') {
+      if (payload.kind === 'subject') {
+        if (!isAdmin || payload.name === key || key === uncategorizedLabel) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        const r = e.currentTarget.getBoundingClientRect()
+        markDrop(key, e.clientY < r.top + r.height / 2 ? 'before' : 'after')
+      } else if (isTeacherOrAdmin && key !== uncategorizedLabel) {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        markDrop(key, 'into')
+      }
+      return
+    }
+    if (payload.kind !== 'course' || !isTeacherOrAdmin) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const r = e.currentTarget.getBoundingClientRect()
+    markDrop(key, e.clientY < r.top + r.height / 2 ? 'before' : 'after')
+  }
+
+  /** 排序按钮默认不显示：满屏箭头既难看又抢宽度，改成悬停 / 触屏按下 / 键盘聚焦才显形。
+   *  隐藏用 width:0 + opacity:0 而不是 display:none —— 后者会把按钮从 Tab 序列里删掉，
+   *  键盘用户就再也够不到上移/下移；按钮拿到焦点时 onFocus 会把这一组展开回来。 */
+  const sideActionsStyle = (key: string): React.CSSProperties => {
+    const on = sideHover === key
+    return {
+      display: 'flex',
+      gap: 0,
+      flex: '0 0 auto',
+      width: on ? 'auto' : 0,
+      minWidth: on ? 'auto' : 0,
+      opacity: on ? 1 : 0,
+      overflow: 'hidden',
+      pointerEvents: on ? 'auto' : 'none',
+    }
+  }
+
+  const sideDropStyle = (key: string): React.CSSProperties => {
+    if (!sideDrop || sideDrop.key !== key) return {}
+    if (sideDrop.pos === 'into') return { background: '#e6f4ff', boxShadow: 'inset 0 0 0 1px #1677ff' }
+    return { boxShadow: sideDrop.pos === 'before' ? 'inset 0 2px 0 #1677ff' : 'inset 0 -2px 0 #1677ff' }
+  }
+
+  /** 学科顺序整表提交：侧栏只显示有课的分组，没课的学科按现有顺序补在尾部 */
+  const commitSubjectOrder = async (orderedVisible: string[]) => {
+    if (reorderingRef.current) { message.warning(t('sortInProgress')); endSideDrag(); return }
+    const visible = orderedVisible.filter((x) => x !== uncategorizedLabel)
+    const payload = [...visible, ...subjectOptions.filter((x) => !visible.includes(x))]
+    reorderingRef.current = true
+    try {
+      const { subjects } = await curriculumApi.reorderSubjects(payload)
+      setSubjectOptions(subjects)
+      message.success(t('subjectOrderUpdated'))
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || t('operationFailed'))
+    } finally {
+      reorderingRef.current = false
+      endSideDrag()
+    }
+  }
+
+  /** 课程顺序：targetList 是目标分组排好序后的数组（含被拖那条）；newSubject 仅在改归属时传 */
+  const commitCourseOrder = async (targetList: Course[], movedId: number, newSubject?: string) => {
+    if (reorderingRef.current) { message.warning(t('sortInProgress')); endSideDrag(); return }
+    const items = planForMove('course', targetList, movedId, null, newSubject)
+    if (!items.length) { endSideDrag(); return }
+    reorderingRef.current = true
+    try {
+      await curriculumApi.reorderNodes(items)
+      const byId = new Map(items.map((i) => [i.id, i] as const))
+      setCourses((prev) => prev
+        .map((c) => {
+          const it = byId.get(c.id)
+          if (!it) return c
+          return { ...c, sort_order: it.sort_order, ...(it.subject ? { subject: it.subject } : {}) }
+        })
+        .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0) || a.id - b.id))
+      message.success(t('sortUpdated'))
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || t('operationFailed'))
+      await loadTree()   // 失败以服务端为准，本地不猜
+    } finally {
+      reorderingRef.current = false
+      endSideDrag()
+    }
+  }
+
+  /** 跨学科 = 改归属，会连带影响出题学科与「谁还能维护这门课」，所以先确认再落库 */
+  const confirmCourseMove = (course: Course, target: string, targetList: Course[]) => {
+    if (target === uncategorizedLabel) {
+      message.warning(t('cannotDragToUncategorized'))
+      endSideDrag()
+      return
+    }
+    modalApi.confirm({
+      title: t('moveCourseToSubjectTitle', { name: course.name, subject: target }),
+      content: t('moveCourseToSubjectDesc'),
+      onOk: () => commitCourseOrder(targetList, course.id, target),
+      onCancel: endSideDrag,
+    })
+  }
+
+  const handleSubjectDrop = async (target: string, e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const payload = sideDrag
+    if (!payload || !isTeacherOrAdmin) { endSideDrag(); return }
+    if (payload.kind === 'subject' && !isAdmin) { endSideDrag(); return }
+    if (payload.kind === 'subject') {
+      const list = sortableSubjects().filter((x) => x !== payload.name)
+      const idx = list.indexOf(target)
+      if (idx < 0) { endSideDrag(); return }
+      list.splice(sideDrop?.pos === 'before' ? idx : idx + 1, 0, payload.name)
+      await commitSubjectOrder(list)
+      return
+    }
+    const course = findCourseById(payload.id)
+    if (!course) { endSideDrag(); return }
+    if (courseGroupOf(course) === target) { endSideDrag(); return }
+    const group = groupedCourses.find((g) => g.subject === target)
+    confirmCourseMove(course, target, [...(group?.courses || []), course])
+  }
+
+  const handleCourseDrop = async (target: Course, groupSubject: string, e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const payload = sideDrag
+    if (!payload || payload.kind !== 'course' || payload.id === target.id || !isTeacherOrAdmin) {
+      endSideDrag(); return
+    }
+    const course = findCourseById(payload.id)
+    if (!course) { endSideDrag(); return }
+    const base = (groupedCourses.find((g) => g.subject === groupSubject)?.courses || [])
+      .filter((c) => c.id !== payload.id)
+    const idx = base.findIndex((c) => c.id === target.id)
+    if (idx < 0) { endSideDrag(); return }
+    const at = sideDrop?.pos === 'before' ? idx : idx + 1
+    const list = [...base.slice(0, at), course, ...base.slice(at)]
+    if (courseGroupOf(course) !== groupSubject) {
+      confirmCourseMove(course, groupSubject, list)
+      return
+    }
+    await commitCourseOrder(list, course.id)
+  }
+
+  /** 触屏与键盘保底：HTML5 拖拽在移动端不触发，这里给上移/下移（与右侧树同一套语义） */
+  const moveSubjectSibling = (name: string, dir: -1 | 1) => {
+    const list = sortableSubjects()
+    const idx = list.indexOf(name)
+    const to = idx + dir
+    if (idx < 0 || to < 0 || to >= list.length) return
+    const next = [...list]
+    next[idx] = list[to]
+    next[to] = list[idx]
+    void commitSubjectOrder(next)
+  }
+
+  const moveCourseSibling = (course: Course, groupSubject: string, dir: -1 | 1) => {
+    const list = groupedCourses.find((g) => g.subject === groupSubject)?.courses || []
+    const idx = list.findIndex((c) => c.id === course.id)
+    const to = idx + dir
+    if (idx < 0 || to < 0 || to >= list.length) return
+    const next = [...list]
+    next[idx] = list[to]
+    next[to] = list[idx]
+    void commitCourseOrder(next, course.id)
+  }
+
   // 知识点详情面板的公共 props（宽屏内联 / 窄屏 Drawer 共用一份）
   // 知识点在当前课程树里的显示顺序（子章节在前、本章知识点在后，与 buildChapterNode 同序），
   // 连同祖先章节 key —— 跳转后要把路径展开，否则会"跳到了一个看不见的节点"
@@ -1895,7 +2115,7 @@ const CurriculumPage: React.FC = () => {
           >
             {isTeacherOrAdmin && (
               <Space orientation="vertical" style={{ width: '100%' }}>
-                {subjectOptions.length === 0 && user?.role === 'admin' && (
+                {subjectOptions.length === 0 && isAdmin && (
                   <Button
                     icon={<SettingOutlined />}
                     onClick={() => navigate('/system-config')}
@@ -1934,61 +2154,70 @@ const CurriculumPage: React.FC = () => {
               height: '100%',
             }}
           >
-            {/* 折叠/展开切换按钮 */}
+            {/* 顶栏：折叠按钮 + 「显示已停用课程」开关。
+               开关原先独占一行（48px + 一条分隔线），在 260px 宽的侧栏里很浪费；
+               折叠按钮那行本来就空着，合并后列表多出一行课程的空间。 */}
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
                 height: 48,
                 borderBottom: '1px solid var(--border-color)',
-                cursor: 'pointer',
                 color: 'var(--text-secondary)',
                 fontSize: 16,
-                // 课程树很长时，折叠按钮与下面的开关一起钉住，滚动不丢操作
+                // 课程树很长时顶栏钉住，滚动时折叠与开关都不丢
                 position: 'sticky',
                 top: 0,
                 zIndex: 6,
                 background: 'var(--bg-container)',
+                justifyContent: siderCollapsed ? 'center' : 'space-between',
+                gap: 8,
               }}
-              onClick={() => setSiderCollapsed(!siderCollapsed)}
             >
-              {siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              <div
+                onClick={() => setSiderCollapsed(!siderCollapsed)}
+                style={{
+                  width: siderCollapsed ? '100%' : 48,
+                  height: '100%',
+                  flex: '0 0 auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                {siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              </div>
+              {!siderCollapsed && isTeacherOrAdmin && (
+                <Tooltip title={`${t('showInactiveCourses')}：${t('showInactiveCoursesHint')}`}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 4 }}>
+                    <InboxOutlined
+                      onClick={() => setShowInactive((v) => !v)}
+                      style={{
+                        fontSize: 15,
+                        cursor: 'pointer',
+                        color: showInactive ? '#1677ff' : 'var(--text-tertiary)',
+                      }}
+                    />
+                    {inactiveCourses.length > 0 && (
+                      <Typography.Text type="secondary" style={{ fontSize: 11, lineHeight: 1 }}>
+                        {inactiveCourses.length}
+                      </Typography.Text>
+                    )}
+                    <Switch
+                      size="small"
+                      checked={showInactive}
+                      loading={inactiveLoading}
+                      onChange={setShowInactive}
+                    />
+                  </div>
+                </Tooltip>
+              )}
             </div>
 
             {/* 未折叠时显示完整导航 */}
             {!siderCollapsed && (
               <>
-                {/* 侧栏头部 */}
-                <div style={{
-                  padding: '12px 16px',
-                  borderBottom: '1px solid var(--border-color)',
-                  position: 'sticky',
-                  top: 48,
-                  zIndex: 5,
-                  background: 'var(--bg-container)',
-                }}>
-                  {isTeacherOrAdmin && (
-                    <Tooltip title={t('showInactiveCoursesHint')}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Switch
-                          size="small"
-                          checked={showInactive}
-                          loading={inactiveLoading}
-                          onChange={setShowInactive}
-                        />
-                        <Typography.Text
-                          type="secondary"
-                          style={{ fontSize: 12, cursor: 'pointer' }}
-                          onClick={() => setShowInactive((v) => !v)}
-                        >
-                          {t('showInactiveCourses')}
-                          {inactiveCourses.length > 0 ? `（${inactiveCourses.length}）` : ''}
-                        </Typography.Text>
-                      </div>
-                    </Tooltip>
-                  )}
-                </div>
 
                 {/* 课程分类列表 */}
                 <div style={{ padding: '8px 0' }}>
@@ -1996,74 +2225,155 @@ const CurriculumPage: React.FC = () => {
                     const isExpanded = expandedSubjects.includes(subject)
                     // 学科图标：全站共用一份映射；未配置的「未分类」桶保持中性 📂
                     const subjectIcon = subjectOptions.includes(subject) ? getSubjectEmoji(subject) : '📂'
+                    // 学科顺序影响全校（含学生端），手柄只给管理员；「未分类」是合成桶，不参与排序
+                    const canSortSubject = isAdmin && subject !== uncategorizedLabel
 
                     return (
                       <div key={subject} style={{ marginBottom: 2 }}>
-                        {/* 大类标题 — 可点击展开/收起 */}
+                        {/* 大类标题 — 点击展开/收起；管理员从手柄拖动排序，同时是课程的落点 */}
                         <div
                           onClick={() => toggleSubject(subject)}
+                          onDragOver={sideOver(subject, 'subject')}
+                          onDrop={(e) => { void handleSubjectDrop(subject, e) }}
                           style={{
-                            padding: '11px 16px',
+                            padding: '11px 12px 11px 16px',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 8,
+                            gap: 6,
                             fontSize: 15,
                             fontWeight: 700,
                             color: 'var(--text-primary)',
                             userSelect: 'none',
                             borderRadius: 0,
                             transition: 'all 0.2s',
+                            ...sideDropStyle(subject),
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)' }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                          onPointerDown={() => setSideHover(subject)}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)'; setSideHover(subject) }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; setSideHover(null) }}
                         >
-                          <span style={{ fontSize: 13, width: 20, textAlign: 'center', color: 'var(--text-tertiary)' }}>
+                          {canSortSubject && (
+                            <span
+                              {...sideHandle({ kind: 'subject', name: subject })}
+                              onClick={(e) => e.stopPropagation()}
+                              title={t('dragSubjectHint')}
+                              style={{ cursor: 'grab', fontSize: 12, color: 'var(--text-tertiary)', opacity: 0.55 }}
+                            >
+                              <HolderOutlined />
+                            </span>
+                          )}
+                          <span style={{ fontSize: 13, width: 16, textAlign: 'center', color: 'var(--text-tertiary)' }}>
                             {isExpanded ? <DownOutlined /> : <RightOutlined />}
                           </span>
                           <span style={{ fontSize: 18 }}>{subjectIcon}</span>
-                          <span style={{ flex: 1, letterSpacing: 1 }}>{subject}</span>
-                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          <span style={{ flex: 1, minWidth: 0, letterSpacing: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {subject}
+                          </span>
+                          {canSortSubject && (
+                            <span
+                              onClick={(e) => e.stopPropagation()}
+                              onFocus={() => setSideHover(subject)}
+                              onBlur={() => setSideHover(null)}
+                              style={sideActionsStyle(subject)}
+                            >
+                              <Tooltip title={t('moveUp')}>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  aria-label={t('moveUp')}
+                                  icon={<ArrowUpOutlined style={{ fontSize: 11 }} />}
+                                  onClick={() => moveSubjectSibling(subject, -1)}
+                                />
+                              </Tooltip>
+                              <Tooltip title={t('moveDown')}>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  aria-label={t('moveDown')}
+                                  icon={<ArrowDownOutlined style={{ fontSize: 11 }} />}
+                                  onClick={() => moveSubjectSibling(subject, 1)}
+                                />
+                              </Tooltip>
+                            </span>
+                          )}
+                          <Typography.Text type="secondary" style={{ fontSize: 12, flex: '0 0 auto' }}>
                             {subjectCourses.length}
                           </Typography.Text>
                         </div>
 
-                        {/* 课程列表（展开时显示） */}
+                        {/* 课程列表（展开时显示）：整行可拖（与文件页分组同风格），也可上移/下移 */}
                         {isExpanded && subjectCourses.map((course) => (
                           <div
                             key={course.id}
                             onClick={(e) => { e.stopPropagation(); handleSelectCourse(course.id) }}
+                            onDragOver={sideOver(`c_${course.id}`, 'course')}
+                            onDrop={(e) => { void handleCourseDrop(course, subject, e) }}
+                            {...(isTeacherOrAdmin
+                              ? sideHandle({ kind: 'course', id: course.id, subject })
+                              : {})}
                             style={{
-                              padding: '9px 16px 9px 48px',
+                              padding: '9px 12px 9px 48px',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: 8,
+                              gap: 6,
                               fontSize: 14,
                               color: activeCourseId === course.id ? '#1677ff' : '#333',
                               background: activeCourseId === course.id ? '#e6f4ff' : 'transparent',
                               borderRight: activeCourseId === course.id ? '3px solid #1677ff' : '3px solid transparent',
                               transition: 'all 0.2s',
+                              ...sideDropStyle(`c_${course.id}`),
                             }}
+                            onPointerDown={() => setSideHover(`c_${course.id}`)}
                             onMouseEnter={(e) => {
                               if (activeCourseId !== course.id) {
                                 e.currentTarget.style.background = 'var(--bg-layout)'
                               }
+                              setSideHover(`c_${course.id}`)
                             }}
                             onMouseLeave={(e) => {
                               if (activeCourseId !== course.id) {
                                 e.currentTarget.style.background = 'transparent'
                               }
+                              setSideHover(null)
                             }}
                           >
                             <BookOutlined style={{ fontSize: 14 }} />
-                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {course.name}
                             </span>
                             {isStudent && course.progress && (
                               <Typography.Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                                 {course.progress.completed}/{course.progress.total}
                               </Typography.Text>
+                            )}
+                            {isTeacherOrAdmin && (
+                              <span
+                                onClick={(e) => e.stopPropagation()}
+                                onFocus={() => setSideHover(`c_${course.id}`)}
+                                onBlur={() => setSideHover(null)}
+                                style={sideActionsStyle(`c_${course.id}`)}
+                              >
+                                <Tooltip title={t('moveUp')}>
+                                  <Button
+                                    type="text"
+                                    size="small"
+                                    aria-label={t('moveUp')}
+                                    icon={<ArrowUpOutlined style={{ fontSize: 11 }} />}
+                                    onClick={() => moveCourseSibling(course, subject, -1)}
+                                  />
+                                </Tooltip>
+                                <Tooltip title={t('moveDown')}>
+                                  <Button
+                                    type="text"
+                                    size="small"
+                                    aria-label={t('moveDown')}
+                                    icon={<ArrowDownOutlined style={{ fontSize: 11 }} />}
+                                    onClick={() => moveCourseSibling(course, subject, 1)}
+                                  />
+                                </Tooltip>
+                              </span>
                             )}
                           </div>
                         ))}

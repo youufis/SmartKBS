@@ -75,6 +75,7 @@ const DiscussionPage: React.FC = () => {
   const [editForm] = Form.useForm()
   const [aiForm] = Form.useForm()
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+  const [subjectDefault, setSubjectDefault] = useState('')
   const [discussionScope, setDiscussionScope] = useState<ActivityScopeValue>({
     target_scope: 'teacher_classes',
     target_grade: '',
@@ -91,7 +92,10 @@ const DiscussionPage: React.FC = () => {
   // 从系统配置加载课程列表
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
-      if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
+      if (data?.subjects?.length > 0) {
+        setSubjectOptions(data.subjects)
+        setSubjectDefault(data.default || data.subjects[0])
+      }
     }).catch((err) => { reportLoadError(err, { key: 'discussion.subjects' }) })
   }, [])
 
@@ -865,7 +869,7 @@ const DiscussionPage: React.FC = () => {
           <Form.Item name="topic" label={t('discussionTopic')} rules={[{ required: true, message: t('discussionTopicRequired') }]}>
             <Input placeholder={t('discussionTopicPlaceholder')} />
           </Form.Item>
-          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
+          <Form.Item name="subject" label={t('subject')} initialValue={subjectDefault || subjectOptions[0] || ''}>
             <Select>
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>

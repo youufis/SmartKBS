@@ -19,6 +19,8 @@ interface ComposeWizardProps {
   examId: number
   examTitle: string
   subjects: string[]
+  /** 默认学科：后端按本人任教学科算，不等于 subjects[0] */
+  defaultSubject?: string
   grades: string[]
   /** 当前卷子上已有几道题：选"替换"时要拿它做二次确认，防止一键删空 */
   existingCount?: number
@@ -32,6 +34,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   examId,
   examTitle,
   subjects,
+  defaultSubject,
   grades,
   existingCount = 0,
   initialSchool = "",
@@ -62,7 +65,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   const formInitialValues = {
     school_name: initialSchool,
     semester: initialSemester,
-    subject: subjects[0] || '',
+    subject: defaultSubject || subjects[0] || '',
     target_grade: [],
     duration: 45,
     type_configs: [

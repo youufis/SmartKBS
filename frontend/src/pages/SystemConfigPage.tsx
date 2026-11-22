@@ -3,6 +3,7 @@ import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { Card, Tabs, Form, Input, InputNumber, Button, Switch, Radio, Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip, Collapse } from 'antd'
 import { message, modalApi } from '../utils/feedback'
+import { swallowLoadError } from '../utils/loadError'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
@@ -659,6 +660,8 @@ const NOTIF_TYPE_FALLBACK: { value: string; in_use?: boolean }[] = [
 ]
 
 // ── 题型列表编辑器 ──
+// 后端 DEFAULT_CONFIG["QUESTION_TYPES"] 的键，仅用于接口不可用时兜底锁定（不是第二份真相）
+const BUILTIN_QTYPE_KEYS = ['single', 'multiple', 'true_false', 'short', 'fill', 'essay', 'subjective']
 // 存储格式仍是「每行 key:标签」的多行文本（后端契约不变），但界面上不再让人手写格式：
 // 点进弹窗按行增删，key 与显示名分开填，保存时再拼回文本。
 const parseQTypes = (text: string): { key: string; label: string }[] =>
@@ -681,18 +684,54 @@ const QuestionTypeEditor: React.FC<{
   const rows = useMemo(() => parseQTypes(value || ''), [value])
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<{ key: string; label: string }[]>([])
+  // 打开弹窗时现拉一次：默认题型清单 + 各题型在题库里的题目数（?counts=1 才带，别白扫）
+  const [qmeta, setQmeta] = useState<{ defaults: string[]; counts: Record<string, number> }>(
+    { defaults: [], counts: {} })
+  // 锁定信息没到齐之前一律按"锁住"渲染：否则弹窗刚开的几百毫秒里默认题型可删，
+  // 删完点保存会被后端连整页配置一起拒，报错和手上的动作对不上，很难看懂
+  const [qmetaReady, setQmetaReady] = useState(false)
 
-  const startEdit = () => {
+  const startEdit = async () => {
     setDraft(rows.length ? rows : [{ key: '', label: '' }])
+    setQmetaReady(false)
     setOpen(true)
+    try {
+      const { data } = await apiClient.get('/api/config/question-types', { params: { counts: 1 } })
+      setQmeta({ defaults: (data?.defaults || []) as string[], counts: (data?.counts || {}) as Record<string, number> })
+    } catch (err) {
+      // 次要数据：拿不到就按内置的 7 个默认题型兜底锁定，服务端仍会硬拦
+      swallowLoadError('题型引用清单（默认题型 / 各题型题目数）', err)
+      setQmeta({ defaults: BUILTIN_QTYPE_KEYS, counts: {} })
+    } finally {
+      setQmetaReady(true)
+    }
   }
   const patch = (i: number, part: 'key' | 'label', v: string) => {
     setDraft((prev) => prev.map((r, idx) => (idx === i ? { ...r, [part]: v } : r)))
+  }
+  /** 锁 = 默认题型，或该 key 在题库里还有题目（含回收站）；判据用行自己的 key，删行不会错位 */
+  const lockOf = (key: string) => {
+    const k = key.trim()
+    if (!k) return null
+    if (qmeta.defaults.includes(k)) return 'default' as const
+    const n = qmeta.counts[k] ?? 0
+    if (n > 0) return 'used' as const
+    // 还没拿到锁定信息：先按内置默认题型锁住，避免"可删的一闪"
+    return (!qmetaReady && BUILTIN_QTYPE_KEYS.includes(k)) ? 'default' as const : null
   }
   const commit = () => {
     const cleaned = draft
       .map((r) => ({ key: r.key.trim(), label: r.label.trim() }))
       .filter((r) => r.key)
+    // 兜一层：被锁的行（默认题型 / 已有题目）若不知怎么少了，按原位置补回来
+    const blocked: string[] = []
+    rows.forEach((r, i) => {
+      if (lockOf(r.key) && !cleaned.some((c) => c.key === r.key)) {
+        blocked.push(`${r.label}（${r.key}）`)
+        cleaned.splice(Math.min(i, cleaned.length), 0, { ...r })
+      }
+    })
+    if (blocked.length) message.warning(t('qtypeLockedRemoved', { names: blocked.join('、') }))
     const dup = cleaned.map((r) => r.key).filter((k, i, arr) => arr.indexOf(k) !== i)
     if (dup.length) {
       message.warning(t('qtypeDupKey', { keys: Array.from(new Set(dup)).join('、') }))
@@ -704,7 +743,7 @@ const QuestionTypeEditor: React.FC<{
 
   return (
     <>
-      <Button onClick={startEdit}>{rows.length ? t('qtypeEdit', { n: rows.length }) : t('qtypeAdd')}</Button>
+      <Button onClick={() => { void startEdit() }}>{rows.length ? t('qtypeEdit', { n: rows.length }) : t('qtypeAdd')}</Button>
       <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
         {rows.length ? rows.map((r) => `${r.label}（${r.key}）`).join('、') : t('qtypeEmpty')}
       </div>
@@ -715,30 +754,43 @@ const QuestionTypeEditor: React.FC<{
         onOk={commit}
         okText={t('saveShort')}
         cancelText={t('cancel')}
-        width={560}
+        width={600}
       >
         <div style={{ marginTop: 8 }}>
-          {draft.map((r, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <Input
-                value={r.key}
-                placeholder={t('qtypeKeyPlaceholder')}
-                style={{ width: 180 }}
-                onChange={(e) => patch(i, 'key', e.target.value)}
-              />
-              <Input
-                value={r.label}
-                placeholder={t('qtypeLabelPlaceholder')}
-                onChange={(e) => patch(i, 'label', e.target.value)}
-              />
-              <Button
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => setDraft((prev) => prev.filter((_, idx) => idx !== i))}
-              />
-            </div>
-          ))}
+          {draft.map((r, i) => {
+            const lock = lockOf(r.key)
+            const n = qmeta.counts[r.key] ?? 0
+            return (
+              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+                <Input
+                  value={r.key}
+                  placeholder={t('qtypeKeyPlaceholder')}
+                  style={{ width: 180 }}
+                  disabled={!!lock}
+                  onChange={(e) => patch(i, 'key', e.target.value)}
+                />
+                <Input
+                  value={r.label}
+                  placeholder={t('qtypeLabelPlaceholder')}
+                  style={{ flex: 1 }}
+                  disabled={!!lock}
+                  onChange={(e) => patch(i, 'label', e.target.value)}
+                />
+                {lock ? (
+                  <Tag color={lock === 'default' ? 'default' : 'warning'} style={{ marginTop: 4, whiteSpace: 'nowrap' }}>
+                    {lock === 'default' ? t('qtypeTagDefault') : t('qtypeTagUsed', { n })}
+                  </Tag>
+                ) : (
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => setDraft((prev) => prev.filter((_, idx) => idx !== i))}
+                  />
+                )}
+              </div>
+            )
+          })}
           <Button
             type="dashed"
             icon={<PlusOutlined />}
@@ -747,6 +799,9 @@ const QuestionTypeEditor: React.FC<{
           >
             {t('qtypeAddRow')}
           </Button>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
+            {t('qtypeLockHint')}
+          </div>
         </div>
       </Modal>
     </>
@@ -2320,6 +2375,8 @@ const SystemConfigPage: React.FC = () => {
   const [dirty, setDirty] = useState<string[]>([])      // 与已加载值不同的配置键
   const loadedRef = useRef<Record<string, unknown>>({}) // 上次加载/保存后的表单快照（脏值对比 + 放弃修改）
   const [meta, setMeta] = useState<ConfigMeta | null>(null)        // 后端校验元数据（取值范围/长度上限）
+  // 学科 → 挂课数：>0 的学科在配置页不可移除（学科名是数据主键，删掉=课程成孤儿）
+  const [subjectCourseCounts, setSubjectCourseCounts] = useState<Record<string, number>>({})
   // 音色按模型分组（换合成模型时清单与默认音色都要跟着换）
   const [ttsModels, setTtsModels] = useState<TtsModel[]>([])
   const [ttsVoicesByModel, setTtsVoicesByModel] = useState<Record<string, TtsVoice[]>>({})
@@ -2397,6 +2454,11 @@ const SystemConfigPage: React.FC = () => {
       setConfig(data)
       applyConfig(data)
       loadApikeyStatus()
+      // 学科挂课数走 /config/subjects（已带 course_counts）；拿不到就退回"不拦"，
+      // 真正的拦截在服务端，这里只是把报错提前到人能听懂的地方
+      apiClient.get('/api/config/subjects', { params: { counts: 1 } })
+        .then(({ data: sd }) => setSubjectCourseCounts(sd?.course_counts || {}))
+        .catch(() => setSubjectCourseCounts({}))
     } catch {
       message.error(t('loadConfigFailed'))
     } finally {
@@ -3036,6 +3098,9 @@ const SystemConfigPage: React.FC = () => {
                     normalize={field.extMode ? normalizeExt : undefined}
                     hintInvalid={field.extMode ? t('errExtFormat') : undefined}
                     hintMax={t('errListMax', { n: meta?.strlist_keys?.[field.key] ?? '' })}
+                    lockedCounts={field.key === 'SUBJECTS' ? subjectCourseCounts : undefined}
+                    lockedHint={t('errSubjectHasCourses')}
+                    lockedSummary={t('subjectLockedSummary')}
                   />
                 </Form.Item>
               ) : field.type === 'duration' ? (

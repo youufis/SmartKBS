@@ -89,10 +89,12 @@ const ExamPage: React.FC = () => {
 
   // 从后端加载课程列表
   const [subjects, setSubjects] = useState<string[]>([])
+  const [subjectDefault, setSubjectDefault] = useState('')
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) {
         setSubjects(data.subjects)
+        setSubjectDefault(data.default || data.subjects[0])
         subjectOptions = data.subjects
       }
     }).catch((err) => { reportLoadError(err, { key: 'exam.subjects' }) })
@@ -1164,7 +1166,7 @@ const ExamPage: React.FC = () => {
 
   // ── 创建表单初始值 ──
   const createInitialValues = {
-    subject: subjects[0] || '',
+    subject: subjectDefault || subjects[0] || '',
     duration: 45,
     total_score: 100,
     pass_score: 60,

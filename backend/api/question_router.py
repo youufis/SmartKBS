@@ -23,6 +23,7 @@ from backend.question_db import (
     execute_query_one,
     execute_insert,
     execute_update,
+    get_connection,
 )
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files
@@ -33,10 +34,13 @@ from backend.question_media import (
     SOURCE_BANK,
     archive_bank_dir,
     attach_media,
+    bank_media_footprint,
     delete_media_file,
     dump_json,
     ensure_media_dir,
     infer_status,
+    purge_bank_dir,
+    restore_bank_dir,
     media_columns_for_insert,
     media_summary,
     normalize_media_files,
@@ -197,7 +201,7 @@ async def import_question(req: ImportQuestion, request: Request):
     # 校验 source 字段
     if req.source not in _VALID_SOURCES:
         raise HTTPException(status_code=400, detail=f"无效的 source 值: {req.source}，允许值: {', '.join(sorted(_VALID_SOURCES))}")
-    subject = _question_subject(req.subject or get_default_subject())
+    subject = _question_subject(req.subject or get_default_subject(username))
 
     # 获取用户姓名
     from backend.database import execute_query as user_query
@@ -726,6 +730,7 @@ async def list_questions(
     subject: str = Query(None, description="筛选学科"),
     knowledge_points: str = Query(None, description="筛选知识点（多个用逗号/顿号分隔）"),
     kp_state: str = Query(None, description="筛选知识点标注状态：none=未标注、tagged=已标注"),
+    status: str = Query("active", description="筛选状态：active=在用（默认）、deleted=回收站、all=全部"),
     start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
     end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
     page: int = Query(1, ge=1),
@@ -741,8 +746,14 @@ async def list_questions(
     if role == 2:  # student
         raise HTTPException(status_code=403, detail="学生无权访问题库")
 
-    conditions = ["q.status = 'active'"]
-    params = []
+    # 回收站需要能被列出来，否则「彻底删除」没有入口（旧实现这里写死 active）
+    status_filter = (status or "active").strip().lower()
+    if status_filter not in ("active", "deleted", "all"):
+        raise HTTPException(status_code=400, detail="status 只能是 active / deleted / all")
+    conditions, params = [], []
+    if status_filter != "all":
+        conditions.append("q.status = ?")
+        params.append(status_filter)
 
     if type:
         conditions.append("q.type = ?")
@@ -786,7 +797,7 @@ async def list_questions(
         conditions.append("q.created_at < ?")
         params.append(end_dt.strftime("%Y-%m-%d 00:00:00"))
 
-    where = " AND ".join(conditions)
+    where = " AND ".join(conditions) or "1=1"      # status=all 且没别的筛选时不能留空 WHERE
 
     # 统计总数
     count_row = execute_query_one(f"SELECT COUNT(*) as total FROM question_bank q WHERE {where}", tuple(params))
@@ -1579,6 +1590,261 @@ async def batch_delete_questions(req: BatchDeleteRequest, request: Request):
 
     logger.info(f"[题库] 批量删除 by={username}: 已删 {len(deletable)} 道, 跳过 {len(skipped)} 道")
     return {"success": True, "deleted": len(deletable), "skipped": skipped}
+
+
+# ══════════════════════════════════════════════════════════════
+# 彻底删除（回收站 → 物理删除）
+# ══════════════════════════════════════════════════════════════
+
+class QuestionPurgeRequest(BaseModel):
+    """彻底删除请求：必须显式确认，且只接受回收站里的题"""
+    ids: list[int]
+    confirm: bool = False
+
+
+_PURGE_MAX = 200
+
+
+def _wrong_book_refs(ids: list[int]) -> dict[int, dict[str, int]]:
+    """错题本引用统计。
+
+    wrong_book 只存 question_id 与学生的错答，题干/答案是运行时 JOIN 题库取的
+    （见 wrong_book_router 的取题 SQL）。题目一旦被物理删除，学生的错题条目就变成
+    空白条目 —— 这是真正的数据损失，必须拦，不能只提示。
+    """
+    out: dict[int, dict[str, int]] = {}
+    if not ids:
+        return out
+    ph = ",".join("?" for _ in ids)
+    try:
+        from backend.database import execute_query_dict as main_query
+        for r in main_query(
+                f"""SELECT question_id, COUNT(*) AS n,
+                           COUNT(DISTINCT student_username) AS students
+                    FROM wrong_book WHERE question_id IN ({ph}) GROUP BY question_id""",
+                tuple(ids)) or []:
+            out[int(r["question_id"])] = {"entries": int(r["n"] or 0),
+                                          "students": int(r["students"] or 0)}
+    except Exception as e:
+        logger.warning(f"[彻底删除] 错题本引用查询失败，本次按未知处理: {e}")
+    return out
+
+
+def _purge_impact(ids: list[int], username: str, role: int) -> list[dict[str, Any]]:
+    """逐题算清"能不能删 + 删了会连带清掉什么"。
+
+    预览与执行共用这一份判定：分叉两次实现，迟早会出现"预览说能删、点执行又被拒"，
+    而老师是在预览的数字化下才按确认的。
+    """
+    idph = ",".join("?" for _ in ids)
+    rows = {int(r["id"]): r for r in (execute_query(
+        f"""SELECT id, type, subject, status, creator_username, question_text, updated_at
+            FROM question_bank WHERE id IN ({idph})""", tuple(ids)) or [])}
+    refs_map = _questions_refs_map(ids)
+    wb = _wrong_book_refs(ids)
+    edges = {int(r["question_id"]): int(r["n"]) for r in (execute_query(
+        f"SELECT question_id, COUNT(*) AS n FROM question_kp_map WHERE question_id IN ({idph})"
+        " GROUP BY question_id", tuple(ids)) or [])}
+
+    empty_clean = {"kp_edges": 0, "live_files": 0, "archived_dirs": 0, "archived_files": 0}
+    items: list[dict[str, Any]] = []
+    for qid in ids:
+        row = rows.get(qid)
+        if not row:
+            items.append({"id": qid, "title": "", "purgeable": False,
+                          "blockers": [{"kind": "not_found"}], "cleanup": dict(empty_clean)})
+            continue
+        exam_refs, practice_refs = refs_map.get(qid, ([], []))
+        blockers: list[dict[str, Any]] = []
+        if (row.get("status") or "active") == "active":
+            # 在用题请先走「删除」（软删进回收站），保留误删可恢复这条路
+            blockers.append({"kind": "not_in_recycle_bin"})
+        if role != 0 and (row.get("creator_username") or "") != username:
+            blockers.append({"kind": "not_owner"})
+        if exam_refs or practice_refs:
+            blockers.append({
+                "kind": "in_use",
+                "exams": [str(r.get("title") or r.get("id")) for r in exam_refs],
+                "practices": [str(r.get("title") or r.get("id")) for r in practice_refs],
+            })
+        w = wb.get(qid)
+        if w:
+            blockers.append({"kind": "in_wrong_book", **w})
+        head = re.sub(r"\s+", " ", str(row.get("question_text") or "")).strip()
+        items.append({
+            "id": qid,
+            "type": row.get("type"),
+            "subject": row.get("subject") or "",
+            "status": row.get("status") or "active",
+            "creator_username": row.get("creator_username") or "",
+            "updated_at": row.get("updated_at") or "",
+            "title": head[:60],
+            "purgeable": not blockers,
+            "blockers": blockers,
+            "cleanup": {"kp_edges": edges.get(qid, 0), **bank_media_footprint(qid)},
+        })
+    return items
+
+
+def _purge_ids(raw_ids: list[int]) -> list[int]:
+    ids = list(dict.fromkeys(int(x) for x in (raw_ids or []) if int(x) > 0))
+    if not ids:
+        raise HTTPException(status_code=400, detail="请先勾选要彻底删除的试题")
+    if len(ids) > _PURGE_MAX:
+        # 物理删除不可撤销，上限比软删(500)收紧一档；一屏 50 条，200 已够一次清理
+        raise HTTPException(status_code=400,
+                            detail=f"一次最多彻底删除 {_PURGE_MAX} 道试题，请分批操作")
+    return ids
+
+
+class QuestionRestoreRequest(BaseModel):
+    """还原请求：把回收站里的题放回题库"""
+    ids: list[int]
+
+
+@router.post("/restore", summary="从回收站还原试题")
+async def restore_questions(req: QuestionRestoreRequest, request: Request):
+    """把回收站里的题目还原回题库（``status`` 改回 active）。
+
+    还原不是只改一个状态位，被软删时一起"收走"的东西也得跟着回来，否则题回来了但残缺：
+
+      1. 配图目录：软删时 ``archive_bank_dir`` 把 ``question_media/<id>`` 搬进了
+         ``.archived/<id>__<时间戳>``，这里搬回来；本题目录已存在则不动（可能是删除后
+         又生成过新图，覆盖会把新图弄丢）；
+      2. 知识点连边：软删不动 ``question_kp_map``，但彻底删除会清掉它。这里用
+         ``link_question_kp`` 按题目自带的知识点标签重新连边（幂等，只认确定关系，
+         不会为了"有边"去猜一个知识点）。
+
+    与批量删除同口径：逐条判定、结构化返回原因，能还原的全还原。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+
+    ids = list(dict.fromkeys(int(x) for x in (req.ids or []) if int(x) > 0))
+    if not ids:
+        raise HTTPException(status_code=400, detail="请先勾选要还原的试题")
+    if len(ids) > 500:
+        raise HTTPException(status_code=400, detail="一次最多还原 500 道试题，请分批操作")
+
+    idph = ",".join("?" for _ in ids)
+    rows = {
+        int(r["id"]): r for r in (execute_query(
+            f"SELECT id, status, creator_username, knowledge_points, question_text "
+            f"FROM question_bank WHERE id IN ({idph})", tuple(ids)) or [])
+    }
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    restored: list[int] = []
+    skipped: list[dict[str, Any]] = []
+    media_back = 0
+    edges_back = 0
+    for qid in ids:
+        row = rows.get(qid)
+        if not row:
+            skipped.append({"id": qid, "kind": "not_found"})
+            continue
+        if (row.get("status") or "active") == "active":
+            skipped.append({"id": qid, "kind": "already_active"})
+            continue
+        if role != 0 and (row.get("creator_username") or "") != username:
+            skipped.append({"id": qid, "kind": "not_owner"})
+            continue
+        execute_update(
+            "UPDATE question_bank SET status = 'active', updated_at = ? WHERE id = ?",
+            (now, qid),
+        )
+        m = restore_bank_dir(qid)
+        media_back += int(m.get("restored") or 0)
+        if m.get("errors"):
+            logger.warning(f"[还原] 配图目录搬回失败 id={qid}: {m['errors']}")
+        try:
+            from backend.question_select import link_question_kp
+            if link_question_kp(qid, kp_name=row.get("knowledge_points") or ""):
+                edges_back += 1
+        except Exception as e:
+            logger.debug(f"[还原] 重新连边失败 id={qid}: {e}")
+        restored.append(qid)
+        logger.info(
+            "题目还原 id=%s by=%s: 题型原状态=deleted 配图目录搬回=%d 知识点标签=%s 题干=%s"
+            % (qid, username, int(m.get("restored") or 0),
+               str(row.get("knowledge_points") or "")[:40],
+               re.sub(r"\s+", " ", str(row.get("question_text") or ""))[:40])
+        )
+
+    logger.info(f"[题库] 还原 by={username}: 已还原 {len(restored)} 道, 跳过 {len(skipped)} 道")
+    return {"success": True, "restored": len(restored), "restored_ids": restored,
+            "skipped": skipped, "media_dirs_restored": media_back,
+            "kp_relinked": edges_back}
+
+
+@router.post("/purge/preview", summary="彻底删除预览（回收站题目的连带清理清单）")
+async def purge_questions_preview(req: BatchDeleteRequest, request: Request):
+    """把"能删哪些、哪些删不掉、删掉会连带清什么"摊开，确认框才有依据。"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足：仅教师和管理员可以彻底删除试题")
+    ids = _purge_ids(req.ids)
+    items = _purge_impact(ids, username, role)
+    return {
+        "items": items,
+        "purgeable": sum(1 for x in items if x["purgeable"]),
+        "blocked": sum(1 for x in items if not x["purgeable"]),
+    }
+
+
+@router.post("/purge", summary="彻底删除试题（不可撤销）")
+async def purge_questions(req: QuestionPurgeRequest, request: Request):
+    """物理删除回收站里的试题，并连带清理知识点连边与配图。
+
+    与软删的三点差别都是刻意的：
+      1. 只接受回收站里的题（status='deleted'）—— 在用题走软删，保留可恢复路径；
+      2. 错题本还在引用的题不删：wrong_book 靠 JOIN 题库取题干，删了就剩空白错题；
+      3. 必须 confirm=true，且判定与预览共用 _purge_impact。
+    逐条判定、结构化返回原因（kind），能删的全删 —— 批量场景"一道被拦就整批回滚"体验最差。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足：仅教师和管理员可以彻底删除试题")
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="彻底删除不可撤销，请显式确认（confirm=true）")
+    ids = _purge_ids(req.ids)
+
+    items = _purge_impact(ids, username, role)
+    deleted: list[int] = []
+    skipped: list[dict[str, Any]] = []
+    media_stats = {"live_removed": 0, "archived_removed": 0, "files": 0}
+    for it in items:
+        if not it["purgeable"]:
+            skipped.append({"id": it["id"], "kind": str(it["blockers"][0]["kind"]),
+                            "blockers": it["blockers"]})
+            continue
+        qid = int(it["id"])
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM question_kp_map WHERE question_id=?", (qid,))
+            cur.execute("DELETE FROM question_bank WHERE id=?", (qid,))
+            conn.commit()
+        m = purge_bank_dir(qid)
+        media_stats["live_removed"] += int(m.get("live_removed") or 0)
+        media_stats["archived_removed"] += int(m.get("archived_removed") or 0)
+        media_stats["files"] += int(m.get("files") or 0)
+        deleted.append(qid)
+        logger.info(
+            "题目彻底删除 id=%s by=%s: 题型=%s 学科=%s 连边=%d 配图=%d张/归档%d个 题干=%s"
+            % (qid, username, it.get("type"), it.get("subject"), it["cleanup"]["kp_edges"],
+               m.get("files", 0), m.get("archived_removed", 0), str(it.get("title") or "")[:60])
+        )
+
+    logger.info(f"[题库] 彻底删除 by={username}: 已删 {len(deleted)} 道, 跳过 {len(skipped)} 道")
+    return {"success": True, "deleted": len(deleted), "deleted_ids": deleted,
+            "skipped": skipped, "media": media_stats}
 
 
 class DedupRequest(BaseModel):

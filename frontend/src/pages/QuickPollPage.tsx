@@ -109,7 +109,7 @@ const QuickPollPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
-  const { subjects: subjectOptions } = useSubjectOptions()
+  const { subjects: subjectOptions, defaultSubject } = useSubjectOptions()
 
   const [polls, setPolls] = useState<PollItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -316,7 +316,7 @@ const QuickPollPage: React.FC = () => {
       question: aiPreview.question,
       options: aiPreview.options,
       poll_type: aiForm.getFieldValue('poll_type') || 'single',
-      subject: aiForm.getFieldValue('subject') || subjectOptions[0] || '',
+      subject: aiForm.getFieldValue('subject') || defaultSubject || subjectOptions[0] || '',
       anonymous: false,
       duration: 0,
       max_choices: 0,
@@ -628,7 +628,7 @@ const QuickPollPage: React.FC = () => {
                 { value: 'multiple', label: t('multipleChoice') },
               ]} />
             </Form.Item>
-            <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''} style={{ flex: '1 1 180px' }}>
+            <Form.Item name="subject" label={t('subject')} initialValue={defaultSubject || subjectOptions[0] || ''} style={{ flex: '1 1 180px' }}>
               <Select options={subjectOptions.map(s => ({ value: s, label: s }))} />
             </Form.Item>
             <Form.Item name="duration" label={t('pollDuration')} style={{ flex: '0 0 150px' }}>
@@ -740,7 +740,7 @@ const QuickPollPage: React.FC = () => {
                 { value: 'multiple', label: t('multipleChoice') },
               ]} />
             </Form.Item>
-            <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''} style={{ flex: '1 1 180px' }}>
+            <Form.Item name="subject" label={t('subject')} initialValue={defaultSubject || subjectOptions[0] || ''} style={{ flex: '1 1 180px' }}>
               <Select options={subjectOptions.map(s => ({ value: s, label: s }))} />
             </Form.Item>
           </div>

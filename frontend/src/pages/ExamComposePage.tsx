@@ -22,6 +22,7 @@ const ExamComposePage: React.FC = () => {
   const [exam, setExam] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [subjects, setSubjects] = useState<string[]>([])
+  const [subjectDefault, setSubjectDefault] = useState('')
   const [grades, setGrades] = useState<string[]>([])
   const [wizardVisible, setWizardVisible] = useState(false)
 
@@ -54,6 +55,7 @@ const ExamComposePage: React.FC = () => {
       const { data } = await apiClient.get('/api/config/subjects')
       if (data?.subjects?.length > 0) {
         setSubjects(data.subjects)
+        setSubjectDefault(data.default || data.subjects[0])
       }
     } catch (err) { reportLoadError(err, { key: 'ExamComposePage.loadSubjects', retry: () => { void loadSubjects() } }) }
   }
@@ -202,6 +204,7 @@ const ExamComposePage: React.FC = () => {
           examId={Number(examId)}
           examTitle={exam.title}
           subjects={subjects}
+          defaultSubject={subjectDefault}
           grades={grades}
           existingCount={(exam.questions || []).length}
           initialSchool={exam.school_name || ''}

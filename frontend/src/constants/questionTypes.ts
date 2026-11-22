@@ -24,8 +24,16 @@ const DEFAULT_TYPES = [
   { key: 'fill', label: '填空题' },
   { key: 'essay', label: '作文' },
   { key: 'subjective', label: '主观题' },
-  { key: 'code', label: '编程题' },
 ]
+
+/**
+ * 历史题型标签：已从启用的题型列表里去掉、但题库（含回收站）可能还留着行的题型。
+ * 只补标签，不进 TYPE_OPTIONS —— 否则下拉里又会出现一个进考卷不能判分的题型。
+ * 与后端 question_labels.DEFAULT_TYPE_LABELS 同口径。
+ */
+const LEGACY_TYPE_LABELS: Record<string, string> = {
+  code: '编程题',
+}
 
 // ── 导出的可变对象（外部 import 后能实时反映更新） ──
 export const TYPE_LABELS: Record<string, string> = {}
@@ -42,6 +50,10 @@ function _buildFrom(raw: { key: string; label: string }[]) {
     TYPE_COLORS[t.key] = COLOR_PALETTE[i % COLOR_PALETTE.length]
     TYPE_OPTIONS.push({ value: t.key, label: t.label })
   })
+  // 历史题型只补标签：让回收站/残留行仍显示"编程题"，但不进可选项
+  for (const [k, v] of Object.entries(LEGACY_TYPE_LABELS)) {
+    if (!(k in TYPE_LABELS)) TYPE_LABELS[k] = v
+  }
 }
 
 /** 初始化/刷新题型数据（从后端加载，失败则 fallback）。建议在 App 启动时调用。 */

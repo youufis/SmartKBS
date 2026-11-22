@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
-# 与 config_router.DEFAULT_CONFIG["QUESTION_TYPES"] 同口径的兜底表
+# 兜底表：配置里没启用该题型时，导出仍要能读得懂历史数据。
+# 允许比 config_router.DEFAULT_CONFIG["QUESTION_TYPES"] 多几项 —— 这里多的是 code（编程题）：
+# 后端 QUESTION_TYPE_MAP 与 question_factory.ALL_TYPES 一直认这个键，题库里也确实有编程题，
+# 少一行就会让附表里出现裸的 "code"。
 DEFAULT_TYPE_LABELS = {
     "single": "单选题",
     "multiple": "多选题",
@@ -13,6 +16,7 @@ DEFAULT_TYPE_LABELS = {
     "fill": "填空题",
     "essay": "作文",
     "subjective": "主观题",
+    "code": "编程题",
 }
 
 

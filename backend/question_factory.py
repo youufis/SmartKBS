@@ -356,7 +356,7 @@ def persist_questions(items: Sequence[dict[str, Any]], *, subject: str = "", sou
                    normalize_notes, dup_index_size}
     """
     # 题库学科只允许学科配置（SUBJECTS）中的取值；历史别名在这里统一归一。
-    subject = require_subject(subject or get_default_subject())
+    subject = require_subject(subject or get_default_subject(username))
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not creator_name:
         creator_name = username

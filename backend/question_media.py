@@ -218,6 +218,88 @@ def archive_bank_dir(question_id: Any) -> str | None:
     return str(dst)
 
 
+def purge_bank_dir(question_id: Any) -> dict[str, Any]:
+    """彻底删除试题时物理清除它的配图：本题目录 + 之前软删归档出去的 ``.archived/<id>__*`` 副本。
+
+    与 :func:`archive_bank_dir` 相反：归档是"先收起来，30 天后由日志保留任务清"，
+    彻底删除是老师明确说了"不要了"，所以两处都清干净，不留待清理的尾巴。
+    只碰本题的目录；``quest/``、``whiteboard_ai/`` 这些子命名空间一律不动。
+    """
+    out: dict[str, Any] = {"live_removed": 0, "archived_removed": 0, "files": 0, "errors": []}
+    qid = _safe_token(question_id)
+    if not qid:
+        return out
+    live = media_dir(SOURCE_BANK, qid)
+    if _contained(live) and live.is_dir():
+        try:
+            out["files"] += sum(1 for p in live.rglob("*") if p.is_file())
+            shutil.rmtree(live)
+            out["live_removed"] = 1
+        except OSError as e:
+            out["errors"].append(f"live:{e}")
+    arch = media_root() / ARCHIVE_DIR_NAME
+    if arch.is_dir():
+        for d in sorted(arch.glob(f"{qid}__*")):
+            if not d.is_dir() or not _contained(d):
+                continue
+            try:
+                out["files"] += sum(1 for p in d.rglob("*") if p.is_file())
+                shutil.rmtree(d)
+                out["archived_removed"] += 1
+            except OSError as e:
+                out["errors"].append(f"archived:{e}")
+    return out
+
+
+def restore_bank_dir(question_id: Any) -> dict[str, Any]:
+    """把软删时归档出去的配图目录搬回本题目录（还原题目时配套调用）。
+
+    只认 ``.archived/<id>__<时间戳>``，有多份时取最新那一份。本题目录已存在就不动它
+    —— 那说明删除后又生成过配图，覆盖会把新图弄丢；此时归档留在原地，
+    由日志保留任务到期清理。
+    """
+    out: dict[str, Any] = {"restored": 0, "files": 0, "kept": 0, "errors": []}
+    qid = _safe_token(question_id)
+    if not qid:
+        return out
+    arch = media_root() / ARCHIVE_DIR_NAME
+    if not arch.is_dir():
+        return out
+    cands = sorted((d for d in arch.glob(f"{qid}__*") if d.is_dir() and _contained(d)),
+                   key=lambda d: d.name, reverse=True)
+    if not cands:
+        return out
+    live = media_dir(SOURCE_BANK, qid)
+    if _contained(live) and live.exists():
+        out["kept"] = len(cands)
+        return out
+    try:
+        live.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(cands[0]), str(live))
+        out["restored"] = 1
+        out["files"] = sum(1 for p in live.rglob("*") if p.is_file())
+    except (OSError, shutil.Error) as e:
+        out["errors"].append(str(e))
+    return out
+
+
+def bank_media_footprint(question_id: Any) -> dict[str, int]:
+    """彻底删除前的只读盘点：本题目录与归档副本里各有多少文件（预览用，不落任何改动）。"""
+    live_files = archived_dirs = archived_files = 0
+    qid = _safe_token(question_id)
+    if qid:
+        live = media_dir(SOURCE_BANK, qid)
+        if _contained(live) and live.is_dir():
+            live_files = sum(1 for p in live.rglob("*") if p.is_file())
+        arch = media_root() / ARCHIVE_DIR_NAME
+        if arch.is_dir():
+            for d in arch.glob(f"{qid}__*"):
+                if d.is_dir() and _contained(d):
+                    archived_dirs += 1
+                    archived_files += sum(1 for p in d.rglob("*") if p.is_file())
+    return {"live_files": live_files, "archived_dirs": archived_dirs, "archived_files": archived_files}
+
+
 def cleanup_quest_media(question_id: Any, raw_media_files: Any) -> int:
     """删除闯关题配图：新命名空间整目录删 + 历史平铺目录按 manifest 精确删
 

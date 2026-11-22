@@ -146,11 +146,11 @@ const TaskPage: React.FC = () => {
   const [editModeLocked, setEditModeLocked] = useState(false)
   // 复制模式下的源作业 id：非空时"确定"走 /duplicate，范围选择器一定可编辑
   const [copySourceId, setCopySourceId] = useState<string | null>(null)
-  const { subjects: subjectOptions } = useSubjectOptions()
+  const { subjects: subjectOptions, defaultSubject } = useSubjectOptions()
   // 学科清单到位后补默认值（留空太容易漏填，作业就没有学科了）
   useEffect(() => {
-    if (subjectOptions.length > 0) setTaskSubject(prev => prev || subjectOptions[0])
-  }, [subjectOptions])
+    if (subjectOptions.length > 0) setTaskSubject(prev => prev || defaultSubject || subjectOptions[0])
+  }, [subjectOptions, defaultSubject])
   const [taskScope, setTaskScope] = useState<ActivityScopeValue>({
     target_scope: 'teacher_classes',
     target_grade: '',
@@ -1103,7 +1103,7 @@ const TaskPage: React.FC = () => {
         onCancel={() => {
           setCreateModal(false); setEditingTaskId(null)
           setTaskName(''); setTaskDesc('')
-          setTaskSubject(subjectOptions[0] || '')
+          setTaskSubject(defaultSubject || subjectOptions[0] || '')
           setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
           setHw(emptyHomework())
           setEditModeLocked(false)

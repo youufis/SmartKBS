@@ -752,7 +752,7 @@ const TeacherView: React.FC = () => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) {
         setSubjectOptions(data.subjects)
-        setSubject(data.subjects[0])
+        setSubject(data.default || data.subjects[0])
       }
     }).catch((err) => { reportLoadError(err, { key: 'practice.subjects' }) })
   }, [])

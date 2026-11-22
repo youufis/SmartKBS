@@ -154,6 +154,7 @@ const CodePracticePage: React.FC = () => {
   const [myStatusFilter, setMyStatusFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+  const [subjectDefault, setSubjectDefault] = useState('')
   const [supportedLangs, setSupportedLangs] = useState<{ value: string; label: string; available: boolean }[]>([])
 
   // ── 创建 ──
@@ -235,8 +236,9 @@ const CodePracticePage: React.FC = () => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) {
         setSubjectOptions(data.subjects)
-        setAiGenSubject((prev) => prev || data.subjects[0])
-        setCreateForm((prev) => ({ ...prev, subject: prev.subject || data.subjects[0] }))
+        setSubjectDefault(data.default || data.subjects[0])
+        setAiGenSubject((prev) => prev || data.default || data.subjects[0])
+        setCreateForm((prev) => ({ ...prev, subject: prev.subject || data.default || data.subjects[0] }))
       }
     }).catch(() => { /* ignore */ })
   }, [])
@@ -279,7 +281,7 @@ const CodePracticePage: React.FC = () => {
       await apiClient.post('/api/code/problems', buildProblemPayload(createForm))
       message.success(t('createSuccess'))
       setCreateModalOpen(false)
-      setCreateForm(emptyCreateForm(subjectOptions[0] || ''))
+      setCreateForm(emptyCreateForm(subjectDefault || subjectOptions[0] || ''))
       loadProblems()
     } catch (e: any) {
       message.error(describeApiError(e, t('createFailed')))
@@ -392,7 +394,7 @@ const CodePracticePage: React.FC = () => {
   const openAiGenModal = () => {
     setAiGenLanguage(createForm.language || 'python')
     setAiGenDifficulty(createForm.difficulty || 'medium')
-    setAiGenSubject(createForm.subject || aiGenSubject || subjectOptions[0] || '')
+    setAiGenSubject(createForm.subject || aiGenSubject || subjectDefault || subjectOptions[0] || '')
     setAiGenModal(true)
   }
 

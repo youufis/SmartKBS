@@ -28,7 +28,18 @@ export const TagListInput: React.FC<{
   normalize?: (raw: string) => string
   hintInvalid?: string
   hintMax?: string
-}> = ({ value, onChange, presets, placeholder, max, normalize, hintInvalid, hintMax }) => {
+  /**
+   * 「名字即数据主键」的清单用（学科）：值 → 被引用的条数。
+   * 大于 0 的项被删掉时按原位置补回去，界面看着像没动，只弹一句为什么 ——
+   * 后端同样会整批拒绝，这里只是把报错提前到人能听懂的地方。
+   */
+  lockedCounts?: Record<string, number>
+  /** 单个被拦项的提示模板，填充 {name} 与 {n} */
+  lockedHint?: string
+  /** 控件下方的只读清单说明，填充 {list} */
+  lockedSummary?: string
+}> = ({ value, onChange, presets, placeholder, max, normalize, hintInvalid, hintMax,
+       lockedCounts, lockedHint, lockedSummary }) => {
   const list = Array.isArray(value) ? value : []
 
   const commit = (next: string[]) => {
@@ -43,6 +54,21 @@ export const TagListInput: React.FC<{
       if (!out.includes(one)) out.push(one)
     }
     if (invalid && hintInvalid) message.warning(hintInvalid)
+    // 被移除的"还在被引用"的项：按原位置补回，并说明原因
+    if (lockedCounts) {
+      const blocked: string[] = []
+      list.forEach((name, i) => {
+        if ((lockedCounts[name] ?? 0) > 0 && !out.includes(name)) {
+          blocked.push(name)
+          out.splice(Math.min(i, out.length), 0, name)
+        }
+      })
+      if (blocked.length && lockedHint) {
+        message.warning(blocked.map((n) => lockedHint
+          .replace('{name}', n)
+          .replace('{n}', String(lockedCounts[n] ?? 0))).join('；'))
+      }
+    }
     if (max && out.length > max) {
       if (hintMax) message.warning(hintMax)
       onChange?.(out.slice(0, max))
@@ -51,17 +77,29 @@ export const TagListInput: React.FC<{
     onChange?.(out)
   }
 
+  // 按清单自身的顺序列（学科顺序就是它），而不是后端 GROUP BY 的随机序
+  const locked = list
+    .filter((name) => (lockedCounts?.[name] ?? 0) > 0)
+    .map((name) => `${name}(${lockedCounts?.[name]})`)
+
   return (
-    <Select
-      mode="tags"
-      value={list}
-      onChange={(v) => commit(v as string[])}
-      options={(presets || []).map((p) => ({ value: p, label: p }))}
-      placeholder={placeholder}
-      // 与后端 _validate_config_updates 的分隔符口径一致：支持整段粘贴旧格式
-      tokenSeparators={[',', '，', '、', ';', '；']}
-      allowClear
-    />
+    <>
+      <Select
+        mode="tags"
+        value={list}
+        onChange={(v) => commit(v as string[])}
+        options={(presets || []).map((p) => ({ value: p, label: p }))}
+        placeholder={placeholder}
+        // 与后端 _validate_config_updates 的分隔符口径一致：支持整段粘贴旧格式
+        tokenSeparators={[',', '，', '、', ';', '；']}
+        allowClear
+      />
+      {locked.length > 0 && lockedSummary && (
+        <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-tertiary, #8c8c8c)' }}>
+          {lockedSummary.replace('{list}', locked.join(' · '))}
+        </div>
+      )}
+    </>
   )
 }
 

@@ -241,19 +241,33 @@ export async function getClassProgressOverview(params?: {
   return data;
 }
 
-/** 拖动排序（批量更新 sort_order，支持跨层级拖动） */
+/** 拖动排序（批量更新 sort_order，支持跨层级拖动与跨学科移动课程） */
 export interface ReorderItem {
-  type: 'chapter' | 'knowledge_point';
+  type: 'chapter' | 'knowledge_point' | 'course';
   id: number;
   sort_order: number;
   /** 章节的新父级ID（None=顶层），仅 type='chapter' 时有效 */
   parent_id?: number | null;
   /** 知识点的新归属章节ID，仅 type='knowledge_point' 时有效 */
   chapter_id?: number | null;
+  /** 课程的新学科，仅 type='course' 时有效；不传=只改序号，改了=同时把课挪进该学科 */
+  subject?: string;
 }
 
-export async function reorderNodes(items: ReorderItem[]): Promise<{ message: string; updated: { chapters: number; knowledge_points: number } }> {
+export async function reorderNodes(items: ReorderItem[]): Promise<{
+  message: string;
+  updated: { chapters: number; knowledge_points: number; courses: number };
+}> {
   const { data } = await apiClient.put('/api/curriculum/reorder', { items });
+  return data;
+}
+
+/**
+ * 学科显示顺序（仅管理员）：成员真相仍在系统配置的学科列表，这里只回答谁排在前面。
+ * 传入的必须是完整清单——侧栏只显示有课的分组，没课的学科要按现有顺序补在尾部。
+ */
+export async function reorderSubjects(subjects: string[]): Promise<{ message: string; subjects: string[] }> {
+  const { data } = await apiClient.put('/api/curriculum/subjects/reorder', { subjects });
   return data;
 }
 
