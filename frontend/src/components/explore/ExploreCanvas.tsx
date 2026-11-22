@@ -13,7 +13,8 @@ import { useTranslation } from 'react-i18next'
 import { getPage, savePage, uploadAsset, type SaveState } from '../../api/explore'
 import { AskCardUtil } from './AskCardShape'
 import { TLUI_ZH_OVERRIDES } from '../../constants/tldrawUiZh'
-import { TL_LICENSE_KEY } from '../../constants/tldrawLicense'
+import { useTLDrawLicense } from '../../hooks/useTLDrawLicense'
+import { TLDrawLicenseBlocked } from '../TLDrawLicenseGate'
 import { saveDraft, loadDraft, clearDraft } from '../../utils/exploreDraft'
 
 const minimalComponents: TLComponents = {
@@ -44,6 +45,9 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
   const internalRef = useRef<Editor | null>(null)
   const editorRef = externalEditorRef || internalRef
   const [ready, setReady] = useState(false)
+  // 授权闸门：未授权/过期/域名不符时，SDK 会在 5 秒后把画布整体替换成空白 div，
+  // 所以判定没通过之前不挂载白板组件，改渲染自有说明页（详见 components/TLDrawLicenseGate.tsx）
+  const { state: tlState, key: tlKey, reasons: tlReasons, recheck: tlRecheck } = useTLDrawLicense()
   const dirtyRef = useRef(false)
   const timerRef = useRef(0)
   const stateCb = useRef(onSaveState)
@@ -222,10 +226,14 @@ const ExploreCanvas: React.FC<Props> = ({ canvasId, pageNumber, onSaveState, onA
     },
   }), [canvasId])
 
+  if (tlState === 'blocked') return <TLDrawLicenseBlocked reasons={tlReasons} onRecheck={tlRecheck} />
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Tldraw onMount={handleMount} components={minimalComponents}
-        assets={assetStore} shapeUtils={[AskCardUtil]} licenseKey={TL_LICENSE_KEY} overrides={TLUI_ZH_OVERRIDES} />
+      {tlState === 'ok' && (
+        <Tldraw onMount={handleMount} components={minimalComponents}
+          assets={assetStore} shapeUtils={[AskCardUtil]} licenseKey={tlKey} overrides={TLUI_ZH_OVERRIDES} />
+      )}
       {!ready && (
         <div style={{
           position: 'absolute', inset: 0,

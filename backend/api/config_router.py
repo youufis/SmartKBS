@@ -303,6 +303,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 学生作答页防泄题（默认全关：关掉时前端不挂监听、不注入水印，作答链路与改动前一致）
     "EXAM_ANTI_COPY": False,             # 题目区禁止选中/复制/剪切/右键/打印快捷键，输入区始终豁免
     "EXAM_WATERMARK": False,             # 作答页平铺个人水印（姓名 + 学号 + 时间），用于事后追溯
+    # 白板引擎（tldraw SDK）授权 key：留空 = 用安装包烘进去的构建期 key（VITE_TLDRAW_LICENSE_KEY），
+    # 填了则**覆盖**构建期值。这样换 key / 年度续期只改配置、不必重新出包，也不影响没填过的老部署。
+    # 它不是机密：任何部署包的 JS 里都能看到同一串（客户端 SDK 的 key 本来就藏不住），所以按公开
+    # 配置下发给前端；写入仍限管理员。填错等于没填 —— SDK 验签失败会直接判未授权。
+    "TL_LICENSE_KEY": "",
     "EXAM_WA_MAX_QUESTIONS": 8,            # 全班错因讲评一次最多讲几道题（控 token 与等待时间）
     "EXAM_WA_RATE_CEILING": 90,            # 正确率低于此百分比的题目才进讲评
     # AI 线程池并发上限 — 全站同步 AI 调用（图示/板书/出题/批改/讨论/闯关）共用的工作线程数。
@@ -744,7 +749,13 @@ _STR_LIMITS: dict[str, int] = {
     "TTS_MODEL": 80, "TTS_VOICE": 128,
     "PODCAST_VOICE_A": 128, "PODCAST_VOICE_B": 128, "PODCAST_DURATION_OPTIONS": 32,
     "CAST_DURATION_OPTIONS": 32,
+    "TL_LICENSE_KEY": 500,
 }
+# tldraw 授权 key 的形态：tldraw-<日期>/<base64 编码>.<签名>。
+# 只校验形态、不验签（验签要 WebCrypto，归浏览器里的 SDK 管）；目的是把"少粘了一段/多带空格"
+# 这种填错挡在保存这一关，而不是等上课点开白板才发现画布空白。
+_TL_LICENSE_RE = re.compile(r"^tldraw-[^/]+/[A-Za-z0-9+/=_-]{16,}\.[A-Za-z0-9+/=_.-]{16,}$")
+
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
                  "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64,
                  "HOMEWORK_ALLOWED_EXTS": 60,
@@ -1006,7 +1017,13 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"{key} 必须是文本")
             if len(value) > _STR_LIMITS[key]:
                 raise HTTPException(status_code=400, detail=f"{key} 最长 {_STR_LIMITS[key]} 字")
-            out[key] = value.strip() if key in ("dashscope_api_key", "APPID", "KB_API_BASE", "KB_AGENT_ID") else value
+            out[key] = value.strip() if key in ("dashscope_api_key", "APPID", "KB_API_BASE", "KB_AGENT_ID", "TL_LICENSE_KEY") else value
+            if key == "TL_LICENSE_KEY" and out[key] and not _TL_LICENSE_RE.fullmatch(out[key]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="TL_LICENSE_KEY 不是合法的 tldraw 授权 key（应形如 tldraw-<日期>/<编码>.<签名>）；"
+                           "留空表示改用安装包内置 key",
+                )
         elif key in _STRLIST_KEYS:
             if isinstance(value, str):
                 # 容错：标签输入框有时会把整串原样送来（旧前端 / 直接调 API），
@@ -1586,6 +1603,22 @@ async def get_public_config():
         "AGENT_NAME": full_name,
         "ORG_NAME": cfg.get("ORG_NAME", ""),
     }
+
+
+@router.get("/tldraw-license", summary="白板引擎授权 key（登录后，供挂载 tldraw 前读取）")
+async def get_tldraw_license(request: Request):
+    """白板引擎 tldraw 是商业授权 SDK，生产环境必须携带有效 license key。
+
+    两条来源按优先级：**系统配置里的 TL_LICENSE_KEY → 安装包烘死的构建期 key**。
+    前端（constants/tldrawLicense.ts）拿这个值去挂 <Tldraw>；两者都空且当前是 https 时，
+    白板组件会显示自有的"未配置授权"说明页，而不是等 SDK 把画布替换成空白 div。
+
+    读取门槛与 /exam-protect 一致：任何登录用户（白板的所有使用角色），不要求管理员；
+    但不做成匿名可读 —— 走运行时注入部署时，这串就是学校自己申请的 key，没理由让未登录
+    访客读到。前端一律用带令牌的 apiClient 读取，读不到就回落到构建期内置 key。
+    """
+    get_current_user(request)
+    return {"key": str(get_config_value("TL_LICENSE_KEY", "") or "").strip()}
 
 
 @router.get("/exam-protect", summary="学生作答页防复制与水印开关（登录后）")

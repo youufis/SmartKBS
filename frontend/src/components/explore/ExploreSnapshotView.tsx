@@ -6,7 +6,8 @@ import React, { useCallback, useRef, useState } from 'react'
 import { Tldraw, type TLComponents, type TLStoreSnapshot } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { AskCardUtil } from './AskCardShape'
-import { TL_LICENSE_KEY } from '../../constants/tldrawLicense'
+import { useTLDrawLicense } from '../../hooks/useTLDrawLicense'
+import { TLDrawLicenseBlocked } from '../TLDrawLicenseGate'
 
 const minimalComponents: TLComponents = {
   SharePanel: null,
@@ -18,6 +19,9 @@ const minimalComponents: TLComponents = {
 
 const ExploreSnapshotView: React.FC<{ snapshot: string }> = ({ snapshot }) => {
   const [ready, setReady] = useState(false)
+  // 授权闸门：未授权/过期/域名不符时，SDK 会在 5 秒后把画布整体替换成空白 div，
+  // 所以判定没通过之前不挂载白板组件，改渲染自有说明页（详见 components/TLDrawLicenseGate.tsx）
+  const { state: tlState, key: tlKey, reasons: tlReasons, recheck: tlRecheck } = useTLDrawLicense()
   const loaded = useRef(false)
   const handleMount = useCallback((editor: any) => {
     if (loaded.current) return
@@ -29,9 +33,13 @@ const ExploreSnapshotView: React.FC<{ snapshot: string }> = ({ snapshot }) => {
     try { editor.zoomToFit() } catch { /* ignore */ }
     setReady(true)
   }, [snapshot])
+  if (tlState === 'blocked') return <TLDrawLicenseBlocked reasons={tlReasons} onRecheck={tlRecheck} />
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Tldraw onMount={handleMount} components={minimalComponents} shapeUtils={[AskCardUtil]} licenseKey={TL_LICENSE_KEY} />
+      {tlState === 'ok' && (
+        <Tldraw onMount={handleMount} components={minimalComponents} shapeUtils={[AskCardUtil]} licenseKey={tlKey} />
+      )}
       {!ready && (
         <div style={{
           position: 'absolute', inset: 0,

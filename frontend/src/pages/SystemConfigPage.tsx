@@ -18,6 +18,7 @@ import { TagListInput, DurationPicker, SuggestionInput } from '../components/sys
 import { useAuthStore } from '../stores/authStore'
 import { asrSelfCheck, type AsrCheckResult } from '../api/explore'
 import StoragePanel from '../components/explore/StoragePanel'
+import { TLDrawLicenseStatus } from '../components/TLDrawLicenseGate'
 import PageHeader from '../components/PageHeader'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
@@ -63,7 +64,7 @@ interface ConfigField {
   longDescKey?: string
   type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'kv' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'wrong_book_sources' | 'model_select' | 'tts_model' | 'tts_voice' | 'image_size' | 'select' | 'radio' | 'login_gate' | 'tags_select' | 'duration' | 'combobox'
   /** 字段旁的附加动作按钮（目前只有语音识别自检） */
-  action?: 'asr_check' | 'news_discover'
+  action?: 'asr_check' | 'news_discover' | 'tldraw_license'
   group: string
   /** 面向管理员的常用项，默认可见；未标注 = advanced */
   level?: 'basic' | 'advanced'
@@ -420,6 +421,10 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AI_REQUEST_TIMEOUT', labelKey: 'field_AI_REQUEST_TIMEOUT', descKey: 'field_AI_REQUEST_TIMEOUT_desc', type: 'number', group: 'credentials', unitKey: 'unitSecond' },
   // 并发数是进程内线程池的规格，建池时读取一次 -> 标 restart
   { key: 'AI_MAX_CONCURRENCY', labelKey: 'field_AI_MAX_CONCURRENCY', descKey: 'field_AI_MAX_CONCURRENCY_desc', type: 'number', group: 'credentials', unitKey: 'unitThread', scope: 'restart' },
+  // 白板引擎（tldraw SDK）授权：留空 = 用安装包内置的构建期 key；填了则覆盖它，续期/换 key 不必重新出包。
+  // 标题旁的状态标签读的是「当前真正生效」的那一枚（表单草稿 > 已保存值 > 构建期内置）。
+  // 定为常用项（不是高级参数）：到期天数只有字段渲染出来才看得见，收进高级等于把续期提醒藏起来。
+  { key: 'TL_LICENSE_KEY', labelKey: 'field_TL_LICENSE_KEY', descKey: 'field_TL_LICENSE_KEY_desc', longDescKey: 'field_TL_LICENSE_KEY_tip', type: 'text', group: 'credentials', level: 'basic', required: false, placeholderKey: 'placeholder_tldrawLicenseKey', action: 'tldraw_license' },
   // 模型与端点
   { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', longDescKey: 'field_APPID_tip', type: 'text', group: 'models', level: 'basic', required: false, placeholderKey: 'placeholder_APPID' },
   { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', level: 'basic', required: false },
@@ -2843,6 +2848,7 @@ const SystemConfigPage: React.FC = () => {
           </Tooltip>
         ) : null}
         {field.action === 'asr_check' ? <AsrCheckButton /> : null}
+        {field.action === 'tldraw_license' ? <TLDrawLicenseStatus /> : null}
 
       </span>
     )
