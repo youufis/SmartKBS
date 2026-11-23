@@ -5,7 +5,7 @@ import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
   LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined, TagsOutlined,
   BarChartOutlined, ExclamationCircleOutlined, UndoOutlined,
-  PictureOutlined, UpOutlined,
+  PictureOutlined, UpOutlined, ToolOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -1049,19 +1049,26 @@ const QuestionBankPage: React.FC = () => {
               <Button icon={<BarChartOutlined />} onClick={() => navigate('/question-bank/analytics')}>
                 {t('analyticsTitle')}
               </Button>
-              <Button icon={<ClearOutlined />} onClick={handleDedup} loading={dedupLoading}>
-                {t('dedup')}
-              </Button>
-              {user?.role === 'admin' && (
-                <Dropdown
-                  menu={{
-                    items: [{ key: 'tag', label: t('tagFill'), icon: <TagsOutlined /> }],
-                    onClick: () => { void handleTagFill() },
-                  }}
-                >
-                  <Button loading={tagFillLoading}>{t('moreActions')}</Button>
-                </Dropdown>
-              )}
+              {/* 低频维护动作收进一个菜单：原来「更多操作」只有一个 AI 补标，
+                  去重又单独占一个按钮，7 个按钮同权重反而看不出主次 */}
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'dedup', label: t('dedup'), icon: <ClearOutlined />, disabled: dedupLoading },
+                    ...(user?.role === 'admin'
+                      ? [{ key: 'tag', label: t('tagFill'), icon: <TagsOutlined />, disabled: tagFillLoading }]
+                      : []),
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === 'dedup') void handleDedup()
+                    else if (key === 'tag') void handleTagFill()
+                  },
+                }}
+              >
+                <Button icon={<ToolOutlined />} loading={dedupLoading || tagFillLoading}>
+                  {t('governance')}
+                </Button>
+              </Dropdown>
               <Button icon={<PlusOutlined />} onClick={openCreate}>{t('manualCreate')}</Button>
               <Button
                 type="primary"

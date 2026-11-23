@@ -217,6 +217,7 @@
   "dedupKeep": "保留 #{{id}}",
   "dedupRemove": "删除 #{{id}}",
   "imageExtractQueued": "长图已转后台处理，请稍候…",
+  "governance": "题库治理",
   "manualCreate": "手动录入",
   "createQuestionTitle": "新建题目",
   "createQuestionSuccess": "已添加到题库",

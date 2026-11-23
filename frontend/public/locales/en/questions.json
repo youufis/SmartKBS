@@ -191,6 +191,7 @@
   "dedupKeep": "Keep #{{id}}",
   "dedupRemove": "Remove #{{id}}",
   "imageExtractQueued": "Long image is being processed in the background…",
+  "governance": "Maintenance",
   "manualCreate": "Manual Entry",
   "createQuestionTitle": "New Question",
   "createQuestionSuccess": "Added to question bank",

@@ -88,8 +88,12 @@ const QuestionFormModal: React.FC<Props> = ({
     const qtype = (q?.type as string) || 'single'
     const subject = q?.subject || subjectOptions[0] || ''
     let opts: string[] = []
+    let optionKeys: string[] = []
     if (q?.options && typeof q.options === 'object') {
-      opts = Object.keys(q.options).sort().map((k) => String((q.options as Record<string, string>)[k]))
+      // 选项 key 可能不连续（旧编辑器允许删掉 C 后留下 A/B/D）：
+      // 必须按"字母在 key 序列里的位置"还原答案，不能直接 charCode-65
+      optionKeys = Object.keys(q.options).sort()
+      opts = optionKeys.map((k) => String((q.options as Record<string, string>)[k]))
     }
     if (opts.length < 2) opts = ['', '', '', '']
 
@@ -109,7 +113,8 @@ const QuestionFormModal: React.FC<Props> = ({
 
     if (CHOICE.has(qtype)) {
       const letters = String(q?.correct_answer || '').toUpperCase().replace(/[^A-Z]/g, '')
-      setAnswers(letters.split('').map((ch) => ch.charCodeAt(0) - 65).filter((i) => i >= 0 && i < opts.length))
+      const picked = letters.split('').map((ch) => optionKeys.indexOf(ch)).filter((i) => i >= 0 && i < opts.length)
+      setAnswers([...new Set(picked)])
       setTf('对')
       setRefAnswer('')
     } else if (qtype === 'true_false') {
@@ -194,6 +199,12 @@ const QuestionFormModal: React.FC<Props> = ({
   }
 
   const save = async (keepOpen: boolean) => {
+    // 先走表单级校验，题干/学科为空时字段上直接标红（不再只弹一条 toast）
+    try {
+      await form.validateFields()
+    } catch {
+      return
+    }
     const err = validate()
     if (err) { message.warning(err); return }
     setSaving(true)

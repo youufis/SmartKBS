@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Space, Typography, Tag } from 'antd'
+import { Space, Tag } from 'antd'
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import { runAiTaskJob } from '../api/aiTask'
@@ -149,12 +149,6 @@ const QuestionMediaPanel: React.FC<Props> = ({ question, onChanged, reloadList }
         onDeleteMedia={handleDeleteMedia}
         progressText={progress}
       />
-      {/* 进度文案在 PlaceholderManager 内部不展示时，这里兜一个 */}
-      {progress && (
-        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-          {progress}
-        </Typography.Text>
-      )}
     </div>
   )
 }
