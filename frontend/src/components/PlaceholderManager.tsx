@@ -18,7 +18,9 @@ import { useTranslation } from 'react-i18next'
 import React, { useCallback, useMemo, useState } from 'react'
 import { Card, Button, Upload, Space, Tag, Spin, Image, Empty, Alert } from 'antd'
 import { message } from '../utils/feedback'
-import { UploadOutlined, ReloadOutlined, DeleteOutlined, PictureOutlined } from '@ant-design/icons'
+import {
+  UploadOutlined, ReloadOutlined, DeleteOutlined, PictureOutlined, ExclamationCircleOutlined,
+} from '@ant-design/icons'
 import SVGViewer from './SVGViewer'
 import { buildMediaEntries, type MediaEntry } from '../utils/mediaEntries'
 import type { MediaFile, MediaPlaceholder } from '../types'
@@ -167,13 +169,13 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
           ) : (isFailed || isMissing) ? (
             <div style={{
               width: '100%', height: '100%', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', background: '#f5f5f5', color: '#ff4d4f', fontSize: 24,
-            }}>⚠️</div>
+              justifyContent: 'center', background: 'var(--bg-layout)', color: 'var(--error-color)',
+            }}><ExclamationCircleOutlined style={{ fontSize: 22 }} /></div>
           ) : (
             <div style={{
               width: '100%', height: '100%', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', background: '#fafafa', color: '#999',
-            }}>{isLoading ? <Spin /> : '📷'}</div>
+              justifyContent: 'center', background: 'var(--bg-layout)', color: 'var(--text-tertiary)',
+            }}>{isLoading ? <Spin /> : <PictureOutlined style={{ fontSize: 22 }} />}</div>
           )}
         </div>
 

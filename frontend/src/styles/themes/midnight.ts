@@ -56,6 +56,12 @@ export const midnightTheme: ThemeConfig = {
       headerBg: '#1c1e26',
       borderColor: '#2e3038',
       colorBgContainer: '#1c1e26',
+      headerColor: '#a6a8b0',
+      // 选中/悬浮行底色：未启用 darkAlgorithm 时 antd 按 colorPrimaryBg 派生成
+      // 浅蓝白（实测 rgb(240,248,255)），勾选后整行浅色文字直接糊掉
+      rowSelectedBg: 'rgba(79, 140, 255, 0.16)',
+      rowSelectedHoverBg: 'rgba(79, 140, 255, 0.24)',
+      rowHoverBg: 'rgba(255, 255, 255, 0.04)',
     },
     Modal: {
       contentBg: '#1c1e26',
