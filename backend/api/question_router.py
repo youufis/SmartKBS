@@ -787,15 +787,28 @@ async def list_questions(
     if kp_state in ("none", "tagged"):
         conditions.append(f"{_kp_blank_sql('q')} {'=' if kp_state == 'none' else '<>'} ''")
     if quality:
-        # 与统计页 quality 口径对齐的三项；option_issues / duplicate 需要解析 JSON，
-        # 不适合放进 SQL 分页，仍由去重与人工核对处理
-        _no_media = ("COALESCE(q.has_svg, 0) = 0 AND "
-                     "(q.media_files IS NULL OR TRIM(q.media_files) IN ('', '[]', 'null'))")
+        # 与统计页 quality 口径逐项对齐：统计页是 json.loads 后判空，这里用 JSON1 函数
+        # 表达同一语义（空串 / JSON null / 空数组 / 非法 JSON 都算"无配图"）。
+        # option_issues / duplicate 需要解析每行的选项结构，不适合 SQL 分页，仍由去重与人工核对处理。
+        _media_empty = (
+            "(q.media_files IS NULL OR TRIM(q.media_files) = '' OR ("
+            "CASE WHEN json_valid(q.media_files) = 0 THEN 1 "
+            "WHEN json_type(q.media_files) = 'null' THEN 1 "
+            "WHEN json_type(q.media_files) = 'array' THEN json_array_length(q.media_files) = 0 "
+            "ELSE 0 END) = 1)"
+        )
+        _no_media = "COALESCE(q.has_svg, 0) = 0 AND " + _media_empty
+        _has_placeholders = (
+            "(q.media_placeholders IS NOT NULL AND "
+            "CASE WHEN json_valid(q.media_placeholders) = 0 THEN 0 "
+            "WHEN json_type(q.media_placeholders) = 'null' THEN 0 "
+            "WHEN json_type(q.media_placeholders) = 'array' THEN json_array_length(q.media_placeholders) > 0 "
+            "ELSE 1 END = 1)"
+        )
         quality_map = {
             "no_explanation": "TRIM(COALESCE(q.explanation, '')) = ''",
             "no_media": _no_media,
-            "pending_media": (_no_media + " AND q.media_placeholders IS NOT NULL "
-                              "AND TRIM(q.media_placeholders) NOT IN ('', '[]', 'null')"),
+            "pending_media": _no_media + " AND " + _has_placeholders,
         }
         if quality not in quality_map:
             raise HTTPException(status_code=400, detail="quality 只能是 no_explanation / no_media / pending_media")
