@@ -14,6 +14,7 @@ import apiClient from '../api/client'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import { pollAiTask } from '../api/aiTask'
+import { describeProgress } from '../utils/aiProgress'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 import { useTranslation } from 'react-i18next'
@@ -353,9 +354,6 @@ const QuestionBankPage: React.FC = () => {
       const totalCount = values.count || 5
       setGenProgress({ step: 1, text: t('generating'), count: 0, total: totalCount })
 
-      await new Promise(r => setTimeout(r, 100))
-      setGenProgress({ step: 2, text: `${t('aiGenerating')} ${totalCount}...`, count: 0, total: totalCount })
-
       const res = await questionsApi.generateQuestionsWithMedia({
         subject: values.subject,
         knowledge_points: Array.isArray(values.knowledge_points)
@@ -364,6 +362,14 @@ const QuestionBankPage: React.FC = () => {
         question_type: values.question_type,
         count: totalCount,
         difficulty: values.difficulty || 'medium',
+      }, (p) => {
+        // 后台任务会报 generate / media / done 阶段，直接翻成界面文案（原来是 setTimeout 假进度）
+        setGenProgress({
+          step: 2,
+          text: describeProgress(p, t),
+          count: p.done ?? 0,
+          total: p.total ?? totalCount,
+        })
       })
 
       setGeneratedQuestions(res.questions)
@@ -440,15 +446,7 @@ const QuestionBankPage: React.FC = () => {
   }
 
   // ── 删除重复试题 ──
-  const [dedupResult, setDedupResult] = useState<{
-    dry_run?: boolean;
-    total_deleted: number;
-    deletable_count?: number;
-    total_skipped_owner?: number;
-    total_skipped_ref?: number;
-    groups: { question_text: string; count: number }[];
-    message: string;
-  } | null>(null)
+  const [dedupResult, setDedupResult] = useState<questionsApi.DedupResult | null>(null)
   const [dedupLoading, setDedupLoading] = useState(false)
 
   // Q4: 先预览重复组(不写库), 用户在结果弹窗里点“确认清理”才真正执行
@@ -817,7 +815,7 @@ const QuestionBankPage: React.FC = () => {
       title: t('subject'),
       dataIndex: 'subject',
       key: 'subject',
-      width: 76,
+      width: 68,
       ellipsis: true,
       render: (subject: string) => (
         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{subject || '—'}</span>
@@ -845,7 +843,7 @@ const QuestionBankPage: React.FC = () => {
       title: t('knowledgePoints'),
       dataIndex: 'knowledge_points',
       key: 'knowledge_points',
-      width: 88,
+      width: 80,
       ellipsis: true,
       // 知识点最长 46 字，列宽只兜得住 p90（15 字）：截断时悬浮看全，别让人去展开行翻
       render: (text: string) => text ? (
@@ -875,7 +873,7 @@ const QuestionBankPage: React.FC = () => {
       // 导致同一批题的创建者一会儿 root、一会儿 管理员、一会儿 UNET; creator_username 恒有值且唯一
       dataIndex: 'creator_username',
       key: 'creator_username',
-      width: 80,
+      width: 72,
       ellipsis: true,
       render: (username: string, record: QuestionInfo) => (
         <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
@@ -887,7 +885,7 @@ const QuestionBankPage: React.FC = () => {
       title: t('media'),
       dataIndex: 'has_svg',
       key: 'has_svg',
-      width: 80,
+      width: 72,
       align: 'center' as const,
       render: (has_svg: number, record: QuestionInfo) => {
         // 解析 media_files（可能是 JSON 字符串或数组）
@@ -926,7 +924,7 @@ const QuestionBankPage: React.FC = () => {
       title: t('refCount'),
       dataIndex: 'ref_count',
       key: 'ref_count',
-      width: 60,
+      width: 56,
       align: 'center' as const,
       render: (n: number) => (n > 0 ? (
         <Tooltip title={t('refCountTip', { count: n })}>
@@ -957,7 +955,7 @@ const QuestionBankPage: React.FC = () => {
     {
       title: t('actions'),
       key: 'action',
-      width: 96,
+      width: 104,
       render: (_: any, record: QuestionInfo) => {
         // 权限：管理员（role=0）可操作全部，教师只能操作自己的（与勾选框同一口径）
         const canEdit = canOperate(record)
@@ -1282,7 +1280,7 @@ const QuestionBankPage: React.FC = () => {
                         </Col>
                       </Row>
                       <div style={{ marginTop: 12 }}>
-                        <Typography.Text strong style={{ fontSize: 13 }}>📷 {t('imageExtract')}</Typography.Text>
+                        <Typography.Text strong style={{ fontSize: 13 }}><PictureOutlined /> {t('imageExtract')}</Typography.Text>
                         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
                           {t('imageExtractHint')}
                         </Typography.Text>
@@ -1296,6 +1294,9 @@ const QuestionBankPage: React.FC = () => {
                               fd.append('file', file)
                               fd.append('subject', extractSubject || subjectDefault || subjectOptions[0] || '')
                               fd.append('difficulty', extractDifficulty)
+                              // 长图会被切片并逐轮续提，同步请求必然撞上网关超时；
+                              // 统一转后台任务，失败重试也不会重复入库
+                              fd.append('background', '1')
                               setExtracting(true)
                               setExtractError(null)
                               setExtractElapsed(0)
@@ -1304,10 +1305,18 @@ const QuestionBankPage: React.FC = () => {
                               try {
                                 const { data } = await apiClient.post('/api/questions/extract-from-image', fd, {
                                   headers: { 'Content-Type': 'multipart/form-data' },
-                                  timeout: 120000,
+                                  timeout: 180000,
                                 })
-                                setExtractedQuestions(data.questions || [])
-                                message.success(data.message || t('extractedCount', { count: data.total || 0 }))
+                                let result = data
+                                if (data?.mode === 'task' && data.task_id) {
+                                  message.info(t('imageExtractQueued'))
+                                  const polled = await pollAiTask(data.task_id, 900000)
+                                  if (!polled) throw new Error(t('extractFail'))
+                                  if (polled.error) throw new Error(String(polled.error))
+                                  result = polled
+                                }
+                                setExtractedQuestions(result.questions || [])
+                                message.success(result.message || t('extractedCount', { count: result.total || 0 }))
                                 loadQuestions()
                               } catch (err: any) {
                                 setExtractError(err.response?.data?.detail || err.message || t('extractFail'))
@@ -1577,7 +1586,7 @@ const QuestionBankPage: React.FC = () => {
           size="small"
           tableLayout="fixed"
           sticky
-          scroll={{ x: 1100 }}
+          scroll={{ x: 1020 }}
           onChange={(pag, _colFilters, sorter, extra) => {
             if (extra?.action === 'sort') {
               const single = Array.isArray(sorter) ? sorter[0] : sorter
@@ -1794,6 +1803,13 @@ const QuestionBankPage: React.FC = () => {
                     }}>
                       <Typography.Text style={{ fontSize: 13 }}>{g.question_text}</Typography.Text>
                       <Tag color="red" style={{ marginLeft: 8 }}>{t('dupTimes', { count: g.count })}</Tag>
+                      {/* 只给"重复 N 次"等于让老师盲签：必须说清保留哪条、删哪几条 */}
+                      <div style={{ marginTop: 6 }}>
+                        <Tag color="green">{t('dedupKeep', { id: g.keep_id })}</Tag>
+                        {(g.deleted_ids || []).map((id) => (
+                          <Tag key={id} color="red">{t('dedupRemove', { id })}</Tag>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>

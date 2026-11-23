@@ -1,6 +1,6 @@
 /** 试题库 API */
 import apiClient from './client';
-import { pollAiTask } from './aiTask';
+import { pollAiTask, pollAiTaskWithProgress, type AiTaskProgress } from './aiTask';
 import type {
   QuestionInfo,
   QuestionGenerateRequest,
@@ -14,8 +14,18 @@ import type {
  * 出题/生图这类调用在单条 HTTP 请求里可长达数分钟, 容易被网关/代理掐断,
  * 因此统一走 ai_task_manager 的异步任务(Q7)。
  */
-async function runAiTask<T>(url: string, body: unknown, maxWait = 600000): Promise<T> {
+async function runAiTask<T>(
+  url: string,
+  body: unknown,
+  maxWait = 600000,
+  onProgress?: (p: AiTaskProgress) => void,
+): Promise<T> {
   const { data } = await apiClient.post(url, body);
+  if (onProgress) {
+    // 有进度回调时走带进度的轮询：出题/生图最慢，界面需要知道在第几步
+    const task = await pollAiTaskWithProgress(data.task_id, onProgress, maxWait);
+    return task.result as T;
+  }
   const result = await pollAiTask(data.task_id, maxWait);
   if (!result) {
     // 超时: 不带 message, 由调用方回落到本地化文案
@@ -113,8 +123,11 @@ export async function purgeQuestions(ids: number[]): Promise<PurgeResponse> {
 }
 
 /** AI 生成试题（含SVG配图+公式+自动生图，异步任务版） */
-export async function generateQuestionsWithMedia(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
-  return runAiTask<QuestionGenerateResponse>('/api/questions/generate-with-media-async', req);
+export async function generateQuestionsWithMedia(
+  req: QuestionGenerateRequest,
+  onProgress?: (p: AiTaskProgress) => void,
+): Promise<QuestionGenerateResponse> {
+  return runAiTask<QuestionGenerateResponse>('/api/questions/generate-with-media-async', req, 600000, onProgress);
 }
 
 export async function listQuestions(params?: {

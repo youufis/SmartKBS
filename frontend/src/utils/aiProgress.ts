@@ -11,6 +11,8 @@ export function describeProgress(
   t: (k: string, o?: Record<string, unknown>) => string,
 ): string {
   switch (p.phase) {
+    case 'generate':
+      return t('pmProgGenerate')
     case 'svg':
       return t('pmProgSvg')
     case 'image':

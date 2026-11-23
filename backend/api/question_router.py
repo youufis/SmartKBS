@@ -1906,6 +1906,24 @@ def _group_duplicate_questions(rows_all: list[dict]) -> list[dict]:
     return groups
 
 
+def _dedup_keep_rank(row: dict[str, Any], ref_ids: set[int]) -> tuple:
+    """重复组里保留哪一条：被引用必留 > 信息更全 > id 更小。
+
+    旧实现固定保留 id 最小（最早创建）的那条，但带 SVG / 配图 / 解析的往往是
+    后来补的那条 —— 按 id 保最早等于把信息最全的那份删掉。
+    """
+    qid = int(row.get("id") or 0)
+    score = 0
+    if int(row.get("has_svg") or 0):
+        score += 8
+    for field, weight in (("media_files", 4), ("media_placeholders", 2),
+                          ("explanation", 2), ("knowledge_points", 1)):
+        val = row.get(field)
+        if isinstance(val, str) and val.strip() and val.strip() not in ("[]", "{}"):
+            score += weight
+    return (0 if qid in ref_ids else 1, -score, qid)
+
+
 @router.post("/dedup", summary="查找/清理重复试题(默认仅预览)")
 async def dedup_questions(req: DedupRequest | None = Body(default=None), request: Request = None):
     """查找重复试题; `confirm=false` 只返回清单, `confirm=true` 才执行软删除。
@@ -1925,7 +1943,12 @@ async def dedup_questions(req: DedupRequest | None = Body(default=None), request
         raise HTTPException(status_code=403, detail="仅管理员可跨创建者清理重复题")
 
     rows_all = [dict(r) for r in (execute_query(
-        """SELECT id, question_text, type, IFNULL(correct_answer, '') AS ans
+        """SELECT id, question_text, type, IFNULL(correct_answer, '') AS ans,
+                  COALESCE(explanation, '') AS explanation,
+                  COALESCE(knowledge_points, '') AS knowledge_points,
+                  COALESCE(has_svg, 0) AS has_svg,
+                  COALESCE(media_files, '') AS media_files,
+                  COALESCE(media_placeholders, '') AS media_placeholders
            FROM question_bank WHERE status = 'active' ORDER BY id ASC""") or [])]
     groups = _group_duplicate_questions(rows_all)
     candidate_ids: list[int] = []
@@ -1950,9 +1973,13 @@ async def dedup_questions(req: DedupRequest | None = Body(default=None), request
     total_skipped_owner = 0
     total_skipped_ref = 0
 
+    rows_by_id = {int(r["id"]): r for r in rows_all}
+    ref_ids_all = exam_ref_ids | prac_ref_ids
     for g in groups:
         ids = sorted(int(x) for x in (g["ids"] or "").split(",") if x)
-        keep_id, dup_ids = ids[0], ids[1:]
+        ordered_ids = sorted(ids, key=lambda qid: _dedup_keep_rank(rows_by_id.get(qid, {"id": qid}), ref_ids_all))
+        keep_id = ordered_ids[0]
+        dup_ids = [qid for qid in ids if qid != keep_id]
         allowed, skipped_owner, skipped_ref = [], 0, 0
         for did in dup_ids:
             owner = owners.get(did, "")
@@ -1983,7 +2010,7 @@ async def dedup_questions(req: DedupRequest | None = Body(default=None), request
         # Q4: 预览模式, 不做任何写入
         parts = []
         if delete_ids:
-            parts.append("可删除 %d 条重复试题(保留每组最早的一条)" % len(delete_ids))
+            parts.append("可删除 %d 条重复试题(每组保留信息最全的一条)" % len(delete_ids))
         if total_skipped_ref:
             parts.append("%d 条因被考试/练习引用而保留" % total_skipped_ref)
         if total_skipped_owner:
@@ -2574,56 +2601,12 @@ def _crop_image_from_line(image_bytes: bytes, mime_type: str, line_no: int) -> t
         logger.warning(f"图片续提裁剪失败: {e}")
         return b"", ""
 
-@router.post("/extract-from-image", summary="从图片中智能提取试题（使用视觉模型）")
-async def extract_questions_from_image(
-    request: Request,
-    subject: str = Form(""),
-    difficulty: str = Form("medium"),
-    file: UploadFile = File(...),
-):
-    """从图片（截图/扫描件）中提取试题，使用视觉模型识别"""
-    user = get_current_user(request)
-    username = user["username"]
-
-    if not can_manage_html_files(username):
-        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
-    subject = _question_subject(subject)
-
-    # 验证图片格式
-    filename_lower = (file.filename or "").lower()
-    ext = os.path.splitext(filename_lower)[1]
-    supported_images = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
-    if ext not in supported_images:
-        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}，支持 jpg/png/gif/webp/bmp")
-
-    # 读取图片（直接在内存处理，不落盘）。M3: 大小前置 + 硬上限 + 魔法字节验真
-    _MAX_IMG_BYTES = 20 * 1024 * 1024
-    if file.size is not None and file.size > _MAX_IMG_BYTES:
-        raise HTTPException(status_code=400, detail="图片过大（上限 20MB），请压缩后重试")
-    file_bytes = await file.read(_MAX_IMG_BYTES + 1)
-    if len(file_bytes) > _MAX_IMG_BYTES:
-        raise HTTPException(status_code=400, detail="图片过大（上限 20MB），请压缩后重试")
-    if len(file_bytes) < 100:
-        raise HTTPException(status_code=400, detail="图片内容过小，请上传清晰的试卷截图")
-    from backend.api.image_gen_service import _sniff_image_format
-    _fmt = _sniff_image_format(file_bytes)
-    if not _fmt:
-        raise HTTPException(status_code=400, detail="上传内容不是可识别的图片文件")
-    # MIME 按真实格式定, 不信扩展名
-    _fmt_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                 "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp"}
-    mime_type = _fmt_mime.get(_fmt, "image/jpeg")
-    # 获取 API Key
-    api_key, _ = get_api_keys(username)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 API Key")
-
-    # 调用视觉模型提取试题
-    model_name = resolve_vl_model(get_config_value("MODEL_VL_NAME", ""))
-
+async def _extract_image_questions(
+    file_bytes: bytes, mime_type: str, subject: str, difficulty: str,
+    username: str, api_key: str, model_name: str,
+) -> dict[str, Any]:
+    """图片提取的真实实现：同步端点与后台任务共用一份，避免两套逻辑漂移。"""
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
-    prompt_text = _build_image_extract_prompt(subject, difficulty_desc)
-
     # ── 外层逐片(长图自动切), 内层逐轮(截断续提), 最后规范化去重合并 ──
     from backend.question_extract import merge_questions
     MAX_IMG_ROUNDS = 3
@@ -2684,6 +2667,72 @@ async def extract_questions_from_image(
         "total": len(saved_questions),
         "note": "；".join(notes),
     }
+
+
+@router.post("/extract-from-image", summary="从图片中智能提取试题（使用视觉模型）")
+async def extract_questions_from_image(
+    request: Request,
+    subject: str = Form(""),
+    difficulty: str = Form("medium"),
+    background: str = Form("0"),
+    file: UploadFile = File(...),
+):
+    """从图片（截图/扫描件）中提取试题，使用视觉模型识别"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    subject = _question_subject(subject)
+
+    # 验证图片格式
+    filename_lower = (file.filename or "").lower()
+    ext = os.path.splitext(filename_lower)[1]
+    supported_images = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+    if ext not in supported_images:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}，支持 jpg/png/gif/webp/bmp")
+
+    # 读取图片（直接在内存处理，不落盘）。M3: 大小前置 + 硬上限 + 魔法字节验真
+    _MAX_IMG_BYTES = 20 * 1024 * 1024
+    if file.size is not None and file.size > _MAX_IMG_BYTES:
+        raise HTTPException(status_code=400, detail="图片过大（上限 20MB），请压缩后重试")
+    file_bytes = await file.read(_MAX_IMG_BYTES + 1)
+    if len(file_bytes) > _MAX_IMG_BYTES:
+        raise HTTPException(status_code=400, detail="图片过大（上限 20MB），请压缩后重试")
+    if len(file_bytes) < 100:
+        raise HTTPException(status_code=400, detail="图片内容过小，请上传清晰的试卷截图")
+    from backend.api.image_gen_service import _sniff_image_format
+    _fmt = _sniff_image_format(file_bytes)
+    if not _fmt:
+        raise HTTPException(status_code=400, detail="上传内容不是可识别的图片文件")
+    # MIME 按真实格式定, 不信扩展名
+    _fmt_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                 "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp"}
+    mime_type = _fmt_mime.get(_fmt, "image/jpeg")
+    # 获取 API Key
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    # 调用视觉模型提取试题
+    model_name = resolve_vl_model(get_config_value("MODEL_VL_NAME", ""))
+
+    if (background or "").strip().lower() in ("1", "true", "yes"):
+        from backend.ai_task_manager import task_manager
+
+        async def _run_image() -> dict[str, Any]:
+            return await _extract_image_questions(
+                file_bytes, mime_type, subject, difficulty, username, api_key, model_name)
+
+        task_id = await task_manager.create_task(
+            description=f"教师 {username} 图片提取试题",
+            coro_factory=_run_image,
+        )
+        return {"mode": "task", "task_id": task_id,
+                "message": "图片提取已转后台处理，请稍候…"}
+
+    return await _extract_image_questions(
+        file_bytes, mime_type, subject, difficulty, username, api_key, model_name)
 
 
 def _normalize_question_json(q: dict[str, Any]) -> dict[str, Any]:
@@ -2912,6 +2961,8 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     )
     # 注意：不注入技能 — 技能的结构化输出指令与纯 JSON 输出要求冲突
     logger.info(f"开始调用AI生成多媒体试题: subject={subject}, type={req.question_type}")
+    from backend.ai_task_manager import report_progress
+    report_progress(phase="generate", total=req.count, done=0, message="AI 正在出题")
 
     try:
         # 含配图出题输出长、结构复杂：走 json_mode，由网关兜底 JSON 合法性
@@ -3020,6 +3071,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
             "duplicated": True,
         })
 
+    report_progress(phase="done", done=stats["saved"], total=req.count, message="出题完成")
     note = _generation_note(outcome, media_notes, asked=req.count, parsed=len(questions))
     logger.info(f"用户 {username} AI 出题(含配图) 入库={stats['saved']} 重复={stats['duplicated']} "
                 f"拒绝={stats['rejected']} 题型={stats['by_type']}")
