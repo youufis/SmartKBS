@@ -444,7 +444,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                     <YAxis allowDecimals={false} />
                     <RTooltip />
-                    <Bar dataKey="count" fill="#1677ff" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="count" name={t('analyticsCount')} fill="#1677ff" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
@@ -470,7 +470,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
                     <XAxis type="number" allowDecimals={false} />
                     <YAxis type="category" dataKey="subject" width={75} tick={{ fontSize: 11 }} />
                     <RTooltip />
-                    <Bar dataKey="count" fill="#52c41a" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="count" name={t('analyticsCount')} fill="#52c41a" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
@@ -486,7 +486,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis allowDecimals={false} />
                     <RTooltip />
-                    <Area type="monotone" dataKey="count" stroke="#1677ff" fill="#1677ff33" />
+                    <Area type="monotone" dataKey="count" name={t('analyticsCount')} stroke="#1677ff" fill="#1677ff33" />
                   </AreaChart>
                 </ResponsiveContainer>
               </Card>
@@ -499,7 +499,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
                     <XAxis type="number" allowDecimals={false} />
                     <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
                     <RTooltip />
-                    <Bar dataKey="count" fill="#722ed1" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="count" name={t('analyticsCount')} fill="#722ed1" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
