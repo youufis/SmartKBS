@@ -1,56 +1,40 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Layout, Card, Table, Button, Modal, Form, Input, Select, Segmented, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image, DatePicker, Dropdown, Badge } from 'antd'
+import { Layout, Card, Table, Button, Modal, Form, Input, Select, Segmented, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image, DatePicker, Dropdown, Badge, theme } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
   LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined, TagsOutlined,
   BarChartOutlined, ExclamationCircleOutlined, UndoOutlined,
+  PictureOutlined, UpOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
-import { pollAiTask, runAiTaskJob, type AiTaskProgress } from '../api/aiTask'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
 import AnswerLine from '../components/AnswerLine'
+import QuestionFormModal from '../components/QuestionFormModal'
 import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import MediaDisplay from '../components/MediaDisplay'
-import PlaceholderManager from '../components/PlaceholderManager'
 import { TYPE_LABELS, TYPE_COLORS, TYPE_OPTIONS } from '../constants/questionTypes'
-import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
 const { Option } = Select
 
-/** 把后台任务的 progress 结构字段翻成界面文案（不直接用后端的中文 message） */
-function describeProgress(p: AiTaskProgress, t: (k: string, o?: any) => string): string {
-  switch (p.phase) {
-    case 'svg':
-      return t('pmProgSvg')
-    case 'image':
-      return t('pmProgImage', {
-        model: p.model || '-',
-        attempt: p.attempt ?? 1,
-        maxAttempts: p.max_attempts ?? 3,
-      })
-    case 'download':
-      return t('pmProgDownload')
-    case 'fallback':
-      return t('pmProgFallback')
-    case 'media':
-      if (p.total) return t('pmProgMedia', { done: p.done ?? 0, total: p.total })
-      return t('pmProgWorking')
-    case 'done':
-      return t('pmProgDone')
-    default:
-      return t('pmProgWorking')
-  }
+/** 状态色用半透明叠加而不是固定 hex：不用 darkAlgorithm 的主题里，antd 的
+ *  colorSuccessBg 等派生令牌仍是浅色，硬编码会更糟。 */
+const TINT = {
+  success: { bg: 'rgba(82, 196, 26, 0.08)', border: 'rgba(82, 196, 26, 0.35)' },
+  info: { bg: 'rgba(22, 119, 255, 0.06)', border: 'rgba(22, 119, 255, 0.30)' },
+  warning: { bg: 'rgba(250, 173, 20, 0.10)', border: 'rgba(250, 173, 20, 0.40)' },
+  danger: { bg: 'rgba(255, 77, 79, 0.07)', border: 'rgba(255, 77, 79, 0.35)' },
 }
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -135,6 +119,7 @@ function rangeFromQuery(qs: string): [Dayjs | null, Dayjs | null] | null {
 const QuestionBankPage: React.FC = () => {
   const { t } = useTranslation('questions')
   const { t: tc } = useTranslation('common')
+  const { token } = theme.useToken()
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -211,15 +196,11 @@ const QuestionBankPage: React.FC = () => {
   const [purging, setPurging] = useState(false)
   const [restoring, setRestoring] = useState(false)
 
-  // ── 编辑弹窗 ──
-  const [editModal, setEditModal] = useState(false)
-  const [mediaModal, setMediaModal] = useState(false)
-  const [mediaQuestion, setMediaQuestion] = useState<QuestionInfo | null>(null)
-  const [editingQuestion, setEditingQuestion] = useState<QuestionInfo | null>(null)
-  const [editForm] = Form.useForm()
-  const [saving, setSaving] = useState(false)
-  const [optionEntries, setOptionEntries] = useState<{ key: string; value: string }[]>([])
-  const [showFormulaHelp, setShowFormulaHelp] = useState(false)
+  // ── 试题表单弹窗（新建 / 编辑 / 配图，同一个组件三个入口） ──
+  const [formOpen, setFormOpen] = useState(false)
+  const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
+  const [formQuestion, setFormQuestion] = useState<QuestionInfo | null>(null)
+  const [formTab, setFormTab] = useState<'form' | 'media'>('form')
 
   // URL 参数 -> 筛选条件。两个 setter 都做了"值没变就保留原引用"，
   // 避免挂载时 filters 被换成等价的新对象后 loadQuestions 重建、同一页数据再拉一遍
@@ -448,198 +429,23 @@ const QuestionBankPage: React.FC = () => {
     }
   }
 
-  // ── 配图管理（粒度 loading 状态） ──
-  const [svgLoading, setSvgLoading] = useState(false)
-  const [wanxiangLoading, setWanxiangLoading] = useState(false)
-  const [mediaProgress, setMediaProgress] = useState('')
-
-  const handleManageMedia = (q: QuestionInfo) => {
-    setMediaQuestion(q)
-    setMediaProgress('')
-    setMediaModal(true)
+  const openCreate = () => {
+    setFormMode('create')
+    setFormQuestion(null)
+    setFormTab('form')
+    setFormOpen(true)
   }
-
-  /**
-   * 配图类动作统一走后台任务 + 轮询进度。
-   *
-   * 为什么不再是同步 HTTP：万相同步等待叠加"最多 3 个模型 × 3 次重试"能到几分钟，
-   * 前端那条 300s 的长连接在反代下必断；断连后教师看到"失败"，图其实已经生成并计费，
-   * 再点一次就是第二张图。改成任务后：连接只用于提交，进度可见，重复点击由后端
-   * dedupe_key 挡在同一张图上。
-   */
-  const runMediaTask = async (
-    url: string,
-    opts: { okKey: string; failKey: string; setUploading?: (v: boolean) => void },
-  ) => {
-    if (!mediaQuestion) return
-    const { okKey, failKey, setUploading } = opts
-    setUploading?.(true)
-    setMediaProgress(t('pmProgWorking'))
-    try {
-      await runAiTaskJob(url, null, (p) => setMediaProgress(describeProgress(p, t)))
-      message.success(t(okKey))
-      await loadQuestions()
-      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
-      setMediaQuestion(data)
-    } catch (e: any) {
-      if (e?.aiTaskTimeout) {
-        // 超时 ≠ 失败：后台还在生成，提示"失败"会诱导重复点击重复烧配额
-        message.warning(t('generateStillRunning'))
-        loadQuestions()
-      } else {
-        message.error(e?.response?.data?.detail || e?.message || t(failKey))
-      }
-    } finally {
-      setMediaProgress('')
-      setUploading?.(false)
-    }
+  const openEdit = (q: QuestionInfo) => {
+    setFormMode('edit')
+    setFormQuestion(q)
+    setFormTab('form')
+    setFormOpen(true)
   }
-
-  const handleRegenerateSVG = async () => {
-    if (!mediaQuestion) return
-    await runMediaTask(`/api/questions/${mediaQuestion.id}/generate-svg-async`, {
-      okKey: 'svgRegenerated', failKey: 'svgGenFail', setUploading: setSvgLoading,
-    })
-  }
-
-  const handleGenerateImage = async () => {
-    if (!mediaQuestion) return
-    await runMediaTask(`/api/questions/${mediaQuestion.id}/generate-image-async`, {
-      okKey: 'imageGenerated', failKey: 'imageGenFail', setUploading: setWanxiangLoading,
-    })
-  }
-
-  const handleDeleteSVG = async () => {
-    if (!mediaQuestion) return
-    try {
-      await apiClient.delete(`/api/questions/${mediaQuestion.id}/svg`)
-      message.success(t('svgDeleted'))
-      await loadQuestions()
-      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
-      setMediaQuestion(data)
-    } catch (e: any) {
-      message.error(e?.response?.data?.detail || t('deleteFail'))
-    }
-  }
-
-  const handleGenerateMedia = async (key: string) => {
-    if (!mediaQuestion) return
-    // per-key loading 仍由 PlaceholderManager 内部管理，父组件只负责接口与进度文案
-    await runMediaTask(`/api/questions/${mediaQuestion.id}/generate-media/${key}/async`, {
-      okKey: 'imageGenerated', failKey: 'imageGenFail',
-    })
-  }
-
-  const handleUploadMedia = async (key: string, file: File) => {
-    if (!mediaQuestion) return
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      await apiClient.post(`/api/questions/${mediaQuestion.id}/upload-media/${key}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      message.success(t('imageUploaded'))
-      await loadQuestions()
-      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
-      setMediaQuestion(data)
-    } catch (e: any) {
-      message.error(e?.response?.data?.detail || t('uploadFail'))
-    }
-  }
-
-  const handleDeleteMedia = async (key: string) => {
-    if (!mediaQuestion) return
-    try {
-      await apiClient.delete(`/api/questions/${mediaQuestion.id}/media/${key}`)
-      message.success(t('imageDeleted'))
-      await loadQuestions()
-      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
-      setMediaQuestion(data)
-    } catch (e: any) {
-      message.error(e?.response?.data?.detail || t('deleteFail'))
-    }
-  }
-
-  // ── 编辑题目 ──
-  const handleEdit = (q: QuestionInfo) => {
-    setEditingQuestion(q)
-    // 解析选项为逐个输入框
-    let entries: { key: string; value: string }[] = []
-    if (q.options && typeof q.options === 'object') {
-      entries = Object.entries(q.options).map(([k, v]) => ({ key: k, value: String(v) }))
-    }
-    setOptionEntries(entries)
-    editForm.setFieldsValue({
-      question_text: q.question_text,
-      correct_answer: q.correct_answer,
-      explanation: q.explanation,
-      knowledge_points: q.knowledge_points,
-      difficulty: q.difficulty,
-      type: q.type,
-      subject: (q as any).subject || '',
-    })
-    setEditModal(true)
-  }
-
-  // ── 选项值变更 ──
-  const handleOptionKeyChange = (index: number, newKey: string) => {
-    setOptionEntries(prev => prev.map((e, i) => i === index ? { ...e, key: newKey.toUpperCase() } : e))
-  }
-  const handleOptionValueChange = (index: number, newValue: string) => {
-    setOptionEntries(prev => prev.map((e, i) => i === index ? { ...e, value: newValue } : e))
-  }
-  const handleAddOption = () => {
-    const nextKey = String.fromCharCode(65 + optionEntries.length)
-    setOptionEntries([...optionEntries, { key: nextKey, value: '' }])
-  }
-  const handleRemoveOption = (index: number) => {
-    setOptionEntries(prev => prev.filter((_, i) => i !== index))
-  }
-
-  const handleSaveEdit = async () => {
-    if (!editingQuestion) return
-    try {
-      const values = await editForm.validateFields()
-      setSaving(true)
-
-      // 从 optionEntries 构建 options JSON
-      let optionsStr = ''
-      if (editingQuestion.type !== 'short' && optionEntries.length > 0) {
-        const optObj: Record<string, string> = {}
-        for (const e of optionEntries) {
-          if (e.key && e.value) optObj[e.key] = e.value
-        }
-        if (Object.keys(optObj).length > 0) {
-          optionsStr = JSON.stringify(optObj)
-        }
-      }
-
-      const updates: any = {
-        question_text: values.question_text,
-        correct_answer: values.correct_answer,
-        explanation: values.explanation ?? '',
-        knowledge_points: values.knowledge_points ?? '',
-        difficulty: values.difficulty,
-        type: values.type,
-        subject: values.subject ?? '',
-        // 总是回传 options：后端按“字段是否出现”区分未改动与显式清空(Q8)
-        options: optionsStr,
-      }
-
-      const res = await questionsApi.updateQuestion(editingQuestion.id, updates)
-      message.success(t('editSuccess'))
-      ;(res?.warnings || []).forEach((w) => message.warning(w, 8))
-      setEditModal(false)
-      loadQuestions()
-    } catch (err: any) {
-      if (err?.errorFields) {
-        // 表单校验失败, antd 已在字段上标红, 不再重复弹提示
-        return
-      }
-      message.error(err?.response?.data?.detail || err?.message || t('updateFail'))
-    } finally {
-      setSaving(false)
-    }
+  const openMedia = (q: QuestionInfo) => {
+    setFormMode('edit')
+    setFormQuestion(q)
+    setFormTab('media')
+    setFormOpen(true)
   }
 
   // ── 删除题目 ──
@@ -1010,11 +816,11 @@ const QuestionBankPage: React.FC = () => {
         if ((record.media_placeholders?.length || 0) > 0) {
           return (
             <Tooltip title={t('placeholderCount', { count: record.media_placeholders?.length || 0 })}>
-              <Tag color="orange">📷 {record.media_placeholders?.length}</Tag>
+              <Tag color="orange" icon={<PictureOutlined />}>{record.media_placeholders?.length}</Tag>
             </Tooltip>
           )
         }
-        return <span style={{ color: '#ddd' }}>—</span>
+        return <span style={{ color: token.colorTextQuaternary }}>—</span>
       },
     },
     {
@@ -1071,11 +877,13 @@ const QuestionBankPage: React.FC = () => {
           <Space size="small">
             <Tooltip title={t('editQuestion')}>
               <Button type="link" size="small" icon={<EditOutlined />}
-                onClick={() => handleEdit(record)} />
+                aria-label={t('editQuestion')}
+                onClick={() => openEdit(record)} />
             </Tooltip>
             <Tooltip title={t('imageManagement')}>
-              <Button type="link" size="small" icon={<span>🎨</span>}
-                onClick={() => handleManageMedia(record)} />
+              <Button type="link" size="small" icon={<PictureOutlined />}
+                aria-label={t('imageManagement')}
+                onClick={() => openMedia(record)} />
             </Tooltip>
             <Popconfirm
               title={t('confirmDelete')}
@@ -1085,7 +893,8 @@ const QuestionBankPage: React.FC = () => {
               cancelText={t('cancel')}
             >
               <Tooltip title={t('deleteQuestion')}>
-                <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}
+                  aria-label={t('deleteQuestion')} />
               </Tooltip>
             </Popconfirm>
           </Space>
@@ -1137,9 +946,10 @@ const QuestionBankPage: React.FC = () => {
                   <Button loading={tagFillLoading}>{t('moreActions')}</Button>
                 </Dropdown>
               )}
+              <Button icon={<PlusOutlined />} onClick={openCreate}>{t('manualCreate')}</Button>
               <Button
                 type="primary"
-                icon={<PlusOutlined />}
+                icon={showGeneratePanel ? <UpOutlined /> : <PlusOutlined />}
                 onClick={() => setShowGeneratePanel(!showGeneratePanel)}
               >
                 {showGeneratePanel ? t('collapsePanel') : t('generateExtract')}
@@ -1150,7 +960,7 @@ const QuestionBankPage: React.FC = () => {
 
         {/* ── 试题生成/提取面板 ── */}
         {showGeneratePanel && (
-          <Card style={{ border: '1px solid #1677ff22', background: '#fafaff' }}>
+          <Card style={{ border: `1px solid ${TINT.info.border}`, background: TINT.info.bg }}>
             <Tabs
               activeKey={genTab}
               onChange={setGenTab}
@@ -1234,7 +1044,7 @@ const QuestionBankPage: React.FC = () => {
                             )}
                             {genError && (
                               <Typography.Text type="danger" style={{ fontSize: 13 }}>
-                                ❌ {genError}
+                                {genError}
                               </Typography.Text>
                             )}
                           </div>
@@ -1255,9 +1065,9 @@ const QuestionBankPage: React.FC = () => {
                                 marginBottom: 8,
                                 // 命中题库已有题的是"回填展示"，不是新入库的题：
                                 // 画成一样的绿卡会让老师以为又生成了几道，数量也对不上
-                                background: (q as any).duplicated ? '#fafafa' : '#f6ffed',
+                                background: (q as any).duplicated ? token.colorFillQuaternary : TINT.success.bg,
                                 border: (q as any).duplicated
-                                  ? '1px dashed #d9d9d9' : '1px solid #b7eb8f',
+                                  ? `1px dashed ${token.colorBorder}` : `1px solid ${TINT.success.border}`,
                               }}
                               title={(
                                 <span style={{ fontSize: 14 }}>
@@ -1400,15 +1210,7 @@ const QuestionBankPage: React.FC = () => {
                           rows={6}
                           value={extractText}
                           onChange={(e) => setExtractText(e.target.value)}
-                          placeholder={`在此粘贴试题文本，例如：
-
-1. 世界上最大的海洋是？
-   A. 大西洋  B. 太平洋  C. 印度洋  D. 北冰洋
-   答案：B
-
-2. 计算机的核心部件是？
-   A. 显示器  B. 键盘  C. CPU  D. 内存
-   答案：C`}
+                          placeholder={t('pasteExamplePlaceholder')}
                           style={{ marginTop: 4 }}
                           disabled={!!extractFile}
                         />
@@ -1425,7 +1227,7 @@ const QuestionBankPage: React.FC = () => {
                         </Button>
                         {extractError && (
                           <Typography.Text type="danger" style={{ fontSize: 13 }}>
-                            ❌ {extractError}
+                            {extractError}
                           </Typography.Text>
                         )}
                       </div>
@@ -1438,9 +1240,9 @@ const QuestionBankPage: React.FC = () => {
                           </Divider>
                           {extractedQuestions.map((q, idx) => (
                             <Card
-                              key={q.id}
+                              key={`${q.id}-${idx}`}
                               size="small"
-                              style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
+                              style={{ marginBottom: 8, background: TINT.success.bg, border: `1px solid ${TINT.success.border}` }}
                               title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
                             >
                               <FormulaRenderer content={q.question_text} />
@@ -1602,7 +1404,7 @@ const QuestionBankPage: React.FC = () => {
 
         {/* ── 多选操作条：勾选后才出现，紧贴表格，删完即隐藏 ── */}
         {selectedRowKeys.length > 0 && (
-          <Card size="small" style={{ borderRadius: 8, background: '#fff7f7', border: '1px solid #ffccc7' }}>
+          <Card size="small" style={{ borderRadius: 8, background: TINT.danger.bg, border: `1px solid ${TINT.danger.border}` }}>
             <Space wrap size={8}>
               <Typography.Text style={{ fontSize: 13 }}>
                 <DeleteOutlined /> {t('selectedCount', { count: selectedRowKeys.length })}
@@ -1666,12 +1468,12 @@ const QuestionBankPage: React.FC = () => {
                 </div>
                 <MediaDisplay svgContent={record.svg_content} hasSvg={record.has_svg} mediaFiles={record.media_files} size="normal" />
                 {record.type !== 'short' && record.options && Object.entries(record.options).map(([k, v]) => (
-                  <div key={k} style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
+                  <div key={k} style={{ margin: '4px 0 0 20px', fontSize: 13, color: token.colorTextSecondary }}>
                     <Tag>{k}</Tag> <FormulaRenderer content={v as string} inline />
                   </div>
                 ))}
                 {record.type === 'short' && (
-                  <div style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
+                  <div style={{ margin: '4px 0 0 20px', fontSize: 13, color: token.colorTextSecondary }}>
                     {t('referenceAnswer')}：<FormulaRenderer content={record.correct_answer} inline />
                   </div>
                 )}
@@ -1693,302 +1495,16 @@ const QuestionBankPage: React.FC = () => {
         />
       </Space>
 
-      {/* ── 编辑弹窗 ── */}
-      <Modal mask={{ closable: false }}
-        title={t('editQuestion_', { id: editingQuestion?.id })}
-        open={editModal}
-        onOk={handleSaveEdit}
-        onCancel={() => closeWithDirtyGuard(editForm.isFieldsTouched(), tc, () => setEditModal(false))}
-        confirmLoading={saving}
-        width={760}
-        okText={t('save')}
-        cancelText={t('cancel')}
-        destroyOnHidden
-      >
-        <Form
-          form={editForm}
-          layout="vertical"
-          onValuesChange={(_, all: any) => setEditingQuestion((prev) => (
-            prev ? { ...prev, type: all.type ?? prev.type, subject: all.subject ?? prev.subject } : prev
-          ))}
-        >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item label={t('questionType')} name="type">
-                <Select
-                  showSearch
-                  optionFilterProp="children"
-                  suffixIcon={
-                    <Tag color={TYPE_COLORS[editingQuestion?.type || '']} style={{ margin: 0, lineHeight: '18px' }}>
-                      {TYPE_LABELS[editingQuestion?.type || '']}
-                    </Tag>
-                  }
-                >
-                  {TYPE_OPTIONS.map((o) => (
-                    <Option key={o.value} value={o.value}>{o.label}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={t('subject')} name="subject" rules={[{ required: true, message: t('subject') }]}>
-                <Select
-                  placeholder={t('subject')}
-                  options={subjectOptions.map(s => ({ value: s, label: s }))}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          {/* ── 题目内容（含公式预览） ── */}
-          <Form.Item
-            label={t('questionContent')}
-            name="question_text"
-            rules={[{ required: true, message: t('enterQuestionContent') }]}
-            extra={t('formulaSupport')}
-          >
-            <TextArea rows={3} />
-          </Form.Item>
-          {/* 公式预览 */}
-          <Form.Item shouldUpdate={(prev, cur) => prev.question_text !== cur.question_text} noStyle>
-            {({ getFieldValue }) => {
-              const qt = getFieldValue('question_text')
-              if (!qt) return null
-              return (
-                <div style={{
-                  marginTop: -16, marginBottom: 16, padding: '8px 12px',
-                  background: 'var(--bg-layout)', borderRadius: 6, border: '1px solid var(--border-color-secondary)',
-                }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 4 }}>📐 {t('livePreview')}：</div>
-                  <div style={{ fontSize: 14, lineHeight: 1.8 }}>
-                    <FormulaRenderer content={qt} />
-                  </div>
-                </div>
-              )
-            }}
-          </Form.Item>
-
-          {/* ── 选项编辑（非简答题） ── */}
-          {editingQuestion?.type !== 'short' && (
-            <Form.Item label={t('options')} required>
-              <div style={{ border: '1px solid var(--border-color-secondary)', borderRadius: 6, padding: 12, background: 'var(--bg-layout)' }}>
-                {optionEntries.length === 0 && (
-                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                    {t('noOptionsYet')}
-                  </Typography.Text> 
-                )}
-                {optionEntries.map((entry, idx) => (
-                  <div key={idx} style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <Input
-                      style={{ width: 56, textAlign: 'center', fontWeight: 'bold' }}
-                      value={entry.key}
-                      onChange={(e) => handleOptionKeyChange(idx, e.target.value)}
-                      placeholder={t('optionKeyPlaceholder')}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <TextArea
-                        rows={1}
-                        value={entry.value}
-                        onChange={(e) => handleOptionValueChange(idx, e.target.value)}
-                        placeholder={t('optionValuePlaceholder')}
-                        style={{ minHeight: 32 }}
-                      />
-                      {/* 选项预览 */}
-                      {entry.value && (
-                        <div style={{
-                          marginTop: 2, padding: '2px 8px',
-                          background: 'var(--bg-container)', borderRadius: 4,
-                          fontSize: 13, color: 'var(--text-secondary)',
-                          border: '1px dashed var(--border-color-secondary)',
-                        }}>
-                          <FormulaRenderer content={entry.value} inline />
-                        </div>
-                      )}
-                    </div>
-                    <Button
-                      size="small"
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={() => handleRemoveOption(idx)}
-                      disabled={optionEntries.length <= 2}
-                    />
-                  </div>
-                ))}
-                <Button
-                  size="small"
-                  type="dashed"
-                  icon={<PlusOutlined />}
-                  onClick={handleAddOption}
-                  style={{ marginTop: 4 }}
-                >
-                  {t('addOption')}
-                </Button>
-              </div>
-            </Form.Item>
-          )}
-
-          {/* ── 正确答案（含公式预览） ── */}
-          <Form.Item
-            label={editingQuestion?.type === 'short' ? t('referenceAnswer') : t('correctAnswer')}
-            name="correct_answer"
-            rules={[{ required: true, message: t('enterQuestionContent') }]}
-          >
-            <Input placeholder={editingQuestion?.type === 'short' ? t('referenceAnswer') : t('correctAnswer')} />
-          </Form.Item>
-          {/* 答案预览 */}
-          <Form.Item shouldUpdate={(prev, cur) => prev.correct_answer !== cur.correct_answer} noStyle>
-            {({ getFieldValue }) => {
-              const ca = getFieldValue('correct_answer')
-              if (!ca) return null
-              return (
-                <div style={{
-                  marginTop: -16, marginBottom: 16, padding: '4px 12px',
-                  background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f',
-                }}>
-                  <span style={{ fontSize: 12, color: '#52c41a' }}>✅ {t('preview')}：</span>
-                  <FormulaRenderer content={ca} inline />
-                </div>
-              )
-            }}
-          </Form.Item>
-
-          {/* ── 解析（含公式预览） ── */}
-          <Form.Item label={t('explanation')} name="explanation">
-            <TextArea rows={2} placeholder={t('explanation')} />
-          </Form.Item>
-          {/* 解析预览 */}
-          <Form.Item shouldUpdate={(prev, cur) => prev.explanation !== cur.explanation} noStyle>
-            {({ getFieldValue }) => {
-              const exp = getFieldValue('explanation')
-              if (!exp) return null
-              return (
-                <div style={{
-                  marginTop: -16, marginBottom: 16, padding: '6px 12px',
-                  background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff',
-                  fontSize: 13,
-                }}>
-                  <span style={{ fontSize: 12, color: '#1677ff' }}>📖 {t('explanationPreview')}：</span>
-                  <FormulaRenderer content={exp} />
-                </div>
-              )
-            }}
-          </Form.Item>
-
-          <Row gutter={16}>
-            <Col span={12}>
-              {/* 与"生成试题"表单同款控件：下拉选课程知识点 + 手输；表单值仍是"、"连接的字符串 */}
-              <Form.Item label={t('knowledgePoint')} name="knowledge_points"
-                getValueProps={(v) => ({ value: splitKps(v) })}
-                normalize={(v) => joinKps(v)}>
-                <KnowledgePointSelect />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={t('difficulty')} name="difficulty">
-                <Select>
-                  <Option value="easy">{t('easy')}</Option>
-                  <Option value="medium">{t('medium')}</Option>
-                  <Option value="hard">{t('hard')}</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-
-          {/* ── 配图管理入口 ── */}
-          {editingQuestion && editingQuestion.id > 0 && (
-            <div style={{
-              padding: '8px 12px', background: '#fffbe6', borderRadius: 6,
-              border: '1px solid #ffe58f', marginBottom: 12,
-            }}>
-              <Space>
-                <span>🖼️ {t('imageManagement')}</span>
-                <Button size="small" onClick={() => {
-                  handleManageMedia(editingQuestion)
-                }}>
-                  {t('imageManagement')}
-                </Button>
-                {editingQuestion.has_svg === 1 && (
-                  <Tag color="blue">{t('hasSvg')}</Tag>
-                )}
-                {editingQuestion.media_files && Array.isArray(editingQuestion.media_files) && editingQuestion.media_files.length > 0 && (
-                  <Tag color="green">{t('imageCount', { count: editingQuestion.media_files.length })}</Tag>
-                )}
-                {(editingQuestion.media_placeholders?.length || 0) > 0 && (
-                  <Tag color="orange">{t('placeholderCount', { count: editingQuestion.media_placeholders?.length || 0 })}</Tag>
-                )}
-              </Space>
-            </div>
-          )}
-
-          {/* ── 公式语法帮助 ── */}
-          <div style={{ textAlign: 'right' }}>
-            <Button
-              type="link"
-              size="small"
-              onClick={() => setShowFormulaHelp(!showFormulaHelp)}
-              style={{ fontSize: 12 }}
-            >
-              {showFormulaHelp ? t('collapsePanel') : t('preview')} LaTeX 📐
-            </Button>
-          </div>
-          {showFormulaHelp && (
-            <div style={{
-              padding: '8px 12px', background: '#f6f8fa', borderRadius: 6,
-              border: '1px solid var(--border-color-secondary)', fontSize: 12, lineHeight: 2, marginBottom: 8,
-            }}>
-              <Typography.Text strong style={{ fontSize: 13 }}>{t('latexExamplesTitle')}</Typography.Text>
-              <table style={{ width: '100%', marginTop: 4, borderCollapse: 'collapse' }}>
-                <tbody>
-                  {[
-                    ['行内公式', '$E=mc^2$', '$E=mc^2$'],
-                    ['独立公式', '$$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$$', '$$\\sum_{i=1}^n i$$'],
-                    ['分数', '$\\frac{a}{b}$', '$\\frac{a}{b}$'],
-                    ['上标/下标', '$x^{2}_{i}$', '$x^{2}_{i}$'],
-                    ['平方根', '$\\sqrt{x}$ / $\\sqrt[3]{x}$', '$\\sqrt{x}$'],
-                    ['希腊字母', '$\\alpha \\beta \\gamma \\pi$', '$\\alpha \\beta \\gamma \\pi$'],
-                    ['化学式', '$\\ce{H2O}$ / $\\ce{CO2}$', '$\\ce{H2O}$'],
-                    ['矢量', '$\\vec{v}$ / $\\overrightarrow{AB}$', '$\\vec{v}$'],
-                  ].map(([desc, syntax, preview], i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '2px 8px', color: 'var(--text-secondary)', width: 80 }}>{desc}</td>
-                      <td style={{ padding: '2px 8px', fontFamily: 'monospace', fontSize: 11 }}>{syntax}</td>
-                      <td style={{ padding: '2px 8px' }}><FormulaRenderer content={preview} inline /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Form>
-      </Modal>
-
-      {/* ── 配图管理弹窗 ── */}
-      <Modal
-        title={`${t('imageManagement')} #${mediaQuestion?.id}`}
-        open={mediaModal}
-        onCancel={() => setMediaModal(false)}
-        footer={<Button onClick={() => setMediaModal(false)}>{t('close')}</Button>}
-        width={700}
-      >
-        {mediaQuestion && (
-          <PlaceholderManager
-            questionId={mediaQuestion.id}
-            svgContent={mediaQuestion.svg_content}
-            hasSvg={mediaQuestion.has_svg}
-            placeholders={mediaQuestion.media_placeholders}
-            mediaFiles={mediaQuestion.media_files}
-            svgLoading={svgLoading}
-            wanxiangLoading={wanxiangLoading}
-            onRegenerateSVG={handleRegenerateSVG}
-            onDeleteSVG={handleDeleteSVG}
-            onGenerateImage={handleGenerateImage}
-            onGenerateMedia={handleGenerateMedia}
-            onUploadMedia={handleUploadMedia}
-            onDeleteMedia={handleDeleteMedia}
-            progressText={mediaProgress}
-          />
-        )}
-      </Modal>
+      {/* ── 试题表单弹窗：新建 / 编辑 / 配图 ── */}
+      <QuestionFormModal
+        open={formOpen}
+        mode={formMode}
+        question={formQuestion}
+        subjectOptions={subjectOptions}
+        initialTab={formTab}
+        onClose={() => setFormOpen(false)}
+        onSaved={() => { loadQuestions(); void loadMeta() }}
+      />
 
       {/* ── 生成进度弹窗（已改为内联显示） ── */}
 
@@ -2063,7 +1579,7 @@ const QuestionBankPage: React.FC = () => {
 
       {/* ── 去重结果弹窗 ── */}
       <Modal
-        title="🧹"
+        title={<Space><ClearOutlined />{t('dedupTitle')}</Space>}
         open={dedupResult !== null}
         onCancel={() => setDedupResult(null)}
         footer={
@@ -2080,7 +1596,7 @@ const QuestionBankPage: React.FC = () => {
       >
         {dedupResult && (
           <div>
-            <Typography.Title level={4} style={{ color: dedupResult.total_deleted > 0 ? '#52c41a' : '#999' }}>
+            <Typography.Title level={4} style={{ color: dedupResult.total_deleted > 0 ? token.colorSuccess : token.colorTextTertiary }}>
               {dedupResult.dry_run
                 ? (dedupResult.deletable_count ?? 0) > 0
                   ? t('dedupFound', { groups: dedupResult.groups.length, count: dedupResult.deletable_count ?? 0 })
@@ -2107,8 +1623,8 @@ const QuestionBankPage: React.FC = () => {
                   {dedupResult.groups.map((g, i) => (
                     <div key={i} style={{
                       padding: '8px 12px', marginBottom: 6,
-                      background: '#fffbe6', borderRadius: 6,
-                      border: '1px solid #ffe58f',
+                      background: TINT.warning.bg, borderRadius: 6,
+                      border: `1px solid ${TINT.warning.border}`,
                     }}>
                       <Typography.Text style={{ fontSize: 13 }}>{g.question_text}</Typography.Text>
                       <Tag color="red" style={{ marginLeft: 8 }}>{t('dupTimes', { count: g.count })}</Tag>
