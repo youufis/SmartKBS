@@ -129,6 +129,11 @@ export async function listQuestions(params?: {
   end_date?: string;
   /** active=在用（默认）、deleted=回收站、all=全部 */
   status?: string;
+  /** 排序：created_at(默认) | updated_at | id | difficulty */
+  sort?: string;
+  order?: 'asc' | 'desc';
+  /** 1 = 附带每道题被考试/练习引用的次数 */
+  include_refs?: number;
   page?: number;
   page_size?: number;
 }, opts?: { signal?: AbortSignal }): Promise<QuestionListResponse> {

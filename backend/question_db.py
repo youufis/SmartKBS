@@ -47,6 +47,9 @@ def init_question_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qb_creator ON question_bank(creator_username)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qb_knowledge ON question_bank(knowledge_points)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qb_status ON question_bank(status)")
+                # 列表默认按创建时间倒序；没有这个索引时每次翻页都要临时排序
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qb_created ON question_bank(created_at DESC)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qb_subject ON question_bank(subject)")
             except sqlite3.OperationalError:
                 pass
 

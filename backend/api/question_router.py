@@ -733,6 +733,9 @@ async def list_questions(
     status: str = Query("active", description="筛选状态：active=在用（默认）、deleted=回收站、all=全部"),
     start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
     end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
+    sort: str = Query("created_at", description="排序字段：created_at|updated_at|id|difficulty"),
+    order: str = Query("desc", description="排序方向：asc|desc"),
+    include_refs: int = Query(0, ge=0, le=1, description="1=附带每道题被考试/练习引用的次数"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
 ):
@@ -803,12 +806,34 @@ async def list_questions(
     count_row = execute_query_one(f"SELECT COUNT(*) as total FROM question_bank q WHERE {where}", tuple(params))
     total = count_row["total"] if count_row else 0
 
+    # 排序字段走白名单：拼进 SQL 的只有下面四个常量表达式
+    sort_map = {
+        "created_at": "q.created_at",
+        "updated_at": "q.updated_at",
+        "id": "q.id",
+        # 难度按 easy < medium < hard 的语义排，而不是按字母
+        "difficulty": ("CASE q.difficulty WHEN 'easy' THEN 1 WHEN 'medium' THEN 2 "
+                       "WHEN 'hard' THEN 3 ELSE 4 END"),
+    }
+    sort_by = (sort or "created_at").strip().lower()
+    if sort_by not in sort_map:
+        raise HTTPException(status_code=400, detail="sort 只能是 created_at / updated_at / id / difficulty")
+    order_by = (order or "desc").strip().lower()
+    if order_by not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="order 只能是 asc / desc")
+    direction = order_by.upper()
+    # created_at 只到秒：同批 AI 生成的题时间戳完全相同，必须用 id 兜底，
+    # 否则 OFFSET 翻页在并列值上的顺序不稳定，会重复或漏题
+    order_sql = f"{sort_map[sort_by]} {direction}"
+    if sort_by != "id":
+        order_sql += " , q.id DESC"
+
     # 分页查询
     offset = (page - 1) * page_size
     rows = execute_query(
         f"""SELECT q.* FROM question_bank q
             WHERE {where}
-            ORDER BY q.created_at DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?""",
         tuple(params) + (page_size, offset),
     )
@@ -828,6 +853,14 @@ async def list_questions(
             else:
                 row[field] = [] if field != "options" else None
         _hydrate_media_state(row)
+
+    # 被考试/练习引用的次数：前端据此在删除前就给出"正在使用"的信号，
+    # 不用等到点了删除被 409 弹回来。一次查询覆盖整页，不逐条查。
+    if include_refs and rows:
+        refs = _questions_refs_map([int(r["id"]) for r in rows])
+        for row in rows:
+            exam_refs, practice_refs = refs.get(int(row["id"]), ([], []))
+            row["ref_count"] = len(exam_refs) + len(practice_refs)
 
     return {
         "questions": rows,

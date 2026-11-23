@@ -209,6 +209,8 @@ export interface QuestionInfo {
   media_placeholders?: MediaPlaceholder[];
   /** 已上传/生成的媒体文件 */
   media_files?: MediaFile[];
+  /** 被考试/练习引用的次数（列表 include_refs=1 时返回） */
+  ref_count?: number;
   /** 配图统计（出题/生图接口返回，用于提示哪些图没成功） */
   media_summary?: { placeholders: number; media_files: number; done: number; pending: number; failed: number };
 }

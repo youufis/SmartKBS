@@ -12,6 +12,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
+import useSubjectOptions from '../hooks/useSubjectOptions'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
@@ -23,7 +24,6 @@ import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import MediaDisplay from '../components/MediaDisplay'
 import { TYPE_LABELS, TYPE_COLORS, TYPE_OPTIONS } from '../constants/questionTypes'
-import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -57,8 +57,9 @@ const DIFFICULTY_LABELS: Record<string, string> = {
   hard: 'hard',
 }
 
-let subjectOptions: string[] = []
-let subjectDefault = ''
+type SortField = 'created_at' | 'updated_at' | 'id' | 'difficulty'
+interface SortState { sortBy: SortField; order: 'asc' | 'desc' }
+const SORT_FIELDS: SortField[] = ['created_at', 'updated_at', 'id', 'difficulty']
 
 /** 列表筛选条件（同时是 URL 下钻参数的载体，见 filtersFromQuery） */
 interface QBFilters {
@@ -116,26 +117,27 @@ function rangeFromQuery(qs: string): [Dayjs | null, Dayjs | null] | null {
   return [sd ? dayjs(sd) : null, ed ? dayjs(ed) : null]
 }
 
+function sortFromQuery(qs: string): SortState {
+  const params = new URLSearchParams(qs)
+  const raw = params.get('sort') || 'created_at'
+  const sortBy = (SORT_FIELDS as string[]).includes(raw) ? (raw as SortField) : 'created_at'
+  const order = params.get('order') === 'asc' ? 'asc' : 'desc'
+  return { sortBy, order }
+}
+
 const QuestionBankPage: React.FC = () => {
   const { t } = useTranslation('questions')
   const { t: tc } = useTranslation('common')
   const { token } = theme.useToken()
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryString = searchParams.toString()
   const queryFilters = useMemo(() => filtersFromQuery(queryString), [queryString])
   const queryRange = useMemo(() => rangeFromQuery(queryString), [queryString])
 
-  // 从后端加载课程列表
-  useEffect(() => {
-    apiClient.get('/api/config/subjects').then(({ data }) => {
-      if (data?.subjects?.length > 0) {
-        subjectOptions = data.subjects
-        subjectDefault = data.default || data.subjects[0]
-      }
-    }).catch((err) => { reportLoadError(err, { key: 'questionBank.subjects' }) })
-  }, [])
+  // 学科清单统一走共享 hook：与组卷/测验同一份，换学科只改配置，不在页面里各拉一份
+  const { subjects: subjectOptions, defaultSubject: subjectDefault } = useSubjectOptions()
 
   // ── 生成试题表单 ──
   const [generateForm] = Form.useForm()
@@ -168,6 +170,9 @@ const QuestionBankPage: React.FC = () => {
   const [keywordInput, setKeywordInput] = useState(() => filtersFromQuery(queryString).keyword || '')
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(() => rangeFromQuery(queryString))
   const [creatorOptions, setCreatorOptions] = useState<{ username: string; name: string }[]>([])
+  /** 题库里实际出现过的学科（可能包含已从配置移除的历史值，如"生物"） */
+  const [metaSubjects, setMetaSubjects] = useState<string[]>([])
+  const [sort, setSort] = useState<SortState>(() => sortFromQuery(queryString))
 
   // 创建者筛选项 + 未标注角标：与统计页共用同一份元数据，页面本来就拉一次，不多打请求
   const [untaggedCount, setUntaggedCount] = useState(0)
@@ -175,6 +180,7 @@ const QuestionBankPage: React.FC = () => {
     try {
       const meta = await questionsApi.getQuestionAnalyticsMeta()
       setCreatorOptions(meta.creators || [])
+      setMetaSubjects(meta.subjects || [])
       setUntaggedCount(Number(meta.untagged_count ?? 0))
     } catch {
       setCreatorOptions([])
@@ -182,10 +188,79 @@ const QuestionBankPage: React.FC = () => {
   }, [])
   useEffect(() => { void loadMeta() }, [loadMeta])
 
+  // 学科下拉 = 配置里的学科 ∪ 题库里实际存在的学科。
+  // 只吃配置会漏掉历史值（如已下线课程的"生物"题），只吃实际值又会出现"数学"这类空学科。
+  const subjectFilterOptions = useMemo(() => {
+    const set = new Set<string>([...(subjectOptions || []), ...metaSubjects])
+    return [...set].filter(Boolean)
+  }, [subjectOptions, metaSubjects])
+
+  /** 筛选 + 分页写回 URL：刷新不丢、链接可分享、浏览器前进后退可用 */
+  const writeUrl = useCallback((f: QBFilters, p: number, s: SortState) => {
+    const next = new URLSearchParams()
+    for (const key of FILTER_KEYS) {
+      const v = f[key]
+      if (v) next.set(key, String(v))
+    }
+    if (p > 1) next.set('page', String(p))
+    if (s.sortBy !== 'created_at' || s.order !== 'desc') {
+      next.set('sort', s.sortBy)
+      next.set('order', s.order)
+    }
+    setSearchParams(next, { replace: true })
+  }, [setSearchParams])
+
+  /** 唯一的筛选入口：改条件、回到第 1 页、同步 URL、切换视图时清空勾选 */
+  const applyFilters = (patch: Partial<QBFilters>, opts?: { keepPage?: boolean }) => {
+    const next: QBFilters = { ...filters, ...patch }
+    for (const key of FILTER_KEYS) {
+      if (!next[key]) delete next[key]
+    }
+    const p = opts?.keepPage ? page : 1
+    if ((next.status || '') !== (filters.status || '')) setSelectedRowKeys([])
+    setFilters(next)
+    if (p !== page) setPage(p)
+    writeUrl(next, p, sort)
+  }
+
   // 一键只看未标注，再点取消；数字与 kp_state=none 的列表口径同源，点进去"共 N 道题"必然对得上
   const toggleUntaggedFilter = () => {
-    setFilters(f => ({ ...f, kp_state: f.kp_state === 'none' ? undefined : 'none' }))
+    applyFilters({ kp_state: filters.kp_state === 'none' ? undefined : 'none' })
+  }
+
+  const filterChips = useMemo(() => {
+    const chips: { key: keyof QBFilters | 'date'; label: string }[] = []
+    if (filters.type) chips.push({ key: 'type', label: `${t('questionType')}：${TYPE_LABELS[filters.type] || filters.type}` })
+    if (filters.difficulty) chips.push({ key: 'difficulty', label: `${t('difficulty')}：${t(filters.difficulty)}` })
+    if (filters.subject) chips.push({ key: 'subject', label: `${t('subject')}：${filters.subject}` })
+    if (filters.creator) {
+      const c = creatorOptions.find((x) => x.username === filters.creator)
+      chips.push({ key: 'creator', label: `${t('creator')}：${c ? c.name : filters.creator}` })
+    }
+    if (filters.knowledge_points) {
+      chips.push({ key: 'knowledge_points', label: `${t('knowledgePoint')}：${filters.knowledge_points}` })
+    }
+    if (filters.kp_state) {
+      chips.push({
+        key: 'kp_state',
+        label: `${t('kpStateFilter')}：${filters.kp_state === 'none' ? t('kpStateNone') : t('kpStateTagged')}`,
+      })
+    }
+    if (filters.keyword) chips.push({ key: 'keyword', label: t('keywordChip', { value: filters.keyword }) })
+    if (filters.start_date || filters.end_date) {
+      chips.push({ key: 'date', label: t('dateChip', { range: `${filters.start_date || '…'} ~ ${filters.end_date || '…'}` }) })
+    }
+    if (filters.status === 'deleted') chips.push({ key: 'status', label: t('viewRecycle') })
+    return chips
+  }, [filters, creatorOptions, t])
+
+  const resetFilters = () => {
+    setKeywordInput('')
+    setDateRange(null)
+    setSelectedRowKeys([])
     setPage(1)
+    setFilters({})
+    writeUrl({}, 1, sort)
   }
 
   // 多选批量删除：只作用于当前页可见行（翻页后自动剔除不可见 id，见下方 effect）
@@ -208,8 +283,13 @@ const QuestionBankPage: React.FC = () => {
     setFilters(prev => (sameFilters(prev, queryFilters) ? prev : queryFilters))
     setKeywordInput(queryFilters.keyword || '')
     setDateRange(prev => (sameRange(prev, queryRange) ? prev : queryRange))
-    setPage(1)
-  }, [queryFilters, queryRange])
+    // 分页/排序从 URL 读回（刷新、分享链接、浏览器后退都靠这里）
+    const urlPage = Math.max(1, Number(searchParams.get('page') || 1) || 1)
+    setPage(prev => (prev === urlPage ? prev : urlPage))
+    const urlSort = sortFromQuery(queryString)
+    setSort(prev => (prev.sortBy === urlSort.sortBy && prev.order === urlSort.order ? prev : urlSort))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryFilters, queryRange, queryString])
 
   // ── 加载题库列表 ──
   // 翻页/筛选连点时，旧请求的结果一律作废：否则慢的那次会把新页数据盖掉
@@ -224,7 +304,10 @@ const QuestionBankPage: React.FC = () => {
     setLoading(true)
     try {
       const res = await questionsApi.listQuestions(
-        { ...filters, page, page_size: pageSize },
+        {
+          ...filters, page, page_size: pageSize,
+          sort: sort.sortBy, order: sort.order, include_refs: 1,
+        },
         { signal: ctrl.signal },
       )
       if (seq !== reqSeqRef.current) return
@@ -236,7 +319,7 @@ const QuestionBankPage: React.FC = () => {
     } finally {
       if (seq === reqSeqRef.current) setLoading(false)
     }
-  }, [filters, page, pageSize, t])
+  }, [filters, page, pageSize, sort, t])
 
   useEffect(() => {
     loadQuestions()
@@ -714,6 +797,8 @@ const QuestionBankPage: React.FC = () => {
       dataIndex: 'id',
       key: 'id',
       width: 54,
+      sorter: true,
+      sortOrder: sort.sortBy === 'id' ? (sort.order === 'asc' ? 'ascend' as const : 'descend' as const) : null,
       render: (id: number) => (
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>#{id}</span>
       ),
@@ -725,6 +810,17 @@ const QuestionBankPage: React.FC = () => {
       width: 68,
       render: (type: string) => (
         <Tag color={TYPE_COLORS[type]}>{TYPE_LABELS[type] || type}</Tag>
+      ),
+    },
+    {
+      // 多学科学校里，一屏 50 行分不清哪道题属于哪门课；学科是筛选项却不在列里
+      title: t('subject'),
+      dataIndex: 'subject',
+      key: 'subject',
+      width: 76,
+      ellipsis: true,
+      render: (subject: string) => (
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{subject || '—'}</span>
       ),
     },
     {
@@ -749,7 +845,7 @@ const QuestionBankPage: React.FC = () => {
       title: t('knowledgePoints'),
       dataIndex: 'knowledge_points',
       key: 'knowledge_points',
-      width: 96,
+      width: 88,
       ellipsis: true,
       // 知识点最长 46 字，列宽只兜得住 p90（15 字）：截断时悬浮看全，别让人去展开行翻
       render: (text: string) => text ? (
@@ -767,6 +863,8 @@ const QuestionBankPage: React.FC = () => {
       dataIndex: 'difficulty',
       key: 'difficulty',
       width: 60,
+      sorter: true,
+      sortOrder: sort.sortBy === 'difficulty' ? (sort.order === 'asc' ? 'ascend' as const : 'descend' as const) : null,
       render: (d: string) => (
         <Tag color={DIFFICULTY_COLORS[d]}>{t(DIFFICULTY_LABELS[d]) || d}</Tag>
       ),
@@ -777,7 +875,7 @@ const QuestionBankPage: React.FC = () => {
       // 导致同一批题的创建者一会儿 root、一会儿 管理员、一会儿 UNET; creator_username 恒有值且唯一
       dataIndex: 'creator_username',
       key: 'creator_username',
-      width: 88,
+      width: 80,
       ellipsis: true,
       render: (username: string, record: QuestionInfo) => (
         <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
@@ -824,10 +922,27 @@ const QuestionBankPage: React.FC = () => {
       },
     },
     {
+      // 删除前先给出"正在使用"的信号，不用等 409 弹回来才知道
+      title: t('refCount'),
+      dataIndex: 'ref_count',
+      key: 'ref_count',
+      width: 60,
+      align: 'center' as const,
+      render: (n: number) => (n > 0 ? (
+        <Tooltip title={t('refCountTip', { count: n })}>
+          <Tag color="blue" style={{ marginInlineEnd: 0 }}>{n}</Tag>
+        </Tooltip>
+      ) : (
+        <span style={{ color: token.colorTextQuaternary }}>—</span>
+      )),
+    },
+    {
       title: t('time'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 96,
+      sorter: true,
+      sortOrder: sort.sortBy === 'created_at' ? (sort.order === 'asc' ? 'ascend' as const : 'descend' as const) : null,
       render: (v: string) => {
         if (!v) return '-'
         // 同一年的题只显示"月-日 时:分"，跨年才补年份；完整时间戳收进 Tooltip
@@ -842,7 +957,7 @@ const QuestionBankPage: React.FC = () => {
     {
       title: t('actions'),
       key: 'action',
-      width: 112,
+      width: 96,
       render: (_: any, record: QuestionInfo) => {
         // 权限：管理员（role=0）可操作全部，教师只能操作自己的（与勾选框同一口径）
         const canEdit = canOperate(record)
@@ -903,8 +1018,11 @@ const QuestionBankPage: React.FC = () => {
     },
   ]
 
-  // 见 CELL_UPDATE 注释：统一挂到每一列上
-  const columns = rawColumns.map((col) => ({ ...col, shouldCellUpdate: CELL_UPDATE }))
+  // 见 CELL_UPDATE 注释：纯展示列挂上；操作列必须排除 —— 它读 restoring/purging，
+  // 只比较 record 引用会让"还原/彻底删除"的 loading 永远不显示
+  const columns = rawColumns.map((col) => (
+    col.key === 'action' ? col : { ...col, shouldCellUpdate: CELL_UPDATE }
+  ))
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
@@ -1272,7 +1390,7 @@ const QuestionBankPage: React.FC = () => {
         )}
 
         {/* ── 筛选栏 ── */}
-        <Row gutter={12} align="middle" style={{ marginTop: 8 }}>
+        <Row gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
           <Col>
             <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}><FilterOutlined /> {t('filter')}：</span>
           </Col>
@@ -1280,55 +1398,50 @@ const QuestionBankPage: React.FC = () => {
             {/* 在用 / 回收站两个视图：回收站里的题不会出现在题库列表、组卷与练习中 */}
             <Segmented
               value={filters.status === 'deleted' ? 'deleted' : 'active'}
-              onChange={(v) => {
-                setFilters(f => ({ ...f, status: v === 'deleted' ? 'deleted' : undefined }))
-                setSelectedRowKeys([])
-                setPage(1)
-              }}
+              onChange={(v) => applyFilters({ status: v === 'deleted' ? 'deleted' : undefined })}
               options={[
                 { value: 'active', label: t('viewActive') },
                 { value: 'deleted', label: recycleTotal > 0 ? t('viewRecycleCount', { n: recycleTotal }) : t('viewRecycle') },
               ]}
             />
           </Col>
-          <Col span={3}>
+          <Col xs={12} sm={8} md={4}>
             <Select
               allowClear
               placeholder={t('questionType')}
               style={{ width: '100%' }}
               value={filters.type}
-              onChange={(val) => { setFilters(f => ({ ...f, type: val })); setPage(1) }}
-            >
-              {TYPE_OPTIONS.map(opt => (
-                <Option key={opt.value} value={opt.value}>{opt.label}</Option>
-              ))}
-            </Select>
+              onChange={(val) => applyFilters({ type: val })}
+              options={TYPE_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+            />
           </Col>
-          <Col span={3}>
+          <Col xs={12} sm={8} md={4}>
             <Select
               allowClear
               placeholder={t('difficulty')}
               style={{ width: '100%' }}
               value={filters.difficulty}
-              onChange={(val) => { setFilters(f => ({ ...f, difficulty: val })); setPage(1) }}
-            >
-              <Option value="easy">{t('easy')}</Option>
-              <Option value="medium">{t('medium')}</Option>
-              <Option value="hard">{t('hard')}</Option>
-            </Select>
+              onChange={(val) => applyFilters({ difficulty: val })}
+              options={[
+                { value: 'easy', label: t('easy') },
+                { value: 'medium', label: t('medium') },
+                { value: 'hard', label: t('hard') },
+              ]}
+            />
           </Col>
-          <Col span={3}>
+          <Col xs={12} sm={8} md={4}>
             <Select
               allowClear
+              showSearch
+              optionFilterProp="label"
               placeholder={t('subject')}
               style={{ width: '100%' }}
               value={filters.subject}
-              onChange={(val) => { setFilters(f => ({ ...f, subject: val })); setPage(1) }}
-            >
-              {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
-            </Select>
+              onChange={(val) => applyFilters({ subject: val })}
+              options={subjectFilterOptions.map((sub) => ({ value: sub, label: sub }))}
+            />
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={8} md={4}>
             <Select
               allowClear
               showSearch
@@ -1336,71 +1449,95 @@ const QuestionBankPage: React.FC = () => {
               placeholder={t('analyticsAllCreators')}
               style={{ width: '100%' }}
               value={filters.creator}
-              onChange={(val) => { setFilters(f => ({ ...f, creator: val })); setPage(1) }}
-              options={creatorOptions.map(c => ({ value: c.username, label: `${c.name} (${c.username})` }))}
+              onChange={(val) => applyFilters({ creator: val })}
+              options={creatorOptions.map((c) => ({ value: c.username, label: `${c.name} (${c.username})` }))}
             />
           </Col>
-          <Col span={4}>
+          <Col xs={24} sm={12} md={6}>
             <KnowledgePointSelect
               subject={filters.subject || ''}
               value={splitKps(filters.knowledge_points || '')}
-              onChange={(v) => {
-                setFilters(f => ({
-                  ...f,
-                  knowledge_points: joinKps(Array.isArray(v) ? v : [v]) || undefined,
-                }))
-                setPage(1)
-              }}
+              onChange={(v) => applyFilters({
+                knowledge_points: joinKps(Array.isArray(v) ? v : [v]) || undefined,
+              })}
               style={{ width: '100%' }}
               placeholder={t('analyticsKnowledgePointFilter')}
             />
           </Col>
-          <Col span={3}>
+          <Col xs={12} sm={8} md={3}>
             {/* 标注状态：管理员批量补标/编辑时先只看没标的题（配合"更多操作 → AI 补标"用） */}
             <Select
               allowClear
               placeholder={t('kpStateFilter')}
               style={{ width: '100%' }}
               value={filters.kp_state}
-              onChange={(val) => { setFilters(f => ({ ...f, kp_state: val })); setPage(1) }}
-            >
-              <Option value="none">{t('kpStateNone')}</Option>
-              <Option value="tagged">{t('kpStateTagged')}</Option>
-            </Select>
+              onChange={(val) => applyFilters({ kp_state: val })}
+              options={[
+                { value: 'none', label: t('kpStateNone') },
+                { value: 'tagged', label: t('kpStateTagged') },
+              ]}
+            />
           </Col>
-          <Col span={4}>
+          <Col xs={24} sm={10} md={6}>
             <DatePicker.RangePicker
               style={{ width: '100%' }}
               value={dateRange}
               onChange={(v) => {
-                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-                setFilters(f => ({
-                  ...f,
-                  start_date: v?.[0]?.format('YYYY-MM-DD'),
-                  end_date: v?.[1]?.format('YYYY-MM-DD'),
-                }))
-                setPage(1)
+                const range = v as [Dayjs | null, Dayjs | null] | null
+                setDateRange(range)
+                applyFilters({
+                  start_date: range?.[0]?.format('YYYY-MM-DD'),
+                  end_date: range?.[1]?.format('YYYY-MM-DD'),
+                })
               }}
             />
           </Col>
-          <Col span={4}>
+          <Col xs={24} sm={14} md={7}>
             <Input.Search
               placeholder={t('searchContentOrKp')}
               allowClear
               value={keywordInput}
               onChange={(e) => {
                 setKeywordInput(e.target.value)
-                if (!e.target.value) { setFilters(f => ({ ...f, keyword: undefined })); setPage(1) }
+                if (!e.target.value) applyFilters({ keyword: undefined })
               }}
-              onSearch={(val) => { setFilters(f => ({ ...f, keyword: val || undefined })); setPage(1) }}
+              onSearch={(val) => applyFilters({ keyword: val || undefined })}
             />
           </Col>
           <Col>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {t('totalQuestions', { count: total })}
-            </Typography.Text>
+            <Button onClick={resetFilters} disabled={filterChips.length === 0}>{t('resetFilters')}</Button>
           </Col>
         </Row>
+
+        {/* 已选条件回显：只剩一个小计数时，老师容易把"筛出 3 道"当成"题库只有 3 道" */}
+        {filterChips.length > 0 && (
+          <Space wrap size={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('activeFilters', { count: filterChips.length })}：
+            </Typography.Text>
+            {filterChips.map((chip) => (
+              <Tag
+                key={chip.key}
+                closable
+                style={{ marginInlineEnd: 0 }}
+                onClose={() => {
+                  if (chip.key === 'date') {
+                    setDateRange(null)
+                    applyFilters({ start_date: undefined, end_date: undefined })
+                  } else if (chip.key === 'keyword') {
+                    setKeywordInput('')
+                    applyFilters({ keyword: undefined })
+                  } else {
+                    applyFilters({ [chip.key]: undefined } as Partial<QBFilters>)
+                  }
+                }}
+              >
+                {chip.label}
+              </Tag>
+            ))}
+            <Button type="link" size="small" style={{ fontSize: 12 }} onClick={resetFilters}>{t('clearAllFilters')}</Button>
+          </Space>
+        )}
 
         {/* ── 多选操作条：勾选后才出现，紧贴表格，删完即隐藏 ── */}
         {selectedRowKeys.length > 0 && (
@@ -1439,7 +1576,36 @@ const QuestionBankPage: React.FC = () => {
           loading={loading}
           size="small"
           tableLayout="fixed"
-          scroll={{ x: 1000 }}
+          sticky
+          scroll={{ x: 1100 }}
+          onChange={(pag, _colFilters, sorter, extra) => {
+            if (extra?.action === 'sort') {
+              const single = Array.isArray(sorter) ? sorter[0] : sorter
+              const field = single?.field as SortField | undefined
+              if (field && (SORT_FIELDS as string[]).includes(field)) {
+                // 第三次点击取消排序时回到默认（按创建时间倒序），避免出现"无排序"的随机顺序
+                const next: SortState = single?.order
+                  ? { sortBy: field, order: single.order === 'ascend' ? 'asc' : 'desc' }
+                  : { sortBy: 'created_at', order: 'desc' }
+                setSort(next)
+                setPage(1)
+                writeUrl(filters, 1, next)
+              }
+              return
+            }
+            const ps = pag.pageSize || pageSize
+            if (ps !== pageSize) {
+              setPageSize(ps)
+              setPage(1)
+              writeUrl(filters, 1, sort)
+              return
+            }
+            const p = pag.current || 1
+            if (p !== page) {
+              setPage(p)
+              writeUrl(filters, p, sort)
+            }
+          }}
           rowSelection={{
             columnWidth: 40,
             selectedRowKeys,
@@ -1455,8 +1621,8 @@ const QuestionBankPage: React.FC = () => {
             pageSize,
             total,
             showSizeChanger: true,
-            showTotal: (total) => t('totalQuestions', { count: total }),
-            onChange: (p, ps) => { setPage(p); setPageSize(ps) },
+            pageSizeOptions: [20, 50, 100],
+            showTotal: (n) => t('totalQuestions', { count: n }),
           }}
           locale={{ emptyText: <Empty description={t('emptyQuestions')} /> }}
           expandable={{
