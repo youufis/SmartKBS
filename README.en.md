@@ -37,30 +37,20 @@
 
 > 📌 **Highlights of V9.2.0** (outline)
 >
-> - 🎯 **Direct question link (new)**: click a question id in wrong-answer review, practice or class drill to jump back to it · editable for your own, read-only for others, recycle-bin aware
-> - 📊 **Analytics drill-down**: click a quality figure to open the matching list · chart tooltips read "Count"
-> - ⚙️ **Quality parity**: the bank list and analytics agree item by item
-> - 🧾 **Question-bank authoring rework (new)**: one form for manual entry and editing · click an option to set the answer · true/false switch · collapsible preview · save & continue
-> - 📊 **Question list & maintenance**: sort by ID / difficulty / created · subject column and reference count · filters written to the URL · dedupe keeps the most complete copy · badges refresh after deletion
-> - 🖼 **Generation & extraction**: image extraction in the background (no long-image timeouts) · real progress · non-contiguous option keys keep their answer
-> - 🌙 **Midnight theme**: selected rows and generation panel colours fixed · unified media icons · menu works on touch screens
-> - 🎒 **Student to-do upgrade (new)**: multi-facet filters (teacher / subject-course / type / due window / resource kind) · group-axis + deadline timeline views · inline filter panel · focus mode · deep links & state memory
-> - 🏠 **Student home de-noise (new)**: "N to do today" badge · my-progress four cards (today / week / streak / title) · condensed exam reminders · single companion message · 390/320 mobile verified
-> - 🖥 **Local model engine (new)**: Ollama integration · cloud / hybrid / local tiers · live model list with resident info · chat engine badge · capability matrix & graded notices · friendly errors
-> - 🧠 **Dual-engine semantics**: hybrid = local generation + cloud KB retrieval · local = fully offline (cloud retrieval/warmup bypassed, local question-bank fallback) · cloud tier passes through unchanged
-> - 🧩 **Settings restructure**: cloud / local model sections · cloud-service attribution labels (KB / TTS / ASR / image gen) · guides collapsed by default · auto-probe on page entry
-> - 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafting · nine sections with conclusions · praise-title registry · auto-generation off by default behind one global switch · scheduled checks & in-app notice · admin teacher scoping · mobile read-only with copy-to-share
-> - 👥 **Bulk import speed-up**: off-transaction parallel hashing · identical initial passwords hashed once · thousands of rows in seconds · chunked commits keep partial imports · errors summarized by cause
-> - 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · new "Logs & Archives" section · takes effect on save
-> - 🔌 **Configurable deploy port**: one `SMARTKB_PORT` environment variable shared by the desktop shell, dev proxy, backend and packaging preflight · default `8086` unchanged
-> - 🧮 **Formula export upgrade**: exam / answer-key / report Word files embed **native Word formulas (OMML)** · Chinese inside formulas, equation systems and piecewise functions render correctly · auto-degrades to matplotlib images / Unicode text when optional deps are missing · fill-blank underline fixed
-> - 🛡 **Stability & privacy**: upgrade keeps existing behaviour · fully usable offline, no network required · student data stays on campus
-> - 🧭 **Syllabus Ordering & Recycle Bin (new)**: drag to order subjects (admins only, school-wide) · drag courses (incl. cross-subject move) · recycle-bin view (restore / delete permanently)
-> - 🛡 **Master-data protection (new)**: subjects with courses cannot be removed or renamed · built-in question types are locked · custom types protected by active questions · default subject derived from teaching scope
+> - 🎯 **Classroom & question bank**: direct question links · multi-KP picking for quiz/ladder · recycle bin & bank maintenance · analytics drill-down with matching figures
+> - 🧾 **Question authoring**: one form for entry and editing (click an option to answer) · background image extraction · option-key answers stay aligned
+> - 🎒 **Student side**: multi-facet to-do list with a timeline · quieter home · mobile touch targets met
+> - 📊 **Analytics & briefing**: weekly / monthly / yearly teaching briefing (nine sections, off by default) · one basis for monitoring and stats
+> - 🖥 **AI engine**: cloud / hybrid / local tiers · dual-engine semantics · settings sections with auto-probe
+> - 📚 **Courses & master data**: three syllabus views · drag-order subjects and courses with a recycle bin · one five-level master-data model
+> - 🧮 **Export & assignments**: native Word formulas (OMML) · assignments in chat / file form
+> - 🔌 **Operations**: configurable deploy port (`SMARTKB_PORT`) · log rotation · faster bulk import
+> - 🛡 **Stability & privacy**: upgrade keeps existing behaviour · fully usable offline · student data stays on campus
+> - 🧭 **Whiteboard**: sync fixes (offline replay, authoritative snapshot) · licence key entered by the deployer · no badge on intranet HTTP once a key is set
 >
 > - ⚠️ **Breaking changes**: none
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); to enable the local engine, install Ollama yourself and switch the mode in System Configuration → AI Capabilities; to change the port, set the system environment variable `SMARTKB_PORT` and restart (same convention for desktop and source deployments); Git deployments keep in-site incremental upgrades.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the whiteboard licence key is entered by each school under System settings → Credentials (**optional** — the board works without it); to enable the local engine, install Ollama and switch the mode in System Configuration → AI Capabilities; to change the port, set `SMARTKB_PORT` and restart.
 ---
 
 <a id="intro"></a>
@@ -720,10 +710,12 @@ AI tutor-assisted classroom group discussion system:
 
 Real-time collaborative whiteboard system based on TLDraw, with built-in AI whiteboard assistant sidebar:
 
-- **Three Teaching Modes**:
+> 🔑 **Licensing**: the tldraw engine needs a licence key, entered by the local admin under System settings → Credentials → Whiteboard licence key (installers ship none, and **leaving it empty is fine**). Empty keeps the board working and shows the tldraw badge; a valid key is verified for real and clears that badge, intranet HTTP included. **The watermark and licence enforcement must never be hidden** — that is a tldraw licence requirement.
+
+- **Two Teaching Modes**:
   - 📺 **Presentation Mode**: Teacher displays, students view only
   - 🤝 **Interactive Mode**: Teacher authorizes students to operate
-  - 📝 **Self-Study Mode**: Students operate independently
+  - (Self-study mode is retired; use the Explore Canvas for personal work)
 - **🔗 Room System**: Teacher creates rooms (supports class/course/temporary types), students enter 6-digit room code to join
 - **👥 Real-Time Member Management**: Online member list showing currently online students
 - **🎨 Whiteboard Tools**: Pen, shapes (rectangle/ellipse/diamond/arrow), text, sticky notes, images, laser pointer
@@ -1241,35 +1233,17 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.2.0
 
-- 🎯 **Direct question link (new)**: click a question id in wrong-answer review, practice or class drill to jump back to it · editable for your own, read-only for others, recycle-bin aware
-- 📊 **Analytics drill-down**: quality items (no explanation / no media / pending media) open the matching list · chart tooltips read "Count"
-- ⚙️ **Quality parity**: the bank list and analytics agree item by item
-- 🧭 **Practice page**: the "last N days" baseline refreshes with the list, so it stays correct across midnight
-- 🧾 **Question-bank authoring rework**: one form for manual entry and editing · click an option to set the answer · true/false switch · collapsible preview · save & continue
-- 📊 **Question list**: sort by ID / difficulty / created · subject column and reference count · filters written to the URL · sticky header
-- 🧹 **Bank maintenance**: dedupe keeps the most complete copy and lists keep/remove · dedupe and AI tagging merged into one menu · badges refresh after deletion
-- 🖼 **Generation & extraction**: image extraction in the background · real progress · non-contiguous option keys keep their answer
-- 🌙 **Midnight theme**: selected rows and generation panel colours fixed · menu works on touch screens
-- 🎒 **Student to-do (new)**: multi-facet filters (teacher / subject-course / type / due window / resource kind) · group-axis + timeline views · inline filter panel · focus mode · deep links & state memory
-- 🏠 **Student home de-noise (new)**: "N to do today" badge · my-progress four cards · condensed exam reminders · single companion message · mobile touch targets met
-- 📊 **Teaching briefing (new)**: weekly / monthly / yearly drafts · nine sections · rule-based AI fallback · auto-generation off behind one global policy · 30-min checks · admin teacher scoping · mobile read-only
-- 🖥 **Local engine (new)**: Ollama cloud / hybrid / local tiers · model list & probe · dual-engine semantics · settings sections
-- 🧮 **Formula export**: native Word formulas (OMML) in exam / answer-key / report exports · Chinese, equation systems & piecewise functions · three-tier fallback (image / Unicode) · fill-blank underline fixed
-- 📚 **Assignments**: chat / file dual form · background AI grading · expected roster & reminders · class duplication & retry
-- 👥 **Bulk import speed-up**: off-transaction parallel hashing · shared initial-password reuse · thousands of rows in seconds · chunked commits survive interruption · errors summarized by cause
-- 🗂 **Log rotation settings**: by size / daily / daily + size fuse · retention days & count configurable · takes effect on save
-- 🔌 **Configurable deploy port**: one `SMARTKB_PORT` variable shared by the desktop shell, dev proxy, backend and packaging preflight · default `8086` unchanged
-- 🎯 **Classroom activities**: multi-knowledge-point picking for quiz/ladder · rotating question pools · unified AI parse basis
-- 🧩 **Settings page**: Logs & Archives section · import password-reuse switch · cloud-service attribution labels · auto-probe on entry
-- 🔇 **Log noise reduction**: shape-based reconnect-noise summary · rate-limited handshake / poll 401s
-- 🧭 **Explore canvas**: asset cleanup never corrupts the DB · dry runs made read-only
-- 🧭 **Course syllabus**: three view modes (focus / split / overlay) · previous & next knowledge point · multi-grade picking · disabled means withdrawn · shorter toolbar labels
-- 🏷 **Master-data terminology**: subject → course → chapter → section → knowledge point unified · one source for the subject list · shared subject icons and grade separators
-- 🧪 **Stability & privacy**: existing behaviour survives the upgrade · fully usable offline · interrupted bulk imports keep what already succeeded and group errors by cause
-- 🧭 **Syllabus ordering**: drag to order subjects (admins only, school-wide) · drag courses (incl. cross-subject move) · recycle-bin view (restore / delete permanently)
-- 🗑 **Question recycle bin**: soft delete is restorable · preview before permanent delete · media folders and KP links cleaned up together
-- 🛡 **Master-data protection**: subjects with courses are protected · built-in question types locked · custom types protected by active questions
-- 🧠 **Default subject**: derived from the user's teaching scope instead of the first list item (consumed from the API `default` field)
+- 🎯 **Classroom & question bank**: direct question links · multi-KP picking for quiz/ladder · recycle bin & bank maintenance · analytics drill-down with matching figures
+- 🧾 **Question authoring**: one form for entry and editing (click an option to answer) · background image extraction · option-key answers stay aligned
+- 🎒 **Student side**: multi-facet to-do list with a timeline · quieter home · mobile touch targets met
+- 📊 **Analytics & briefing**: weekly / monthly / yearly teaching briefing (nine sections, off by default) · one basis for monitoring and stats
+- 🖥 **AI engine**: cloud / hybrid / local tiers · dual-engine semantics · settings sections with auto-probe
+- 📚 **Courses & master data**: three syllabus views · drag-order subjects and courses with a recycle bin · one five-level master-data model
+- 🧮 **Export & assignments**: native Word formulas (OMML) · assignments in chat / file form
+- 🔌 **Operations**: configurable deploy port (`SMARTKB_PORT`) · log rotation · faster bulk import
+- 🛡 **Stability & privacy**: upgrade keeps existing behaviour · fully usable offline · student data stays on campus
+- 🧭 **Whiteboard**: sync fixes (offline replay, authoritative snapshot) · licence key entered by the deployer · no badge on intranet HTTP once a key is set
+
 ### v7.x – v9.1.0
 
 > Merged section: v9.1.0 and v7.x – v9.0.0 updates (reverse chronological).
@@ -1773,7 +1747,7 @@ This project is released under the **AGPL-3.0**; the full text lives in [LICENSE
 
 | Component | Licence | Notes |
 | --- | --- | --- |
-| tldraw SDK 5.1.1 (collaborative whiteboard / exploration canvas) | [tldraw licence](https://github.com/tldraw/tldraw/blob/main/LICENSE.md) | **Not open source** — source available, commercially licensed. Production use requires a valid license key; SmartKBS runs on a free key issued by tldraw because it is a personal, non-commercial project. The watermark and licence enforcement are kept intact (hiding them with CSS/JS is prohibited by the licence); the verbatim licence ships at `frontend/dist/THIRD-PARTY-NOTICES/tldraw-LICENSE.md`. **This component is not covered by AGPL-3.0 — its own terms prevail.** |
+| tldraw SDK 5.1.1 (collaborative whiteboard / exploration canvas) | [tldraw licence](https://github.com/tldraw/tldraw/blob/main/LICENSE.md) | **Not open source** — source available, commercially licensed. The licence key is entered by whoever deploys the app under System settings → Credentials (installers ship none, and **empty is fine**: the board works and shows the tldraw badge). The watermark and licence enforcement are kept intact (hiding them with CSS/JS is prohibited by the licence); the verbatim licence ships at `frontend/dist/THIRD-PARTY-NOTICES/tldraw-LICENSE.md`. **This component is not covered by AGPL-3.0 — its own terms prevail.** |
 
 Copyright © 2026 youufis (UNET)
 
