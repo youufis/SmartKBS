@@ -183,6 +183,7 @@
   "generatedCount": "✅ Generated {{count}} questions (auto-saved to question bank)",
   "qbAlreadyInBank": "already in bank, not duplicated",
   "extractedCount": "✅ Extracted {{count}} questions (auto-saved to question bank)",
+  "viewQuestion_": "View Question #{{id}}",
   "editQuestion_": "Edit Question #{{id}}",
   "noSvg": "No SVG image",
   "refCount": "Refs",

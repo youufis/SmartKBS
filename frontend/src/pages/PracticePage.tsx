@@ -741,7 +741,8 @@ const TeacherView: React.FC = () => {
   const [gradingNow, setGradingNow] = useState(false)
   // 抽屉是否还开着：批改是异步的，闭包里的 detailOpen 会过期，只能靠 ref 判断
   const detailOpenRef = useRef(false)
-  detailOpenRef.current = detailOpen
+  // ref 只在 effect 里同步：render 期写 ref 违反 React Compiler 规则（eslint 报 error）
+  useEffect(() => { detailOpenRef.current = detailOpen }, [detailOpen])
   // R1: 详情页的 AI 学情分析(缓存到 sessionStorage, 避免每次打开都烧一次 token)
   const [detailAiAnalysis, setDetailAiAnalysis] = useState<string | null>(null)
   const [detailAiLoading, setDetailAiLoading] = useState(false)
@@ -783,6 +784,19 @@ const TeacherView: React.FC = () => {
     finally { setGenerating(false) }
   }
 
+  // 重试回调不能直接引用 loadSessions 自身（编译器报"声明前访问"），用 ref 间接调用
+  const loadSessionsRef = useRef<() => Promise<void>>(async () => {})
+  const loadSessions = useCallback(async () => {
+    setLoadingSessions(true)
+    try {
+      const { data } = await apiClient.get('/api/practice/sessions')
+      setSessions(data.sessions || [])
+    } catch (err) {
+      reportLoadError(err, { key: 'PracticePage.loadSessions', retry: () => { void loadSessionsRef.current() } })
+    } finally { setLoadingSessions(false) }
+  }, [])
+  useEffect(() => { loadSessionsRef.current = loadSessions }, [loadSessions])
+
   // publish=false → 存为草稿（学生看不到），之后在列表里用「发布」开关放出去
   const publishSession = async (publish = true) => {
     if (!title.trim()) { message.warning(t('inputTitle')); return }
@@ -807,15 +821,6 @@ const TeacherView: React.FC = () => {
     } catch (e: any) { message.error(e.response?.data?.detail || t('publishFailed')) }
     finally { setPublishing(false) }
   }
-
-  const loadSessions = useCallback(async () => {
-    setLoadingSessions(true)
-    try {
-      const { data } = await apiClient.get('/api/practice/sessions')
-      setSessions(data.sessions || [])
-    } catch (err) { reportLoadError(err, { key: 'PracticePage.loadSessions', retry: () => { void loadSessions() } }) }
-    finally { setLoadingSessions(false) }
-  }, [])
 
   useEffect(() => { if (tab === 'sessions') loadSessions() }, [tab, loadSessions])
 

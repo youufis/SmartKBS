@@ -433,7 +433,13 @@ const QuestionFormModal: React.FC<Props> = ({
 
   return (
     <Modal
-      title={mode === 'create' ? t('createQuestionTitle') : t('editQuestion_', { id: question?.id })}
+      title={
+        mode === 'create'
+          ? t('createQuestionTitle')
+          : readOnly
+            ? t('viewQuestion_', { id: question?.id })
+            : t('editQuestion_', { id: question?.id })
+      }
       open={open}
       onCancel={handleCancel}
       mask={{ closable: false }}

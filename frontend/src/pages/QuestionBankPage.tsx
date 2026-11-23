@@ -346,6 +346,8 @@ const QuestionBankPage: React.FC = () => {
         setFormOpen(true)
         clearParam()
       } catch (err: any) {
+        // 401 由全局拦截器统一提示并跳登录，这里再弹会重复
+        if (err?.response?.status === 401) return
         message.warning(
           err?.response?.status === 404
             ? t('deepLinkMissing')
