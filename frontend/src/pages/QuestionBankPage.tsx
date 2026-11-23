@@ -1062,6 +1062,8 @@ const QuestionBankPage: React.FC = () => {
               {/* 低频维护动作收进一个菜单：原来「更多操作」只有一个 AI 补标，
                   去重又单独占一个按钮，7 个按钮同权重反而看不出主次 */}
               <Dropdown
+                // 教室一体机是触摸屏：默认 hover 触发时点一下可能只悬停不展开
+                trigger={['click']}
                 menu={{
                   items: [
                     { key: 'dedup', label: t('dedup'), icon: <ClearOutlined />, disabled: dedupLoading },
