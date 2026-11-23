@@ -1,4 +1,9 @@
 {
+  "qualityFilter": "Quality",
+  "qualityNoExplanation": "No explanation",
+  "qualityNoMedia": "No media",
+  "qualityPendingMedia": "Media pending",
+  "analyticsJumpTip": "Click to open the matching filter in the question bank",
   "title": "Question Bank",
   "analyticsTitle": "Question Bank Analytics",
   "analyticsSubtitle": "Type, knowledge point, creator and quality analysis",
