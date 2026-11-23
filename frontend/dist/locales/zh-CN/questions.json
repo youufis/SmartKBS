@@ -209,6 +209,7 @@
   "generatedCount": "✅ 已生成 {{count}} 道题（已自动保存到题库）",
   "qbAlreadyInBank": "题库里已有，未重复入库",
   "extractedCount": "✅ 已提取 {{count}} 道题（已自动保存到题库）",
+  "viewQuestion_": "查看题目 #{{id}}",
   "editQuestion_": "编辑题目 #{{id}}",
   "noSvg": "暂无 SVG 配图",
   "refCount": "引用",
