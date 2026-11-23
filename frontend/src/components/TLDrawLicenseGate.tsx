@@ -13,14 +13,17 @@ import { SyncOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import {
-  TL_BUILD_LICENSE_KEY,
   fetchTLDrawRuntimeKey,
   parseTLDrawLicenseKey,
   resetTLDrawRuntimeCache,
   tlHostsLicensed,
   type TLBlockReason,
 } from '../constants/tldrawLicense'
-
+import {
+  ensureTLVerifyCapability,
+  tlVerifyCapability,
+  type TLVerifyCapability,
+} from '../utils/webcryptoVerifyShim'
 
 const REASON_KEYS: Record<TLBlockReason, string> = {
   'no-key': 'tlBlockedReasonNoKey',
@@ -63,43 +66,60 @@ export const TLDrawLicenseBlocked: React.FC<{ reasons: TLBlockReason[]; onRechec
 const SOURCE_KEYS: Record<string, string> = {
   draft: 'tlLicenseSourceDraft',
   runtime: 'tlLicenseSourceRuntime',
-  build: 'tlLicenseSourceBuild',
   none: 'tlLicenseStatusNone',
+}
+
+const CAP_KEYS: Record<TLVerifyCapability, string> = {
+  native: 'tlLicenseCapNative',
+  shim: 'tlLicenseCapShim',
+  none: 'tlLicenseCapNone',
 }
 
 /**
  * 配置页里贴在字段标题旁的状态标签：当前生效的是哪来的 key、什么类型、还剩几天、
- * 域名在不在授权范围内。draft（表单里还没保存的值）优先显示，方便管理员边填边看。
+ * 域名在不在授权范围内、这台机器上 SDK 能不能真的验签。draft（表单里还没保存的值）优先显示。
  */
 export const TLDrawLicenseStatus: React.FC = () => {
   const { t } = useTranslation('system')
   const draft = (Form.useWatch('TL_LICENSE_KEY') as string | undefined) ?? ''
   const [saved, setSaved] = useState<string | null>(null)
   const [checking, setChecking] = useState(true)
+  const [cap, setCap] = useState<TLVerifyCapability>(() => tlVerifyCapability())
 
   const load = useCallback(() => {
     setChecking(true)
     resetTLDrawRuntimeCache()
-    fetchTLDrawRuntimeKey().then((k) => { setSaved(k); setChecking(false) })
+    fetchTLDrawRuntimeKey().then(async (k) => {
+      setSaved(k)
+      // 只有真的填了 key 才去加载 tl-verify.js：留空的部署行为与旧版完全一致
+      setCap(k.trim() ? await ensureTLVerifyCapability() : tlVerifyCapability())
+      setChecking(false)
+    })
   }, [])
 
   useEffect(() => { load() }, [load])
 
   const savedTrim = (saved ?? '').trim()
   const draftTrim = draft.trim()
-  const effective = draftTrim || savedTrim || (TL_BUILD_LICENSE_KEY ?? '')
-  const source = draftTrim ? 'draft' : savedTrim ? 'runtime' : TL_BUILD_LICENSE_KEY ? 'build' : 'none'
+  const effective = draftTrim || savedTrim
+  const source = draftTrim ? 'draft' : savedTrim ? 'runtime' : 'none'
   const info = effective ? parseTLDrawLicenseKey(effective) : null
 
   if (checking) return <Tag style={{ marginInlineStart: 4 }}>{t('tlLicenseChecking')}</Tag>
-  if (source === 'none') return <Tag style={{ marginInlineStart: 4 }}>{t('tlLicenseStatusNone')}</Tag>
+  const capTag = <Tag color={cap === 'none' ? 'orange' : 'green'}>{t(CAP_KEYS[cap])}</Tag>
+  if (source === 'none') return <Space size={4} style={{ marginInlineStart: 4 }}><Tag>{t('tlLicenseStatusNone')}</Tag>{capTag}</Space>
   if (!info) {
-    return <Tag color="red" style={{ marginInlineStart: 4 }}>{t('tlLicenseStatusInvalid')}</Tag>
+    return (
+      <Space size={4} style={{ marginInlineStart: 4 }}>
+        <Tag color="red">{t('tlLicenseStatusInvalid')}</Tag>
+        {capTag}
+      </Space>
+    )
   }
   const hostOk = info.hosts.includes('*') || tlHostsLicensed(info.hosts, location.hostname)
   return (
-    <Space size={4} style={{ marginInlineStart: 4 }}>
-      <Tag color={source === 'build' ? 'green' : 'blue'}>{t(SOURCE_KEYS[source])}</Tag>
+    <Space size={4} style={{ marginInlineStart: 4, flexWrap: 'wrap' }}>
+      <Tag color="blue">{t(SOURCE_KEYS[source])}</Tag>
       <Tag>{info.kinds.join('+') || 'license'}</Tag>
       {info.expired ? (
         <Tag color="red">{t('tlLicenseStatusExpired', { date: info.expiry })}</Tag>
@@ -115,6 +135,7 @@ export const TLDrawLicenseStatus: React.FC = () => {
           <Tag color="red">{t('tlLicenseStatusHostMismatch')}</Tag>
         </Tooltip>
       ) : null}
+      {capTag}
       <Button size="small" type="text" icon={<SyncOutlined />} onClick={load} aria-label={t('tlLicenseRefresh')} />
     </Space>
   )

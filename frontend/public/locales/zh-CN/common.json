@@ -402,11 +402,11 @@
   "previewWinClose": "关闭",
   "tlBlockedTitle": "白板暂时不可用",
   "tlBlockedDesc": "白板引擎需要有效的授权 key 才能在 HTTPS 环境下工作。为避免上课时画布突然变成一片空白，这里先不加载白板。",
-  "tlBlockedReasonNoKey": "未配置白板授权 key，安装包内也没有内置 key",
+  "tlBlockedReasonNoKey": "未配置白板授权 key（HTTPS 访问时必需；HTTP 内网下白板可用，只显示 tldraw 的授权提示）",
   "tlBlockedReasonInvalidKey": "白板授权 key 格式不合法（填错等于没填）",
   "tlBlockedReasonExpired": "白板授权 key 已过期",
   "tlBlockedReasonHost": "当前访问域名不在授权 key 允许的范围内",
-  "tlBlockedHintAdmin": "可在「系统配置 → 接入凭证 → 白板授权 key」填写；留空表示继续使用安装包内置的 key。",
+  "tlBlockedHintAdmin": "可在「系统配置 → 接入凭证 → 白板授权 key」填写并保存，然后刷新白板。",
   "tlBlockedHintStudent": "请把这条提示转告学校管理员，配置好之后刷新页面即可。",
   "tlBlockedRetry": "重新检测"
 }

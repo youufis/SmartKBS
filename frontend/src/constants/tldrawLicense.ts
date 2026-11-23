@@ -6,24 +6,31 @@
  *   2. 不得隐藏、遮挡或干扰水印与授权校验 —— 水印就是免费/非商业授权的对价；
  *   3. 再分发安装包时附带许可原文（frontend/public/THIRD-PARTY-NOTICES/tldraw-LICENSE.md）。
  *
- * key 有两条来源，按优先级取用：
- *   ① 运行时：系统配置 TL_LICENSE_KEY（GET /api/config/tldraw-license）
- *      → 换 key / 年度续期只改配置，不必重新出包；
- *   ② 构建期：VITE_TLDRAW_LICENSE_KEY（frontend/.env.local，不入库）
- *      → 安装包内置，学校开箱可用，不用任何人再申请。
+ * key 只有一条来源：**系统配置 TL_LICENSE_KEY**（GET /api/config/tldraw-license）。
+ * 构建期不内置、打包不校验 —— 由部署者自己填；换 key / 年度续期只改配置，不必重新出包。
+ * 留空也完全合法：内网 http 下白板照常可用，只是会显示 SDK 自带的授权提示按钮。
+ *
+ * 三种访问形态（照 SDK 的 LicenseManager 源码判，不是猜）：
+ *   ① https / vscode-webview：SDK 自己验签。无 key、域名不符、过期 → 5 秒后画布变空白。
+ *   ② 明文 http + 环回（127.0.0.1 / localhost）：浏览器提供 WebCrypto，SDK 自己验签，正常。
+ *   ③ 明文 http + 非环回（内网 IP/域名）：浏览器不给 crypto.subtle，SDK 跳过验签，只显示
+ *      "Get a license for production" 按钮。此形态由 utils/webcryptoVerifyShim.ts 补上
+ *      importKey/verify，让 SDK 的验签真的执行：合法 key → licensed（无 watermark 位即无标记）；
+ *      过期 → expired（闸门提前拦成说明页）；带 watermark 位 → 官方水印照显，不得遮蔽。
  *
  * 为什么还要在这里做"要不要挂载 SDK"的预判：未授权/域名不符/过期时，SDK 自己会在 5 秒后
  * 把整个画布替换成空白 div（LicenseProvider 的 LicenseGate）。老师上课点开白板看到一片空白，
  * 是最难排查的失败形态。所以这里按 SDK 的同一套判定提前给出原因，由白板组件渲染自有说明页。
- *
- * 一个容易误判的点：http（非 localhost）部署里浏览器没有 WebCrypto，SDK 无法验签，
- * 无论有没有 key 都会显示 "Get a license for production" 按钮 —— 那是 SDK 的正常显示，
- * 不得用 CSS 遮蔽。
  */
 
 import apiClient from '../api/client'
+import {
+  ensureTLVerifyCapability,
+  nativeVerifyAvailable,
+  type TLVerifyCapability,
+} from '../utils/webcryptoVerifyShim'
 
-export type TLLicenseSource = 'runtime' | 'build' | 'none'
+export type TLLicenseSource = 'runtime' | 'none'
 
 export interface TLLicenseInfo {
   key: string
@@ -32,12 +39,12 @@ export interface TLLicenseInfo {
   id: string
   /** 授权允许的域名，["*"] = 不限 */
   hosts: string[]
-  /** 到期日 YYYY-MM-DD */
+  /** 到期日 YYYY-MM-DD（取自 payload；前缀里的日期不参与验签，不能当依据） */
   expiry: string
   /** 距到期剩余天数（负数 = 已过期） */
   daysLeft: number
   expired: boolean
-  /** annual / perpetual / watermark / evaluation … */
+  /** annual / perpetual / internal / watermark / evaluation / native … */
   kinds: string[]
 }
 
@@ -48,14 +55,10 @@ const FLAG_LABELS: Record<number, string> = {
   1: 'annual', 2: 'perpetual', 4: 'internal', 8: 'watermark', 16: 'evaluation', 32: 'native',
 }
 
-/** 构建期内置 key（安装包自带，学校无需配置） */
-export const TL_BUILD_LICENSE_KEY: string | undefined =
-  ((import.meta.env.VITE_TLDRAW_LICENSE_KEY as string | undefined) ?? '').trim() || undefined
-
 const padBase64 = (b64: string) => b64 + '='.repeat((4 - (b64.length % 4)) % 4)
 
 /**
- * 解出 key 的授权信息。只解 payload 形态、不验签（验签归浏览器里的 SDK）。
+ * 解出 key 的授权信息。只解 payload 形态、不验签（验签归浏览器里的 SDK / tl-verify.js）。
  * 返回 null 表示这串不是合法 key —— 填错等于没填，必须当成问题暴露出来。
  */
 export function parseTLDrawLicenseKey(key: string, source: TLLicenseSource = 'runtime'): TLLicenseInfo | null {
@@ -119,14 +122,9 @@ function sdkTreatsAsProduction(): boolean {
   return secureContext && location.hostname !== 'localhost'
 }
 
-/** SDK 有没有能力验签（http 非 localhost 时 WebCrypto 不可用，它压根不校验 key） */
-function sdkCanVerify(): boolean {
-  return !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle)
-}
-
 let runtimePromise: Promise<string> | null = null
 
-/** 读取系统配置里的覆盖 key；失败/超时按空串处理（回落到构建期 key），缓存一次 */
+/** 读取系统配置里的 key；失败/超时按空串处理，缓存一次 */
 export function fetchTLDrawRuntimeKey(): Promise<string> {
   if (!runtimePromise) {
     runtimePromise = (async () => {
@@ -140,8 +138,8 @@ export function fetchTLDrawRuntimeKey(): Promise<string> {
           clearTimeout(timer)
         }
       } catch {
-        // 401（令牌过期）/ 网络不通 / 后端还是旧版本（没有这个端点）都按"没有运行时 key"处理：
-        // 回落到构建期内置 key，绝不能因为读不到配置就把白板锁死
+        // 401（令牌过期）/ 网络不通 / 后端还是旧版本（没有这个端点）都按"没有 key"处理：
+        // 绝不能因为读不到配置就把白板锁死
         return ''
       }
     })()
@@ -155,39 +153,49 @@ export function resetTLDrawRuntimeCache(): void {
 }
 
 export interface TLDrawLicenseDecision {
-  /** 传给 <Tldraw licenseKey>；undefined = 不传（SDK 自行处理） */
+  /** 传给 <Tldraw licenseKey>；undefined = 不传（SDK 自行处理，结果就是显示它自己的提示） */
   key?: string
   info: TLLicenseInfo | null
   /** 非空即不应挂载 SDK，改渲染自有说明页 */
   reasons: TLBlockReason[]
-  /** 不致命但值得提醒：临期、http 下无法验签等 */
+  /** 不致命但值得提醒：临期、http 下无法验签、本次由 tl-verify 补齐等 */
   notes: string[]
+  /** 本次页面里 SDK 能不能验签（native=浏览器原生 / shim=tl-verify 补齐 / none=不能） */
+  capability: TLVerifyCapability
 }
 
 /**
  * 解析出"该用哪枚 key、能不能挂载白板"。判定刻意与 SDK 保持一致：
  * 只有 SDK 真会把画布藏掉的情形才返回 reasons，避免把本来能用的 http 内网部署误锁。
+ *
+ * 关键差异（与旧版相比）：只要系统配置里填了形态合法的 key，就在非 https 的非环回环境里
+ * 补上 WebCrypto。补上之后 SDK 会真的验签，于是"过期"也会真的触发空白 —— 这里照实拦成说明页。
+ * 留空则完全不动（不加载 tl-verify.js），行为与旧版一致。
  */
 export async function resolveTLDrawLicense(): Promise<TLDrawLicenseDecision> {
-  const runtime = await fetchTLDrawRuntimeKey()
-  const raw = runtime || TL_BUILD_LICENSE_KEY || ''
-  const source: TLLicenseSource = runtime ? 'runtime' : TL_BUILD_LICENSE_KEY ? 'build' : 'none'
+  const raw = await fetchTLDrawRuntimeKey()
   const production = sdkTreatsAsProduction()
-  const verifiable = sdkCanVerify()
   const reasons: TLBlockReason[] = []
   const notes: string[] = []
 
   if (!raw) {
-    if (production && verifiable) reasons.push('no-key')
-    return { key: undefined, info: null, reasons, notes }
+    if (production && nativeVerifyAvailable()) reasons.push('no-key')
+    return { key: undefined, info: null, reasons, notes, capability: nativeVerifyAvailable() ? 'native' : 'none' }
   }
 
-  const info = parseTLDrawLicenseKey(raw, source)
+  const info = parseTLDrawLicenseKey(raw, 'runtime')
   if (!info) {
-    if (production && verifiable) reasons.push('invalid-key')
+    // 形态不合法：不补 WebCrypto（补了也只会让 SDK 报 invalid key），按"没填"处理
+    if (production && nativeVerifyAvailable()) reasons.push('invalid-key')
     else notes.push('invalid-key')
-    return { key: undefined, info: null, reasons, notes }
+    return { key: undefined, info: null, reasons, notes, capability: nativeVerifyAvailable() ? 'native' : 'none' }
   }
+
+  // 只在这里补能力：有合法形态的 key + 浏览器没有原生 WebCrypto（= 明文 http 非环回）
+  const capability = await ensureTLVerifyCapability()
+  const verifiable = capability !== 'none'
+  if (capability === 'shim') notes.push('verify-shim')
+  else if (!verifiable) notes.push('no-webcrypto')
 
   // 过期：SDK 只要验得了签就会判 expired 并隐藏画布（evaluation 无宽限期）
   if (info.expired) {
@@ -197,11 +205,10 @@ export async function resolveTLDrawLicense(): Promise<TLDrawLicenseDecision> {
     notes.push('expiring-soon')
   }
 
-  // 域名不符：SDK 只在"非开发环境"下才因此判未授权
+  // 域名不符：SDK 只在"非开发环境"下才因此判未授权（http 属开发环境，会跳过域名校验）
   if (!info.expired && production && verifiable && !tlHostsLicensed(info.hosts, location.hostname)) {
     reasons.push('host-not-licensed')
   }
-  if (!verifiable) notes.push('no-webcrypto')
 
-  return { key: info.key, info, reasons, notes }
+  return { key: info.key, info, reasons, notes, capability }
 }

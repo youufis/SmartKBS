@@ -7,19 +7,20 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  TL_BUILD_LICENSE_KEY,
   resetTLDrawRuntimeCache,
   resolveTLDrawLicense,
   type TLDrawLicenseDecision,
 } from '../constants/tldrawLicense'
+import type { TLVerifyCapability } from '../utils/webcryptoVerifyShim'
+
 export type TLDrawLicenseState = 'checking' | 'ok' | 'blocked'
 
 /**
- * 解析链出异常时的兜底：只保留构建期内置 key、不给拦截理由。
+ * 解析链出异常时的兜底：不给 key、不给拦截理由。
  * 判定本身出错不该让老师连白板都打不开 —— 最坏交给 SDK 显示它自己的提示。
  */
 function fallbackDecision(): TLDrawLicenseDecision {
-  return { key: TL_BUILD_LICENSE_KEY, info: null, reasons: [], notes: ['resolve-failed'] }
+  return { key: undefined, info: null, reasons: [], notes: ['resolve-failed'], capability: 'none' }
 }
 
 /** 白板组件用它在挂载 SDK 前取到 key 与判定结果 */
@@ -29,7 +30,7 @@ export function useTLDrawLicense() {
   const recheck = useCallback(() => {
     setDecision(null)
     resetTLDrawRuntimeCache()
-    resolveTLDrawLicense().then(setDecision).catch(fallbackDecision)
+    resolveTLDrawLicense().then(setDecision).catch(() => setDecision(fallbackDecision()))
   }, [])
 
   useEffect(() => {
@@ -42,5 +43,13 @@ export function useTLDrawLicense() {
   }, [])
 
   const state: TLDrawLicenseState = !decision ? 'checking' : decision.reasons.length ? 'blocked' : 'ok'
-  return { state, key: decision?.key, info: decision?.info ?? null, reasons: decision?.reasons ?? [], notes: decision?.notes ?? [], recheck }
+  return {
+    state,
+    key: decision?.key,
+    info: decision?.info ?? null,
+    reasons: decision?.reasons ?? [],
+    notes: decision?.notes ?? [],
+    capability: (decision?.capability ?? 'none') as TLVerifyCapability,
+    recheck,
+  }
 }

@@ -303,10 +303,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 学生作答页防泄题（默认全关：关掉时前端不挂监听、不注入水印，作答链路与改动前一致）
     "EXAM_ANTI_COPY": False,             # 题目区禁止选中/复制/剪切/右键/打印快捷键，输入区始终豁免
     "EXAM_WATERMARK": False,             # 作答页平铺个人水印（姓名 + 学号 + 时间），用于事后追溯
-    # 白板引擎（tldraw SDK）授权 key：留空 = 用安装包烘进去的构建期 key（VITE_TLDRAW_LICENSE_KEY），
-    # 填了则**覆盖**构建期值。这样换 key / 年度续期只改配置、不必重新出包，也不影响没填过的老部署。
-    # 它不是机密：任何部署包的 JS 里都能看到同一串（客户端 SDK 的 key 本来就藏不住），所以按公开
-    # 配置下发给前端；写入仍限管理员。填错等于没填 —— SDK 验签失败会直接判未授权。
+    # 白板引擎（tldraw SDK）授权 key：**唯一来源**，由部署者自己填。安装包不内置 key，构建与打包
+    # 也不校验 key。留空同样合法：内网 http 下白板照常可用，只是显示 SDK 自带的授权提示按钮。
+    # 它不是机密：会下发到前端（客户端 SDK 的 key 本来就藏不住），所以按公开配置下发；写入仍限管理员。
+    # 填错等于没填 —— 形态不合法会被保存校验挡住；形态合法但签名不对，由浏览器里的 SDK 判未授权。
     "TL_LICENSE_KEY": "",
     "EXAM_WA_MAX_QUESTIONS": 8,            # 全班错因讲评一次最多讲几道题（控 token 与等待时间）
     "EXAM_WA_RATE_CEILING": 90,            # 正确率低于此百分比的题目才进讲评
@@ -1609,13 +1609,13 @@ async def get_public_config():
 async def get_tldraw_license(request: Request):
     """白板引擎 tldraw 是商业授权 SDK，生产环境必须携带有效 license key。
 
-    两条来源按优先级：**系统配置里的 TL_LICENSE_KEY → 安装包烘死的构建期 key**。
-    前端（constants/tldrawLicense.ts）拿这个值去挂 <Tldraw>；两者都空且当前是 https 时，
-    白板组件会显示自有的"未配置授权"说明页，而不是等 SDK 把画布替换成空白 div。
+    唯一来源就是这里的系统配置（安装包不内置 key、构建也不校验）。前端（constants/tldrawLicense.ts）
+    拿这个值去挂 <Tldraw>；空值且当前是 https 时，白板组件会显示自有的"未配置授权"说明页，
+    而不是等 SDK 把画布替换成空白 div；空值但走 http 内网时白板照常可用，只显示 SDK 自带的提示按钮。
 
     读取门槛与 /exam-protect 一致：任何登录用户（白板的所有使用角色），不要求管理员；
-    但不做成匿名可读 —— 走运行时注入部署时，这串就是学校自己申请的 key，没理由让未登录
-    访客读到。前端一律用带令牌的 apiClient 读取，读不到就回落到构建期内置 key。
+    但不做成匿名可读 —— 这串是学校自己申请的 key，没理由让未登录访客读到。
+    前端一律用带令牌的 apiClient 读取，读不到就当作"没有配置"（绝不影响白板可用性）。
     """
     get_current_user(request)
     return {"key": str(get_config_value("TL_LICENSE_KEY", "") or "").strip()}
