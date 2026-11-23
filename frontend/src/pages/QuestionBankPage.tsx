@@ -312,6 +312,11 @@ const QuestionBankPage: React.FC = () => {
         { signal: ctrl.signal },
       )
       if (seq !== reqSeqRef.current) return
+      // 删掉某页最后一条后停在空页很困惑：还有数据就自动回退一页
+      if (res.questions.length === 0 && page > 1 && res.total > 0) {
+        setPage(page - 1)
+        return
+      }
       setQuestions(res.questions)
       setTotal(res.total)
     } catch (err: any) {
@@ -539,6 +544,9 @@ const QuestionBankPage: React.FC = () => {
       }
       message.success(t('deleteSuccess'))
       loadQuestions()
+      // 回收站角标与未标注角标都要跟着变，否则删完还显示旧数字
+      void loadRecycleTotal()
+      void loadMeta()
     } catch (err: any) {
       const detail = err?.response?.data?.detail
       if (err?.response?.status === 409) {
@@ -611,6 +619,8 @@ const QuestionBankPage: React.FC = () => {
           }
           setSelectedRowKeys([])
           loadQuestions()
+          void loadRecycleTotal()
+          void loadMeta()
         } catch (err: any) {
           const detail = err?.response?.data?.detail
           message.error(typeof detail === 'string' ? detail : t('deleteFailed'))
@@ -1334,7 +1344,7 @@ const QuestionBankPage: React.FC = () => {
                               return false
                             }}
                           >
-                            <Button icon={<UploadOutlined />}>{t('selectImage')}</Button>
+                            <Button icon={<UploadOutlined />} disabled={extracting}>{t('selectImage')}</Button>
                           </Upload>
                         </div>
                       </div>

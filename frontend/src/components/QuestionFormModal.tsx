@@ -199,6 +199,7 @@ const QuestionFormModal: React.FC<Props> = ({
   }
 
   const save = async (keepOpen: boolean) => {
+    if (saving) return
     // 先走表单级校验，题干/学科为空时字段上直接标红（不再只弹一条 toast）
     try {
       await form.validateFields()
