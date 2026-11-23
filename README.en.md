@@ -7,7 +7,7 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 51 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry / id link) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -37,6 +37,9 @@
 
 > 📌 **Highlights of V9.2.0** (outline)
 >
+> - 🎯 **Direct question link (new)**: click a question id in wrong-answer review, practice or class drill to jump back to it · editable for your own, read-only for others, recycle-bin aware
+> - 📊 **Analytics drill-down**: click a quality figure to open the matching list · chart tooltips read "Count"
+> - ⚙️ **Quality parity**: the bank list and analytics agree item by item
 > - 🧾 **Question-bank authoring rework (new)**: one form for manual entry and editing · click an option to set the answer · true/false switch · collapsible preview · save & continue
 > - 📊 **Question list & maintenance**: sort by ID / difficulty / created · subject column and reference count · filters written to the URL · dedupe keeps the most complete copy · badges refresh after deletion
 > - 🖼 **Generation & extraction**: image extraction in the background (no long-image timeouts) · real progress · non-contiguous option keys keep their answer
@@ -135,7 +138,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management (generate / extract / manual entry) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre | 12 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management (generate / extract / manual entry / id link) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre | 12 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, teaching briefing, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 12 |
@@ -266,6 +269,7 @@ AI-powered smart question management system supporting manual entry, AI generati
 - **🤖 One-Click AI Generation**: Automatically generate questions by subject, type, knowledge point, difficulty, and quantity
 - **📤 Smart Extraction**: Supports pasting text or uploading .docx/JSON files, automatically identifies types, options, and answers
 - **✍️ Manual Entry**: shares one form with editing — click the circle / checkbox to set the answer, option letters are generated automatically, true/false uses a switch, and "Save & Continue" supports batch entry
+- **🎯 Direct question link**: from wrong-answer review, practice detail or class drill, click the question id to jump back to it; your own questions open editable, others open read-only, recycled ones switch to the recycle view
 - **🧱 One door into the bank**: AI generation, smart extraction and every practice / quiz backfill share the same entry point — validate, dedup, one transaction, link knowledge points after commit; ungradeable questions are turned away at the door with a reason. One write path per question, so grading, duplicate checks and question selection agree from the source onward, and a future gate only has to be added in one place
 - **📋 Supported Types**: built-in types (single choice, multiple choice, true/false, short answer, fill-in-the-blank, essay, subjective) cannot be edited or removed; custom types follow the enabled list and are protected while active questions exist
 - **📐 Formula Support**: Full support for LaTeX formula ($...$) rendering display
@@ -274,7 +278,7 @@ AI-powered smart question management system supporting manual entry, AI generati
   - Tongyi Wanxiang generates realistic images
   - Supports image generation, preview, deletion, concurrent generation optimization
   - Image placeholder management
-- **📂 Question Bank Management**: filtering, search, edit, delete; sort by ID / difficulty / created; the list shows **subject** and **reference count** (how many exams or practices use it, visible before deleting); filters are written to the URL so refresh and sharing keep them; **multi-select bulk deletion** with the same rules as single delete (others' questions and ones in use are skipped with per-row reasons, 500 per call)
+- **📂 Question Bank Management**: filtering, search, edit, delete; sort by ID / difficulty / created; the list shows **subject** and **reference count** (how many exams or practices use it, visible before deleting); filters are written to the URL so refresh and sharing keep them; quality items in analytics (no explanation / no media / pending media) drill straight into the matching list; **multi-select bulk deletion** with the same rules as single delete (others' questions and ones in use are skipped with per-row reasons, 500 per call)
 - **🏷️ Tag maintenance**: filter by tag status to see only untagged questions (one definition across list, analytics and the header badge); dedupe and AI tagging live in the **Maintenance** menu
 - **🧹 Duplicate cleanup**: preview before executing; each group keeps the **most complete** copy (media / explanation / knowledge points first) and lists which IDs are kept or removed
 - **🗑 Recycle bin**: soft-deleted questions can be **restored** to the bank from the recycle-bin view (media folders and knowledge-point links come back with them), or **deleted permanently** (a preview lists what will be removed together and what cannot be removed) — the backlog count on the view switch updates immediately after deletion
@@ -1237,6 +1241,10 @@ Current version **9.2.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.2.0
 
+- 🎯 **Direct question link (new)**: click a question id in wrong-answer review, practice or class drill to jump back to it · editable for your own, read-only for others, recycle-bin aware
+- 📊 **Analytics drill-down**: quality items (no explanation / no media / pending media) open the matching list · chart tooltips read "Count"
+- ⚙️ **Quality parity**: the bank list and analytics agree item by item
+- 🧭 **Practice page**: the "last N days" baseline refreshes with the list, so it stays correct across midnight
 - 🧾 **Question-bank authoring rework**: one form for manual entry and editing · click an option to set the answer · true/false switch · collapsible preview · save & continue
 - 📊 **Question list**: sort by ID / difficulty / created · subject column and reference count · filters written to the URL · sticky header
 - 🧹 **Bank maintenance**: dedupe keeps the most complete copy and lists keep/remove · dedupe and AI tagging merged into one menu · badges refresh after deletion
