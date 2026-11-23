@@ -449,7 +449,7 @@ const QuestionFormModal: React.FC<Props> = ({
       styles={{ body: { maxHeight: 'calc(100vh - 240px)', overflowY: 'auto', paddingRight: 8 } }}
       footer={(
         <Space>
-          <Button onClick={handleCancel}>{t('cancel')}</Button>
+          <Button onClick={handleCancel}>{readOnly ? t('close') : t('cancel')}</Button>
           {mode === 'create' && !readOnly && (
             <Button onClick={() => save(true)} loading={saving}>{t('saveAndContinue')}</Button>
           )}

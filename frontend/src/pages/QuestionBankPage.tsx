@@ -320,9 +320,12 @@ const QuestionBankPage: React.FC = () => {
     deepLinkRef.current = raw
 
     const clearParam = () => {
-      const next = new URLSearchParams(searchParams)
-      next.delete('id')
-      setSearchParams(next, { replace: true })
+      // 函数式更新：用当前地址栏的真实参数，避免闭包里的旧 searchParams 把新筛选覆盖回去
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('id')
+        return next
+      }, { replace: true })
     }
     const idNum = Number(raw)
     if (!Number.isFinite(idNum) || idNum <= 0) { clearParam(); return }
@@ -332,6 +335,8 @@ const QuestionBankPage: React.FC = () => {
     void (async () => {
       try {
         const q = await questionsApi.getQuestion(idNum)
+        // 连点不同题号时，先返回的旧请求不能覆盖后一个
+        if (deepLinkRef.current !== raw) return
         if (q.status === 'deleted') {
           message.info(t('deepLinkInRecycle'))
           // applyFilters 会按筛选重建参数，id 自然被丢掉，不必再清一次
