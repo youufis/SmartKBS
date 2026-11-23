@@ -183,7 +183,7 @@ const SessionRoster: React.FC<{
 // 学生端
 // ════════════════════════════════════════
 const StudentView: React.FC = () => {
-  const { t } = useTranslation('practice')
+  const { t, i18n } = useTranslation('practice')
   const protect = useExamProtect()   // 防复制与水印开关（系统配置，默认全关）
 
   const navigate = useNavigate()
@@ -217,17 +217,17 @@ const StudentView: React.FC = () => {
     try {
       const { data } = await apiClient.get('/api/practice/my-sessions')
       setSessions(data.sessions || [])
-    } catch { message.error(t('loadFailed')) }
+    } catch { message.error(i18n.t('loadFailed')) }
     finally { setLoading(false) }
-  }, [])
+  }, [i18n])
 
   // 初始加载：不在 effect 中同步调用 setLoading，直接从 true→false
   useEffect(() => {
     apiClient.get('/api/practice/my-sessions')
       .then(({ data }) => setSessions(data.sessions || []))
-      .catch(() => message.error(t('loadFailed')))
+      .catch(() => message.error(i18n.t('loadFailed')))
       .finally(() => setLoading(false))
-  }, [])
+  }, [i18n])
 
   const startPractice = async (sid: number) => {
     try {
@@ -1097,10 +1097,14 @@ const TeacherView: React.FC = () => {
       .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'))
   }, [wrongBookAll])
 
+  // 「最近 N 天」的基准时间：随 sessions 一起刷新，避免长时间挂页时一直用挂载时的 now
+  const [nowTs, setNowTs] = useState(0)
+  useEffect(() => { setNowTs(Date.now()) }, [sessions])
+
   const wrongBookSessions = useMemo(() => {
     const days = wbDays === 'all' ? 0 : Number(wbDays)
     const limit = days ? days * 86400000 : 0
-    const now = Date.now()
+    const now = nowTs
     return wrongBookAll.filter((s: any) => {
       if (wbStudent && !(s.target_students || []).includes(wbStudent)) return false
       if (limit) {
@@ -1110,7 +1114,7 @@ const TeacherView: React.FC = () => {
       }
       return true
     })
-  }, [wrongBookAll, wbDays, wbStudent])
+  }, [wrongBookAll, wbDays, wbStudent, nowTs])
 
   const PAGE_SIZE = 10
   const listSessions = tab === 'wrongbook' ? wrongBookSessions : classFiltered
