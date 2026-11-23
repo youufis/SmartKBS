@@ -249,7 +249,9 @@ const QuestionFormModal: React.FC<Props> = ({
     }
   }
 
-  const handleCancel = () => closeWithDirtyGuard(dirty || form.isFieldsTouched(), tc, onClose)
+  // 只用 dirty：antd 的 isFieldsTouched 在 setFieldsValue 初始化后会返回 true，
+  // 导致"什么都没改也弹未保存确认"。dirty 只由用户交互（onValuesChange/选项操作）置位。
+  const handleCancel = () => closeWithDirtyGuard(dirty, tc, onClose)
 
   const isChoice = CHOICE.has(watchedType)
   const isTF = watchedType === 'true_false'
