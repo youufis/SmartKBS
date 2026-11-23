@@ -277,6 +277,8 @@ const QuestionBankPage: React.FC = () => {
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
   const [formQuestion, setFormQuestion] = useState<QuestionInfo | null>(null)
   const [formTab, setFormTab] = useState<'form' | 'media'>('form')
+  /** 深链打开别人创建的题时置 true：能看到全貌但保存按钮不可用 */
+  const [formReadOnly, setFormReadOnly] = useState(false)
 
   // URL 参数 -> 筛选条件。两个 setter 都做了"值没变就保留原引用"，
   // 避免挂载时 filters 被换成等价的新对象后 loadQuestions 重建、同一页数据再拉一遍
@@ -291,6 +293,53 @@ const QuestionBankPage: React.FC = () => {
     setSort(prev => (prev.sortBy === urlSort.sortBy && prev.order === urlSort.order ? prev : urlSort))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryFilters, queryRange, queryString])
+
+  // ── ?id= 深链：错题管理 / 练习 / 抽问里点题号直达某道题 ──
+  // 只取详情后打开表单，不改列表筛选；题在回收站时切到回收站视图。
+  const deepLinkRef = useRef('')
+  useEffect(() => {
+    const raw = searchParams.get('id')
+    if (!raw) { deepLinkRef.current = ''; return }
+    if (deepLinkRef.current === raw) return
+    deepLinkRef.current = raw
+
+    const clearParam = () => {
+      const next = new URLSearchParams(searchParams)
+      next.delete('id')
+      setSearchParams(next, { replace: true })
+    }
+    const idNum = Number(raw)
+    if (!Number.isFinite(idNum) || idNum <= 0) { clearParam(); return }
+
+    // 注意：不要用 cancelled 标志 —— StrictMode 下 effect 会挂载→清理→再挂载，
+    // 第一次请求被 cleanup 作废、第二次又被上面的 ref 拦住，结果谁都不执行
+    void (async () => {
+      try {
+        const q = await questionsApi.getQuestion(idNum)
+        if (q.status === 'deleted') {
+          message.info(t('deepLinkInRecycle'))
+          // applyFilters 会按筛选重建参数，id 自然被丢掉，不必再清一次
+          applyFilters({ status: 'deleted' })
+          return
+        }
+        const canEdit = user?.role === 'admin' || q.creator_username === user?.username
+        setFormMode('edit')
+        setFormQuestion(q)
+        setFormTab('form')
+        setFormReadOnly(!canEdit)
+        setFormOpen(true)
+        clearParam()
+      } catch (err: any) {
+        message.warning(
+          err?.response?.status === 404
+            ? t('deepLinkMissing')
+            : (err?.response?.data?.detail || t('deepLinkMissing')),
+        )
+        clearParam()
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   // ── 加载题库列表 ──
   // 翻页/筛选连点时，旧请求的结果一律作废：否则慢的那次会把新页数据盖掉
@@ -516,18 +565,21 @@ const QuestionBankPage: React.FC = () => {
   }
 
   const openCreate = () => {
+    setFormReadOnly(false)
     setFormMode('create')
     setFormQuestion(null)
     setFormTab('form')
     setFormOpen(true)
   }
   const openEdit = (q: QuestionInfo) => {
+    setFormReadOnly(false)
     setFormMode('edit')
     setFormQuestion(q)
     setFormTab('form')
     setFormOpen(true)
   }
   const openMedia = (q: QuestionInfo) => {
+    setFormReadOnly(false)
     setFormMode('edit')
     setFormQuestion(q)
     setFormTab('media')
@@ -1696,7 +1748,8 @@ const QuestionBankPage: React.FC = () => {
         question={formQuestion}
         subjectOptions={subjectOptions}
         initialTab={formTab}
-        onClose={() => setFormOpen(false)}
+        readOnly={formReadOnly}
+        onClose={() => { setFormOpen(false); setFormReadOnly(false) }}
         onSaved={() => { loadQuestions(); void loadMeta() }}
       />
 

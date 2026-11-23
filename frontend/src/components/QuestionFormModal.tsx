@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Modal, Form, Input, Select, Radio, Checkbox, Segmented, Button, Space, Row, Col,
-  Tag, Typography, Collapse, Tabs, Tooltip,
+  Tag, Typography, Collapse, Tabs, Tooltip, Alert,
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, SwapOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -31,6 +31,8 @@ interface Props {
   subjectOptions: string[]
   /** 从「配图」入口打开时直接落在配图页 */
   initialTab?: 'form' | 'media'
+  /** 只看不改（深链打开别人创建的题时用） */
+  readOnly?: boolean
   onClose: () => void
   /** 保存成功或配图变更后通知页面刷新列表（不负责关闭弹窗） */
   onSaved: () => void
@@ -46,7 +48,7 @@ interface Props {
  *   - 配图从「弹窗套弹窗」改为同弹窗内的第二个页签，状态单向往回同步。
  */
 const QuestionFormModal: React.FC<Props> = ({
-  open, mode, question, subjectOptions, initialTab, onClose, onSaved,
+  open, mode, question, subjectOptions, initialTab, readOnly = false, onClose, onSaved,
 }) => {
   const { t } = useTranslation('questions')
   const { t: tc } = useTranslation('common')
@@ -199,7 +201,7 @@ const QuestionFormModal: React.FC<Props> = ({
   }
 
   const save = async (keepOpen: boolean) => {
-    if (saving) return
+    if (saving || readOnly) return
     // 先走表单级校验，题干/学科为空时字段上直接标红（不再只弹一条 toast）
     try {
       await form.validateFields()
@@ -270,7 +272,15 @@ const QuestionFormModal: React.FC<Props> = ({
   const isTextAnswer = TEXT_ANSWER.has(watchedType)
 
   const formPane = (
-    <Form form={form} layout="vertical" onValuesChange={markDirty}>
+    <Form form={form} layout="vertical" disabled={readOnly} onValuesChange={markDirty}>
+      {readOnly && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          title={t('readOnlyNotice', { creator: question?.creator_username || question?.creator_name || '-' })}
+        />
+      )}
       <Row gutter={12}>
         <Col span={8}>
           <Form.Item label={t('questionType')} name="type" rules={[{ required: true }]}>
@@ -311,12 +321,14 @@ const QuestionFormModal: React.FC<Props> = ({
                   {watchedType === 'single' ? (
                     <Radio
                       checked={answers.includes(i)}
+                      disabled={readOnly}
                       onChange={() => toggleAnswer(i)}
                       aria-label={t('markAnswerOption', { letter: letterOf(i) })}
                     />
                   ) : (
                     <Checkbox
                       checked={answers.includes(i)}
+                      disabled={readOnly}
                       onChange={() => toggleAnswer(i)}
                       aria-label={t('markAnswerOption', { letter: letterOf(i) })}
                     />
@@ -328,6 +340,7 @@ const QuestionFormModal: React.FC<Props> = ({
                 <TextArea
                   autoSize={{ minRows: 1, maxRows: 4 }}
                   value={opt}
+                  disabled={readOnly}
                   onChange={(e) => setOptionAt(i, e.target.value)}
                   placeholder={t('optionValuePlaceholder')}
                   style={{ flex: 1 }}
@@ -335,7 +348,7 @@ const QuestionFormModal: React.FC<Props> = ({
                 <Tooltip title={t('deleteOption')}>
                   <Button
                     type="text" size="small" danger icon={<DeleteOutlined />}
-                    disabled={options.length <= 2}
+                    disabled={readOnly || options.length <= 2}
                     aria-label={t('deleteOption')}
                     onClick={() => removeOption(i)}
                   />
@@ -343,10 +356,10 @@ const QuestionFormModal: React.FC<Props> = ({
               </div>
             ))}
             <Space>
-              <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addOption} disabled={options.length >= 10}>
+              <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addOption} disabled={readOnly || options.length >= 10}>
                 {t('addOption')}
               </Button>
-              <Button size="small" icon={<SwapOutlined />} onClick={shuffleOptions} disabled={options.length < 2}>
+              <Button size="small" icon={<SwapOutlined />} onClick={shuffleOptions} disabled={readOnly || options.length < 2}>
                 {t('shuffleOptions')}
               </Button>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -361,6 +374,7 @@ const QuestionFormModal: React.FC<Props> = ({
         <Form.Item label={t('correctAnswer')} required>
           <Segmented
             value={tf}
+            disabled={readOnly}
             onChange={(v) => { markDirty(); setTf(v as '对' | '错') }}
             options={[{ value: '对', label: t('true') }, { value: '错', label: t('false') }]}
           />
@@ -369,7 +383,7 @@ const QuestionFormModal: React.FC<Props> = ({
 
       {isTextAnswer && (
         <Form.Item label={t('referenceAnswer')} required extra={t('referenceAnswerTip')}>
-          <TextArea rows={3} value={refAnswer} onChange={(e) => { markDirty(); setRefAnswer(e.target.value) }} />
+          <TextArea rows={3} value={refAnswer} disabled={readOnly} onChange={(e) => { markDirty(); setRefAnswer(e.target.value) }} />
         </Form.Item>
       )}
 
@@ -410,6 +424,7 @@ const QuestionFormModal: React.FC<Props> = ({
         <KnowledgePointSelect
           subject={watchedSubject}
           value={kps}
+          disabled={readOnly}
           onChange={(v) => { markDirty(); setKps(Array.isArray(v) ? v : splitKps(v)) }}
         />
       </Form.Item>
@@ -429,14 +444,14 @@ const QuestionFormModal: React.FC<Props> = ({
       footer={(
         <Space>
           <Button onClick={handleCancel}>{t('cancel')}</Button>
-          {mode === 'create' && (
+          {mode === 'create' && !readOnly && (
             <Button onClick={() => save(true)} loading={saving}>{t('saveAndContinue')}</Button>
           )}
-          <Button type="primary" onClick={() => save(false)} loading={saving}>{t('save')}</Button>
+          {!readOnly && <Button type="primary" onClick={() => save(false)} loading={saving}>{t('save')}</Button>}
         </Space>
       )}
     >
-      {mode === 'edit' && mediaQuestion ? (
+      {mode === 'edit' && mediaQuestion && !readOnly ? (
         <Tabs
           activeKey={tab}
           onChange={(k) => setTab(k as 'form' | 'media')}

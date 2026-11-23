@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Layout, Card, Button, Tag, Space, Typography, Spin, Collapse, Modal, Select, Pagination, Divider, Input, InputNumber, Segmented, Checkbox, Empty, Tooltip } from 'antd'
 import { message } from '../utils/feedback'
-import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined, SearchOutlined, CheckCircleFilled, CloseCircleFilled, DownOutlined, UpOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined, SearchOutlined, CheckCircleFilled, CloseCircleFilled, DownOutlined, UpOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import PageHeader from '../components/PageHeader'
@@ -92,6 +92,8 @@ interface QuestionCardProps {
   canAiExplain: boolean
   expBusy: boolean
   onAiExplain: (questionId: string) => void
+  /** 教师/管理员：跳到试题管理查看这道题（学生传 undefined，不渲染入口） */
+  onOpenInBank?: (questionId: string) => void
   t: (key: string, opts?: any) => string
   typeLabel: Record<string, string>
 }
@@ -105,7 +107,7 @@ interface QuestionCardProps {
  */
 const QuestionCard: React.FC<QuestionCardProps> = ({
   q, selected, busy, kpFilter, onSelect, onToggleMaster, onPickKp,
-  canAiExplain, expBusy, onAiExplain, t, typeLabel,
+  canAiExplain, expBusy, onAiExplain, onOpenInBank, t, typeLabel,
 }) => {
   const [showExp, setShowExp] = useState(false)
   const done = q.wb_status === 'mastered'
@@ -130,6 +132,14 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
             <Checkbox checked={selected} onChange={e => onSelect(wbId, e.target.checked)} />
           )}
           <Tag>{typeLabel[q.question_type] || q.question_type || t('questionType')}</Tag>
+          {onOpenInBank && !gone && !!q.question_id && (
+            <Tooltip title={t('openInBankTip')}>
+              <Tag color="blue" icon={<ExportOutlined />} style={{ cursor: 'pointer' }}
+                onClick={() => onOpenInBank(String(q.question_id))}>
+                #{q.question_id}
+              </Tag>
+            </Tooltip>
+          )}
           {(q.wrong_count || 1) > 1 && <Tag color="red">{t('wrongTimes', { count: q.wrong_count })}</Tag>}
           {gone && <Tag color="orange">{t('wbQuestionGone')}</Tag>}
           <span className="wb-meta">{q._src.exam_title}{fmtDate(q._src.submitted_at) ? ` · ${fmtDate(q._src.submitted_at)}` : ''}</span>
@@ -873,6 +883,7 @@ const WrongBookPage: React.FC = () => {
                               canAiExplain={!isStudent}
                               expBusy={expBusy}
                               onAiExplain={(qid) => runExplainGen([qid])}
+                              onOpenInBank={isStudent ? undefined : (qid) => navigate(`/question-bank?id=${encodeURIComponent(qid)}`)}
                               t={t} typeLabel={typeLabel}
                             />
                           ))}
