@@ -7,7 +7,7 @@
  *     状态记为 unlicensed，只在右下角渲染 "Get a license for production" 按钮。
  *     也就是说：管理员填了合法 key，内网 http 访问也看不到任何效果。
  *
- * 这里按需加载 public/tl-verify.js（只实现 importKey/verify 两个方法），让 SDK 的
+ * 这里按需加载 utils/tlVerifyImpl（独立 chunk，只实现 importKey/verify 两个方法），让 SDK 的
  * 验签真的跑起来。判定结果仍然完全由 SDK 给出：合法 → licensed（无水印位就没有
  * 任何标记）；过期 → expired；带水印位 → licensed-with-watermark（官方水印照显）。
  *
@@ -19,8 +19,6 @@
  *      留空的内网部署与今天的行为逐字节一致。
  */
 export type TLVerifyCapability = 'native' | 'shim' | 'none'
-
-declare const __APP_BUILD__: string
 
 /** 本次页面会话里已经确定的能力：'shim' 一旦装上就不再回退 */
 let settled: 'native' | 'shim' | null = null
@@ -38,7 +36,7 @@ export function tlVerifyCapability(): TLVerifyCapability {
 /**
  * 确保验签能力可用。返回值：
  *   'native' 浏览器本来就能验签；
- *   'shim'   本次由 tl-verify.js 补上（仅明文 http 非环回）；
+ *   'shim'   本次由 tlVerifyImpl 补上（仅明文 http 非环回）；
  *   'none'   补不上（老浏览器/资源缺失），调用方按"没有验签"处理。
  */
 export async function ensureTLVerifyCapability(): Promise<TLVerifyCapability> {
@@ -48,9 +46,8 @@ export async function ensureTLVerifyCapability(): Promise<TLVerifyCapability> {
     return 'native'
   }
   try {
-    // 带构建戳：public/ 里的文件没有内容哈希，靠 ?v= 让升级后的浏览器不吃旧缓存
-    const url = `${import.meta.env.BASE_URL}tl-verify.js?v=${__APP_BUILD__}`
-    const mod = (await import(/* @vite-ignore */ url)) as { installVerifyShim?: () => boolean }
+    // 独立按需 chunk：主包不含这段（BigInt 不进 es2015 主包），只有这台机器真正需要时才下载
+    const mod = (await import('./tlVerifyImpl')) as { installVerifyShim?: () => boolean }
     if (mod && typeof mod.installVerifyShim === 'function' && mod.installVerifyShim()) {
       settled = 'shim'
       return 'shim'
