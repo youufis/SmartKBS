@@ -127,7 +127,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
     }))
   }, [data, t])
 
-  const goList = (override: { kp_state?: string } = {}) => {
+  const goList = (override: { kp_state?: string; quality?: string } = {}) => {
     const q = new URLSearchParams()
     if (filters.subject) q.set('subject', filters.subject)
     if (filters.type) q.set('type', filters.type)
@@ -137,6 +137,7 @@ const QuestionBankAnalyticsPage: React.FC = () => {
     // 质量卡片的「无知识点」点进来要直接落在未标注筛选上，所以允许调用方覆盖这一项
     const kpState = override.kp_state ?? filters.kp_state
     if (kpState) q.set('kp_state', kpState)
+    if (override.quality) q.set('quality', override.quality)
     if (keyword) q.set('keyword', keyword)
     if (range?.[0]) q.set('start_date', range[0].format('YYYY-MM-DD'))
     if (range?.[1]) q.set('end_date', range[1].format('YYYY-MM-DD'))
@@ -542,9 +543,19 @@ const QuestionBankAnalyticsPage: React.FC = () => {
                   </div>
                 </Tooltip>
               </Col>
-              <Col xs={12} md={4}><Statistic title={t('analyticsNoExplanation')} value={data.quality.no_explanation} /></Col>
-              <Col xs={12} md={4}><Statistic title={t('analyticsNoMedia')} value={data.quality.no_media} /></Col>
-              <Col xs={12} md={4}><Statistic title={t('analyticsPendingMedia')} value={data.quality.pending_media} /></Col>
+              {([
+                ['analyticsNoExplanation', 'no_explanation', data.quality.no_explanation],
+                ['analyticsNoMedia', 'no_media', data.quality.no_media],
+                ['analyticsPendingMedia', 'pending_media', data.quality.pending_media],
+              ] as [string, string, number][]).map(([titleKey, qualityKey, value]) => (
+                <Col xs={12} md={4} key={qualityKey}>
+                  <Tooltip title={t('analyticsJumpTip')}>
+                    <div style={{ cursor: 'pointer' }} onClick={() => goList({ quality: qualityKey })}>
+                      <Statistic title={t(titleKey)} value={value} />
+                    </div>
+                  </Tooltip>
+                </Col>
+              ))}
               <Col xs={12} md={4}><Statistic title={t('analyticsOptionIssues')} value={data.quality.option_issues} /></Col>
               <Col xs={12} md={4}><Statistic title={t('analyticsDuplicates')} value={data.quality.duplicate_groups} /></Col>
             </Row>

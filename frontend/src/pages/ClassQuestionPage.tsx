@@ -13,9 +13,10 @@ import { message } from '../utils/feedback'
 import {
   AimOutlined, ThunderboltOutlined, CheckOutlined, ForwardOutlined,
   SoundOutlined, MutedOutlined, ReloadOutlined, RobotOutlined, DatabaseOutlined,
-  EditOutlined, BulbOutlined,
+  EditOutlined, BulbOutlined, ExportOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import KnowledgePointSelect, { joinKps } from '../components/KnowledgePointSelect'
@@ -50,6 +51,7 @@ function optionKey(opt: string, idx: number, questionType: string): string {
 const ClassQuestionPage: React.FC = () => {
   const { t } = useTranslation('classQuestion')
   const { subjects } = useSubjectOptions()
+  const navigate = useNavigate()
 
   // ── 配置 ──
   const [config, setConfig] = useState<DrillConfig | null>(null)
@@ -643,6 +645,15 @@ const ClassQuestionPage: React.FC = () => {
                   >
                     <FormulaRenderer content={r.question_text} inline />
                   </div>
+                  {r.question_id && (
+                    <Tooltip title={t('openInBankTip')}>
+                      <Button
+                        type="link" size="small" icon={<ExportOutlined />}
+                        aria-label={t('openInBankTip')}
+                        onClick={() => navigate(`/question-bank?id=${r.question_id}`)}
+                      />
+                    </Tooltip>
+                  )}
                   <Tag color={r.result === 'correct' ? 'green' : r.result === 'incorrect' ? 'orange' : 'default'}>
                     {r.result === 'correct' ? t('correctTxt') : r.result === 'incorrect' ? t('incorrectTxt') : t('skipTxt')}
                   </Tag>

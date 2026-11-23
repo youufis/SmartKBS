@@ -1,4 +1,9 @@
 {
+  "qualityFilter": "质量",
+  "qualityNoExplanation": "缺解析",
+  "qualityNoMedia": "缺配图",
+  "qualityPendingMedia": "待配图",
+  "analyticsJumpTip": "点数字跳到题库对应筛选",
   "title": "试题管理",
   "analyticsTitle": "题库统计分析",
   "analyticsSubtitle": "题型、知识点、创建者与题库质量分析",

@@ -7,7 +7,7 @@ import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, DeleteOutlined,
   ThunderboltOutlined, DownloadOutlined, BellOutlined,
-  SearchOutlined, EyeOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined, EditOutlined,
+  SearchOutlined, EyeOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined, EditOutlined, ExportOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import { RowList } from '../components/RowList'
@@ -727,6 +727,7 @@ const TeacherView: React.FC = () => {
   const [wrongBookPage, setWrongBookPage] = useState(1)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const user = useAuthStore(s => s.user)
+  const navigate = useNavigate()
   const isAdmin = user?.role === 'admin'
   // S-GRADE: 练习详情改用抽屉(原 Modal.info 塞不下二级交互), 并支持逐题查看答卷/改分
   const [detail, setDetail] = useState<any>(null)
@@ -1566,7 +1567,21 @@ const TeacherView: React.FC = () => {
                       {detail.questions?.map((q: any, i: number) => (
                         <Card key={q.question_id || i} size="small" style={{ marginBottom: 8 }}
                           title={t('questionN', { n: i + 1 })}
-                          extra={<Space size={4}><Tag>{TYPE_LABELS_LOCAL[q.type] || q.type}</Tag><Tag color="blue">{t('fullScore')} {q.score}</Tag></Space>}
+                          extra={(
+                            <Space size={4}>
+                              <Tag>{TYPE_LABELS_LOCAL[q.type] || q.type}</Tag>
+                              <Tag color="blue">{t('fullScore')} {q.score}</Tag>
+                              {q.question_id && user?.role !== 'student' && (
+                                <Tooltip title={t('openInBankTip')}>
+                                  <Button
+                                    type="link" size="small" icon={<ExportOutlined />}
+                                    aria-label={t('openInBankTip')}
+                                    onClick={() => navigate(`/question-bank?id=${q.question_id}`)}
+                                  />
+                                </Tooltip>
+                              )}
+                            </Space>
+                          )}
                         >
                           <FormulaRenderer content={q.question_text} />
                           <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="normal" />

@@ -70,6 +70,8 @@ interface QBFilters {
   creator?: string
   knowledge_points?: string
   kp_state?: string
+  /** 质量筛选（统计页下钻用）：no_explanation | no_media | pending_media */
+  quality?: string
   keyword?: string
   start_date?: string
   end_date?: string
@@ -78,8 +80,16 @@ interface QBFilters {
 }
 
 const FILTER_KEYS: (keyof QBFilters)[] = [
-  'type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'kp_state', 'keyword', 'start_date', 'end_date', 'status',
+  'type', 'difficulty', 'subject', 'creator', 'knowledge_points', 'kp_state', 'quality',
+  'keyword', 'start_date', 'end_date', 'status',
 ]
+
+/** 质量筛选的展示名（键在 questions 命名空间） */
+const QUALITY_LABELS: Record<string, string> = {
+  no_explanation: 'qualityNoExplanation',
+  no_media: 'qualityNoMedia',
+  pending_media: 'qualityPendingMedia',
+}
 
 /** 支持从统计页下钻：/question-bank?type=...&creator=...&keyword=... */
 function filtersFromQuery(qs: string): QBFilters {
@@ -245,6 +255,12 @@ const QuestionBankPage: React.FC = () => {
       chips.push({
         key: 'kp_state',
         label: `${t('kpStateFilter')}：${filters.kp_state === 'none' ? t('kpStateNone') : t('kpStateTagged')}`,
+      })
+    }
+    if (filters.quality) {
+      chips.push({
+        key: 'quality',
+        label: `${t('qualityFilter')}：${QUALITY_LABELS[filters.quality] ? t(QUALITY_LABELS[filters.quality]) : filters.quality}`,
       })
     }
     if (filters.keyword) chips.push({ key: 'keyword', label: t('keywordChip', { value: filters.keyword }) })

@@ -138,6 +138,8 @@ export async function listQuestions(params?: {
   subject?: string;
   knowledge_points?: string;
   kp_state?: string;
+  /** no_explanation | no_media | pending_media */
+  quality?: string;
   start_date?: string;
   end_date?: string;
   /** active=在用（默认）、deleted=回收站、all=全部 */

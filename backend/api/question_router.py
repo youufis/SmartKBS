@@ -730,6 +730,7 @@ async def list_questions(
     subject: str = Query(None, description="筛选学科"),
     knowledge_points: str = Query(None, description="筛选知识点（多个用逗号/顿号分隔）"),
     kp_state: str = Query(None, description="筛选知识点标注状态：none=未标注、tagged=已标注"),
+    quality: str = Query("", description="质量筛选：no_explanation=缺解析 / no_media=缺配图 / pending_media=待配图"),
     status: str = Query("active", description="筛选状态：active=在用（默认）、deleted=回收站、all=全部"),
     start_date: str = Query("", description="开始日期 YYYY-MM-DD"),
     end_date: str = Query("", description="结束日期 YYYY-MM-DD"),
@@ -785,6 +786,20 @@ async def list_questions(
             params.extend(f"%{_esc_like(kp)}%" for kp in kps)
     if kp_state in ("none", "tagged"):
         conditions.append(f"{_kp_blank_sql('q')} {'=' if kp_state == 'none' else '<>'} ''")
+    if quality:
+        # 与统计页 quality 口径对齐的三项；option_issues / duplicate 需要解析 JSON，
+        # 不适合放进 SQL 分页，仍由去重与人工核对处理
+        _no_media = ("COALESCE(q.has_svg, 0) = 0 AND "
+                     "(q.media_files IS NULL OR TRIM(q.media_files) IN ('', '[]', 'null'))")
+        quality_map = {
+            "no_explanation": "TRIM(COALESCE(q.explanation, '')) = ''",
+            "no_media": _no_media,
+            "pending_media": (_no_media + " AND q.media_placeholders IS NOT NULL "
+                              "AND TRIM(q.media_placeholders) NOT IN ('', '[]', 'null')"),
+        }
+        if quality not in quality_map:
+            raise HTTPException(status_code=400, detail="quality 只能是 no_explanation / no_media / pending_media")
+        conditions.append(f"({quality_map[quality]})")
     if start_date:
         try:
             datetime.strptime(start_date, "%Y-%m-%d")
