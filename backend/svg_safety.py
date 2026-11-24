@@ -45,14 +45,14 @@ _BAD_SCHEME_RE = re.compile(r"^\s*(?:javascript|vbscript|livescript|data:text/ht
 _STYLE_BAD_RE = re.compile(r"(?:javascript\s*:|expression\s*\(|@import|behavior\s*:|url\([^)]*(?:https?:|ftp:|//))", re.IGNORECASE)
 
 
-#: 智能体/网关返回的响应壳字段（值里才是真正的 SVG 文本）
+#: 网关/模型返回的响应壳字段（值里才是真正的 SVG 文本）
 _SHELL_KEYS = ("result", "content", "answer", "data", "text", "output", "message")
 
 
 def unwrap_ai_text(text: str) -> str:
     """剥掉 ``{"code":0,"status":"success","result":"<svg ...>"}`` 这类响应壳
 
-    百炼智能体应用（以及 json_mode 兜底）有时会把模型输出包在 JSON 里返回。
+    部分网关/模型（以及 json_mode 兜底）有时会把模型输出包在 JSON 里返回。
     这时**整段壳里能正则匹配到 ``<svg>``，但它是被 JSON 转义过的**
     （引号变成 ``\"``、换行变成 ``\\n``），直接入库就是一张永远渲染不出来的空图。
     所以提取 SVG 之前必须先把壳解开、拿到未转义的原文。

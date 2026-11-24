@@ -11,7 +11,7 @@
 三档模式（系统配置 AI_MODE）
   cloud   现状：全部走百炼。本模块所有路由函数都是直通（地址链原样、payload 不动）。
   hybrid  本地优先：本地连接失败/读超时沿地址链回落到云端；知识库/TTS/生图照旧云端。
-  local   只用本地：绝不外呼。智能体应用与百炼知识库接管（都要出网）一并旁路。
+  local   只用本地：绝不外呼。云端知识库检索（要出网）一并旁路。
 
 约定
   - 本地地址只填 OLLAMA_API_BASE，不碰 QWEN_OPENAI_API_BASE —— 云端那条
@@ -224,6 +224,19 @@ def _origin(base: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+_EMBED_NAME_HINTS = ("embed", "bge", "e5", "gte", "m3", "nomic", "minilm", "jina", "mxbai", "bert")
+_EMBED_FAMILIES = ("bert", "nomic-bert", "xlm-roberta", "jina-bert")
+
+
+def _looks_embedding(name: str, family: str) -> bool:
+    """按模型名 + Ollama family 判断是否 embedding 模型（bge-m3 / bge-large 等）。"""
+    fam = str(family or "").lower()
+    if fam in _EMBED_FAMILIES or fam.endswith("bert"):
+        return True
+    n = str(name or "").lower()
+    return any(h in n for h in _EMBED_NAME_HINTS)
+
+
 def model_catalog(refresh: bool = True) -> dict:
     """配置页下拉用的实时模型明细：名字来自 /v1/models，用原生 /api/tags 补参数与体积、
     /api/ps 补驻留与真实 context。管理员刚 ollama pull 完就该在下拉里看见新模型，
@@ -237,6 +250,7 @@ def model_catalog(refresh: bool = True) -> dict:
     import httpx
     origin = _origin(ollama_base())
     meta: dict = {}
+    family: dict = {}
     resident: dict = {}
     try:
         r = httpx.get(f"{origin}/api/tags", timeout=5.0)
@@ -248,7 +262,9 @@ def model_catalog(refresh: bool = True) -> dict:
                 size_gb = (m.get("size") or 0) / 2 ** 30
                 if size_gb:
                     bits.append(f"{size_gb:.1f}G")
-                meta[str(m.get("name"))] = " ".join(x for x in bits if x)
+                name = str(m.get("name"))
+                meta[name] = " ".join(x for x in bits if x)
+                family[name] = str(d.get("family") or "")
     except Exception:
         pass
     try:
@@ -264,9 +280,12 @@ def model_catalog(refresh: bool = True) -> dict:
         ps = resident.get(name) or resident.get(f"{name}:latest")
         if ps:
             note_bits.append(f"驻留·ctx{ps.get('context_length', '?')}")
+        kind = "embedding" if _looks_embedding(name, family.get(name, "")) else "chat"
         options.append({"id": name, "note": " · ".join(note_bits) or "Ollama",
-                        "tier": "", "visible": True})
+                        "tier": "", "visible": True, "model_kind": kind})
     out["options"] = options
+    out["chat_options"] = [o for o in options if o["model_kind"] == "chat"]
+    out["embed_options"] = [o for o in options if o["model_kind"] == "embedding"]
     return out
 
 

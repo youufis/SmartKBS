@@ -193,9 +193,6 @@
   "submitFailed": "Submit failed",
   "createFailed": "Failed to create homework",
   "deleteFailed": "Delete failed",
-  "useAgent": "Agent",
-  "useAgentTip": "Connect via AI Agent",
-  "useAgentDisabledTip": "APPID not configured, direct model connection only",
   "directModel": "Direct Model",
   "status": {
     "draft": "Draft",
@@ -216,11 +213,9 @@
   "ragTipNotReady": "Cloud knowledge base not ready: {{reason}}",
   "ragTipNotReadyDefault": "Configure it in System Settings > Knowledge Base Retrieval",
   "refSources": "Sources",
-  "useAgentTakenOverTip": "Knowledge base mode has taken over the agent service: former agent calls now run as 'direct + knowledge retrieval'",
   "modeLlm": "LLM",
-  "modeAgent": "Agent",
   "modeKb": "Knowledge Base",
-  "modeBadgeTip": "The chat pipeline follows system config (priority: knowledge base > agent > model). In direct-model mode the badge shows the actual engine: Cloud Model = DashScope; Local Model = answered entirely by Ollama; Local-first = hybrid mode, local answers with automatic cloud fallback. Teachers/admins can adjust it in System Settings → AI",
+  "modeBadgeTip": "The chat pipeline follows system config (priority: cloud KB → local library → LLM). In direct-model mode the badge shows the actual engine: Cloud = DashScope; Local = fully answered by Ollama; Local-first = hybrid with automatic cloud fallback. Teachers/admins can adjust it in System Settings → AI",
   "pageTitle": "Knowledge Q&A",
   "historyRangeAll": "All",
   "historyRangeToday": "Today",
@@ -245,5 +240,8 @@
   "historyYearLabel": "{{year}}",
   "modeLlmCloud": "Cloud Model",
   "modeLlmLocal": "Local Model",
-  "modeLlmHybrid": "Local-first"
+  "modeLlmHybrid": "Local-first",
+  "modeLocalKb": "Local KB",
+  "refLocal": "Local",
+  "refCloud": "Cloud"
 }

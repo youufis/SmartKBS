@@ -123,3 +123,8 @@ work/
 
 # AI 助手工作区数据（会话记忆等，不入库）
 .workbuddy/
+
+# 本地文库运行时数据（文档原件与向量索引，不入库）
+kb_files/
+kb_vectors/
+outputs/

@@ -9,12 +9,11 @@ export interface UsageInfo {
   remaining: number;
   multimodal_enabled?: boolean;
   model_name?: string;
-  appid_configured?: boolean;
   /** 云端知识库链路是否就绪（KB_ENABLED + 专属域名 + 检索服务 ID 配套） */
   kb_ready?: boolean;
   kb_reason?: string;
-  /** V6.9 全局聊天模式（服务端裁决）：llm=大模型 agent=智能体 kb=知识库 */
-  chat_mode?: 'llm' | 'agent' | 'kb';
+  /** 全局聊天模式（服务端裁决）：llm=大模型 kb=云端知识库 kb_local=本地文库 */
+  chat_mode?: 'llm' | 'kb' | 'kb_local';
   /** 直连大模型时实际应答的引擎：cloud=百炼，local=Ollama，hybrid=本地优先（故障回落云端） */
   engine?: 'cloud' | 'local' | 'hybrid';
 }

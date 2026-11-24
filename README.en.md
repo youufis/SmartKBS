@@ -7,7 +7,7 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 51 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry / id link) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry / id link) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -15,7 +15,7 @@
 >
 > Built with **FastAPI + React**, integrated with Alibaba Cloud DashScope (Qwen / Wanxiang), DeepSeek and a local Ollama engine (cloud / hybrid / local tiers). SSE streaming and WebSocket channels carry classroom concurrency; every byte of data stays in local SQLite files and local directories, so the platform can run fully offline.
 
-![Version](https://img.shields.io/badge/version-9.2.0-blue)
+![Version](https://img.shields.io/badge/version-9.3.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek%20%7C%20Ollama-orange)
@@ -35,22 +35,19 @@
 
 ---
 
-> 📌 **Highlights of V9.2.0** (outline)
+> 📌 **Highlights of V9.3.0** (outline)
 >
-> - 🎯 **Classroom & question bank**: direct question links · multi-KP picking for quiz/ladder · recycle bin & bank maintenance · analytics drill-down with matching figures
-> - 🧾 **Question authoring**: one form for entry and editing (click an option to answer) · background image extraction · option-key answers stay aligned
-> - 🎒 **Student side**: multi-facet to-do list with a timeline · quieter home · mobile touch targets met
-> - 📊 **Analytics & briefing**: weekly / monthly / yearly teaching briefing (nine sections, off by default) · one basis for monitoring and stats
-> - 🖥 **AI engine**: cloud / hybrid / local tiers · dual-engine semantics · settings sections with auto-probe
-> - 📚 **Courses & master data**: three syllabus views · drag-order subjects and courses with a recycle bin · one five-level master-data model
-> - 🧮 **Export & assignments**: native Word formulas (OMML) · assignments in chat / file form
-> - 🔌 **Operations**: configurable deploy port (`SMARTKB_PORT`) · log rotation · faster bulk import
-> - 🛡 **Stability & privacy**: upgrade keeps existing behaviour · fully usable offline · student data stays on campus
-> - 🧭 **Whiteboard**: sync fixes (offline replay, authoritative snapshot) · licence key entered by the deployer · no badge on intranet HTTP once a key is set
+> - 📚 **Local library**: standalone knowledge-base module (upload / folders / trash; keyword + vector hybrid retrieval)
+> - 🔌 **Vector channel**: cloud or local models, cloud by default; switch prompt, dimension validation, optional dual channel
+> - 🔗 **AI chain**: agent app removed; fixed as cloud KB → local library → LLM
+> - 🧠 **Retrieval everywhere**: question authoring, lesson prep and whiteboard all use the same retrieval funnel
+> - 🛡 **Backup & restore**: local library included in backups; vectors verified after restore
+> - ✅ **Quality**: unit/integration tests and type checks
 >
-> - ⚠️ **Breaking changes**: none
+> - ⚠️ **Breaking changes**: Bailian agent application (APPID) chain removed
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the whiteboard licence key is entered by each school under System settings → Credentials (**optional** — the board works without it); to enable the local engine, install Ollama and switch the mode in System Configuration → AI Capabilities; to change the port, set `SMARTKB_PORT` and restart.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is enabled by default — upload materials under Local Library first; for a fully offline setup switch the vector channel to local and install Ollama + bge-m3; agent-app settings are gone from the UI.
+
 ---
 
 <a id="intro"></a>
@@ -63,13 +60,13 @@ The platform is **subject-agnostic**. The subject list, grades, classes, questio
 
 Built-in grade master data covers **primary, junior secondary and senior secondary** stages: twelve preset grades from Grade 1 (一年级) to Senior 3 (高三). A teacher account can hold a multi-grade teaching scope such as `高一|高二` (Senior 1 | Senior 2), and every read and write is filtered by that scope. A course itself can also target several grades at once (`高一|高二`); exercise submission and resource sharing match on the grade intersection. Preschool and higher-education stages have no built-in stage rules; they require extending the grade master data.
 
-AI capabilities go through a single invocation service offering three modes, taken over by priority and degrading step by step:
+AI capabilities go through a single invocation service, taken over by priority and degrading step by step:
 
-1. **Retrieval-augmented generation** — once a knowledge base is ready it takes over the whole AI chain: retrieve first (Bailian knowledge base, or the local question bank and syllabus), generate from what was matched, show the cited sources in the UI, and fall back to the next level when retrieval fails
-2. **Bailian agent application** — call a pre-configured agent app directly
+1. **Cloud Bailian knowledge base (RAG, priority 1)** — retrieves before generating when the knowledge service is ready, with citations in the UI; falls back to the next level when unavailable
+2. **Local library (priority 2)** — standalone knowledge-base module: Chroma vectors + FTS keywords, cloud or local embedding models; supplements when the cloud is unavailable or misses
 3. **Direct model invocation** — the fallback path, compatible with DashScope and DeepSeek
 
-**Dual engine**: the generation step of the chain above can run on the cloud (DashScope / DeepSeek) or on a local Ollama engine, switched across cloud / hybrid / local tiers; knowledge-base retrieval, TTS, ASR and image generation remain DashScope cloud services (capability matrix in System Settings).
+**Dual engine**: the generation step can run on the cloud (DashScope / DeepSeek) or a local Ollama engine, switched across cloud / hybrid / local tiers; cloud KB retrieval stays on Bailian, while the local library can use cloud or local embeddings (capability matrix in System Settings). The Bailian agent application (APPID) chain has been removed.
 
 Conversations and their attachments share one lifetime: images and documents uploaded with a question are archived together with it, so reopening a history entry still shows the original image and the file stays downloadable. Attachments are visible to their owner only, and both capacity and idle recycling are managed from System Configuration.
 
@@ -128,7 +125,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management (generate / extract / manual entry / id link) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre | 12 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management (generate / extract / manual entry / id link) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre, local library | 13 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, teaching briefing, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 12 |
@@ -455,6 +452,15 @@ Download directory file management:
 ---
 
 <a id="ch-learn"></a>
+
+### Local Library (Standalone Knowledge Base)
+
+A knowledge-base module fully independent from the File Center / Resource Center, used by AI retrieval and citations.
+
+- Upload and organise: md / txt / docx / pdf; one-level folders (Exams / Textbooks / Lesson plans…); 30-day trash
+- Retrieval: SQLite FTS keywords + Chroma vectors (cloud or local models) with source citations
+- Position in the chain: cloud Bailian KB → local library → direct LLM
+- Backup: originals and index are part of full backups; vectors can be rebuilt from the originals
 
 ## Learning and Practice
 
@@ -1229,183 +1235,29 @@ Git-based online incremental upgrade system:
 
 ## Changelog
 
-Current version **9.2.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v9.1.0 is merged into one section below.
+Current version **9.3.0**. Only changes a reader can notice are listed; per-commit detail lives in the git history. Everything up to v9.2.0 is merged into one section below.
 
-### v9.2.0
+### v9.3.0
 
-- 🎯 **Classroom & question bank**: direct question links · multi-KP picking for quiz/ladder · recycle bin & bank maintenance · analytics drill-down with matching figures
-- 🧾 **Question authoring**: one form for entry and editing (click an option to answer) · background image extraction · option-key answers stay aligned
-- 🎒 **Student side**: multi-facet to-do list with a timeline · quieter home · mobile touch targets met
-- 📊 **Analytics & briefing**: weekly / monthly / yearly teaching briefing (nine sections, off by default) · one basis for monitoring and stats
-- 🖥 **AI engine**: cloud / hybrid / local tiers · dual-engine semantics · settings sections with auto-probe
-- 📚 **Courses & master data**: three syllabus views · drag-order subjects and courses with a recycle bin · one five-level master-data model
-- 🧮 **Export & assignments**: native Word formulas (OMML) · assignments in chat / file form
-- 🔌 **Operations**: configurable deploy port (`SMARTKB_PORT`) · log rotation · faster bulk import
-- 🛡 **Stability & privacy**: upgrade keeps existing behaviour · fully usable offline · student data stays on campus
-- 🧭 **Whiteboard**: sync fixes (offline replay, authoritative snapshot) · licence key entered by the deployer · no badge on intranet HTTP once a key is set
+- 📚 **Local library**: standalone KB module (upload / folders / trash / batch management) with keyword + vector hybrid retrieval
+- 🔌 **Vector channel**: cloud or local models, cloud by default, dual channel off by default; switch prompt and dimension validation
+- 🔗 **AI chain**: Bailian agent app (APPID) removed; fixed as cloud KB → local library → LLM
+- 🧠 **Retrieval everywhere**: authoring, lesson prep and whiteboard use one retrieval funnel; vectors verified after restore
+- 🛡 **Ops & backup**: local library included in full backups; index rebuildable and health visible
+- ✅ **Quality**: unit/integration tests and type checks
 
-### v7.x – v9.1.0
+### v7.x – v9.2.0
 
-> Merged section: v9.1.0 and v7.x – v9.0.0 updates (reverse chronological).
+> Merged, categorised outline of v7.x – v9.2.0.
 
-**🧭 Explore Canvas (new)**
-
-- Personal infinite canvas + floating AI companion (chat / image / read-aloud / voice / camera) + circle-to-ask + mind & star maps
-- Granted read-only shares (auto-expiry / revocable) + template library; soft points & honors + care alerts (zero raw text) + daily quotas
-- UX: contiguous pages / page trash (30 days) / timeline thumbnails / portfolio / unified terms / mobile fit
-- Asset ledger with auto-cleanup (reference renewal / recycling / dry-run); usage merged into Activity Monitor (behavior only)
-
-**🛡 Security hardening**
-
-- Share permission checks: forged re-share escalation blocked; re-share rows follow owner renames
-- Same-origin HTML preview (courseware / podcast / resource center; uploads restricted to trusted teachers/admins); downloads HTML forced attachment
-- Uploads: file center restricted to teachers/admins + type whitelist; size pre-checks in three upload paths; AI import unified at 20MB
-- Directory-browsing traversal guard; view-tracking visibility checks + server-side lookup; diagnostic endpoint no longer echoes tokens
-- Exam protection: anti-copy + personal watermark (off by default)
-- Score protection: grade clearing limited to practice resources across bind/unbind/unshare/purge/delete; progress scores clamped
-- Export CSV formula-injection sanitization (summary / user exports); user/score read-write teaching-scope checks
-- Courseware preview single-port same-origin: native cookie auth, Worker/wasm run natively
-- Password minimum length (configurable); error messages no longer leak internal details
-
-**📚 Curriculum & practice**
-
-- Server-side grading: persisted scores are server-computed; submit responses carry no answers; explanations delivered after submission; question text & options escaped
-- Outline maintenance: same-course reorder check; recursive cascade delete + transactions; non-destructive GETs
-- AI import: parsing in thread pool + PDF page cap; transactional save + field validation; lesson-plan cache & refusal detection
-- Generation task dedupe (no double billing); KaTeX localized (offline math)
-
-**🏷 Question bank**
-
-- Import & edit share one merged-state validation: malformed questions (too few options / out-of-range answers / unknown types / empty stems) rejected
-- Cross-creator dedupe admin-only; text/image extraction size caps + image magic-byte verification
-- Async generation task dedupe; upload size pre-checks; model field length limits
-
-**📊 Analytics & summaries**
-
-- Scores student-ID migration: new column + unique-constraint migration + unambiguous backfill (auto at startup)
-- Class snapshot / individual analytics aggregate ID-first (same-name separated); legacy rows fall back to names
-- Exam attempts pre-filtered by candidate exams; student analytics daily cap (config, default unlimited)
-- Class-summary prompt data isolation (data, not instructions); analytics dead code removed
-
-**🔗 Resources & chat**
-
-- Lifecycle: delete auto-clears bindings / shares / logs; rename auto-updates names & URLs; dead links hidden instantly
-- Exact same-name matching (delete/share no longer cross-hit); share updates keep stable ids
-- Chat history persistent sidebar (click to preview); attachments archived with chats (auth downloads / quota config / recycling)
-
-**📝 Exams & analytics**
-
-- Class-wide error review (high-error picks + Word export); exam / practice / quiz AI analytics export to Word (per-question accuracy tables)
-- Score dialog button tiers; cached exports (no re-billing); history preview renders tables & math
-- Configurable multiple-choice scoring: default no points for partial/wrong; optional 50% of full score for partial, 0 for wrong (exam/practice/quiz, proportional to full score; takes effect on save)
-- Unified Chinese question-type labels in Word/Excel exports; configurable export fonts (body/heading, Word/Excel same criterion, applies on re-export) — heading fonts were previously overridden by the Word theme font (showing MS Gothic regardless of the setting) and now follow the configuration (headers and legacy style copies included)
-- Task list: failure retry (no longer disguised as empty) · semantic score colors · live pulse · softer suggestions
-
-**🎪 Classroom interaction**
-
-- Quiz race: single server clock / late-answer cutoff / early collection / on-the-fly questions / controlled reveal
-- Class ladder: resume on refresh / manual-auto advance / hint voting pauses timer / safety floor / per-round review & report
-- Knowledge quest: explanations after answering / server timing / resume on refresh / single source of rules & scores
-- Discussion: AI auto-guidance (3 sensitivity levels) / actual-attendance counting / unified name citations / batched writes
-- Announcements: search / priority filter / bulk delete / read tracking; student page headers & times unified
-
-**📰 News & discovery**
-
-- News: favorites / search / unread-only / time grouping / thumbnails & heat / prev-next / daily brief open to students
-- Daily picks: retry / refresh keeps old cards / read markers / Markdown detail / share poster
-- Feeds: circuit-breaker / standby fallback / auto-discovery / promotion & demotion / one-click discovery / event notifications
-
-**⚡ Performance**
-
-- Activity/score/user lists batched + short-TTL cache (invalidated on write); weekly-ranking conditions pushed to SQL + COUNT
-- Portrait role-data cache; batch scoring/reset single transaction; read endpoints thread-pooled (async→def)
-- Route-level code splitting (first-load JS -79%); hand-drawn SVG radar keeps recharts off the first load
-- Courseware external deps localized: fonts / KaTeX / Chart.js bundled, offline instant load
-- Single-port deployment: same-origin courseware preview, no extra port; server port env-overridable
-
-**🎨 Interface experience**
-
-- Home/task-list skeletons; refresh entry & updated-at; visible-period revalidation, ticking countdowns
-- Quick-action tiles; semantic tags (scores/focus/counts) dark-consistent; unified icon language
-- Mobile: stat-title wrapping, category-strip wrap separators, quick-switch overflow fade; row-level click & keyboard access
-- Preview window edge-to-edge / drag / resize / fullscreen with remembered size & position; aligned controls
-
-**UI & interaction (refactor)**
-
-- 🎛️ One page header everywhere: 30+ pages (student side included) use icon + title + subtitle + right-side actions, extracted into a shared component
-- 🎯 Actions by layer: page-level in the header (1 primary + 2 secondary + More), filters in the toolbar, row actions in the list, risky actions under "More"
-- 🧹 Visual cleanup: gradient banners and card-in-card nesting removed, four stat cards become one line, icon-only buttons on the board page gain labels
-- 📌 Actions survive scrolling: curriculum's two panes keep their headers pinned, reusable on any long list page
-
-**Data safety & backups**
-
-- 🛡️ Install-over upgrades no longer lose data: databases, question bank, images, teacher pages, student portraits and homework attachments move to the user directory; the installer keeps a copy and stray backends are stopped first
-- 💾 Backup & restore is one list showing where data lives and a health score; all three deployments can back up (databases via an online consistent snapshot) and roll back in one click
-- 🔁 Every config save keeps a rolling history, so upgrades no longer reset it to defaults; the node identity file left version control
-- ⬆️ Pre-upgrade auto backup is now a settings switch, off by default; a config guard snapshot is still kept so the config can't be reset
-
-**Whiteboard AI**
-
-- 🧩 Vision path fixed: question images, full-page screenshots and handwriting are readable, no more "only stray numbers and shapes"
-- 💬 Follow-up questions keep context; answers can be copied, inserted onto the board or regenerated; teaching answers query the school knowledge base with the teacher's own question
-- 🎯 Generated content is selected and zoomed to right after insertion (mind maps, board drafts, bilingual boards, quizzes)
-- 🎛️ Diagram and board generation now use the knowledge-point picker: choose from the course tree or type freely
-
-**AI lecture**
-
-- 🎬 One click turns a knowledge point into paged slides with sentence-by-sentence speech; two presenter modes, second screen, editable outline, per-page re-record, four themes
-- 🔐 Permissions and publish / unpublish are controlled; finishing a synthesis no longer flips a published lecture back to draft
-
-**Coding practice**
-
-- 🧑‍🏫 One form for AI generation / create / edit; rebuilt judge (async, per-question time limit, concurrent cases, per-case detail)
-- 🛡️ Full teaching stats: submissions, missing students, pass rate, CSV export and re-judging; drafts, sample runs and diffs on the student side
-
-**Classroom & analytics**
-
-- 📊 New dashboard: to-dos and activity up front, five cards in several forms rotating by date; chart and to-do display bugs fixed
-- 📕 Wrong-answer book is card-based with AI-completed explanations, real tri-state counts and export; auto reinforcement gains cooldowns, caps and teacher assignment
-- 🔎 Eight activity lists share one search and filter bar; practice tabs, wrong-answer consolidation, one-click quiz restart
-- 🩹 Attendance no longer records duplicates; recent activity is folded per person and session
-
-**Resources & curriculum**
-
-- 🗂️ Three-column sharing (mine / colleagues'), duplicates merged into one card; admin proxy managed by share record
-- 🏷️ 11 content types: typed on disk, moved on rename, cleaned on delete, re-taggable and filterable; ungrouped resources auto-sorted
-- 🧩 Bound resources collapsed into one registry; course practice keeps scores, chapter practice does not
-- 📚 Course tree expands / collapses in one click, edits refresh locally; full question-bank stats, row-level import errors
-
-**System & security**
-
-- ⚙️ System settings rebuilt into 4 groups / 24 sections, corrected control types, new "AI output & parsing" section and a config consistency check
-- 🧑‍💼 User management rebuilt as a single ledger: stats strip, search plus grade / class / role filters and server-side paging; a row opens a drawer for profile, password reset and role change; deletion requires typing the account name
-- 🔔 "Recognition bonus" notification added and switchable per type; "assignment" naming unified
-- 🔒 Static path traversal closed, production no longer exposes the API listing; AI concurrency and queue time capped separately
-- 🩹 Fixed true/false judgement errors, unresponsive coding-question saves and the whiteboard diagram spinner
-
-**v8.9.0 and earlier**
-
-- ⚖️ **Points and honour system reworked**: grade bonuses follow activity weight (exam 15/10/5, quizzes · homework · practice 9/6/3, classroom answers 6/4/2), buzzers pay by placing, the ladder pays by score rate; anti-farming quotas split into three pools (academic 80 / participation 40 / light 30); every classroom activity awards points; one source of truth served by the backend
-- 🏅 **Titles and badges recalibrated**: twelve thresholds re-cut, six permanently locked badges lit up, subject titles weigh accuracy, locked badges show what is missing; deductions and spending separated, weekly stars scoped to the class, a new teacher recognition channel
-- 📎 **File-submission homework**: documents, spreadsheets, slides and photos, one AI pass for the whole class with teacher review before publishing; three attempts, only the last is graded, lateness only flagged; a grading desk with duplicate flags and bulk download
-- 🏁 **Class ladder (big screen)**: 15 levels, safe levels, ends on a wrong answer or timeout, AI top-up questions, seven skins and full-screen settlement
-- 🎲 **Unified picking**: roll call, questioning, ladder and AI quiz share one set of weights and one ledger keyed by student ID, with a cross-activity log, per-activity stats and Excel export
-- 🖼️ **My portrait**: all three roles can use a portrait as their avatar and pin any one (past periods included); staff portraits are as visible as students' and outside the points system
-- 💻 **Question management**: multi-select bulk delete with a reason per skipped item; a denser list shows about 40% more per screen; code in stems and explanations renders as real code blocks, same convention in Word papers and AI quiz pages
-- 🗂️ **Course management**: soft disable plus a recycle bin; the course list returns active courses only by default, with a switch to view, restore or delete permanently
-- 🔧 **Deployment and polish**: skills on by default; per-form upgrade paths with GitHub as the authoritative source; the knowledge-point panel collapses and turns into a drawer on narrow screens
-- 🩹 **Fixes**: same-named classmates sharing one roll-call points key (existing rows re-keyed), whiteboard AI generation always failing, handshake and polling log spam, points and portfolio details unreadable on phones, broken portrait avatars, raw key names leaking, participation capped at 100, missing-table warnings on a fresh database
-- 💬 **Classroom interaction**: question submission de-dup, idempotency and async review, teacher filtering, anonymity, follow-ups, popularity and live refresh; in-class picking and AI podcasts added
-- 🧩 **Teaching flow**: unified knowledge-point input across the site; draft/publish state machine for practice and quizzes; card-style activity lists; completion scoped to the activity; student answer drafts and submission guards
-- 🧱 **Question bank and results**: single ingestion path with validation, dedup, transactions and knowledge-point links; paper composition prefers the bank with AI top-up; unified result tabs with per-question accuracy and AI analysis; bank analytics (type / difficulty / subject / knowledge point / creator / quality) with subjects constrained to the configured courses
-- 📊 **Analytics and summaries**: class and time-window snapshots, corrected exam/task/roll-call semantics and teacher scoping, explicit AI failure hints, reports persisted for export reuse; summary export fixed for submitted/pending semantics and best-of repeats
-- 💬 **Group discussion**: editable list, real-student pre-grouping on start, random and automatic grouping, WebSocket no longer reconnects per message, idempotent rate-limited optimistic messages, posting locked after the end
-- 🎨 **Classroom and incentives**: collaborative whiteboard rebuilt, browsing statistics, my portrait, hall of glory auto-cards, point recomputation and activity-reset auditing, challenge records and bank bulk delete
-- 📰 **Content management**: teacher and admin consoles for daily picks and news with health checks, single and bulk disable, restore and delete
-- 🔒 **Security and operations**: authorisation and privilege scoping, async AI calls, unified paper and grade semantics, online upgrade and login hardening, model configuration and self-checks
-- 🎯 **Earlier releases**: AI skill system and bilingual UI, hall of glory and themed UI, daily picks and RSS news, AI companion and lesson prep, platform-wide removal of subject hard-coding
-
-<a id="deployment"></a>
+- 🧱 **Platform foundation**: multi-stage / multi-subject configuration, roles and teaching scopes, three deployment modes, online incremental upgrades
+- 📚 **Courses & resources**: five-level syllabus, resource centre / file centre, AI resource generation and recommendations, Word / PDF export
+- 🧾 **Question bank & exams**: generate / extract / author / maintain questions, paper composing, online exams, assignments
+- 🎓 **Learning & practice**: AI chat / companion, course and targeted practice, wrong-answer review, code practice, daily picks and news
+- 🎪 **Classroom activities**: quizzes, voting, buzzer rounds, drill / ladder, discussions, whiteboard, attendance and roll call
+- 📊 **Analytics & motivation**: learning analytics, class summary, teaching briefing, activity monitoring, portfolio, points / titles / badges
+- 🖥 **AI & engines**: cloud / hybrid / local tiers, streaming, TTS / ASR / image generation, knowledge retrieval
+- 🛡 **Stability & privacy**: local data storage, offline use, log rotation, security hardening and upgrade rollback
 
 ## Deployment Guide
 

@@ -2007,7 +2007,7 @@ async def ai_chat_stream(request: Request):
         subject=subject,
         snapshot_text=snapshot_text,
     )
-    # 多轮上下文直接并进提示词：知识库接管/智能体两条路都不吃 history 参数，
+    # 多轮上下文直接并进提示词：知识库接管这条路径不吃 history 参数，
     # 并进正文才在三种调用模式下都生效（视觉流那边也是同样的处理）。
     enhanced_prompt = (
         f"{system_prompt}\n\n---\n\n{_wb_history_text(history)}用户提问：{prompt}"
@@ -2143,7 +2143,7 @@ def _whiteboard_ai_stream(prompt: str, username: str, api_key: str, kb_query: st
         # 系统提示词（「按白板与提问自行判定学科作答…」），命中一堆无关片段还拖慢首字。
         for chunk in _agent_chat_stream(prompt, None, api_key, username,
                                         use_kb=True, kb_query=kb_query):
-            # 注意：call_ai_stream/_call_agent_stream 产出的 text 是「累计全文」而非增量，
+            # 注意：call_ai_stream 产出的 text 是「累计全文」而非增量，
             # 这里绝不能再 +=，否则前端替换后会得到逐帧前缀叠加的重复文本。
             full = chunk["text"]
             yield f"data: {json.dumps({'type': 'delta', 'content': full})}\n\n"

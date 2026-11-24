@@ -52,7 +52,12 @@ const KbRefSources: React.FC<{ refs: Message['references'] }> = ({ refs }) => {
       📖 {t('refSources')}：
       {refs.map((r, i) => (
         <span key={i} style={{ marginRight: 10 }}>
-          [{i + 1}] {r.doc_name}
+          [{i + 1}] <span style={{
+            fontSize: 11, padding: '0 4px', borderRadius: 3, marginRight: 4,
+            background: r.source === 'local' ? '#e6fffb' : '#f9f0ff',
+            color: r.source === 'local' ? '#13a8a8' : '#722ed1',
+            border: '1px solid', borderColor: r.source === 'local' ? '#87e8de' : '#d3adf7',
+          }}>{r.source === 'local' ? t('refLocal') : t('refCloud')}</span>{r.doc_name}
           {typeof r.score === 'number' ? ` (${r.score.toFixed(2)})` : ''}
         </span>
       ))}
@@ -1937,16 +1942,16 @@ const ChatPage: React.FC = () => {
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   fontSize: 12, padding: '2px 8px', borderRadius: 4,
-                  background: usage.chat_mode === 'kb' ? '#f9f0ff' : usage.chat_mode === 'agent' ? '#e6fffb'
+                  background: usage.chat_mode === 'kb' ? '#f9f0ff' : usage.chat_mode === 'kb_local' ? '#e6fffb'
                     : usage.engine === 'local' ? '#f6ffed' : usage.engine === 'hybrid' ? '#fffbe6' : '#f6f6f6',
-                  color: usage.chat_mode === 'kb' ? '#722ed1' : usage.chat_mode === 'agent' ? '#13a8a8'
+                  color: usage.chat_mode === 'kb' ? '#722ed1' : usage.chat_mode === 'kb_local' ? '#13a8a8'
                     : usage.engine === 'local' ? '#389e0d' : usage.engine === 'hybrid' ? '#d48806' : '#999',
                   border: '1px solid',
-                  borderColor: usage.chat_mode === 'kb' ? '#d3adf7' : usage.chat_mode === 'agent' ? '#87e8de'
+                  borderColor: usage.chat_mode === 'kb' ? '#d3adf7' : usage.chat_mode === 'kb_local' ? '#87e8de'
                     : usage.engine === 'local' ? '#b7eb8f' : usage.engine === 'hybrid' ? '#ffe58f' : '#e8e8e8',
                   cursor: 'default', whiteSpace: 'nowrap',
                 }}>
-                  {usage.chat_mode === 'kb' ? t('modeKb') : usage.chat_mode === 'agent' ? t('modeAgent')
+                  {usage.chat_mode === 'kb' ? t('modeKb') : usage.chat_mode === 'kb_local' ? t('modeLocalKb')
                     : usage.engine === 'local' ? t('modeLlmLocal') : usage.engine === 'hybrid' ? t('modeLlmHybrid') : t('modeLlmCloud')}
                 </span>
               </Tooltip>

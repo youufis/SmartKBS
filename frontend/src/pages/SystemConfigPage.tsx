@@ -85,7 +85,7 @@ interface ConfigField {
   /** 生效方式，未标注即保存后立即生效 */
   scope?: EffScope
   /** model_select 用：向 /api/config/model-options 取哪一类候选 */
-  optionsKind?: 'chat' | 'long' | 'vl' | 'image' | 'ollama'
+  optionsKind?: 'chat' | 'long' | 'vl' | 'image' | 'ollama' | 'ollama_embed'
   /** tts_voice 用：置顶一个「自动（按模型挑选）」空值选项（播客音色留空 = 交给后端自选） */
   autoOption?: boolean
   /** select / radio 的候选值 */
@@ -295,6 +295,14 @@ const AI_MODE_OPTIONS: FieldOption[] = [
   { value: 'hybrid', labelKey: 'optAiModeHybrid' },
   { value: 'local', labelKey: 'optAiModeLocal' },
 ]
+const LOCAL_KB_EXT_PRESETS = ['.md', '.txt', '.docx', '.pdf']
+// 云端向量模型推荐（百炼 OpenAI 兼容接口实测支持以下四代）
+const LOCAL_KB_CLOUD_EMBED_PRESETS = ['text-embedding-v4', 'text-embedding-v3', 'text-embedding-v2', 'text-embedding-v1']
+const LOCAL_KB_PROVIDER_OPTIONS: FieldOption[] = [
+  { value: 'auto', labelKey: 'optLocalKbAuto' },
+  { value: 'cloud', labelKey: 'optLocalKbCloud' },
+  { value: 'local', labelKey: 'optLocalKbLocal' },
+]
 const OLLAMA_THINKING_OPTIONS: FieldOption[] = [
   { value: 'off', labelKey: 'optOllamaThinkingOff' },
   { value: 'on', labelKey: 'optOllamaThinkingOn' },
@@ -426,8 +434,6 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 定为常用项（不是高级参数）：到期天数只有字段渲染出来才看得见，收进高级等于把续期提醒藏起来。
   { key: 'TL_LICENSE_KEY', labelKey: 'field_TL_LICENSE_KEY', descKey: 'field_TL_LICENSE_KEY_desc', longDescKey: 'field_TL_LICENSE_KEY_tip', type: 'text', group: 'credentials', level: 'basic', required: false, placeholderKey: 'placeholder_tldrawLicenseKey', action: 'tldraw_license' },
   // 模型与端点
-  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', longDescKey: 'field_APPID_tip', type: 'text', group: 'models', level: 'basic', required: false, placeholderKey: 'placeholder_APPID' },
-  { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', level: 'basic', required: false },
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models', level: 'basic' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models', level: 'basic' },
   // ── 图像理解：默认用对话模型看图（快、省），解题类交视觉模型 ──
@@ -446,13 +452,34 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'OLLAMA_VL_MODEL', labelKey: 'field_OLLAMA_VL_MODEL', descKey: 'field_OLLAMA_VL_MODEL_desc', type: 'model_select', optionsKind: 'ollama', group: 'ollama', required: false },
   { key: 'OLLAMA_THINKING', labelKey: 'field_OLLAMA_THINKING', descKey: 'field_OLLAMA_THINKING_desc', longDescKey: 'field_OLLAMA_THINKING_tip', type: 'select', options: OLLAMA_THINKING_OPTIONS, group: 'ollama', required: false },
   { key: 'OLLAMA_FALLBACK_TO_CLOUD', labelKey: 'field_OLLAMA_FALLBACK_TO_CLOUD', descKey: 'field_OLLAMA_FALLBACK_TO_CLOUD_desc', type: 'boolean', group: 'ollama', required: false },
-  // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
+  // 百炼知识库检索（backend/bailian_kb.py；第一优先级：云端知识库 → 本地文库 → 大模型）
   { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', longDescKey: 'field_KB_ENABLED_tip', type: 'boolean', group: 'knowledgebase', level: 'basic', required: false },
   { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', level: 'basic', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
   { key: 'KB_TOP_K', labelKey: 'field_KB_TOP_K', descKey: 'field_KB_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'KB_MIN_SCORE', labelKey: 'field_KB_MIN_SCORE', descKey: 'field_KB_MIN_SCORE_desc', type: 'float', group: 'knowledgebase', required: false },
   { key: 'KB_TIMEOUT_MS', labelKey: 'field_KB_TIMEOUT_MS', descKey: 'field_KB_TIMEOUT_MS_desc', type: 'number', group: 'knowledgebase', required: false, unitKey: 'unitMilliSecond' },
   { key: 'KB_REL_GAP', labelKey: 'field_KB_REL_GAP', descKey: 'field_KB_REL_GAP_desc', type: 'float', group: 'knowledgebase', required: false },
+  // ── 本地知识库（backend/local_kb.py；独立模块，与文件中心/资源中心零耦合）──
+  { key: 'LOCAL_KB_ENABLED', labelKey: 'field_LOCAL_KB_ENABLED', descKey: 'field_LOCAL_KB_ENABLED_desc', longDescKey: 'field_LOCAL_KB_ENABLED_tip', type: 'boolean', group: 'knowledgebase', level: 'basic', required: false },
+  { key: 'LOCAL_KB_EMBED_PROVIDER', labelKey: 'field_LOCAL_KB_EMBED_PROVIDER', descKey: 'field_LOCAL_KB_EMBED_PROVIDER_desc', longDescKey: 'field_LOCAL_KB_EMBED_PROVIDER_tip', type: 'select', options: LOCAL_KB_PROVIDER_OPTIONS, group: 'knowledgebase', level: 'basic', required: false },
+  { key: 'LOCAL_KB_EMBED_MODEL_CLOUD', labelKey: 'field_LOCAL_KB_EMBED_MODEL_CLOUD', descKey: 'field_LOCAL_KB_EMBED_MODEL_CLOUD_desc', longDescKey: 'field_LOCAL_KB_EMBED_MODEL_CLOUD_tip', type: 'combobox', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_LOCAL_KB_EMBED_MODEL_CLOUD', presets: LOCAL_KB_CLOUD_EMBED_PRESETS },
+  { key: 'LOCAL_KB_EMBED_MODEL_LOCAL', labelKey: 'field_LOCAL_KB_EMBED_MODEL_LOCAL', descKey: 'field_LOCAL_KB_EMBED_MODEL_LOCAL_desc', type: 'model_select', optionsKind: 'ollama_embed', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_EMBED_DIM', labelKey: 'field_LOCAL_KB_EMBED_DIM', descKey: 'field_LOCAL_KB_EMBED_DIM_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_DUAL_INDEX', labelKey: 'field_LOCAL_KB_DUAL_INDEX', descKey: 'field_LOCAL_KB_DUAL_INDEX_desc', longDescKey: 'field_LOCAL_KB_DUAL_INDEX_tip', type: 'boolean', group: 'knowledgebase', level: 'basic', required: false },
+  { key: 'LOCAL_KB_TOP_K', labelKey: 'field_LOCAL_KB_TOP_K', descKey: 'field_LOCAL_KB_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_MAX_CHARS', labelKey: 'field_LOCAL_KB_MAX_CHARS', descKey: 'field_LOCAL_KB_MAX_CHARS_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_MAX_FILE_MB', labelKey: 'field_LOCAL_KB_MAX_FILE_MB', descKey: 'field_LOCAL_KB_MAX_FILE_MB_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_MAX_DOCS', labelKey: 'field_LOCAL_KB_MAX_DOCS', descKey: 'field_LOCAL_KB_MAX_DOCS_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_MAX_PAGES', labelKey: 'field_LOCAL_KB_MAX_PAGES', descKey: 'field_LOCAL_KB_MAX_PAGES_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_MAX_TOTAL_MB', labelKey: 'field_LOCAL_KB_MAX_TOTAL_MB', descKey: 'field_LOCAL_KB_MAX_TOTAL_MB_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_TRASH_DAYS', labelKey: 'field_LOCAL_KB_TRASH_DAYS', descKey: 'field_LOCAL_KB_TRASH_DAYS_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_EXTENSIONS', labelKey: 'field_LOCAL_KB_EXTENSIONS', descKey: 'field_LOCAL_KB_EXTENSIONS_desc', type: 'tags_select', extMode: true, group: 'knowledgebase', required: false, presets: LOCAL_KB_EXT_PRESETS },
+  { key: 'LOCAL_KB_VEC_TOP_K', labelKey: 'field_LOCAL_KB_VEC_TOP_K', descKey: 'field_LOCAL_KB_VEC_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_KW_TOP_K', labelKey: 'field_LOCAL_KB_KW_TOP_K', descKey: 'field_LOCAL_KB_KW_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_MIN_SCORE', labelKey: 'field_LOCAL_KB_MIN_SCORE', descKey: 'field_LOCAL_KB_MIN_SCORE_desc', type: 'float', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_REL_GAP', labelKey: 'field_LOCAL_KB_REL_GAP', descKey: 'field_LOCAL_KB_REL_GAP_desc', type: 'float', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_RRF_W', labelKey: 'field_LOCAL_KB_RRF_W', descKey: 'field_LOCAL_KB_RRF_W_desc', type: 'float', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_QUERY_TIMEOUT_MS', labelKey: 'field_LOCAL_KB_QUERY_TIMEOUT_MS', descKey: 'field_LOCAL_KB_QUERY_TIMEOUT_MS_desc', type: 'number', group: 'knowledgebase', required: false, unitKey: 'unitMilliSecond' },
   // AI 对话权限与每日限额：前者管"谁能用"，后者管"能用多少次"，同一件事的两个维度，放在一节
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat', level: 'basic' },
   { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', longDescKey: 'field_ENABLE_REQUEST_LIMIT_tip', type: 'boolean', group: 'chat', level: 'basic' },
@@ -474,7 +501,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'IMAGE_EXTRACT_MAX_TOKENS', labelKey: 'field_IMAGE_EXTRACT_MAX_TOKENS', descKey: 'field_IMAGE_EXTRACT_MAX_TOKENS_desc', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
   { key: 'EXAM_WA_MAX_QUESTIONS', labelKey: 'field_EXAM_WA_MAX_QUESTIONS', descKey: 'field_EXAM_WA_MAX_QUESTIONS_desc', type: 'number', group: 'aioutput', required: false, unitKey: 'unitItem' },
   { key: 'EXAM_WA_RATE_CEILING', labelKey: 'field_EXAM_WA_RATE_CEILING', descKey: 'field_EXAM_WA_RATE_CEILING_desc', type: 'number', group: 'aioutput', required: false },
-  // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
+  // 直连模式多轮记忆（backend/chat_memory.py；知识库接管的生成步骤同样生效）
   { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', longDescKey: 'field_CHAT_MEMORY_ENABLED_tip', type: 'boolean', group: 'memory', level: 'basic' },
   { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitTurn' },
   { key: 'CHAT_MEMORY_TTL_MINUTES', labelKey: 'field_CHAT_MEMORY_TTL_MINUTES', descKey: 'field_CHAT_MEMORY_TTL_MINUTES_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitMinute' },
@@ -2345,8 +2372,8 @@ const SystemConfigPage: React.FC = () => {
     ok: boolean; total?: number; cost_ms?: number; error?: string
     sample?: { doc_name: string; score: number }[]
   } | null>(null)
-  // 直连大模型 / APPID 智能体连通性自检（POST /api/config/model-test | /appid-test）
-  // 自检按钮单独给 120 秒：智能体侧带知识库检索/深度思考经常要几十秒，
+  // 直连大模型连通性自检（POST /api/config/model-test）
+  // 自检按钮单独给 120 秒：知识库检索/深度思考叠加时可能较慢，
   // 默认 30 秒会被浏览器掐断，管理员只看到 "timeout of 30000ms exceeded"
   const SELF_TEST_TIMEOUT = 120000
   const selfTestErr = (err: any) => (err?.code === 'ECONNABORTED'
@@ -2362,10 +2389,6 @@ const SystemConfigPage: React.FC = () => {
   const [imageTestResult, setImageTestResult] = useState<Record<string, any> | null>(null)
   const [ttsTesting, setTtsTesting] = useState(false)
   const [ttsTestResult, setTtsTestResult] = useState<Record<string, any> | null>(null)
-  const [appidTesting, setAppidTesting] = useState(false)
-  const [appidTestResult, setAppidTestResult] = useState<{
-    ok: boolean; cost_ms?: number; reply?: string; error?: string
-  } | null>(null)
   // 本地引擎探活（GET /api/config/ollama-status：/v1/models + /api/ps）
   const [ollamaChecking, setOllamaChecking] = useState(false)
   const [ollamaStatus, setOllamaStatus] = useState<Record<string, any> | null>(null)
@@ -2373,6 +2396,8 @@ const SystemConfigPage: React.FC = () => {
   // 没装 Ollama 的管理员不该靠"点检测按钮"才知道没装
   const [ollamaReach, setOllamaReach] = useState<{ ok: boolean; error: string } | null>(null)
   const [form] = Form.useForm()
+  const embedWarnTimer = useRef<number | null>(null)
+  const lastEmbedWarn = useRef('')
   // AI_MODE 实时值：未装 Ollama 的分级提示按当前模式变色（form 声明之后才能引用）
   const aiModeWatch = Form.useWatch('AI_MODE', form) as string | undefined
   const [query, setQuery] = useState('')                // 顶部搜索关键词
@@ -2387,6 +2412,19 @@ const SystemConfigPage: React.FC = () => {
   const [ttsVoicesByModel, setTtsVoicesByModel] = useState<Record<string, TtsVoice[]>>({})
   const [ttsDefaultVoice, setTtsDefaultVoice] = useState<Record<string, string>>({})
   const [modelOptions, setModelOptions] = useState<Record<string, ModelOption[]>>({})
+  const ollamaChatWatch = Form.useWatch('OLLAMA_CHAT_MODEL', form) as string | undefined
+  const ollamaLongWatch = Form.useWatch('OLLAMA_LONG_MODEL', form) as string | undefined
+  const ollamaVlWatch = Form.useWatch('OLLAMA_VL_MODEL', form) as string | undefined
+  const ollamaModelMismatch = useMemo(() => {
+    const base = (x: unknown) => String(x || '').split(':')[0]
+    const embedIds = new Set((modelOptions['ollama_embed'] || []).map((m) => base(m.id)))
+    const pairs: [string, string | undefined][] = [
+      [t('field_OLLAMA_CHAT_MODEL'), ollamaChatWatch],
+      [t('field_OLLAMA_LONG_MODEL'), ollamaLongWatch],
+      [t('field_OLLAMA_VL_MODEL'), ollamaVlWatch],
+    ]
+    return pairs.filter(([, v]) => v && embedIds.has(base(v))).map(([label, v]) => `${label}=${v}`)
+  }, [modelOptions, ollamaChatWatch, ollamaLongWatch, ollamaVlWatch, t])
   const [imageSizes, setImageSizes] = useState<Record<string, ImageSizeConf>>({})
   const [advPanel, setAdvPanel] = useState<Record<string, boolean>>({}) // 手动展开「高级参数」的小节
   const [showAdvanced, setShowAdvanced] = useState(false)               // 全局显示高级参数（默认收起，降低首屏噪音）
@@ -2437,7 +2475,12 @@ const SystemConfigPage: React.FC = () => {
     for (const [k, data] of results) {
       if (Array.isArray(data?.options)) opts[k] = data.options
       if (data?.image_sizes) Object.assign(sizes, data.image_sizes)
-      if (k === 'ollama' && data) setOllamaReach({ ok: !!data.ok, error: String(data.error || '') })
+      if (k === 'ollama' && data) {
+        // 对话下拉只留 chat 模型；embedding 模型单独留给向量字段
+        opts['ollama'] = Array.isArray(data.chat_options) ? data.chat_options : (Array.isArray(data.options) ? data.options : [])
+        opts['ollama_embed'] = Array.isArray(data.embed_options) ? data.embed_options : []
+        setOllamaReach({ ok: !!data.ok, error: String(data.error || '') })
+      }
     }
     setModelOptions(opts)
     if (Object.keys(sizes).length) setImageSizes(sizes)
@@ -2497,14 +2540,46 @@ const SystemConfigPage: React.FC = () => {
   // ── 逐项比对快照，统计"几项未保存" ──
   // 用 getFieldsValue(true) 取全部 store 值：搜索或切换小节会让部分 Form.Item 卸载，
   // 默认取值只覆盖"已注册"的字段，会把未挂载小节算成空值、进而误判脏值。
-  const handleValuesChange = useCallback(() => {
+  const handleValuesChange = useCallback((changed?: Record<string, unknown>) => {
     const cur = form.getFieldsValue(true) as Record<string, unknown>
     setDirty(
       GLOBAL_CONFIG_FIELDS
         .filter((f) => normVal(cur[f.key]) !== normVal(loadedRef.current[f.key]))
         .map((f) => f.key),
     )
-  }, [form])
+    if (changed && Object.prototype.hasOwnProperty.call(changed, 'LOCAL_KB_EMBED_PROVIDER')) {
+      const v = String(changed.LOCAL_KB_EMBED_PROVIDER || 'cloud')
+      const labelKey = v === 'local' ? 'optLocalKbLocal' : v === 'auto' ? 'optLocalKbAuto' : 'optLocalKbCloud'
+      modalApi.info({
+        title: t('localKbProviderSwitchTitle', { mode: t(labelKey) }),
+        width: 540,
+        content: (
+          <div style={{ marginTop: 8 }}>
+            <p>{t('localKbProviderSwitchBody')}</p>
+            <p style={{ color: 'var(--text-tertiary)', marginBottom: 0 }}>{t('localKbProviderSwitchTail')}</p>
+          </div>
+        ),
+      })
+    }
+    const embedKeys = ['LOCAL_KB_EMBED_MODEL_CLOUD', 'LOCAL_KB_EMBED_MODEL_LOCAL', 'LOCAL_KB_EMBED_DIM']
+    const providerChanged = !!changed && Object.prototype.hasOwnProperty.call(changed, 'LOCAL_KB_EMBED_PROVIDER')
+    const touchedEmbed = !!changed && embedKeys.some((k) => Object.prototype.hasOwnProperty.call(changed, k))
+    if (touchedEmbed && !providerChanged) {
+      if (embedWarnTimer.current) window.clearTimeout(embedWarnTimer.current)
+      embedWarnTimer.current = window.setTimeout(() => {
+        const cur2 = form.getFieldsValue(true) as Record<string, unknown>
+        const sig = embedKeys.map((k) => String(cur2[k] ?? '')).join('|')
+        const loadedSig = embedKeys.map((k) => String(loadedRef.current[k] ?? '')).join('|')
+        if (sig === loadedSig || lastEmbedWarn.current === sig) return
+        lastEmbedWarn.current = sig
+        modalApi.info({
+          title: t('localKbEmbedChangeTitle'),
+          width: 520,
+          content: <div style={{ marginTop: 8 }}>{t('localKbEmbedChangeBody')}</div>,
+        })
+      }, 800)
+    }
+  }, [form, t])
 
   // ── 放弃未保存的修改（回到上次加载/保存的值） ──
   const handleDiscard = () => {
@@ -3177,6 +3252,14 @@ const SystemConfigPage: React.FC = () => {
           </Text>
         </Title>
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 14, marginTop: 10 }}>
+          {group === 'ollama' && ollamaModelMismatch.length > 0 && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={t('ollamaModelMismatch', { models: ollamaModelMismatch.join('，') })}
+            />
+          )}
           {basicFields.map(renderFieldBox)}
           {/* 登录闸门：三项合成一张卡片，共用一条说明 */}
           {gateFields.length > 0 && (
@@ -3233,17 +3316,6 @@ const SystemConfigPage: React.FC = () => {
                   } finally { setModelTesting(false) }
                 }}>{t('modelTestBtn')}</Button>
               </Tooltip>
-              <Tooltip title={t('appidTestHint')}>
-                <Button size="small" loading={appidTesting} onClick={async () => {
-                  setAppidTesting(true); setAppidTestResult(null)
-                  try {
-                    const { data } = await apiClient.post('/api/config/appid-test', null, { timeout: SELF_TEST_TIMEOUT })
-                    setAppidTestResult(data)
-                  } catch (e: any) {
-                    setAppidTestResult({ ok: false, error: selfTestErr(e) })
-                  } finally { setAppidTesting(false) }
-                }}>{t('appidTestBtn')}</Button>
-              </Tooltip>
               {modelTestResult && (
                 <Alert
                   style={{ width: '100%', marginTop: 4 }}
@@ -3267,16 +3339,6 @@ const SystemConfigPage: React.FC = () => {
                       ))}
                     </div>
                   )}
-                />
-              )}
-              {appidTestResult && (
-                <Alert
-                  style={{ width: '100%', marginTop: 4 }}
-                  type={appidTestResult.ok ? 'success' : 'error'}
-                  showIcon
-                  title={appidTestResult.ok
-                    ? t('appidTestOk', { reply: appidTestResult.reply, ms: appidTestResult.cost_ms })
-                    : t('appidTestFail', { err: appidTestResult.error })}
                 />
               )}
             </div>

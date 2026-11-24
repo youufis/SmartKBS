@@ -1746,7 +1746,7 @@ def _read_backup_manifest(backup_dir: Path) -> dict[str, Any]:
 
 def _content_backup_pairs() -> list[tuple[Path, str]]:
     """整站备份要附带的内容目录（相对 STORAGE_DIR 的名字）"""
-    names = ("root", "stu", "question_media", "temp_uploads", "chat_assets", "ChatHistory")
+    names = ("root", "stu", "question_media", "temp_uploads", "chat_assets", "ChatHistory", "kb_files")
     out: list[tuple[Path, str]] = []
     for name in names:
         d = Path(STORAGE_DIR) / name
@@ -1782,6 +1782,7 @@ def _copy_tree_into(src: Path, dst: Path, limit: int = 200000) -> int:
         return 0
     copied = 0
     for root, _dirs, files in os.walk(src):
+        _dirs[:] = [d for d in _dirs if d != "_tmp"]     # 知识库临时上传区不进备份
         rel = Path(root).relative_to(src)
         (dst / rel).mkdir(parents=True, exist_ok=True)
         for name in files:
@@ -1827,7 +1828,7 @@ def _restore_content_missing(backup_dir: Path) -> dict[str, int]:
 
 
 #: 只有主库有这个表；题库/schema 不同，不能拿同一把尺子量
-_DB_MARKER_TABLES = {"smartkb.db": "users", "questions.db": "question_bank"}
+_DB_MARKER_TABLES = {"smartkb.db": "users", "questions.db": "question_bank", "local_kb.db": "kb_docs"}
 
 
 def _db_integrity(db: Path) -> str:
@@ -2261,10 +2262,11 @@ async def create_backup(request: Request,
 
         # ① 数据库：在线一致性快照（正在用也能拍）
         dbs: list[dict[str, Any]] = []
-        for name in ("smartkb.db", "questions.db"):
+        for name in ("smartkb.db", "questions.db", "local_kb.db"):
             src = Path(DB_DIR) / name
             if not src.exists():
-                warnings.append(f"未找到 {name}（{src}）")
+                if name != "local_kb.db":      # 本地文库可能从未启用，缺文件属正常
+                    warnings.append(f"未找到 {name}（{src}）")
                 continue
             how = await asyncio.to_thread(_sqlite_backup_of, src, prot_dir / name)
             dbs.append({"name": name, "bytes": src.stat().st_size, "via": how})
@@ -2299,6 +2301,10 @@ async def create_backup(request: Request,
             content = await asyncio.to_thread(_backup_content_snapshot, backup_path, [])
             total_files = sum(int(v.get("files") or 0) for v in content.values())
             logger.info(f"管理员 {user['username']} 整站备份：内容目录 {total_files} 个文件")
+        else:
+            kb_files = Path(STORAGE_DIR) / "kb_files"
+            if kb_files.is_dir():
+                warnings.append("本次未勾选内容目录：本地文库原件（kb_files）未随备份，换机迁移请手工拷贝该目录")
 
         # ④ 源码快照：只有真的是 git 仓库且有提交时才做，失败不影响数据备份
         has_tar = False
@@ -2522,7 +2528,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             if not cfg_snapshot:
                 logger.warning("[upgrade] Step 1d: 未找到可留底的配置文件（新装机器或路径异常）")
             if auto_backup:
-                for db_name in ("smartkb.db", "questions.db"):
+                for db_name in ("smartkb.db", "questions.db", "local_kb.db"):
                     live = Path(DB_DIR) / db_name
                     if live.is_file():
                         how = _sqlite_backup_of(live, guard_dir / db_name)

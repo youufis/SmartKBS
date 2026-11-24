@@ -107,24 +107,22 @@ def score_config(cfg: dict | None) -> int:
     """配置"像不像真实配置"的粗打分（0 分≈出厂默认值），用于在几份文件里挑一份。
 
     只看文件大小/键数会误判：被重置后的默认值同样是 111 个键、4999 字节。
-    真正的特征是 APPID 空、AGENT_EDITION 退回通用版、知识库没配。
+    真正的特征是知识库没配、AGENT_EDITION 退回通用版。
     """
     if not isinstance(cfg, dict) or not cfg:
         return -1
     s = 0
-    if str(cfg.get("APPID") or "").strip():
-        s += 5
     if str(cfg.get("AGENT_EDITION") or "").strip() not in ("", FACTORY_EDITION_MARK):
         s += 3
     if str(cfg.get("KB_AGENT_ID") or "").strip():
-        s += 3
+        s += 5
     scene_map = cfg.get("skill_scene_map")
     if isinstance(scene_map, dict) and len(scene_map) > 2:
         s += 2
     subjects = cfg.get("SUBJECTS")
     if isinstance(subjects, list) and len(subjects) > 1:
         s += 3        # 学科被收回只剩「人工智能」正是配置被重置的第一个表象
-    for key in ("TTS_ENABLED", "ENABLE_MULTIMODAL", "AGENT_ENABLED", "ENABLE_REQUEST_LIMIT"):
+    for key in ("TTS_ENABLED", "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT"):
         if cfg.get(key) is True:
             s += 1
     return s
@@ -134,20 +132,19 @@ def looks_like_factory_default(cfg: dict | None) -> bool:
     """是不是"从没被管理员配过 / 被重置回出厂值"的配置。
 
     不用 `score_config(cfg) <= 2` 那种阈值判：布尔开关和 skill_scene_map 的默认值本身
-    就会加分，"APPID/知识库/版本号都空、只留着默认开关"的半成品反而越过阈值。
+    就会加分，"知识库/版本号都空、只留着默认开关"的半成品反而越过阈值。
     这里改判据为「身份类字段全空 + 课程仍是单门默认」两个硬特征同时成立：
 
-      · APPID 空 + 知识库(KB_AGENT_ID)空 + 版本号为空/通用版  —— 管理员配过的配置不可能三项全空；
-      · SUBJECTS 只剩一门（默认就是「人工智能」）—— 排除"只是还没填 APPID 的新机器、
-        但课程已经配好好几百门"的情况（API Key 也可能只放在环境变量里）。
+      · 知识库(KB_AGENT_ID)空 + 版本号为空/通用版  —— 管理员配过的配置不可能两项全空；
+      · SUBJECTS 只剩一门（默认就是「人工智能」）—— 排除"新机器还没配课程"的情况
+        （API Key 也可能只放在环境变量里）。
 
     `score_config` 仍用于在几份候选文件里排序挑一份，不再用来定性。
     """
     if not isinstance(cfg, dict) or not cfg:
         return False
     identity_empty = (
-        not str(cfg.get("APPID") or "").strip()
-        and not str(cfg.get("KB_AGENT_ID") or "").strip()
+        not str(cfg.get("KB_AGENT_ID") or "").strip()
         and str(cfg.get("AGENT_EDITION") or "").strip() in ("", FACTORY_EDITION_MARK)
     )
     if not identity_empty:

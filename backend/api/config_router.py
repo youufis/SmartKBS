@@ -50,7 +50,7 @@ def _backup_file() -> Path:
     return CONFIG_FILE.with_name(CONFIG_FILE.name + ".bak")
 
 
-_SECRET_KEYS = ("dashscope_api_key", "APPID")                          # C3: 不回显明文
+_SECRET_KEYS = ("dashscope_api_key",)                          # C3: 不回显明文
 _MASK_PREFIX = "****"
 
 # ── 默认配置（与 config.py 保持一致） ──
@@ -61,12 +61,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # API 密钥（全局兜底）
     "dashscope_api_key": "",
     # 模型与应用配置
-    "APPID": "",  # 留空则直接调用大模型(MODEL_NAME)；填写后调用百炼智能体应用。注意：APPID 必须与 DASHSCOPE_API_KEY 归属于同一个阿里云账号，否则无法调用
-    "AGENT_ENABLED": False,  # 智能体启用闸门：勾选且 APPID 已填才走智能体；默认关，需显式开启（知识库就绪时优先走知识库，不受此项影响）
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     # ── 本地引擎（Ollama，OpenAI 兼容端点）──
     # AI_MODE：cloud=现状全走百炼；hybrid=本地优先、连不上/超时回落云端；
-    #          local=只走本地、绝不出网（智能体应用与百炼知识库接管一并旁路）。
+    #          local=只走本地、绝不出网（百炼知识库检索一并旁路）。
     # 默认 cloud：不显式切换就等于没装这个功能，现网行为零变化。
     "AI_MODE": "cloud",
     "OLLAMA_API_BASE": "http://localhost:11434/v1",
@@ -313,7 +311,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # AI 线程池并发上限 — 全站同步 AI 调用（图示/板书/出题/批改/讨论/闯关）共用的工作线程数。
     # 这些线程只挂在网络等待上，放开到 8 不会压住数据库；调太小会让高峰期请求排队。
     "AI_MAX_CONCURRENCY": 8,
-    # ── 直连模式多轮记忆（backend/chat_memory.py；仅在 APPID 留空/本次强制直连时生效）──
+    # ── 直连模式多轮记忆（backend/chat_memory.py；知识库接管的生成步骤同样是直连）──
     # 默认开启；关闭后代码行为与"加记忆之前"逐字一致（读与写都不发生）。
     "CHAT_MEMORY_ENABLED": True,
     "CHAT_MEMORY_MAX_TURNS": 8,               # 带上最近几轮问答（一问一答=1 轮）
@@ -336,7 +334,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Word 导出东亚字体族（西文按惯例配对：正文 Times New Roman / 标题 Arial）
     "DOCX_FONT_BODY": "宋体",
     "DOCX_FONT_HEADING": "黑体",
-    # ── 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）──
+    # ── 百炼知识库检索（backend/bailian_kb.py；第一优先级）──
     # 开启后聊天页「知识」勾选走 直连大模型 + 百炼知识检索服务；关闭时勾选只启用本地题库/大纲检索（原行为）。
     "KB_ENABLED": False,
     "KB_API_BASE": "",       # 业务空间专属域名（https://llm-xxx.cn-beijing.maas.aliyuncs.com），须与 API Key 同空间
@@ -348,6 +346,27 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "KB_REL_GAP": 0.8,       # 相对分差裁剪（0.0~1.0）：低于最高分×系数的切片一并丢弃，
     #                        避免 5 条里混进蹭分的无关资料（0=关闭）
     "KB_TIMEOUT_MS": 5000,   # 检索超时（毫秒），超时静默降级本地检索，不阻塞对话
+    # ── 本地知识库（backend/local_kb.py；独立模块，与文件中心/资源中心零耦合）──
+    "LOCAL_KB_ENABLED": True,                # 默认开启（2026-11-24 拍板）：云端优先、本地兜底；关闭不影响现有功能
+    "LOCAL_KB_EMBED_PROVIDER": "cloud",      # 默认云端；auto/cloud/local（local 模式下强制本地）
+    "LOCAL_KB_EMBED_MODEL_CLOUD": "text-embedding-v4",
+    "LOCAL_KB_EMBED_MODEL_LOCAL": "bge-m3",
+    "LOCAL_KB_EMBED_DIM": 1024,
+    "LOCAL_KB_DUAL_INDEX": False,             # 默认关闭；开启后云端+本地各存一套向量，查询按可用性自动切换
+    "LOCAL_KB_TOP_K": 5,
+    "LOCAL_KB_VEC_TOP_K": 12,
+    "LOCAL_KB_KW_TOP_K": 12,
+    "LOCAL_KB_MIN_SCORE": 0.15,
+    "LOCAL_KB_REL_GAP": 0.6,
+    "LOCAL_KB_MAX_CHARS": 2500,
+    "LOCAL_KB_MAX_FILE_MB": 20,
+    "LOCAL_KB_MAX_DOCS": 500,
+    "LOCAL_KB_MAX_PAGES": 500,               # 单篇 PDF 页数上限（超限解析阶段拒收）
+    "LOCAL_KB_MAX_TOTAL_MB": 200,
+    "LOCAL_KB_TRASH_DAYS": 30,
+    "LOCAL_KB_EXTENSIONS": [".md", ".txt", ".docx", ".pdf"],  # 仅可在已支持解析的格式内增减
+    "LOCAL_KB_RRF_W": 0.6,
+    "LOCAL_KB_QUERY_TIMEOUT_MS": 1500,
     # ── 知识问答（AI 对话）输出质量（backend/chat_intent.py / chat_prompts.py）──
     "CHAT_META_GUARD_ENABLED": True,     # 元问题闸门：身份/寒暄/低信息量不检索、不套质量模板
     "CHAT_IDENTITY_GUARD_ENABLED": True,  # 平台身份 system 提示：修"自报通义千问/ChatGPT"
@@ -357,7 +376,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 # 已下线的配置键：旧文件里可能还留着，读取时直接丢弃，免得出现在「未收录配置键」里误导管理员
-_RETIRED_KEYS = {"ENABLE_MULTIMODAL", "MODEL_NO_IMAGE_LIST"}
+_RETIRED_KEYS = {"ENABLE_MULTIMODAL", "MODEL_NO_IMAGE_LIST", "APPID", "AGENT_ENABLED"}
 
 _config_lock = threading.Lock()
 _cache_lock = threading.RLock()
@@ -578,7 +597,6 @@ def config_health() -> dict[str, Any]:
         "score": score,
         "factory_default": factory,
         "subjects": len(subjects) if isinstance(subjects, list) else 0,
-        "appid_set": bool(str(cfg.get("APPID") or "").strip()),
     }
 
 
@@ -701,6 +719,17 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     # ── 百炼知识库检索（backend/bailian_kb.py）──
     "KB_TOP_K": (1, 20),
     "KB_TIMEOUT_MS": (500, 30000),
+    "LOCAL_KB_EMBED_DIM": (64, 2560),
+    "LOCAL_KB_TOP_K": (1, 20),
+    "LOCAL_KB_VEC_TOP_K": (1, 50),
+    "LOCAL_KB_KW_TOP_K": (1, 50),
+    "LOCAL_KB_MAX_CHARS": (500, 8000),
+    "LOCAL_KB_MAX_FILE_MB": (1, 100),
+    "LOCAL_KB_MAX_DOCS": (1, 5000),
+    "LOCAL_KB_MAX_PAGES": (10, 5000),
+    "LOCAL_KB_MAX_TOTAL_MB": (10, 10000),
+    "LOCAL_KB_QUERY_TIMEOUT_MS": (100, 5000),
+    "LOCAL_KB_TRASH_DAYS": (1, 365),
     # ── 知识问答输出质量（backend/chat_intent.py / chat_prompts.py）──
     "CHAT_META_MAX_TOKENS": (100, 4000),
     # ── 语音合成（backend/tts_service.py）──
@@ -710,6 +739,9 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
 _FLOAT_RANGES: dict[str, tuple[float, float]] = {
     "KB_MIN_SCORE": (0.01, 1.00),
     "KB_REL_GAP": (0.0, 1.00),
+    "LOCAL_KB_MIN_SCORE": (0.0, 1.00),
+    "LOCAL_KB_REL_GAP": (0.0, 1.00),
+    "LOCAL_KB_RRF_W": (0.0, 1.00),
     "TTS_SPEECH_RATE": (0.5, 2.00),
 }
 _BOOL_KEYS = {
@@ -720,6 +752,8 @@ _BOOL_KEYS = {
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
+    "LOCAL_KB_ENABLED",
+    "LOCAL_KB_DUAL_INDEX",
     "UPGRADE_AUTO_BACKUP",
     "TTS_ENABLED", "CLASS_DRILL_AI_ENABLED", "CLASS_LADDER_AI_ENABLED", "CLASS_LADDER_SOUND_ENABLED",
     "PORTRAIT_ENABLED", "PORTRAIT_PERIOD_MONTHLY", "PORTRAIT_AUTO_PUSH",
@@ -741,8 +775,9 @@ _STR_LIMITS: dict[str, int] = {
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
     "SHOWCASE_RANK_MODE": 16,
     "CLASS_LADDER_DEFAULT_SKIN": 16,
-    "dashscope_api_key": 200, "APPID": 128,
+    "dashscope_api_key": 200,
     "KB_API_BASE": 300, "KB_AGENT_ID": 128,
+    "LOCAL_KB_EMBED_PROVIDER": 16, "LOCAL_KB_EMBED_MODEL_CLOUD": 80, "LOCAL_KB_EMBED_MODEL_LOCAL": 80,
     "OLLAMA_API_BASE": 300, "AI_MODE": 16, "OLLAMA_THINKING": 8,
     "OLLAMA_CHAT_MODEL": 80, "OLLAMA_LONG_MODEL": 80, "OLLAMA_VL_MODEL": 80,
     "CHAT_SKILL_SEGMENT_MODE": 16,
@@ -758,13 +793,14 @@ _TL_LICENSE_RE = re.compile(r"^tldraw-[^/]+/[A-Za-z0-9+/=_-]{16,}\.[A-Za-z0-9+/=
 
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
                  "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64,
-                 "HOMEWORK_ALLOWED_EXTS": 60,
+                 "HOMEWORK_ALLOWED_EXTS": 60, "LOCAL_KB_EXTENSIONS": 10,
                  "wrong_book_sources": 20}
 _TITLE_LIST_KEYS = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG"}
 # 枚举型配置键：只认登记过的取值（大小写/空白归一化）。DEFAULT_CONFIG 新增枚举键必须在此登记，
 # 否则保存时会被 _validate_config_updates 静默丢弃（页面永远停在默认值）。
 _ENUM_KEYS: dict[str, tuple[str, ...]] = {
     "AI_MODE": ("cloud", "hybrid", "local"),
+    "LOCAL_KB_EMBED_PROVIDER": ("auto", "cloud", "local"),
     "OLLAMA_THINKING": ("off", "on"),
     "MULTIPLE_CHOICE_SCORING": ("strict", "partial"),
     "BRIEFING_YEAR_MODE": ("school_year", "calendar"),
@@ -1017,7 +1053,7 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"{key} 必须是文本")
             if len(value) > _STR_LIMITS[key]:
                 raise HTTPException(status_code=400, detail=f"{key} 最长 {_STR_LIMITS[key]} 字")
-            out[key] = value.strip() if key in ("dashscope_api_key", "APPID", "KB_API_BASE", "KB_AGENT_ID", "TL_LICENSE_KEY") else value
+            out[key] = value.strip() if key in ("dashscope_api_key", "KB_API_BASE", "KB_AGENT_ID", "TL_LICENSE_KEY") else value
             if key == "TL_LICENSE_KEY" and out[key] and not _TL_LICENSE_RE.fullmatch(out[key]):
                 raise HTTPException(
                     status_code=400,
@@ -1034,6 +1070,20 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
             if len(value) > _STRLIST_KEYS[key]:
                 raise HTTPException(status_code=400, detail=f"{key} 最多 {_STRLIST_KEYS[key]} 项")
             # 错题本接入范围只认后端登记过的活动来源：写错一个字母就静默失效，必须当场拒
+            if key == "LOCAL_KB_EXTENSIONS":
+                allowed = {".md", ".txt", ".docx", ".pdf"}
+                norm = []
+                for x in value:
+                    x = x.lower()
+                    if not x.startswith("."):
+                        x = "." + x
+                    if x not in allowed:
+                        raise HTTPException(status_code=400,
+                                            detail=f"不支持的格式：{x}（仅 md/txt/docx/pdf 可解析）")
+                    norm.append(x)
+                if not norm:
+                    raise HTTPException(status_code=400, detail="至少保留一种文件格式")
+                value = norm
             if key == "wrong_book_sources":
                 from backend.api.wrong_book_router import ALWAYS_ON_WRONG_BOOK_SOURCES, WRONG_BOOK_SOURCE_LABELS
                 unknown = [x for x in value if x not in WRONG_BOOK_SOURCE_LABELS]
@@ -1193,10 +1243,10 @@ async def get_config(request: Request):
 
 
 # ── 配置备份与恢复（管理员在页面上操作，不必登服务器） ──
-# 场景：升级或误操作把整份配置打回出厂默认值（学科只剩「人工智能」、APPID/知识库为空）。
+# 场景：升级或误操作把整份配置打回出厂默认值（学科只剩「人工智能」、知识库为空）。
 # 历史副本散落在根目录 / backend/ / 各种备份目录里，页面按"健康分"排序列出来，选一份覆盖即可。
 # 关键：出厂默认值同样是 111 个键、约 5KB，光看大小和键数分不出好坏，
-# 所以用 score_config 的指纹（APPID / 版本号 / 知识库）判断哪份"像真实配置"。
+# 所以用 score_config 的指纹（版本号 / 知识库）判断哪份"像真实配置"。
 _CONFIG_SOURCE_LABELS: dict[str, str] = {
     "current": "当前使用中",
     "current_bak": "当前配置的上次保存(.bak)",
@@ -1534,6 +1584,30 @@ class ConfigUpdate(BaseModel):
     config: dict[str, Any]
 
 
+_KB_CLOUD_EMBED_DIMS = {
+    "text-embedding-v2": {1536},
+    "text-embedding-v1": {1536},
+    "text-embedding-v3": {512, 768, 1024},
+}
+
+
+def _validate_kb_embedding_config(cfg: dict) -> None:
+    """保存前校验云端向量模型与维度是否匹配（避免写入后才发现 400 或签名错位）。"""
+    model = str(cfg.get("LOCAL_KB_EMBED_MODEL_CLOUD") or "").strip().lower()
+    try:
+        dim = int(cfg.get("LOCAL_KB_EMBED_DIM") or 1024)
+    except (TypeError, ValueError):
+        dim = 1024
+    allowed = _KB_CLOUD_EMBED_DIMS.get(model)
+    if allowed and dim not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{model} 仅支持 {'/'.join(str(x) for x in sorted(allowed))} 维，当前为 {dim}；请同时修改「向量维度」",
+        )
+    if model == "text-embedding-v4" and not (64 <= dim <= 2048):
+        raise HTTPException(status_code=400, detail="text-embedding-v4 的维度需在 64–2048 之间")
+
+
 @router.put("")
 async def update_config(req: ConfigUpdate, request: Request):
     """更新系统配置（管理员）"""
@@ -1554,6 +1628,7 @@ async def update_config(req: ConfigUpdate, request: Request):
         # 没有实际变更(例如只提交了掩码密钥)时不写盘, 避免无意义的文件重写
         return {"status": "ok", "config": _mask_config(current), "updated": []}
     current.update(known)
+    _validate_kb_embedding_config(current)
     save_config(current)
     logger.info(f"管理员 {user['username']} 更新了系统配置 ({len(known)} 项)")
 
@@ -1671,9 +1746,8 @@ async def get_multimodal_status(request: Request):
 
 
 # 自检接口的等待上限：必须短于前端按钮的超时（120 秒），否则浏览器先掐断，
-# 管理员看到的是 "timeout of 30000ms exceeded" 而不是"智能体侧慢/域名连不上"这类真原因。
+# 管理员看到的是 "timeout of 30000ms exceeded" 而不是"知识库检索慢/域名连不上"这类真原因。
 MODEL_TEST_TIMEOUT_SEC = 60
-APPID_TEST_TIMEOUT_SEC = 90
 
 
 @router.post("/model-test", summary="直连大模型连通性自检（管理员）")
@@ -1791,64 +1865,13 @@ async def ollama_status(request: Request, refresh: bool = False):
     return st
 
 
-@router.post("/appid-test", summary="智能体应用连通性自检（管理员）")
+@router.post("/appid-test", summary="智能体应用自检（已退役）")
 async def appid_connectivity_test(request: Request):
-    """用一条最小提问实测 APPID 智能体是否可用（Key 与 APPID 须同账号）。
-
-    返回 {ok, cost_ms, reply} 或 {ok:false, error}，不抛异常。
-    """
+    """智能体链路已于 2026-11-24 移除；端点保留仅为兼容缓存中的旧前端，不再发起任何外呼。"""
     user = get_current_user(request)
     require_admin(user)
-    import asyncio
-    import time
-    cfg = load_config()
-    app_id = str(cfg.get("APPID", "") or "").strip()
-    if not app_id:
-        return {"ok": False, "error": "未填写 APPID（留空时系统本就直连大模型，无需测试）"}
-    key = str(cfg.get("dashscope_api_key", "") or "").strip()
-    if not key:
-        import os
-        key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not key:
-        return {"ok": False, "error": "API Key 未配置"}
-    t0 = time.time()
-    try:
-        import os
-        os.environ["DASHSCOPE_API_KEY"] = key
-        from dashscope import Application as DashScopeApp
-        # 智能体应用（带知识库检索 / 深度思考）实测经常要几十秒：旧写法在 async 端点里
-        # 直接同步调用，既卡住整个事件循环，又让前端 30 秒先超时，管理员只看到
-        # "timeout of 30000ms exceeded" 而拿不到真实原因。现放线程池执行并给硬上限。
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(DashScopeApp.call, app_id=app_id,
-                              messages=[{"role": "user", "content": "回复OK"}], stream=False),
-            timeout=APPID_TEST_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError:
-        return {"ok": False, "timeout": True,
-                "cost_ms": int((time.time() - t0) * 1000),
-                "error": f"智能体 {APPID_TEST_TIMEOUT_SEC} 秒内未返回（多为应用侧知识库检索或深度思考耗时）。"
-                        + "可稍后重试，或改用「直连大模型 + 知识库」链路"}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)[:200]}
-
-    try:
-        text = None
-        output = getattr(resp, "output", None)
-        if isinstance(output, str):
-            text = output
-        elif output is not None:
-            text = (output.get("text") if hasattr(output, "get") else getattr(output, "text", None))
-        if text:
-            return {"ok": True, "cost_ms": int((time.time() - t0) * 1000),
-                    "reply": str(text).strip()[:30]}
-        code = str(getattr(resp, "code", "") or "")
-        msg = str(getattr(resp, "message", "") or "")
-        return {"ok": False,
-                "cost_ms": int((time.time() - t0) * 1000),
-                "error": (code + " " + msg).strip() or "智能体返回为空（请检查应用是否已发布、知识库是否正常）"}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)[:200]}
+    return {"ok": False, "retired": True,
+            "error": "智能体应用链路已移除：AI 调用固定为 云端知识库 → 本地文库 → 大模型"}
 
 @router.post("/kb-test", summary="知识库检索连通性自检（管理员）")
 async def kb_connectivity_test(request: Request):
@@ -1891,16 +1914,19 @@ async def model_options(request: Request, kind: str = "chat"):
 
     user = get_current_user(request)
     require_admin(user)
-    if kind not in ("chat", "long", "vl", "image", "ollama"):
-        raise HTTPException(status_code=400, detail="kind 只能是 chat / long / vl / image / ollama")
-    if kind == "ollama":
+    if kind not in ("chat", "long", "vl", "image", "ollama", "ollama_embed"):
+        raise HTTPException(status_code=400, detail="kind 只能是 chat / long / vl / image / ollama / ollama_embed")
+    if kind in ("ollama", "ollama_embed"):
         # 本地引擎：候选实时取自 Ollama 自身（llm_provider.model_catalog）。
         # 连不上就返回空清单 —— 前端只退回手输、配置页照常打开，与云端清单"只当提示"同一原则。
         import asyncio
         from backend import llm_provider
         cat = await asyncio.to_thread(llm_provider.model_catalog)
-        return {"kind": kind, "options": cat["options"],
-                "known": sorted(o["id"] for o in cat["options"]),
+        opts = cat["embed_options"] if kind == "ollama_embed" else cat["options"]
+        return {"kind": kind, "options": opts,
+                "chat_options": cat.get("chat_options", []),
+                "embed_options": cat.get("embed_options", []),
+                "known": sorted(o["id"] for o in opts),
                 "ok": cat["ok"], "error": cat["error"]}
     out: dict = {"kind": kind, "options": annotate(kind),
                  "known": sorted(m["id"] for m in options_for(kind))}

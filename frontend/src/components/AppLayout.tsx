@@ -139,6 +139,7 @@ function buildTeacherMenu(t: (k: string) => string) {
       { key: '/wrong-book', icon: <BookOutlined />, label: g('wrongBookManage') },
       { key: '/explore', icon: <EditOutlined />, label: g('exploreCanvas') },
       { key: '/shared-center', icon: <FolderOutlined />, label: g('resourceCenter'), adminOrTeacherOnly: true },
+      { key: '/knowledge-base', icon: <DatabaseOutlined />, label: g('knowledgeBase'), adminOrTeacherOnly: true },
     ]},
     { type: 'group', icon: <FileAddOutlined />, label: g('coding'), key: 'coding', children: [
       { key: '/code-practice', icon: <FileAddOutlined />, label: g('codePractice') },

@@ -679,7 +679,7 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 
 async def _call_dashscope_agent(prompt: str, api_key: str, json_mode: bool = False,
                                 kb_query: str = "", max_tokens: int | None = None) -> str:
-    """调用 AI（异步）- 支持智能体/直接调大模型双模式；json_mode 由网关保证输出合法 JSON
+    """调用 AI（异步）- 检索增强 + 直连生成；json_mode 由网关保证输出合法 JSON
 
     max_tokens 一律由调用点显式给（见 _estimate_generate_max_tokens）：非流式请求不给上限，
     等于把生成长度交给服务商默认值 —— 既会被静默截断，也可能一直生成到读超时、整批题目作废。

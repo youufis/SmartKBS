@@ -175,6 +175,13 @@ async def lifespan(app: FastAPI):
         pass
 
     try:
+        # 本地知识库：出厂默认关；只有开启时才建库/起 worker（关闭态零副作用）
+        from backend import local_kb
+        local_kb.start()
+    except Exception as _e:
+        print(f"[main] 本地知识库启动跳过: {_e}")
+
+    try:
 
         from backend.api.sharing_router import cleanup_empty_dir_shares
 
@@ -675,6 +682,7 @@ from backend.api.activity_reset_router import router as activity_reset_router
 from backend.api.companion_router import router as companion_router
 
 from backend.api.skill_router import router as skill_router
+from backend.api.kb_router import router as kb_router
 
 from backend.api.whiteboard_router import router as whiteboard_router
 
@@ -761,6 +769,7 @@ app.include_router(code_router, prefix="/api", tags=["代码练习"])
 app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
 
 app.include_router(skill_router, prefix="/api/skills", tags=["技能管理"])
+app.include_router(kb_router, prefix="/api/kb", tags=["本地知识库"])
 
 app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
 

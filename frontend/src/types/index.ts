@@ -28,6 +28,8 @@ export interface KbReference {
   doc_name: string;
   score?: number;
   title?: string;
+  /** cloud=百炼云端知识库；local=本地文库 */
+  source?: 'cloud' | 'local';
 }
 
 // 聊天消息

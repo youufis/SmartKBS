@@ -66,6 +66,7 @@ const STAFF_ALLOWED = [
   '/html-files',
   '/shared-center',
   '/resource-mgmt',        // 资源管理（无表格，浏览型）
+  '/knowledge-base',       // 本地文库（教师/管理员）
   '/about',
   // ── 第五批：分组讨论（建组与 AI 方案仍在电脑上做，手机只用于进组与讨论） ──
   '/discussion',           // 分组讨论列表

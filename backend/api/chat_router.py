@@ -46,7 +46,7 @@ class ChatRequest(BaseModel):
     file_paths: list[str] = []
     session_id: Optional[str] = None
     context_enhance: bool = False
-    use_agent: bool = False  # False=直连大模型(默认,响应快)；True=优先使用智能体(有APPID时)
+    use_agent: bool = False  # 已废弃（智能体链路已移除）；保留字段仅为兼容旧前端
     rag_enabled: bool = False  # 「知识」开关：开启后从试题库/课程大纲检索相关知识辅助回答
 
 
@@ -315,21 +315,19 @@ async def get_usage(request: Request):
     used = get_user_daily_usage(username)
 
     # 管理员不受限
-    from backend.api.ai_service import is_appid_configured
-    appid_configured = is_appid_configured()
     from backend import bailian_kb
     kb_ready_flag, kb_reason = bailian_kb.kb_ready()
     from backend.api.ai_service import get_ai_config
-    chat_mode = {"kb_direct": "kb", "agent": "agent"}.get(get_ai_config()["mode"], "llm")
+    chat_mode = {"kb_direct": "kb", "kb_local": "kb_local"}.get(get_ai_config()["mode"], "llm")
 
     # 引擎徽章：只有「直连大模型」且本地分流开着时，应答者才可能是本地引擎。
     # kb/agent 与 cloud 档一律标 cloud；hybrid 的实际应答者可能回落云端，标 hybrid（本地优先）。
     from backend import llm_provider
     _m = llm_provider.ai_mode()
     engine = ("local" if _m == "local" else "hybrid" if _m == "hybrid" else "cloud") if chat_mode == "llm" else "cloud"
-    # 回显真正会跑的模型名：只要本地分流开着且不是智能体模式（agent 由应用侧决定模型），
+    # 回显真正会跑的模型名：只要本地分流开着（模型由平台配置决定），
     # 生成步骤就路由到 Ollama —— kb_direct 接管下同样如此，不能只按 llm 档判断
-    _gen_local = llm_provider.ollama_active() and chat_mode != "agent"
+    _gen_local = llm_provider.ollama_active()
     model_name = (llm_provider.ollama_model_for("chat") if _gen_local
                   else get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL))
 
@@ -339,7 +337,6 @@ async def get_usage(request: Request):
             "enabled": enabled, "used": 0, "max": 0, "remaining": -1,
             "multimodal_enabled": multimodal_enabled,
             "model_name": model_name, "engine": engine,
-            "appid_configured": appid_configured,
             "kb_ready": kb_ready_flag, "kb_reason": kb_reason, "chat_mode": chat_mode,
         }
 
@@ -352,7 +349,6 @@ async def get_usage(request: Request):
         "remaining": max(0, max_req - used),
         "multimodal_enabled": multimodal_enabled,
         "model_name": model_name, "engine": engine,
-        "appid_configured": appid_configured,
         "kb_ready": kb_ready_flag, "kb_reason": kb_reason, "chat_mode": chat_mode,
     }
 
@@ -449,12 +445,12 @@ def _chat_event_generator(
             logger.debug(f"[chat] 对话积分发放失败 {username}: {e}")
 
     # ── V6.9 全局模式裁决：聊天链路不再接受客户端开关控制，只认系统配置 ──
-    # 优先级 知识库(kb_direct) > 智能体(agent) > 大模型(direct)，与后台 19 处业务同源裁决。
+    # 优先级 云端知识库(kb_direct) > 本地文库(kb_local) > 大模型(direct)，与后台业务同源裁决。
     # 客户端传入的 use_agent / rag_enabled 一律忽略（旧版桌面端兼容不报错）。
     from backend.api.ai_service import get_ai_config as _mode_cfg
     _mode = _mode_cfg()["mode"]
-    use_agent = (_mode == "agent")
-    rag_enabled = (_mode == "kb_direct")
+    use_agent = False  # 智能体链路已移除：对话生成直连，检索由下方 RAG 段完成
+    rag_enabled = (_mode in ("kb_direct", "kb_local"))
 
     try:
         # ── V8.6.1 对话分层组稿 ──
@@ -477,16 +473,14 @@ def _chat_event_generator(
 
         # ── V6.7 RAG 增强：由「知识」开关(rag_enabled)控制 ──
         chat_kb_takeover = False  # 知识开关+云端就绪：本次走「直连+知识库」，可关思考链提速
-        # 云端知识库就绪时走「直连 + 百炼知识库」：强制直连（不走 APPID 智能体，
-        # 避免与其自带云端知识库双重注入），检索切片注入 prompt 并下发 references 事件；
+        # 云端知识库就绪时走「直连 + 百炼知识库」：检索切片注入 prompt 并下发
+        # references 事件，生成步骤始终直连（智能体链路已移除）；
         # 未就绪/失败时退回原本地题库+大纲检索，绝不阻塞对话。
         if rag_enabled:
             try:
                 from backend import bailian_kb
                 kb_ok, _kb_reason = bailian_kb.kb_ready()
-                chat_kb_takeover = bool(kb_ok)
-                if kb_ok and use_agent:
-                    use_agent = False
+                chat_kb_takeover = bool(kb_ok) or (_mode == "kb_local")
 
                 # V8.6.1 检索闸门：「你是谁 / 你好 / 111」这类元问题不查知识库。
                 # 百炼对这种问句照样返回 top_k 条过线切片（实测 refs=5、2585 字），
@@ -497,7 +491,7 @@ def _chat_event_generator(
                     logger.info(f"[RAG] 跳过知识检索 (user={username}): {skip_reason}")
                 else:
                     from backend.rag import retrieve_knowledge, retrieve_knowledge_v2
-                    if kb_ok:
+                    if kb_ok or _mode == "kb_local":
                         rag_context, kb_hit_refs = retrieve_knowledge_v2(prompt, username)
                     else:
                         rag_context, kb_hit_refs = retrieve_knowledge(prompt, username), []
@@ -574,7 +568,7 @@ def _chat_event_generator(
                 kb_context=kb_context, skill_segment=skill_segment,
                 meta_reason=meta_reason,
             )
-            # 附件摘要/文件分支仍需要一个"含身份"的单条文本，这里给智能体与
+            # 附件摘要/文件分支仍需要一个"含身份"的单条文本，这里给检索模式与
             # 多模态路径准备合并版（它们各自的 messages 结构不支持独立 system）。
             merged_prompt = f"{system_text}\n\n【用户的问题】\n{user_text}"
             if meta_reason:
@@ -590,8 +584,8 @@ def _chat_event_generator(
             system_text = ""
 
         # ── 直连模式多轮记忆 ──
-        # APPID 留空（或本次强制直连）时，百炼侧没有 session 记忆，这里由平台自己
-        # 带上最近若干轮问答；智能体分支不受影响，仍使用百炼返回的 session_id。
+        # 直连模式没有服务端 session 记忆，这里由平台自己
+        # 带上最近若干轮问答（仅直连/知识库生成步骤使用）。
         # mem_active 必须同时管住"读"和"写"：管理员关掉开关后，前端可能仍持有
         # 上一阶段拿到的 d_ 会话号，若只按前缀判断就会继续往表里写。
         mem_key, mem_history, mem_active = session_id, None, False
@@ -776,9 +770,9 @@ def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, use
                         enable_thinking: Optional[bool] = None,
                         system: Optional[str] = None, max_tokens: Optional[int] = None,
                         use_kb: bool = True, kb_query: str = ""):
-    """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式（history 仅直连生效）
+    """AI 流式对话（同步生成器）- 检索增强 + 直连生成（history 仅直连生效）
 
-    system: V8.6.1 身份/规则段，直连模式走独立 system 角色；智能体模式由
+    system: V8.6.1 身份/规则段，直连生成走独立 system 角色；检索模式由
     ai_service 内联到问题前（百炼 Application 的 messages 不收 system）。
     use_kb: 是否允许知识库接管。
     kb_query: 送进知识库检索的那句话。默认留空 = 用整段 prompt 检索，

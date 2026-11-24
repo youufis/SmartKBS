@@ -168,30 +168,53 @@ def resolve_search_query(text: str) -> str:
 
 
 def retrieve_knowledge_v2(prompt: str, username: str = "") -> tuple[str, list[dict]]:
-    """融合检索：返回 (资料上下文文本, 云端引用列表)
+    """融合检索：云端 KB ∥ 本地知识库并行，返回 (资料上下文, 引用列表)
 
-    引用列表元素 {doc_name, score, title}，供前端展示来源；本地检索结果不计入引用。
-    云端检索词经 resolve_search_query 收敛（聊天/业务/未来新入口一律自动受护）。
+    P0-3：两腿并行起跑；云端命中 >= _CLOUD_ENOUGH 条时丢弃本地结果（不二次等待）。
+    本地腿为空/未启用时行为与旧版完全一致（只多一次 O(1) 的 ready 判断）。
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     parts: list[str] = []
     references: list[dict] = []
+    q = resolve_search_query(prompt)
 
-    # 1. 百炼云端知识库（检索词收口：长文本→核心关键词）
-    #    local 模式承诺不出网：云端检索整体旁路，本地试题库/大纲照常兜底；
-    #    hybrid/cloud 不受影响。聊天 SSE、白板引用、画布都经此函数，一处收口全护住。
-    chunks = []
-    try:
-        from backend import llm_provider
-        _cloud_kb_ok = llm_provider.ai_mode() != "local"
-    except Exception:
-        _cloud_kb_ok = True
-    if _cloud_kb_ok:
+    def _cloud_leg() -> list:
+        try:
+            from backend import llm_provider
+            if llm_provider.ai_mode() == "local":
+                return []          # local 模式承诺不出网
+        except Exception:
+            pass
         try:
             from backend import bailian_kb
-            chunks = bailian_kb.kb_search(resolve_search_query(prompt))
+            return bailian_kb.kb_search(q) or []
         except Exception as e:
             logger.warning(f"云端知识库检索异常（忽略，走本地）: {e}")
+            return []
+
+    def _local_leg() -> tuple[str, list]:
+        try:
+            from backend import local_kb
+            if not local_kb.ready():
+                return "", []
+            return local_kb.context_block(prompt)
+        except Exception as e:
+            logger.warning(f"本地知识库检索异常（忽略）: {e}")
+            return "", []
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_cloud = ex.submit(_cloud_leg)
+        f_local = ex.submit(_local_leg)
+        try:
+            chunks = f_cloud.result(timeout=12) or []
+        except Exception:
             chunks = []
+        try:
+            local_text, local_refs = f_local.result(timeout=12)
+        except Exception:
+            local_text, local_refs = "", []
+
     if chunks:
         used = 0
         lines: list[str] = []
@@ -201,14 +224,18 @@ def retrieve_knowledge_v2(prompt: str, username: str = "") -> tuple[str, list[di
                 break
             lines.append(f"〔资料{i + 1}·《{c['doc_name']}》·相关度{c['score']}〕\n{text}")
             used += len(text)
-            references.append({"doc_name": c["doc_name"], "score": c["score"], "title": c["title"]})
+            references.append({"doc_name": c["doc_name"], "score": c["score"],
+                               "title": c["title"], "source": "cloud"})
         if lines:
             parts.append("【知识库参考资料】\n\n" + "\n\n".join(lines))
 
-    # 2. 本地试题库 + 课程大纲（补充/降级用；云端命中足够时跳过——LIKE 查询是主要耗时）
-    if len(references) >= _CLOUD_ENOUGH:
-        logger.debug(f"[RAG] 云端命中 {len(references)} 条，跳过本地 LIKE 检索")
-    else:
+    if len(references) < _CLOUD_ENOUGH:
+        if local_text:
+            parts.append(local_text)
+            references.extend(local_refs)
+        logger.info(f"[RAG] 云端 {len(chunks)} 条 → 本地知识库补充 {len(local_refs)} 条")
+
+    if len(references) < _CLOUD_ENOUGH:
         local_parts: list[str] = []
         questions = _search_questions(prompt)
         if questions:
@@ -219,5 +246,5 @@ def retrieve_knowledge_v2(prompt: str, username: str = "") -> tuple[str, list[di
         if local_parts:
             parts.append(("\n\n".join(local_parts))[:_LOCAL_BUDGET])
 
-    context = "\n\n".join(parts)[:_CLOUD_BUDGET + _LOCAL_BUDGET + 200]
+    context = "\n\n".join(parts)[:_CLOUD_BUDGET + _LOCAL_BUDGET + 3200]
     return context, references

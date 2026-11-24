@@ -195,9 +195,6 @@
   "deleteFailed": "删除失败",
   "operationFailed": "e?.response?.data?.detail || e?.message || 保存失败",
   "Failed": "刷新失败",
-  "useAgent": "智能体",
-  "useAgentTip": "连接智能体应用",
-  "useAgentDisabledTip": "未配置APPID，仅支持直连大模型",
   "directModel": "直连大模型",
   "status": {
     "draft": "草稿",
@@ -216,11 +213,9 @@
   "ragTipNotReady": "云端知识库未就绪：{{reason}}",
   "ragTipNotReadyDefault": "请在「系统配置 → 知识库检索」完成配置",
   "refSources": "引用来源",
-  "useAgentTakenOverTip": "知识库模式已接管智能体服务：原智能体调用统一改走「直连 + 知识库」",
   "modeLlm": "大模型",
-  "modeAgent": "智能体",
   "modeKb": "知识库",
-  "modeBadgeTip": "AI 对话链路由系统配置决定（优先级：知识库 > 智能体 > 大模型）。直连大模型时，徽章会标明实际引擎：云端模型＝百炼；本地模型＝Ollama 全本地应答；本地优先＝混合档，本地应答、故障自动回落云端。教师/管理员可在「系统配置 → AI 能力」调整",
+  "modeBadgeTip": "AI 对话链路由系统配置决定（优先级：云端知识库 → 本地文库 → 大模型）。直连大模型时，徽章会标明实际引擎：云端模型＝百炼；本地模型＝Ollama 全本地应答；本地优先＝混合档，本地应答、故障自动回落云端。教师/管理员可在「系统配置 → AI 能力」调整",
   "pageTitle": "知识问答",
   "historyRangeAll": "全部",
   "historyRangeToday": "今天",
@@ -245,5 +240,8 @@
   "historyYearLabel": "{{year}} 年",
   "modeLlmCloud": "云端模型",
   "modeLlmLocal": "本地模型",
-  "modeLlmHybrid": "本地优先"
+  "modeLlmHybrid": "本地优先",
+  "modeLocalKb": "本地知识库",
+  "refLocal": "本地",
+  "refCloud": "云端"
 }

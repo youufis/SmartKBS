@@ -46,6 +46,7 @@ const BriefingPage = lazy(() => import('./pages/BriefingPage'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const HtmlFilesPage = lazy(() => import('./pages/HtmlFilesPage'))
 const ResourceMgmtPage = lazy(() => import('./pages/ResourceMgmtPage'))
+const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'))
 const DownloadsPage = lazy(() => import('./pages/DownloadsPage'))
 const UserMgmtPage = lazy(() => import('./pages/UserMgmtPage'))
 const TaskPage = lazy(() => import('./pages/TaskPage'))
@@ -173,6 +174,7 @@ function App() {
             <Route path="chat" element={<ChatPage />} />
             <Route path="html-files" element={<HtmlFilesPage />} />
             <Route path="shared-center" element={<SharedCenterPage />} />
+            <Route path="knowledge-base" element={(user?.role === 'admin' || user?.role === 'teacher') ? <KnowledgeBasePage /> : <Navigate to="/chat" />} />
             <Route path="resource-mgmt" element={user?.role === 'admin' || user?.role === 'teacher' ? <ResourceMgmtPage /> : <Navigate to="/chat" />} />
             <Route path="downloads" element={<DownloadsPage />} />
             <Route path="user-mgmt" element={<UserMgmtPage />} />

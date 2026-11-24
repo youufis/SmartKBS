@@ -168,7 +168,7 @@ class AiGeneratePoll(BaseModel):
 # ── AI 辅助函数 ──
 
 def _call_ai(prompt: str) -> str:
-    """调用 AI（非流式）- 支持智能体/直接调大模型双模式"""
+    """调用 AI（非流式）- 检索增强 + 直连生成"""
     from backend.api.chat_router import get_api_keys
     api_key, _ = get_api_keys("")
     if not api_key:

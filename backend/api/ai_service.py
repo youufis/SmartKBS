@@ -1,8 +1,8 @@
 """
-AI 服务封装：根据是否配置 APPID 自动选择调用模式
+AI 服务封装：统一调用服务
 
-- 配置了 APPID → 调用百炼平台智能体应用 (DashScopeApp.call)
-- 未配置 APPID → 直接调用大模型 (OpenAI 兼容接口 /chat/completions)
+固定优先级：云端百炼知识库 → 本地文库 → 直接调用大模型
+（生成步骤统一走 OpenAI 兼容接口 /chat/completions）
 """
 import json
 import os
@@ -333,32 +333,31 @@ _ai_thread_pool = _LazyAiPool()
 
 
 def get_ai_config(use_agent: bool = True):
-    """获取 AI 调用配置
+    """获取 AI 调用配置（智能体链路已移除）
 
-    Args:
-        use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
+    固定优先级：云端百炼知识库 → 本地文库 → 直连大模型。
+    use_agent=False 仅表示「本次不做知识库接管」（数据类任务强制直连），
+    字段名保留是为了兼容既有调用点。
     """
     from backend.api.config_router import get_config_value
-    # AI_MODE=local：智能体应用与百炼知识库接管都要出网，本地模式下一律旁路，
-    # 强制走直连（实际地址在 transport 层由 llm_provider 改写成 Ollama）。
-    if llm_provider.ai_mode() == "local":
-        use_agent = False
+    mode = llm_provider.ai_mode()
     if use_agent:
-        # V6.8 知识库接管：检索链路就绪时，原本走 APPID 智能体的全部 AI 业务
-        # 统一改走「直连 + 知识库检索」（接管语义与原智能体一致：自带知识库）。
-        # KB 未启用/配置不全 → 照旧走智能体；use_agent=False → 永远纯直连。
+        # 1) 云端百炼知识库（local 模式承诺不出网，旁路）
+        if mode != "local":
+            try:
+                from backend import bailian_kb
+                kb_ok, _ = bailian_kb.kb_ready()
+            except Exception:
+                kb_ok = False
+            if kb_ok:
+                return {"mode": "kb_direct"}
+        # 2) 本地文库（不出网，local 模式同样可用）
         try:
-            from backend import bailian_kb
-            kb_ok, _ = bailian_kb.kb_ready()
+            from backend import local_kb
+            if local_kb.ready():
+                return {"mode": "kb_local"}
         except Exception:
-            kb_ok = False
-        if kb_ok:
-            return {"mode": "kb_direct"}
-    app_id = get_config_value("APPID", "")
-    # V6.9 智能体启用闸门：填了 APPID 且勾选 AGENT_ENABLED 才算启用；
-    # 知识库就绪时已在上方被 kb_direct 接管（优先级：知识库 > 智能体 > 大模型）
-    if app_id and use_agent and bool(get_config_value("AGENT_ENABLED", True)):
-        return {"mode": "agent", "app_id": app_id}
+            pass
     return {
         "mode": "direct",
         "model": get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL),
@@ -398,12 +397,6 @@ def _user_pair(content: str, system: Optional[str] = None, array: bool = False) 
     msgs.append({"role": "user", "content": user_content})
     return msgs
 
-
-def is_appid_configured() -> bool:
-    """检查是否配置了 APPID（智能体应用 ID）"""
-    from backend.api.config_router import get_config_value
-    app_id = get_config_value("APPID", "")
-    return bool(app_id)
 
 
 # ── V6.8 「直连 + 知识库」接管：统一注入点 ──
@@ -466,7 +459,12 @@ def _augment_with_kb(prompt: str, kb_query: str = "") -> str:
     if not context:
         return prompt
     # 注入头按实际来源措辞：云端命中用「知识库资料」头，纯本地兜底用通用头
-    head = _KB_INJECT_HEAD if "【知识库参考资料】" in context else _KB_INJECT_HEAD_LOCAL
+    if "【知识库参考资料】" in context:
+        head = _KB_INJECT_HEAD
+    elif "【本地知识库资料】" in context:
+        head = "【本地知识库资料】以下内容检索自本校知识库，请优先依据其作答；与任务无关时忽略。\n\n"
+    else:
+        head = _KB_INJECT_HEAD_LOCAL
     return f"{head}{context}\n\n———\n【当前任务】\n{prompt}"
 
 
@@ -487,8 +485,11 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
     if (api_key or "").strip() and not llm_provider.is_placeholder_key(api_key):
         os.environ["DASHSCOPE_API_KEY"] = api_key
 
-    if cfg["mode"] == "agent":
-        return _call_agent_sync(prompt, api_key, cfg["app_id"])
+    if cfg["mode"] == "kb_local":
+        prompt = _augment_with_kb(prompt, kb_query)
+        d = get_ai_config(use_agent=False)
+        return _call_model_sync(prompt, api_key, d["model"], d["api_base"], history=history,
+                                max_tokens=max_tokens, enable_thinking=False, json_mode=json_mode)
     elif cfg["mode"] == "kb_direct":
         prompt = _augment_with_kb(prompt, kb_query)
         d = get_ai_config(use_agent=False)
@@ -564,52 +565,6 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: Optional
             logger.error(f"AI 请求失败: {e}")
         raise
 
-
-def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
-    """调用百炼智能体应用（同步）"""
-    from dashscope import Application as DashScopeApp
-    try:
-        messages = [{"role": "user", "content": prompt}]
-        response = DashScopeApp.call(
-            app_id=app_id,
-            messages=messages,
-            stream=False,
-            headers={"X-DashScope-OssResourceResolve": "enable"},
-        )
-        # 尝试多种方式提取响应文本
-        text = None
-        output = getattr(response, "output", None)
-        if output is not None:
-            if isinstance(output, str):
-                text = output
-            elif hasattr(output, "get"):
-                text = output.get("text", None) or getattr(output, "text", None)
-            else:
-                text = getattr(output, "text", None)
-        if not text:
-            try:
-                text = getattr(response, "text", None)
-            except (KeyError, AttributeError, TypeError):
-                pass
-        if not text:
-            try:
-                if isinstance(response, dict):
-                    out = response.get("output", {})
-                    if isinstance(out, dict):
-                        text = out.get("text", "")
-            except (KeyError, TypeError):
-                pass
-        if text:
-            return str(text)
-        logger.warning(f"智能体返回为空，降级到直接调模型 (app_id={app_id})")
-    except Exception as e:
-        logger.warning(f"智能体调用失败 (app_id={app_id}): {e}，降级到直接调模型")
-
-    # 降级：直接调大模型
-    from backend.api.config_router import get_config_value
-    model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
-    api_base = ai_api_base()
-    return _call_model_sync(prompt, api_key, model, api_base)
 
 
 def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
@@ -692,7 +647,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
 def call_ai_sync_direct(prompt: str, api_key: str,
                         enable_thinking: Optional[bool] = None,
                         json_mode: bool = False) -> str:
-    """强制直接调用大模型（绕过智能体），用于知识闯关等不需要 APPID 的场景
+    """强制直接调用大模型（不做知识库接管），用于知识闯关等数据驱动场景
 
     enable_thinking=False 可关闭思考链 —— 摘要、简报、改写这类无需推理的任务能省 10 倍等待。
     """
@@ -718,7 +673,7 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
     """流式调用 AI，返回 (text_generator, get_session_id)
 
     Args:
-        use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
+        use_agent: 是否允许知识库接管。True=按链路检索（云端→本地）；False=强制直连
     """
     cfg = get_ai_config(use_agent=use_agent)
     if not use_kb:
@@ -726,11 +681,12 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
     if (api_key or "").strip() and not llm_provider.is_placeholder_key(api_key):
         os.environ["DASHSCOPE_API_KEY"] = api_key
 
-    if cfg["mode"] == "agent":
-        # 百炼智能体应用的 messages 只收 user 轮，独立 system 送不进去 → 身份段内联到问题前
-        if system:
-            prompt = f"{system}\n\n【用户的问题】\n{prompt}"
-        return _call_agent_stream(prompt, api_key, cfg["app_id"], session_id)
+    if cfg["mode"] == "kb_local":
+        prompt = _augment_with_kb(prompt, kb_query)
+        d = get_ai_config(use_agent=False)
+        return _call_model_stream(prompt, api_key, d["model"], d["api_base"], history=history,
+                                  enable_thinking=False if enable_thinking is None else enable_thinking,
+                                  system=system, max_tokens=max_tokens)
     elif cfg["mode"] == "kb_direct":
         prompt = _augment_with_kb(prompt, kb_query)
         d = get_ai_config(use_agent=False)
@@ -742,53 +698,6 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
                                   enable_thinking=False if not use_kb else enable_thinking,
                                   system=system, max_tokens=max_tokens)
 
-
-def _call_agent_stream(prompt: str, api_key: str, app_id: str,
-                       session_id: Optional[str] = None):
-    """调用百炼智能体应用（流式），返回生成器，yield {"text": str, "session_id": str}"""
-    from dashscope import Application as DashScopeApp
-    messages = [{"role": "user", "content": prompt}]
-    call_params = {
-        "app_id": app_id,
-        "messages": messages,
-        "stream": True,
-        "incremental_output": True,
-        "headers": {"X-DashScope-OssResourceResolve": "enable"},
-    }
-    if session_id:
-        call_params["session_id"] = session_id
-
-    try:
-        response = DashScopeApp.call(**call_params)
-        new_session_id = session_id
-        has_output = False
-        accumulated_text = ""
-        for chunk in response:
-            output = getattr(chunk, "output", None)
-            if output:
-                sid = getattr(output, "session_id", None)
-                if sid:
-                    new_session_id = sid
-                text = getattr(output, "text", None)
-                if text:
-                    has_output = True
-                    accumulated_text += text
-                    yield {"text": accumulated_text, "session_id": new_session_id}
-        # 智能体返回空文本时降级
-        if not has_output:
-            logger.warning(f"智能体流式返回为空，降级到直接调模型 (app_id={app_id})")
-            from backend.api.config_router import get_config_value
-            model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
-            api_base = ai_api_base()
-            for chunk in _call_model_stream(prompt, api_key, model, api_base):
-                yield chunk
-    except Exception as e:
-        logger.error(f"智能体流式调用失败: {e}，降级到直接调模型")
-        from backend.api.config_router import get_config_value
-        model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
-        api_base = ai_api_base()
-        for chunk in _call_model_stream(prompt, api_key, model, api_base):
-            yield chunk
 
 
 def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
@@ -891,9 +800,7 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
         cfg = get_ai_config(use_agent=False)
     if (api_key or "").strip() and not llm_provider.is_placeholder_key(api_key):
         os.environ["DASHSCOPE_API_KEY"] = api_key
-    if cfg["mode"] == "agent":
-        return await _call_agent_async(prompt, api_key, cfg["app_id"])
-    elif cfg["mode"] == "kb_direct":
+    if cfg["mode"] == "kb_direct":
         import asyncio
         loop = asyncio.get_running_loop()
         prompt = await loop.run_in_executor(_ai_thread_pool, _augment_with_kb, prompt, kb_query)
@@ -906,26 +813,6 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
                                        max_tokens=max_tokens, json_mode=json_mode,
                                        enable_thinking=False if not use_kb else None)
 
-
-async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
-    """调用百炼智能体应用（使用 DashScope SDK，与同步版一致）"""
-    import asyncio
-    import concurrent.futures
-
-    loop = asyncio.get_event_loop()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    try:
-        return await loop.run_in_executor(
-            executor, _call_agent_sync, prompt, api_key, app_id
-        )
-    except Exception as e:
-        logger.error(f"智能体异步调用失败 (app_id={app_id}): {e}，降级到直接调模型")
-        from backend.api.config_router import get_config_value
-        model = get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL)
-        api_base = ai_api_base()
-        return await _call_model_async(prompt, api_key, model, api_base)
-    finally:
-        executor.shutdown(wait=False)
 
 
 async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str,
