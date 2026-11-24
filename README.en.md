@@ -4,7 +4,7 @@
 >
 > **An AI-powered smart teaching platform for primary, junior secondary and senior secondary schools** — subjects, grades and classes are all configuration-driven, **with no subject hard-coded anywhere**.
 >
-> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 51 feature areas and 60+ capabilities:
+> It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 52 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry / id link) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
@@ -39,14 +39,14 @@
 >
 > - 📚 **Local library**: standalone knowledge-base module (upload / folders / trash; keyword + vector hybrid retrieval)
 > - 🔌 **Vector channel**: cloud or local models, cloud by default; switch prompt, dimension validation, optional dual channel
-> - 🔗 **AI chain**: agent app removed; fixed as cloud KB → local library → LLM
+> - 🔗 **AI chain**: fixed as cloud KB → local library → LLM
 > - 🧠 **Retrieval everywhere**: question authoring, lesson prep and whiteboard all use the same retrieval funnel
 > - 🛡 **Backup & restore**: local library included in backups; vectors verified after restore
 > - ✅ **Quality**: unit/integration tests and type checks
 >
-> - ⚠️ **Breaking changes**: Bailian agent application (APPID) chain removed
+> - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is enabled by default — upload materials under Local Library first; for a fully offline setup switch the vector channel to local and install Ollama + bge-m3; agent-app settings are gone from the UI.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is enabled by default — upload materials under Local Library first; for a fully offline setup switch the vector channel to local and install Ollama + bge-m3.
 
 ---
 
@@ -66,7 +66,7 @@ AI capabilities go through a single invocation service, taken over by priority a
 2. **Local library (priority 2)** — standalone knowledge-base module: Chroma vectors + FTS keywords, cloud or local embedding models; supplements when the cloud is unavailable or misses
 3. **Direct model invocation** — the fallback path, compatible with DashScope and DeepSeek
 
-**Dual engine**: the generation step can run on the cloud (DashScope / DeepSeek) or a local Ollama engine, switched across cloud / hybrid / local tiers; cloud KB retrieval stays on Bailian, while the local library can use cloud or local embeddings (capability matrix in System Settings). The Bailian agent application (APPID) chain has been removed.
+**Dual engine**: the generation step can run on the cloud (DashScope / DeepSeek) or a local Ollama engine, switched across cloud / hybrid / local tiers; cloud KB retrieval stays on Bailian, while the local library can use cloud or local embeddings (capability matrix in System Settings).
 
 Conversations and their attachments share one lifetime: images and documents uploaded with a question are archived together with it, so reopening a history entry still shows the original image and the file stays downloadable. Attachments are visible to their owner only, and both capacity and idle recycling are managed from System Configuration.
 
@@ -92,7 +92,7 @@ Conversations and their attachments share one lifetime: images and documents upl
 | 👥 Three roles, each with its own AI | Students get a companion, teachers get an assistant, admins get global control — without interfering with each other |
 | 🏆 Gamified motivation | 12-level titles + achievement badges + an automatic points engine replace external pressure with steady positive feedback |
 | 🌐 Configuration-driven, subject-agnostic | Changing subject means editing configuration and prompt templates, never code |
-| 🔒 Local-first | Two SQLite databases plus local directories; runs fully offline, AI goes through endpoints reachable from China, pip mirrors available, student data never leaves the school |
+| 🔒 Local-first | Three SQLite databases plus local directories; runs fully offline, AI goes through endpoints reachable from China, pip mirrors available, student data never leaves the school |
 | 📱 Zero-install multi-device | Works in a phone browser with no app and no extra deployment |
 | 🖥️ One-click desktop edition | Electron shell with bundled backend and frontend, so the target machine needs no Python / Node.js |
 | ⬆️ Online incremental upgrade | Git deployments upgrade in place: fetch, migrate, install dependencies, restart — with automatic rollback on failure |
@@ -1143,7 +1143,7 @@ Centralized management of all system configuration parameters:
 
 - **🏷️ Brand Info**: Platform version name, organization name
 - **🔑 API Keys**: DashScope API Key
-- **🤖 Model Configuration**: APPID, API address, default chat model, long-text model, vision model, multimodal switch (all chosen from dropdowns)
+- **🤖 Model Configuration**: API key, API address, default chat model, long-text model, vision model, multimodal switch (all chosen from dropdowns)
 - **🖥️ AI Engines**: cloud / hybrid / local tiers (Ollama), live model list with auto-probe on entry, capability matrix notes
 - **📊 Teaching Briefing**: weekly/month/yearly auto-generation (all off by default), in-app notice, school-year basis — a single global policy, no longer set per teacher
 - **💬 AI Chat Settings**: Chat permission roles, daily request quota (switch plus limit)
@@ -1241,7 +1241,7 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 
 - 📚 **Local library**: standalone KB module (upload / folders / trash / batch management) with keyword + vector hybrid retrieval
 - 🔌 **Vector channel**: cloud or local models, cloud by default, dual channel off by default; switch prompt and dimension validation
-- 🔗 **AI chain**: Bailian agent app (APPID) removed; fixed as cloud KB → local library → LLM
+- 🔗 **AI chain**: unified as cloud KB → local library → LLM
 - 🧠 **Retrieval everywhere**: authoring, lesson prep and whiteboard use one retrieval funnel; vectors verified after restore
 - 🛡 **Ops & backup**: local library included in full backups; index rebuildable and health visible
 - ✅ **Quality**: unit/integration tests and type checks
@@ -1385,7 +1385,7 @@ The dev server runs on `http://localhost:5173` and proxies API calls to the back
 
 ### Step 4: configure the AI service
 
-Open System Configuration and enter your DashScope API Key (plus the optional knowledge base / agent application and DeepSeek keys). The page lists candidate models and ships with connectivity self-tests, so you know right away whether a setting works.
+Open System Configuration and enter your DashScope API Key (plus the optional knowledge base and DeepSeek keys). The page lists candidate models and ships with connectivity self-tests, so you know right away whether a setting works.
 
 With no AI service configured, the core flows — question bank, exams, roll call, resources, points — still work; AI entry points simply explain what is missing.
 
@@ -1571,10 +1571,10 @@ SmartKBS/
 | Whiteboard engine | tldraw 5 |
 | State and routing | Zustand · React Router 7 |
 | Internationalisation | i18next (whole UI switchable zh/en, messages on both sides) |
-| Database | Two SQLite files (business + question bank), no external database |
+| Database | Three SQLite files (business + question bank + local library), no external database |
 | Auth | JWT (bcrypt + PyJWT), token versioning for single sign-on |
 | AI models | Qwen via DashScope · DeepSeek |
-| AI invocation modes | knowledge-base RAG / Bailian agent app / direct model, taken over by priority with step-down fallback |
+| AI invocation modes | cloud KB / local library / direct model, taken over by priority with step-down fallback |
 | Image generation | Wanxiang (wanx2.1 / wanx2.2) |
 | Speech synthesis | DashScope TTS (roll-call voice, optional) |
 | Streaming and realtime | Server-Sent Events (AI streams) · WebSocket (whiteboard / discussions / buzzer) |
@@ -1610,7 +1610,7 @@ Copyright © 2026 youufis (UNET)
 ## FAQ
 
 - **I forgot my password.** If security questions were set, use "Forgot password" on the login page; otherwise ask an administrator to reset it in User Management.
-- **The AI chat does not answer.** Confirm the API key is filled in and funded under System Configuration, then run the built-in connectivity self-test — it tells you whether the model, the knowledge base or the agent application is at fault.
+- **The AI chat does not answer.** Confirm the API key is filled in and funded under System Configuration, then run the built-in connectivity self-test — it tells you whether the model or the knowledge base is at fault.
 - **Uploads fail.** Documents are capped at 10 MB and images at 5 MB (the image cap is configurable), and the extension plus content whitelist must match.
 - **The companion or the assistant will not open.** The companion is student-only, the assistant is teacher/admin-only. A teacher also needs a grade and class scope set in User Management, otherwise the assistant has no teaching range to work with.
 - **The exam will not submit.** Check that the current time is inside the exam window and that attempts remain. If a teacher is refused while editing questions, that is the in-flight answer lock protecting students who are still writing.
