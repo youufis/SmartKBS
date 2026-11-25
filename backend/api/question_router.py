@@ -43,11 +43,12 @@ from backend.question_media import (
     restore_bank_dir,
     media_columns_for_insert,
     media_summary,
+    resolve_svg,
     normalize_media_files,
     resolve_media_path,
     url_for,
 )
-from backend.svg_safety import extract_svg, is_usable_svg, sanitize_svg
+from backend.svg_safety import extract_svg
 from backend.subject_config import get_default_subject, require_subject
 
 # 复用聊天模块的 API Key 获取函数
@@ -227,11 +228,20 @@ async def import_question(req: ImportQuestion, request: Request):
 
     # 处理配图字段（外部导入按不可信输入处理：SVG 清洗、占位符与清单规整）
     # 导入不限占位符数量（教师可能一次搬 3 个描述进来），只有"自动生图"才受上限约束
+    _import_notes: list[str] = []
     svg_content, has_svg_computed, media_placeholders_str = _media_columns(
-        {"svg_code": req.svg_content, "media_placeholders": req.media_placeholders},
+        {"svg_code": req.svg_content, "media_placeholders": req.media_placeholders,
+         "question": req.question_text, "options": req.options,
+         "answer": req.correct_answer},
         placeholder_limit=0,
+        notes=_import_notes,
     )
-    has_svg = req.has_svg if req.has_svg else has_svg_computed
+    for _note in _import_notes:
+        logger.info("导入配图处理: %s", _note)
+    # has_svg 的含义是"svg_content 里有可用图"，所以只能跟着内容走。
+    # 原先写成 req.has_svg or computed：图被质量闸拦下后 req.has_svg 仍是 1，
+    # 于是库里出现 has_svg=1 + svg_content='' —— 正是"提示有图、渲染出来是空白"那一类。
+    has_svg = 1 if svg_content else 0
     media_files_list = normalize_media_files(req.media_files)
     media_files_str = dump_json(media_files_list) if media_files_list else ""
 
@@ -384,9 +394,16 @@ def _hydrate_media_state(row: dict[str, Any]) -> None:
         ph["status"] = status
 
 
-def _media_columns(q_data: dict[str, Any], placeholder_limit: int | None = 2) -> tuple[str, int, str]:
-    """配图字段入库前的统一清洗与规整（实现见 backend.question_media）"""
-    return media_columns_for_insert(q_data, placeholder_limit=placeholder_limit)
+def _media_columns(q_data: dict[str, Any], placeholder_limit: int | None = 2,
+                   notes: list[str] | None = None, *,
+                   strict: bool = False) -> tuple[str, int, str]:
+    """配图字段入库前的统一清洗、质量闸与规整（实现见 backend.question_media.resolve_svg）
+
+    strict 默认 False：这个入口是教师导入/粘贴，图是他自己给的，只能提示不能丢弃；
+    AI 批量出题那条走 question_factory，用的是默认的严格口径。
+    """
+    return media_columns_for_insert(q_data, placeholder_limit=placeholder_limit,
+                                    notes=notes, strict=strict)
 
 
 def _question_media_rows(row) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -3155,7 +3172,7 @@ async def _apply_generate_svg(question_id: int, username: str, role: int) -> dic
     有 7 份各写各的实现，才出现状态不回写、清洗不一致这类问题。
     """
     from backend.ai_task_manager import report_progress
-    from backend.prompts.chat import SVG_GENERATE_PROMPT
+    from backend.prompts.chat import SVG_GENERATE_SPEC_PROMPT
 
     report_progress(phase="svg", message="AI 正在绘制 SVG 图示")
     row = await _verify_question_owner(question_id, username, role)
@@ -3164,7 +3181,7 @@ async def _apply_generate_svg(question_id: int, username: str, role: int) -> dic
     if not api_key:
         raise HTTPException(status_code=400, detail="API Key 未配置")
 
-    prompt = SVG_GENERATE_PROMPT.format(
+    prompt = SVG_GENERATE_SPEC_PROMPT.format(
         description=row["question_text"],
         subject=row["subject"]
     )
@@ -3178,13 +3195,55 @@ async def _apply_generate_svg(question_id: int, username: str, role: int) -> dic
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成 SVG 失败: {str(e)}")
 
-    svg_code = _extract_svg_code(result)
+    # 模型现在优先返回 figure_spec（数学语义），像素由后端算；只有画不了的图
+    # （电路图/流程图等）才回 svg_code。两条路最后都过 resolve_svg 这同一道闸，
+    # 于是"重新生成"和"批量出题"的验收口径完全一致 —— 不会出现批量出的题被拦、
+    # 手工重生成的同一张错图却入库了。
+    from backend.ai_json import try_parse
+
+    payload = try_parse(result)
+    if isinstance(payload, dict) and ("figure_spec" in payload or "svg_code" in payload):
+        figure_spec = payload.get("figure_spec")
+        hand_drawn = payload.get("svg_code")
+    else:
+        figure_spec = None
+        hand_drawn = extract_svg(result)      # 老写法：直接回一段 SVG
+
+    try:
+        options = json.loads(row["options"]) if row["options"] else {}
+    except (TypeError, ValueError):
+        options = {}
+
+    notes: list[str] = []
+    svg_code = resolve_svg({
+        "figure_spec": figure_spec,
+        "svg_code": hand_drawn,
+        "question": row["question_text"],
+        "options": options if isinstance(options, dict) else {},
+        "answer": row["correct_answer"] or "",
+    }, notes=notes)
+    for note in notes:
+        logger.info("qid=%s 配图处理: %s", question_id, note)
+
     if not svg_code:
-        logger.warning(f"SVG 生成结果不可用 (qid={question_id}): {str(result)[:160]}")
-        raise HTTPException(
-            status_code=502,
-            detail="AI 返回的内容不是可渲染的 SVG（可能被包裹成 JSON 或被截断），请重试一次",
-        )
+        reason = next((n for n in notes if "拒收" in n or "未生成" in n), "")
+        logger.warning(f"SVG 生成结果不可用 (qid={question_id}): "
+                       f"{reason or str(result)[:160]}")
+        if not reason:
+            raise HTTPException(status_code=502,
+                                detail="AI 返回的内容不是可渲染的 SVG（可能被包裹成 JSON "
+                                       "或被截断），请重试一次")
+        from backend.figure_svg import classify_problems
+        body = reason.replace("配图被拒收：", "").replace("配图未生成：", "")
+        # 只有"题目数据/答案键本身矛盾"才该让老师去改题；模型表达失败让他重试。
+        # 混着说会把对的题改坏 —— 这是上一轮跨学科实测里真实出现过的误导。
+        hints = {"data_conflict": "。这是题干条件与答案键互相矛盾，请先核对题目数据",
+                 "model_failure": "。题目数据本身没这个问题，多半是模型没表达出来，"
+                                  "请重试一次或改用「万相生图」",
+                 "unknown": "。可重试一次，仍不行请改用「万相生图」或上传图片"}
+        head = "配图与题目矛盾：" if classify_problems([body]) == "data_conflict" \
+            else "配图未能生成："
+        raise HTTPException(status_code=422, detail=head + body + hints[classify_problems([body])])
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update(
@@ -3219,12 +3278,6 @@ async def generate_svg_for_question_async(question_id: int, request: Request):
     )
     return {"task_id": task_id, "message": "SVG 配图生成中，请稍候...",
             "poll_url": f"/api/interaction/ai-task/{task_id}"}
-
-
-def _extract_svg_code(text: str) -> str:
-    """从 AI 返回文本中提取并清洗 SVG（安全规则见 backend.svg_safety）"""
-    svg_code = sanitize_svg(extract_svg(text))
-    return svg_code if is_usable_svg(svg_code) else ""
 
 
 async def _apply_generate_media(question_id: int, placeholder_key: str,

@@ -291,6 +291,9 @@ def _normalize_client_question(item: dict[str, Any]) -> dict[str, Any]:
         "explanation": item.get("explanation") or "",
         "source": item.get("_source") or "bank",
         "svg_content": svg_content,
+        # 把 figure_spec 一并带过去：AI 题如果只给了结构化规格而没有 svg_code，
+        # 这里丢掉就等于"进闸时既没图也没规格"，只能报"未生成"。
+        "figure_spec": item.get("figure_spec"),
         "has_svg": int(has_svg or 0),
         "media_files": media_files,
         "media_placeholders": item.get("media_placeholders") or "",

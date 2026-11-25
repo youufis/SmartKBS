@@ -38,19 +38,26 @@ QUESTION_GENERATE_WITH_MEDIA_PROMPT = """请根据以下要求生成试题，并
 
 # ── SVG 补图专用 Prompt ──
 
-SVG_GENERATE_PROMPT = """你是一位 SVG 绘图专家。请根据以下描述生成教学用 SVG 配图。
+# ── SVG 配图 Prompt ──
+#
+# 规则正文不在这里抄一份 —— 唯一真相是 backend.prompts.figure_rules（题库单题重生成、
+# 批量出题、课件配图三个消费方共用同一份，画布尺寸也由它锁定）。
+# 本模板本身要走 str.format()，所以嵌入的是**花括号已转义**的版本。
+from backend.prompts.figure_rules import SAFETY_NOTE, figure_rules_for_format
 
-描述：{description}
-学科：{subject}
-尺寸：600×400（viewBox="0 0 600 400"）
-要求：
-- 中文标注
-- 配色协调，主色 #1976D2
-- 适合课堂教学
-- 只输出 SVG 代码，不要 ```svg 标记
-- 如果是电路图，使用标准电路元件符号
-**⚠️ 安全约束（极其重要！）**：SVG 中禁止出现题目的答案、解析、解题过程、选项正误判断或任何泄露正确答案的文字和符号。只能绘制中性、客观的技术原理图示，不得标注正确/错误选项。
-"""
+SVG_GENERATE_SPEC_PROMPT = (
+    "你是一位教学配图设计师。请针对下面这道题，判断它需要什么配图，并按规则输出。\n"
+    "\n"
+    "题干：{description}\n"
+    "学科：{subject}\n"
+    "\n"
+    + figure_rules_for_format()
+    + "\n"
+    + SAFETY_NOTE + "\n"
+)
+
+# 旧的 SVG_GENERATE_PROMPT（让模型直接手写像素坐标）已于 2026-11-25 删除：
+# 它正是函数图像画错的根因，而且留着就是一个"绕过 figure_spec 与质量闸"的现成入口。
 
 
 # ── 图片生成 Prompt（透传给通义万相） ──

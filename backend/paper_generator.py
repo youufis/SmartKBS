@@ -605,8 +605,20 @@ def _prepare_svg(svg_content: str) -> str:
         return svg_content
     out = svg_content
     out = repair_dangling_markers(out)
-    if "$" in out:
-        out = re.sub(r">([^<>]*)<", lambda m: ">" + _svg_text_unlatex(m.group(1)) + "<", out)
+    if "$" in out or "\\" in out:
+        # 先走 backend.math_text 的**真排版**：$R_1$ → 带 dy 偏移的小号 tspan、
+        # $\frac{6}{x}$ → 分子/横线/分母三段。以前这里只有 _svg_text_unlatex，
+        # 它把 LaTeX 转成"可读的 Unicode 字符串"，能防乱码但画不出真正的上下标与
+        # 分数线（R₁ 在常见字体里还是豆腐块），所以是"不报错"而不是"排对了"。
+        # 两步顺序不能反：排版会新增 <text> 元素，必须赶在下面注入中文字体之前做完。
+        try:
+            from backend.math_text import mathify_svg
+            out, _n = mathify_svg(out)
+        except Exception as exc:                # noqa: BLE001 — 排版失败退回老路子，不能把整卷导出带崩
+            logger.warning("导出配图公式排版失败，回退 Unicode 转换: %s", exc)
+        # 残留兜底：<tspan> 内部等 mathify 不覆盖的写法，仍按老逻辑转成可读字符
+        if "$" in out:
+            out = re.sub(r">([^<>]*)<", lambda m: ">" + _svg_text_unlatex(m.group(1)) + "<", out)
     if _CJK_RE.search(out):
         fam = _svg_cjk_font()
         if fam:

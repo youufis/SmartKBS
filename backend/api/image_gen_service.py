@@ -651,23 +651,21 @@ async def generate_placeholders_batch(
 # SVG 生成 + HTML 配图增强（用于 AI 生成 HTML 资源）
 # ═══════════════════════════════════════════════════════════
 
-SVG_GENERATE_PROMPT = """你是一个专业的 SVG 教育图表设计师。请根据以下主题，生成一个纯 SVG 教育示意图。
+# 规则正文来自 backend.prompts.figure_rules —— 与题库、批量出题共用同一份，
+# 不再各写一套（历史上三处各写各的，改一处漏两处，画布尺寸还一个是 800×500）。
+from backend.prompts.figure_rules import SAFETY_NOTE, figure_rules_for_format
 
-## ◈ 主题
-{topic}
-
-## ◈ 用途
-{purpose}
-
-## ◈ 设计要求
-- 输出**纯 SVG 代码**，用 ```svg ... ``` 包裹，不要加任何解释
-- SVG 必须包含 viewBox，建议 viewBox="0 0 800 500"
-- 使用合适的颜色、标注文字（中文）、图例
-- 清晰展示知识点核心概念
-- 适合课堂教学展示，文字大小适中
-- 不要包含任何外部资源引用
-- 使用现代扁平化设计风格
-"""
+SVG_GENERATE_PROMPT = (
+    "你是一位教学配图设计师。请针对下面的主题判断需要什么示意图，并按规则输出。\n"
+    "\n"
+    "## ◈ 主题\n{topic}\n"
+    "\n"
+    "## ◈ 用途\n{purpose}\n"
+    "\n"
+    + figure_rules_for_format()
+    + "\n"
+    + SAFETY_NOTE + "\n"
+)
 
 
 async def generate_svg_via_ai(
@@ -683,24 +681,25 @@ async def generate_svg_via_ai(
         api_key: API Key
 
     Returns:
-        str: 安全 SVG 代码（含 <svg> 标签），失败返回 None
+        str: 模型原文（可能是 figure_spec 的 JSON，也可能是一段 SVG 或 JSON 里带
+             svg_code），失败返回 None。**不在这里提取 SVG** —— 见下方说明。
     """
     prompt = SVG_GENERATE_PROMPT.format(topic=topic, purpose=purpose)
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
-        from backend.svg_safety import is_usable_svg, sanitize_ai_svg_output
         result = await call_ai_sync_with_timeout(prompt, api_key, timeout=120)
         if not result:
             return None
 
-        svg_code = sanitize_ai_svg_output(result)
-        if not is_usable_svg(svg_code):
-            logger.warning(f"AI 返回内容未能提取或清洗出可用 SVG: {result[:100]}...")
-            return None
-
-        logger.info(f"SVG 生成成功: topic={topic}, purpose={purpose}, len={len(svg_code)}")
-        return svg_code
+        # 这里原本一进来就 sanitize_ai_svg_output(result) 提取 SVG，提取不到就 return
+        # None。改成 spec-first 之后这就是个致命 bug：函数图像类题目模型只回
+        # {"figure_spec": {...}}、**根本没有 <svg> 标签**，于是每次都被判"提取失败"
+        # 丢弃，课件链路刚接上的确定性渲染能力在这条路上等于没做
+        # （2026-11-25 对抗性自查发现）。现在把原文交给调用方，由 _generate_svg_item
+        # 统一解析 figure_spec / svg_code 并走 backend.question_media.resolve_svg。
+        logger.info(f"SVG 生成返回: topic={topic}, purpose={purpose}, len={len(result)}")
+        return result
     except TimeoutError:
         logger.warning(f"SVG 生成超时: topic={topic}")
         return None
@@ -980,7 +979,28 @@ async def _generate_svg_item(
     description = item.get("description", purpose)
     keywords = item.get("keywords", [])
 
-    svg_code = await generate_svg_via_ai(topic, description, api_key)
+    raw = await generate_svg_via_ai(topic, description, api_key)
+    if raw:
+        # 模型现在优先回 figure_spec：像素由后端确定性渲染，函数图像不可能画歪。
+        # 拿不到题面和选项，交叉验算只能退到"标注点必须在曲线上"这一条硬约束，
+        # 但那已经足以杜绝 y 轴没翻转、比例尺矛盾、开口方向反、曲线画到画布外这几类。
+        from backend.ai_json import try_parse
+        from backend.question_media import resolve_svg
+        from backend.svg_safety import extract_svg
+
+        parsed = try_parse(raw)
+        if isinstance(parsed, dict) and ("figure_spec" in parsed or "svg_code" in parsed):
+            figure_spec, hand_drawn = parsed.get("figure_spec"), parsed.get("svg_code")
+        else:
+            figure_spec, hand_drawn = None, extract_svg(raw)
+
+        _notes: list[str] = []
+        svg_code = resolve_svg({"figure_spec": figure_spec, "svg_code": hand_drawn,
+                                "question": topic}, notes=_notes)
+        for _n in _notes:
+            logger.info("课件配图处理: %s", _n)
+    else:
+        svg_code = ""
     if svg_code:
         return {
             "type": "svg",

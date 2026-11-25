@@ -7,7 +7,7 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 52 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry / id link) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry / id link), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -37,12 +37,13 @@
 
 > 📌 **Highlights of V9.3.0** (outline)
 >
+> - 📐 **Figure pipeline**: every generation entry point funnels through one quality gate
+> - 📊 **More figure types**: function graphs rendered deterministically; charts and geometry added
+> - 🖼 **Formulas inside figures**: real sub/superscripts and fractions, matched in paper and practice exports
+> - 🛡 **Figure screening**: off-canvas / degenerate / answer-leaking / raw-LaTeX figures blocked before saving
 > - 📚 **Local library**: standalone knowledge-base module (upload / folders / trash; keyword + vector hybrid retrieval)
-> - 🔌 **Vector channel**: cloud or local models, cloud by default; switch prompt, dimension validation, optional dual channel
-> - 🔗 **AI chain**: fixed as cloud KB → local library → LLM
-> - 🧠 **Retrieval everywhere**: question authoring, lesson prep and whiteboard all use the same retrieval funnel
-> - 🛡 **Backup & restore**: local library included in backups; vectors verified after restore
-> - ✅ **Quality**: unit/integration tests and type checks
+> - 🔗 **AI chain**: cloud KB → local library → LLM
+> - ✅ **Quality**: end-to-end regression across all pipelines plus static checks
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
@@ -125,7 +126,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management (generate / extract / manual entry / id link) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre, local library | 13 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management (generate / extract / manual entry / id link · deterministic figures) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre, local library | 13 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, teaching briefing, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 12 |
@@ -261,10 +262,11 @@ AI-powered smart question management system supporting manual entry, AI generati
 - **📋 Supported Types**: built-in types (single choice, multiple choice, true/false, short answer, fill-in-the-blank, essay, subjective) cannot be edited or removed; custom types follow the enabled list and are protected while active questions exist
 - **📐 Formula Support**: Full support for LaTeX formula ($...$) rendering display
 - **🖼️ Image System**:
-  - SVG drawing for technical diagrams
-  - Tongyi Wanxiang generates realistic images
-  - Supports image generation, preview, deletion, concurrent generation optimization
-  - Image placeholder management
+  - Parameterisable figures (function graphs / charts / geometry) are rendered deterministically by the backend
+  - Circuits, flowcharts and apparatus are drawn by AI and screened by the same gate
+  - Formulas inside figures are typeset (sub/superscripts, fractions), matched in paper and practice exports
+  - Off-canvas, degenerate, answer-leaking or raw-LaTeX figures are blocked before saving
+  - Tongyi Wanxiang for realistic images, placeholder management and concurrent generation
 - **📂 Question Bank Management**: filtering, search, edit, delete; sort by ID / difficulty / created; the list shows **subject** and **reference count** (how many exams or practices use it, visible before deleting); filters are written to the URL so refresh and sharing keep them; quality items in analytics (no explanation / no media / pending media) drill straight into the matching list; **multi-select bulk deletion** with the same rules as single delete (others' questions and ones in use are skipped with per-row reasons, 500 per call)
 - **🏷️ Tag maintenance**: filter by tag status to see only untagged questions (one definition across list, analytics and the header badge); dedupe and AI tagging live in the **Maintenance** menu
 - **🧹 Duplicate cleanup**: preview before executing; each group keeps the **most complete** copy (media / explanation / knowledge points first) and lists which IDs are kept or removed
@@ -1239,12 +1241,16 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.3.0
 
+- 📐 **Figure pipeline**: all six generation entry points (bank, quest, ladder, quiz, courseware, lesson cast) funnel through one quality gate
+- 📊 **More figure types**: function graphs now "model declares, backend draws"; charts (bar / line / combo / pie) and geometry added
+- 🖼 **Formulas inside figures**: real sub/superscripts and fractions, matched in Word/PDF and practice-page exports
+- 🛡 **Figure screening**: off-canvas, degenerate, answer-leaking and raw-LaTeX figures blocked; rejection reasons separate bad data from model failure
 - 📚 **Local library**: standalone KB module (upload / folders / trash / batch management) with keyword + vector hybrid retrieval
 - 🔌 **Vector channel**: cloud or local models, cloud by default, dual channel off by default; switch prompt and dimension validation
 - 🔗 **AI chain**: unified as cloud KB → local library → LLM
 - 🧠 **Retrieval everywhere**: authoring, lesson prep and whiteboard use one retrieval funnel; vectors verified after restore
 - 🛡 **Ops & backup**: local library included in full backups; index rebuildable and health visible
-- ✅ **Quality**: unit/integration tests and type checks
+- ✅ **Quality**: end-to-end regression across all pipelines plus static checks
 
 ### v7.x – v9.2.0
 

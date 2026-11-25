@@ -4048,6 +4048,13 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
         raw_svg = item.get("svg_code") or item.get("svg_content") or ""
         if raw_svg:
             safe_svg = sanitize_svg(raw_svg)
+            # 出口只做无损改进：公式排版。不在这里做几何体检/拒收 —— 这份页面里的
+            # 题可能来自历史数据，突然"图没了"比"图不标准"更像故障（入库闸只约束新图）。
+            try:
+                from backend.math_text import mathify_svg
+                safe_svg, _n = mathify_svg(safe_svg)
+            except Exception:                   # noqa: BLE001 — 排版失败就原样输出
+                pass
             item["svg_code"] = safe_svg if is_usable_svg(safe_svg) else ""
         if isinstance(item.get("media_files"), list):
             item["media_files"] = normalize_media_files(item["media_files"])

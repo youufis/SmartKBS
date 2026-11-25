@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from datetime import datetime
@@ -32,7 +33,10 @@ from pathlib import Path
 from typing import Any
 
 from backend.config import MEDIA_ROOT
+from backend.svg_safety import is_usable_svg, sanitize_svg
 from backend.utils import path_within
+
+logger = logging.getLogger(__name__)
 
 # ── 命名空间 ──
 SOURCE_BANK = "bank"            # question_bank
@@ -496,25 +500,261 @@ def plan_salvage(question_id: Any, raw_placeholders: Any, raw_media_files: Any,
     return out
 
 
+class _FigureRejected(Exception):
+    """内部信号：这张图不合格，不要入库。
+
+    只用来把"三个分支的失败"收敛成一条出口 —— 以前每个分支各自往 notes 里写
+    拒收原因、各自 return ""，于是同一个校验（清洗、公式排版、几何体检、可用性）
+    在三个分支里各写了一遍，改一处漏两处（刻度格式化、泄答案检查都漂移过）。
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _read_inputs(q_data: dict[str, Any]) -> dict[str, Any]:
+    """把 AI 返回的各种字段形状收敛成一份规范输入（绝不抛异常）"""
+    spec = q_data.get("figure_spec") or q_data.get("figure") or q_data.get("graph_spec")
+    if isinstance(spec, str) and spec.strip().startswith("{"):
+        # 模型有时把嵌套对象再序列化一次，figure_spec 到手是 JSON 字符串。
+        # 不解析就会被 isinstance(dict) 判掉，表现成"spec 明明给了却当没给"。
+        try:
+            spec = json.loads(spec)
+        except (TypeError, ValueError):
+            spec = None
+    raw_opts = q_data.get("options")
+    return {
+        "spec": spec if isinstance(spec, dict) else None,
+        "hand": str(q_data.get("svg_code") or q_data.get("svg_content") or ""),
+        "text": str(q_data.get("question") or q_data.get("question_text") or ""),
+        "options": raw_opts if isinstance(raw_opts, dict) else {},
+        "answer": str(q_data.get("answer") or q_data.get("correct_answer") or ""),
+    }
+
+
+def _is_shape_spec(spec: dict[str, Any]) -> bool:
+    """判断 spec 是统计图/几何图（而不是函数图像）
+
+    分派靠字段特征而不是强制 shape 键：模型经常不写 shape，但 series/categories
+    或 segments/relations 这些结构一定会给。有 functions 的不走这里 —— 那类还要
+    额外做题干条件与答案选项的交叉验算。
+    """
+    if spec.get("functions"):
+        return False
+    shape = str(spec.get("shape") or "").strip().lower()
+    if shape in ("stat", "chart", "statistics", "pie", "bar", "geometry", "figure", "geo"):
+        return True
+    if spec.get("series") or spec.get("categories"):
+        return True
+    if spec.get("points") and (spec.get("segments") or spec.get("polygons")
+                               or spec.get("relations") or spec.get("angles")
+                               or spec.get("circles") or spec.get("right_angles")):
+        return True
+    return False
+
+
+def _plan(inp: dict[str, Any]) -> str:
+    """定策：shape / function / hand / none。规则只在这里说一次。"""
+    spec, hand = inp["spec"], inp["hand"]
+    if spec is not None and _is_shape_spec(spec):
+        return "shape"
+    if spec is not None and (spec.get("functions") or []):
+        return "function"
+    if hand.strip():
+        return "hand"
+    if spec is not None:
+        # 只有点、没有函数也没有手绘 —— 是"图型不适用参数化"，不是图文矛盾。
+        # 报清楚，否则老师只看到"图没了"，完全不知道发生了什么。
+        raise _FigureRejected("figure_spec 未声明函数且没有 svg_code，"
+                              "该图型（几何/装置/结构等）暂不支持参数化渲染")
+    return "none"
+
+
+class _DrawFallbackToHand(Exception):
+    """渲染器不可用时退回手绘通道（不是"图不合格"，所以单独一个信号）"""
+
+
+def _draw_shape(spec: dict[str, Any]) -> str:
+    """统计图/几何图：柱高=数据、饼图角度=占比、几何关系逐条代入坐标验算"""
+    try:
+        from backend.figure_shapes import ShapeSpecError, render_shape
+    except Exception as exc:                    # noqa: BLE001 — 依赖坏了退回手绘通道
+        logger.warning("figure_shapes 不可用，退回手绘 SVG 通道: %s", exc)
+        raise _DrawFallbackToHand() from exc
+    try:
+        return render_shape(spec)
+    except ShapeSpecError as exc:
+        # 这是"图不合格"，不是"程序坏了"。让它冒到顶层兜底的话，老师看到的是
+        # "配图被拒收：处理异常 线段 引用了未定义的点 Z" —— 前半句把人引去查日志，
+        # 其实后半句才是他该改的东西。
+        raise _FigureRejected(str(exc)) from exc
+
+
+def _draw_function(inp: dict[str, Any], notes: list[str]) -> str:
+    """函数图像：先按题干条件与答案选项交叉验算（必要时自动重建），再确定性渲染"""
+    from backend.figure_svg import (FigureSpecError, render_figure, repair_spec,
+                                    verify_figure)
+    spec = inp["spec"]
+    problems = verify_figure(spec, question_text=inp["text"], options=inp["options"],
+                             correct_answer=inp["answer"])
+    if problems:
+        # 模型把解析式写歪、把答案写进标注，都是这类题的常见错法；而正确的图完全
+        # 能从题干+答案键推出来。先修，修不动（例如答案键本身与题干矛盾）才拒收 ——
+        # 直接拒收只会让老师对着空配图以为功能坏了。
+        repaired, action = repair_spec(spec, question_text=inp["text"],
+                                       options=inp["options"],
+                                       correct_answer=inp["answer"])
+        if repaired is not None:
+            # 提示直接写进 notes：以前塞进一个没人读的中转列表，
+            # 结果"图被自动改过"这件最重要的事反而没告诉老师
+            notes.append("配图已自动修正（%s）：%s" % (action, "；".join(problems[:1])))
+            spec = repaired
+        else:
+            raise _FigureRejected("；".join(problems[:3]))
+    try:
+        return render_figure(spec)
+    except FigureSpecError as exc:              # 同上：校验失败要说人话
+        raise _FigureRejected(str(exc)) from exc
+
+
+def _finish(svg: str, *, notes: list[str], strict: bool, inp: dict[str, Any],
+            origin: str = "配图里") -> str:
+    """统一收尾：清洗 → 公式排版 → 可用性 → 几何体检 → 处置策略
+
+    这一段是整条管线唯一的出口。所有分支的产物都必须经过这里，因此
+    "某条路忘了查泄答案"这类问题在结构上不可能再出现。
+    """
+    cleaned = sanitize_svg(svg)
+    try:
+        from backend.math_text import mathify_svg
+        cleaned, fixed = mathify_svg(cleaned)
+        if fixed:
+            notes.append("%s %d 处公式已自动排版" % (origin, fixed))
+    except Exception as exc:                    # noqa: BLE001 — 排版失败退回原样，不拦
+        logger.warning("配图公式排版异常: %s", exc)
+    if not is_usable_svg(cleaned):
+        raise _FigureRejected("渲染结果不是可渲染的 SVG（可能被截断或包在响应壳里）")
+    try:
+        from backend.svg_geometry import inspect_svg
+        hard, soft = inspect_svg(cleaned, options=inp["options"],
+                                 correct_answer=inp["answer"])
+    except Exception as exc:                    # noqa: BLE001 — 体检坏了不能牵连所有内容
+        # 上一版这里只兜 ImportError，其余异常冒到顶层兜底，结果是**连 strict=False
+        # 的教师粘贴图也一起丢掉** —— 一个体检 bug 就能让全题库的配图消失。
+        logger.error("SVG 几何体检内部错误: %s", exc, exc_info=True)
+        if strict:
+            # AI 产出的图按"宁缺勿错"处理：没检查过的图不进试卷，但原因要写清是
+            # 体检没跑成，而不是暗示图画错了。
+            raise _FigureRejected("配图体检未完成（内部错误），按宁缺勿错暂不入库") from exc
+        notes.append("配图体检未完成，已保留原图（不影响使用，但请人工核对）")
+        return cleaned
+
+    notes.extend(soft)
+    if hard:
+        if strict:
+            raise _FigureRejected("；".join(hard[:2]))
+        # 教师自己上传/粘贴的图不适用"宁缺勿错"：那是他已经认可的内容，
+        # 悄悄丢掉等于改功能行为。这里照样清洗与排版，只把问题作为提示返回。
+        notes.append("配图存在 %d 个问题（已保留，请核对）：" % len(hard)
+                     + "；".join(hard[:2]))
+    return cleaned
+
+
+def resolve_svg(q_data: dict[str, Any], notes: list[str] | None = None, *,
+                 strict: bool = True) -> str:
+    """AI 出题返回的配图字段 -> 可入库的 SVG；**不合格一律返回空串**（宁缺勿错）
+
+    单管线：``读入 -> 定策 -> 绘制 -> 统一收尾``。
+
+    三种绘制方式按可靠性排序：
+
+    1. ``shape``：统计图/几何图，交 ``backend.figure_shapes.render_shape``；
+    2. ``function``：函数图像，交 ``backend.figure_svg.render_figure``，
+       渲染前用题干的数值条件与答案选项做交叉验算（``verify_figure``），
+       对不上先试自动重建（``repair_spec``），重建不了才拒收；
+    3. ``hand``：电路图/流程图/装置图这类无法参数化的图，才用模型手绘的 svg_code。
+
+    无论走哪条，产物都必须过同一个 :func:`_finish`（清洗 → 公式排版 → 可用性 →
+    几何体检 → 处置策略）。历史上这里是"照单全收"，且校验散在各分支各写一遍，
+    于是画到画布外的空图、印着 ``$R_1$`` 反斜杠的乱码图、描述另一道题的错图，
+    都能直接进试卷。
+    """
+    notes = notes if notes is not None else []
+    inp = _read_inputs(q_data)
+    try:
+        mode = _plan(inp)
+        if mode == "none":
+            notes.append("配图未生成：模型没有给出 figure_spec 也没有给出 svg_code，请重试")
+            return ""
+        try:
+            if mode == "shape":
+                svg = _draw_shape(inp["spec"])
+            elif mode == "function":
+                svg = _draw_function(inp, notes)
+            else:
+                svg = inp["hand"]
+        except _DrawFallbackToHand:
+            if not inp["hand"].strip():
+                notes.append("配图未生成：渲染器不可用且模型没有给出手绘 SVG，请重试")
+                return ""
+            svg = inp["hand"]
+        out = _finish(svg, notes=notes, strict=strict, inp=inp)
+        return out
+    except _FigureRejected as exc:
+        notes.append("配图被拒收：%s" % str(exc.reason)[:200])
+        return ""
+    except Exception as exc:                    # noqa: BLE001 — 一张图失败不能带崩整批出题
+        logger.error("配图处理内部异常（%s）: %s", type(exc).__name__, exc, exc_info=True)
+        # 口径必须分开："配图被拒收" = 图与题目不符（该改题）；
+        # "配图未生成（内部错误）" = 我们这边出问题了（该重试/报修，别去改题）。
+        notes.append("配图未生成：内部错误 %s: %s" % (type(exc).__name__, str(exc)[:140]))
+        return ""
+
+
+def polish_svg(svg: Any, notes: list[str] | None = None) -> str:
+    """对**已经入库/从题库复制过来**的 SVG 只做无损改进：安全清洗 + 公式自动排版
+
+    与 :func:`resolve_svg` 的区别是刻意不拒收。闯关、随堂测验、课堂阶梯这些派生表
+    里的图是从题库复制的，是老师已经看到并认可的；如果因为新加的闸在复制环节把它们
+    丢掉，用户看到的就是"原本有图的题现在没图了"——那是改功能行为，不是修质量。
+    图形本身一个像素都不动。
+    """
+    notes = notes if notes is not None else []
+    text = str(svg or "")
+    if not text.strip():
+        return ""
+    inp = {"spec": None, "hand": text, "text": "", "options": {}, "answer": ""}
+    try:
+        out = _finish(text, notes=notes, strict=False, inp=inp,
+                      origin="复制过来的配图里")
+    except _FigureRejected as exc:
+        # 连清洗后都不可渲染（整张图基本是脚本/坏结构）—— 这种留着也没用
+        logger.info("polish_svg 放弃一张不可渲染的图: %s", exc.reason)
+        return ""
+    return out
+
+
 def media_columns_for_insert(q_data: dict[str, Any],
                              placeholder_limit: int | None = MAX_PLACEHOLDERS_PER_QUESTION,
+                             notes: list[str] | None = None, *,
+                             strict: bool = True,
                              ) -> tuple[str, int, str]:
-    """AI 出题/提取返回的配图字段 → 可直接入库的 (svg_content, has_svg, media_placeholders)
+    """AI 出题/提取返回的配图字段 -> 可直接入库的 (svg_content, has_svg, media_placeholders)
 
-    统一做两件过去各入口做得不一致的事：
+    统一做三件过去各入口做得不一致的事：
+    - **配图质量闸**：能参数化的走确定性渲染，其余先排版公式再做几何体检，
+      不合格的不入库（见 :func:`resolve_svg`）；
     - **SVG 清洗**：模型可能返回 ``<script>`` / ``onload=`` / ``href="javascript:..."``，
       这些内容会被前端渲染或被拼进导出的练习 HTML（同源页面），是存储型 XSS 面；
     - **占位符规整**：丢掉缺 description 的畸形项（否则生图循环里 ``ph["description"]``
       KeyError 会把整批已入库的题目带崩）、去重 key、按上限截断（控住单题生图成本）。
     """
-    from backend.svg_safety import is_usable_svg, sanitize_svg
-
-    svg_code = sanitize_svg(str(q_data.get("svg_code") or q_data.get("svg_content") or ""))
-    if not is_usable_svg(svg_code):
-        svg_code = ""
+    svg_code = resolve_svg(q_data, notes=notes, strict=strict)
     placeholders = normalize_placeholders(q_data.get("media_placeholders"),
                                           limit=placeholder_limit)
     return svg_code, (1 if svg_code.strip() else 0), dump_json(placeholders)
+
 
 
 def _dir_size(path: Path) -> int:

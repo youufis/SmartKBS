@@ -342,12 +342,19 @@ def _clean_figure(raw: Any) -> dict[str, Any] | None:
         fig["children"] = children[:6]
         return fig
 
-    # svg：模型直出的图形，必须过安全与可用性两道关，否则当作没有图
-    from backend.svg_safety import is_usable_svg, sanitize_svg
+    # svg：模型直出的图形。上面 flow/tree 等分支是"模型声明结构、服务端渲染"，正确性由代码保证；
+    # 只有这张兜底的 raw svg 是模型手绘像素，所以必须过与题库同一道闸
+    # （清洗 + 公式排版 + 几何体检），否则微课里的图比试卷里的图标准更松。
+    from backend.question_media import resolve_svg
 
-    svg = sanitize_svg(str(raw.get("svg") or ""))
-    if not is_usable_svg(svg):
-        logger.warning("[cast] 丢弃一张不可用的 AI 生成 SVG 图")
+    _notes: list[str] = []
+    svg = resolve_svg({"svg_code": str(raw.get("svg") or ""),
+                       "figure_spec": raw.get("figure_spec"),
+                       "question": str(raw.get("caption") or "")}, notes=_notes)
+    for _n in _notes:
+        logger.info("[cast] 配图处理: %s", _n)
+    if not svg:
+        logger.warning("[cast] 丢弃一张不可用/不合格的 AI 生成 SVG 图")
         return None
     fig["svg"] = svg
     return fig

@@ -26,7 +26,8 @@ from backend.prompts.quest import (
     PHONE_FRIEND_PROMPT,
     AUDIENCE_VOTE_PROMPT,
 )
-from backend.prompts.chat import SVG_GENERATE_PROMPT, IMAGE_GEN_PROMPT_TEMPLATE
+from backend.prompts.chat import (IMAGE_GEN_PROMPT_TEMPLATE,
+                                       SVG_GENERATE_SPEC_PROMPT)
 from backend.question_media import (
     SOURCE_QUEST,
     attach_media,
@@ -38,7 +39,7 @@ from backend.question_media import (
     normalize_media_files,
     url_for,
 )
-from backend.svg_safety import extract_svg, is_usable_svg, sanitize_svg
+from backend.svg_safety import extract_svg
 from backend.logger import logger
 from backend.reward_engine import award_participation, award_grade, update_student_total
 from backend.title_system import check_and_unlock_badges
@@ -152,18 +153,29 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         result.setdefault("has_svg", 1 if result.get("svg_content") else 0)
         result.setdefault("media_files", "")
         result.setdefault("media_placeholders", "")
-        svg = result.get("svg_content", "")
-        if svg:
-            # 提取 + 清洗：AI 可能在 SVG 里带 <script>/onload=/javascript: href，
-            # 直接入库就会被学生端与导出的 HTML 原样渲染
-            cleaned = sanitize_svg(svg)
-            if not is_usable_svg(cleaned):
-                logger.warning(f"AI 返回的 svg_content 无效或不安全，已忽略: {svg[:50]}")
-                result["svg_content"] = ""
-                result["has_svg"] = 0
-            else:
-                result["svg_content"] = cleaned
-                result["has_svg"] = 1
+        # 与题库出题同一条闸（backend.question_media.resolve_svg）：安全清洗之外，
+        # 还要公式自动排版 + 几何体检 + 泄答案检查。以前这里只 sanitize，于是
+        # "同一张错图在题库被拦、在闯关照样入库" —— 两条出题链两套标准。
+        #
+        # 判据必须是"有 svg_code **或** 有 figure_spec"：spec-first 的响应里
+        # svg_content 就是空的，只判 svg 会让整道闸被跳过、spec 永远不会被渲染
+        # （2026-11-25 口径自查实测到的真 bug：模型给了 figure_spec，结果 0 字节）。
+        svg = result.get("svg_content") or ""
+        spec = result.get("figure_spec")
+        if svg or spec:
+            from backend.question_media import resolve_svg
+
+            _notes: list[str] = []
+            result["svg_content"] = resolve_svg({
+                "svg_code": svg,
+                "figure_spec": spec,
+                "question": result.get("question") or "",
+                "options": _loads_options(result.get("options")),
+                "answer": result.get("answer") or "",
+            }, notes=_notes)
+            for _n in _notes:
+                logger.info("闯关出题配图处理: %s", _n)
+        result["has_svg"] = 1 if result.get("svg_content") else 0
         return result
     except Exception as e:
         logger.error(f"AI 出题失败: {e}，尝试从题库取备用题")
@@ -1983,6 +1995,19 @@ async def ai_generate_quest_bank_questions(request: Request, body: dict):
 # ═══════════════════════════════════════════════════════════
 
 
+def _loads_options(raw: Any) -> dict[str, Any]:
+    """闯关题的 options 存的是 JSON 文本，坏值一律回空字典（验算跳过即可，不能抛）"""
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _get_quest_bank_question(question_id: int) -> dict[str, Any]:
     """获取闯关题库单题并校验存在"""
     row = execute_query_one(
@@ -2006,7 +2031,7 @@ async def quest_bank_generate_svg(question_id: int, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="API Key 未配置")
 
-    prompt = SVG_GENERATE_PROMPT.format(
+    prompt = SVG_GENERATE_SPEC_PROMPT.format(
         description=row["question_text"],
         subject=row.get("category", "百科")
     )
@@ -2017,11 +2042,36 @@ async def quest_bank_generate_svg(question_id: int, request: Request):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成 SVG 失败: {str(e)}")
 
-    # 提取 + 清洗（旧的两条正则会把 stop-opacity/stroke-opacity 当 on* 事件属性删掉，
-    # 渐变和描边直接报废；统一走 backend.svg_safety）
-    svg_code = sanitize_svg(extract_svg(text))
-    if not is_usable_svg(svg_code):
-        raise HTTPException(status_code=502, detail="AI 未能生成有效的 SVG 代码")
+    # 与题库「重新生成 SVG」同一条链路：模型优先回 figure_spec，像素由后端确定性
+    # 渲染，再用同一道质量闸。以前这里只做安全清洗、模型手绘什么就存什么，于是
+    # 同一道错题在题库里被拦住、在闯关里却照样出图 —— 两个入口两套标准。
+    from backend.ai_json import try_parse
+    from backend.question_media import resolve_svg
+
+    payload = try_parse(text)
+    if isinstance(payload, dict) and ("figure_spec" in payload or "svg_code" in payload):
+        figure_spec, hand_drawn = payload.get("figure_spec"), payload.get("svg_code")
+    else:
+        figure_spec, hand_drawn = None, extract_svg(text)
+
+    notes: list[str] = []
+    svg_code = resolve_svg({
+        "figure_spec": figure_spec,
+        "svg_code": hand_drawn,
+        "question": row["question_text"],
+        "options": _loads_options(row.get("options")),
+        "answer": row.get("correct_answer") or "",
+    }, notes=notes)
+    for note in notes:
+        logger.info("闯关配图处理 qid=%s: %s", question_id, note)
+    if not svg_code:
+        reason = next((n for n in notes if "拒收" in n), "")
+        raise HTTPException(
+            status_code=422 if reason else 502,
+            detail=(reason.replace("配图被拒收：", "配图与题目不符，已拒收：")
+                    + "。请修正题目数据后重试" if reason else
+                    "AI 未能生成有效的 SVG 代码"),
+        )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_insert_update(

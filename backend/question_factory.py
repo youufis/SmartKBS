@@ -214,7 +214,9 @@ def normalize_item(raw: dict[str, Any], *, subject: str = "", question_type: str
     if diff not in ("easy", "medium", "hard"):
         diff = difficulty if difficulty in ("easy", "medium", "hard") else "medium"
 
-    svg_code, has_svg, media_placeholders = media_columns_for_insert(raw)
+    # 配图质量闸的结论（被拒收的原因、公式自动排版的处数）直接并进 notes，
+    # 老师在前端就能看到"这道题的图为什么没出来"，而不是对着一个空配图栏猜。
+    svg_code, has_svg, media_placeholders = media_columns_for_insert(raw, notes=notes)
 
     return {
         "type": q_type,

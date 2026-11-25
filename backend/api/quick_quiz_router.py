@@ -606,8 +606,26 @@ async def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> lis
             return ""
         return json.dumps(v, ensure_ascii=False)
 
+    from backend.question_media import polish_svg, resolve_svg
+
     operations = []
     for i, q in enumerate(questions):
+        # 同课堂阶梯口径：AI 新生成的图必须过闸；从题库带过来的图只做无损排版。
+        _src = q.get("_source") or (q.get("id") and "bank" or "ai")
+        _notes: list[str] = []
+        if _src == "ai":
+            _svg = resolve_svg({
+                "figure_spec": q.get("figure_spec"),
+                "svg_code": q.get("svg_content") or q.get("svg_code"),
+                "question": q.get("question_text") or "",
+                "options": q.get("options") if isinstance(q.get("options"), dict) else {},
+                "answer": q.get("correct_answer") or "",
+            }, notes=_notes)
+        else:
+            _svg = polish_svg(q.get("svg_content") or q.get("svg_code"), notes=_notes)
+        q["svg_content"] = _svg
+        for _n in _notes:
+            logger.info("随堂测验配图处理: %s", _n)
         operations.append((
             """INSERT INTO quick_quiz_questions
                (room_id, sort_order, question_text, options, correct_answer, explanation, source,

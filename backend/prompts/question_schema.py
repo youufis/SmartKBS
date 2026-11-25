@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """出题 Prompt 的共用规范片段（2026-10 走查后从 6 份出题 prompt 里抽出来）。
 
+
 为什么要抽
 ----------
 会往 question_bank 写题的"出题指令"一共 6 处：chat.py 两份（AI 出题 / 出题含配图）、
@@ -27,6 +28,8 @@ curriculum_router 里内联拼的同步练习补题。同一套规则各写各�
    ANSWER_RULES_LIST。入库那一侧不受影响：question_factory.normalize_options 两种形状都吃，
    落库一律是 {"A": "文本"}。统一发生在入库口，不在展示层。
 """
+
+from backend.prompts.figure_rules import FIGURE_RULES, SAFETY_NOTE
 
 # 与 question_factory.ALL_TYPES 对齐，但去掉 code：机器出题链路不收编程题
 BANK_TYPE_VOCAB = "single/multiple/true_false/short/fill/essay/subjective"
@@ -64,18 +67,26 @@ CODE_RULE = """━━━━ 代码块规则（"阅读下面程序，输出结果
 - 代码块里不要写 $$ 定界符（会被当公式渲染）；确实需要美元符号就用文字描述绕开。
 - 这条说的是"题干里带代码片段"的常规题，**不是**要运行判分的编程题 —— 后者走「代码练习」。"""
 
-MEDIA_RULE = """━━━━ 配图规则（优先 SVG，谨慎用生图） ━━━━
-每道题都可以输出 svg_code 与 media_placeholders 两个字段，不需要配图就留 null。
-- svg_code【优先使用】：电路图、流程图、协议栈、网络拓扑、结构框图、函数图像、光路图、
-  受力分析图等技术图示；viewBox="0 0 600 400"，中文标注，主色 #1976D2，纯 SVG 代码，
-  无需额外 API 调用、零成本。凡包含物理过程、数学图形、技术原理的题目应生成 svg_code。
+MEDIA_RULE = (
+    """━━━━ 配图规则（能参数化就优先 figure_spec） ━━━━
+每道题都可以输出 figure_spec、svg_code 与 media_placeholders 三个字段，不需要配图就留 null。
+- figure_spec【能参数化就一律优先】：函数图像、统计图（柱状/折线/双 Y 轴/饼图）、几何图。
+- svg_code【无法参数化的图示】：电路图、实物连接、流程图、协议栈、网络拓扑、结构框图、
+  光路图、实验装置、受力分析、细胞结构、地图、等高线、时间轴；纯 SVG 代码，零成本。
 - media_placeholders【谨慎使用】：只有确实需要真实图片（硬件外观、电子元器件实物、
   实验装置、生物显微图、场景照片）时才用，每张图消耗一次生图配额；每道题最多 2 个；
   description 写 50-100 字（主体、颜色、环境、用途），purpose 为 "实物图"/"微观图"/"场景图"/"示意图"。
   **生图模型不写中文**，description 里不要要求"标注出XX""写上XX字样"（要文字标注就改用 svg_code）。
-- 两者可以同时存在：SVG 画原理 + 占位符生成实物照片，互不冲突。
-- ⚠️ 安全约束：svg_code 与 description 里**严禁**出现题目答案、解析、解题过程或任何会泄露
-  正确选项的文字 —— 配图会被原样印到学生看到的试卷上。"""
+- 三者可以并存：figure_spec 画函数图 + svg_code 画原理 + 占位符生成实物照片，互不冲突。
+
+"""
+    # 下面这份是"唯一真相"：批量出题、单题重新生成、课件配图共用同一段规则，
+    # 画布尺寸也由 figure_rules 里的常量锁定。以前三处各抄一份，改一处漏两处。
+    + FIGURE_RULES
+    + "\n"
+    + SAFETY_NOTE
+    + "\n"
+)
 
 JSON_QUOTES_RULE = """**引号铁律**：JSON 的键名与字符串定界符必须用英文双引号 " ；
 中文引号「」“” 只能出现在字符串内容里，绝不能充当 JSON 定界符；
@@ -88,7 +99,7 @@ JSON_ONLY_RULE = """━━━━ 输出格式 ━━━━
 
 FIELD_NAME_RULE = """━━━━ 字段名（逐字一致，改名字等于这道题没生成） ━━━━
 type / question / options / answer / explanation / knowledge_point / difficulty /
-svg_code / media_placeholders。
+figure_spec / svg_code / media_placeholders。
 不要写成 question_text、choices、correct_answer、选项、答案 —— 后端按上面的名字取值。"""
 
 ANSWER_RULES = """━━━━ 答案与选项写法（与题库入库校验一致，不符的题目会被直接拒收） ━━━━
@@ -136,6 +147,7 @@ def question_example(types_line: str = BANK_TYPE_VOCAB, options_shape: str = "di
         '    "explanation": "详细解析，说明为什么选这个以及常见错误",\n'
         '    "knowledge_point": "所属知识点",\n'
         '    "difficulty": "easy/medium/hard",\n'
+        '    "figure_spec": null,\n'
         '    "svg_code": "<svg>...</svg>",\n'
         '    "media_placeholders": [\n'
         '      {"key":"p1","description":"详细图片描述（50-100字）","purpose":"示意图/实物图"}\n'

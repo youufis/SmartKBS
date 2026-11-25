@@ -448,7 +448,27 @@ async def _build_pool(session: dict, *, username: str, grade: str, cls: str) -> 
                     pass
 
     now = _now()
+    from backend.question_media import polish_svg, resolve_svg
+
     for level, q in staged:
+        # 新 AI 生成的题走完整质量闸；从题库复制的题只做无损排版改进 ——
+        # 派生表把老师已认可的图拦掉，等于改了功能行为，不是修质量。
+        _notes: list[str] = []
+        if (q.get("source") or "bank") == "ai":
+            q["svg_content"] = resolve_svg({
+                "figure_spec": q.get("figure_spec"),
+                "svg_code": q.get("svg_content") or q.get("svg_code"),
+                "question": q.get("question") or "",
+                "options": q.get("options") if isinstance(q.get("options"), dict) else {},
+                "answer": q.get("answer") or "",
+            }, notes=_notes)
+            q["has_svg"] = 1 if q["svg_content"] else 0
+        else:
+            q["svg_content"] = polish_svg(q.get("svg_content") or q.get("svg_code"),
+                                          notes=_notes)
+            q["has_svg"] = 1 if q["svg_content"] else 0
+        for _n in _notes:
+            logger.info("课堂阶梯配图处理: %s", _n)
         execute_insert_update(
             "INSERT INTO class_ladder_pool "
             "(session_id, level, difficulty, question_id, question_text, question_type, options, "
