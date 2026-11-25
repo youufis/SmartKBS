@@ -1979,5 +1979,7 @@
   "placeholder_LOCAL_KB_EMBED_MODEL_CLOUD": "e.g. text-embedding-v4",
   "ollamaModelMismatch": "These local models are embedding models and cannot be used for chat: {{models}}. Please choose a chat model.",
   "localKbEmbedChangeTitle": "Embedding model/dimension changed",
-  "localKbEmbedChangeBody": "After saving, rebuild the index in Local Library → Maintenance → Rebuild vector index; otherwise new vectors are not written (search uses keywords meanwhile). Changing only the dimension also requires a rebuild."
+  "localKbEmbedChangeBody": "After saving, rebuild the index in Local Library → Maintenance → Rebuild vector index; otherwise new vectors are not written (search uses keywords meanwhile). Changing only the dimension also requires a rebuild.",
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS": "Local library audit retention (days)",
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "Default 365 days; old audit entries are purged automatically"
 }
