@@ -41,9 +41,17 @@ def _need_admin(user: dict) -> None:
         raise HTTPException(status_code=403, detail="权限不足：仅管理员")
 
 
+def _cfg(key: str, default=None):
+    try:
+        from backend.api.config_router import get_config_value
+        return get_config_value(key, default)
+    except Exception:
+        return default
+
+
 def _guard_enabled() -> None:
     if not local_kb.enabled():
-        raise HTTPException(status_code=400, detail="本地知识库未启用（系统配置 → AI 能力 → 本地知识库）")
+        raise HTTPException(status_code=400, detail="本地知识库未启用（系统配置 → AI 能力 → 知识库（云端 + 本地文库））")
 
 
 async def _save_to_tmp(uf: UploadFile, max_bytes: int) -> tuple:
@@ -180,6 +188,29 @@ async def kb_stats(request: Request):
     return local_kb.stats()
 
 
+@router.get("/ai-mode", summary="当前 AI 检索链路（云端知识库/本地文库/大模型）")
+async def kb_ai_mode(request: Request):
+    user = _user(request)
+    _need_editor(user)
+    from backend.api.ai_service import get_ai_config
+    mode = get_ai_config().get("mode", "direct")
+    cloud_enabled = bool(_cfg("KB_ENABLED", False))
+    cloud_ready = False
+    if cloud_enabled:
+        try:
+            from backend import bailian_kb
+            cloud_ready, _reason = bailian_kb.kb_ready()
+        except Exception:
+            cloud_ready = False
+    return {
+        "mode": mode,
+        "cloud_enabled": cloud_enabled,
+        "cloud_ready": bool(cloud_ready),
+        "local_enabled": local_kb.enabled(),
+        "local_ready": local_kb.ready(),
+    }
+
+
 @router.get("/docs", summary="文档列表")
 async def kb_docs(request: Request, q: str = "", status: str = "", scope: str = "all",
                   folder: str = "all", page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
@@ -226,10 +257,11 @@ async def kb_doc_file(request: Request, doc_id: int):
         row = c.execute("SELECT path,name FROM kb_docs WHERE id=?", (doc_id,)).fetchone()
     finally:
         c.close()
-    if not row or not row["path"] or not os.path.exists(row["path"]):
+    abs_path = local_kb._abs_path(row["path"]) if row and row["path"] else ""
+    if not row or not abs_path or not os.path.exists(abs_path):
         raise HTTPException(status_code=404, detail="原件已不存在")
     fname = urllib.parse.quote(row["name"])
-    return FileResponse(row["path"], filename=row["name"],
+    return FileResponse(abs_path, filename=row["name"],
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"})
 
 @router.post("/upload", summary="上传文档（多文件）")
@@ -326,13 +358,16 @@ async def kb_replace(request: Request, doc_id: int):
     return res
 
 
-@router.post("/docs/{doc_id}/reindex", summary="重新索引（管理员）")
+@router.post("/docs/{doc_id}/reindex", summary="重新索引（上传者/管理员）")
 async def kb_reindex(request: Request, doc_id: int):
     user = _user(request)
-    _need_admin(user)
+    _need_editor(user)
     _guard_enabled()
-    if not local_kb.doc_detail(doc_id):
+    detail = local_kb.doc_detail(doc_id)
+    if not detail:
         raise HTTPException(status_code=404, detail="文档不存在")
+    if _role(user) != 0 and detail.get("owner") != user.get("username"):
+        raise HTTPException(status_code=403, detail="仅上传者或管理员可重新索引")
     return local_kb.reindex_doc(doc_id)
 
 
@@ -352,19 +387,25 @@ async def kb_remove(request: Request, doc_id: int):
     return res
 
 
-@router.get("/trash", summary="回收站（管理员）")
+@router.get("/trash", summary="回收站（管理员看全部，教师看自己的）")
 async def kb_trash(request: Request):
     user = _user(request)
-    _need_admin(user)
+    _need_editor(user)
     _guard_enabled()
-    return {"items": local_kb.list_trash()}
+    scope_user = None if _role(user) == 0 else user.get("username", "")
+    return {"items": local_kb.list_trash(scope_user)}
 
 
-@router.post("/trash/{doc_id}/restore", summary="恢复（管理员）")
+@router.post("/trash/{doc_id}/restore", summary="恢复（上传者/管理员）")
 async def kb_restore(request: Request, doc_id: int):
     user = _user(request)
-    _need_admin(user)
+    _need_editor(user)
     _guard_enabled()
+    detail = local_kb.doc_detail(doc_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if _role(user) != 0 and detail.get("owner") != user.get("username"):
+        raise HTTPException(status_code=403, detail="仅上传者或管理员可恢复")
     res = local_kb.restore_doc(doc_id, user.get("username", ""))
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("error") or "恢复失败")
@@ -393,6 +434,15 @@ async def kb_rebuild(request: Request):
     _need_admin(user)
     _guard_enabled()
     return local_kb.rebuild_all()
+
+
+@router.post("/refill-vectors", summary="增量补齐向量索引（管理员）")
+def kb_refill_vectors(request: Request):
+    # 同步 def：embedding 重活在 FastAPI 线程池跑，绝不占用事件循环
+    user = _user(request)
+    _need_admin(user)
+    _guard_enabled()
+    return local_kb.refill_vectors(limit=10)
 
 
 @router.post("/search-test", summary="检索测试")

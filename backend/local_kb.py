@@ -101,6 +101,57 @@ def _max_pages() -> int:
         return 500
 
 
+# 与 DEFAULT_CONFIG 同口径，避免键缺失时代码三处分支各自漂移
+_DUAL_DEFAULT = False
+# 单通道 embedding 尝试次数（首发 + 2 次重试），瞬时失败按 2s/6s 退避后断点续传
+_VEC_ATTEMPTS = 3
+_VEC_RETRY_DELAYS = (2.0, 6.0)
+
+
+def _rel_path(p: Any) -> str:
+    """kb_docs.path 一律按相对 STORAGE_DIR 存储：搬根/换机后可用；存储根之外的旧绝对值原样保留。"""
+    s = str(p or "")
+    if not s:
+        return s
+    try:
+        return str(Path(s).relative_to(Path(STORAGE_DIR))).replace("\\", "/")
+    except Exception:
+        return s
+
+
+def _abs_path(p: Any) -> str:
+    """kb_docs.path → 当前绝对路径：相对值拼回存储根，历史绝对值原样使用。"""
+    s = str(p or "")
+    if not s:
+        return s
+    q = Path(s)
+    if q.is_absolute():
+        return s
+    return str(Path(STORAGE_DIR) / s.replace("/", os.sep))
+
+
+def _is_transient_error(e: BaseException) -> bool:
+    """区分 embedding 的瞬时失败（值得重试）与鉴权/配置类失败（重试无意义，快速失败）。"""
+    try:
+        import httpx
+        if isinstance(e, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
+            return True
+        if isinstance(e, httpx.HTTPStatusError):
+            code = int(e.response.status_code)
+            return code == 429 or code >= 500
+    except Exception:
+        pass
+    if isinstance(e, OSError):
+        return True
+    msg = str(e).lower()
+    m = re.search(r"http (\d{3})", msg)
+    if m:
+        code = int(m.group(1))
+        return code == 429 or code >= 500
+    return any(h in msg for h in ("timeout", "timed out", "connect", "connection reset",
+                                  "temporarily", "unavailable", "too many requests", "rate limit"))
+
+
 # ── 路径与连接 ──
 def db_path() -> Path:
     return Path(DB_DIR) / "local_kb.db"
@@ -215,6 +266,11 @@ def init_db() -> None:
         if "folder_id" not in cols:
             c.execute("ALTER TABLE kb_docs ADD COLUMN folder_id INTEGER")
         c.execute("CREATE INDEX IF NOT EXISTS idx_kb_docs_folder ON kb_docs(folder_id)")
+        # 历史绝对路径一次性转为相对 STORAGE_DIR（读侧 _abs_path 始终兼容绝对值）
+        for r in c.execute("SELECT id,path FROM kb_docs WHERE path != ''").fetchall():
+            rel = _rel_path(r["path"])
+            if rel != r["path"]:
+                c.execute("UPDATE kb_docs SET path=? WHERE id=?", (rel, int(r["id"])))
         c.commit()
     finally:
         c.close()
@@ -585,7 +641,7 @@ def _ollama_model_present_uncached(model: str) -> bool:
 def _target_channels() -> list[str]:
     """索引通道：以用户选择的通道为主；双通道开启时另一通道可用也一并写入。"""
     primary = embed_provider()
-    if not bool(_cfg("LOCAL_KB_DUAL_INDEX", True)):
+    if not bool(_cfg("LOCAL_KB_DUAL_INDEX", _DUAL_DEFAULT)):
         return [primary]
     channels: list[str] = []
 
@@ -650,6 +706,90 @@ def _claim_pending(doc_id: int) -> bool:
         c.close()
 
 
+def _vectorize_chunks(doc_id: int, ids: list[int], chunks: list[dict],
+                      channels: list[str], done_sigs: set[str],
+                      cleanup_on_delete: bool = True) -> tuple[str, str, str]:
+    """把既有切片按目标通道写入 Chroma（upsert 可重入：中断重跑不产生重复或孤儿）。
+
+    - done_sigs：已成功的通道直接跳过，增量补灌不对云通道重复计费；
+    - 瞬时网络类错误在同一通道内最多重试 _VEC_ATTEMPTS 次（退避 2s/6s），从断点续传；
+      鉴权/配置类错误快速失败，交给半小时一次的自动补灌或人工重建；
+    - cleanup_on_delete：文档中途被删时，索引路径清理切片与向量（原行为），
+      补灌路径只需停止——remove_doc 已经清过，绝不能反过来删掉关键词索引。
+    返回 (vec_state, error, 首个成功集合名)，vec_state ∈ done/failed/off/deleted。
+    """
+    errors: list[str] = []
+    col_name = ""
+    done_any = False
+    seg = 65.0 / max(1, len(channels))
+    for ci, p in enumerate(channels):
+        sig = embed_sig(p)
+        if sig in done_sigs:
+            done_any = True      # 仅当前通道签名已 done 才算成功；旧签名的 done 不得掩盖当前通道的失败
+            continue
+        col = _collection(sig)
+        if col is None:
+            errors.append(f"{p}: 向量库不可用")
+            _record_vec(doc_id, sig, "", "failed", "向量库不可用")
+            continue
+        batch = 10 if p == "cloud" else 8
+        added = 0
+        last_err: Optional[BaseException] = None
+        for attempt in range(_VEC_ATTEMPTS):
+            last_err = None
+            try:
+                while added < len(ids):
+                    cr = _conn()
+                    try:
+                        st = cr.execute("SELECT status FROM kb_docs WHERE id=?", (doc_id,)).fetchone()
+                    finally:
+                        cr.close()
+                    if not st or st["status"] == "deleted":
+                        if cleanup_on_delete:
+                            _delete_vectors(_collection_name(sig), ids[:added])
+                            c2 = _conn()
+                            try:
+                                c2.execute("DELETE FROM kb_chunks WHERE doc_id=?", (doc_id,))
+                                c2.execute("DELETE FROM kb_doc_vec WHERE doc_id=?", (doc_id,))
+                                c2.commit()
+                            finally:
+                                c2.close()
+                            _count_cache["t"] = 0
+                        return "deleted", "", ""
+                    part = ids[added:added + batch]
+                    texts = [chunks[j]["text"] for j in range(added, added + len(part))]
+                    vecs = embed_texts(texts, provider=p)
+                    metas = [{"doc_id": doc_id, "ord": added + j,
+                              "title": (chunks[added + j].get("title") or "")[:200]}
+                             for j in range(len(part))]
+                    col.upsert(ids=[str(x) for x in part], embeddings=vecs, metadatas=metas)
+                    added += len(part)
+                    if cleanup_on_delete:      # 进度语义只属于索引路径，补灌不得回退 ready 文档进度
+                        prog = 30 + int(seg * (ci + added / max(1, len(ids))))
+                        _set_doc(doc_id, progress=min(95, prog))
+                    time.sleep(0.05 if p == "cloud" else 0.2)
+                break
+            except Exception as e:
+                last_err = e
+                if not _is_transient_error(e) or attempt >= _VEC_ATTEMPTS - 1:
+                    break
+                delay = _VEC_RETRY_DELAYS[min(attempt, len(_VEC_RETRY_DELAYS) - 1)]
+                logger.info(f"[KB] 通道 {p} 瞬时失败（{str(e)[:120]}），{delay:.0f}s 后断点续传 id={doc_id}")
+                time.sleep(delay)
+        if last_err is not None:
+            msg = str(last_err)[:200]
+            errors.append(f"{p}: {msg}")
+            _record_vec(doc_id, sig, _collection_name(sig), "failed", msg)
+            logger.warning(f"[KB] 向量化失败通道={p} id={doc_id}: {msg}")
+        else:
+            done_any = True
+            _record_vec(doc_id, sig, _collection_name(sig), "done", "")
+            if not col_name:
+                col_name = _collection_name(sig)      # 兼容字段：第一成功通道
+    vec_state = "done" if done_any else ("off" if not channels else "failed")
+    return vec_state, "; ".join(errors)[:300], col_name
+
+
 def _process_doc(doc_id: int) -> None:
     c = _conn()
     try:
@@ -660,7 +800,7 @@ def _process_doc(doc_id: int) -> None:
         return
     if not _claim_pending(doc_id):
         return
-    path = Path(row["path"])
+    path = Path(_abs_path(row["path"]))
     if not path.exists():
         _set_doc(doc_id, status="failed", error="源文件缺失", vec_state="off", progress=0)
         return
@@ -702,63 +842,12 @@ def _process_doc(doc_id: int) -> None:
         finally:
             c.close()
 
-        vec_state, vec_err, col_name = "failed", "", ""
-        if not enabled():
-            vec_state = "off"
-        else:
-            channels = _target_channels()
-            done_any = False
-            errors: list[str] = []
-            seg = 65.0 / max(1, len(channels))
-            for ci, p in enumerate(channels):
-                sig = embed_sig(p)
-                col = _collection(sig)
-                if col is None:
-                    errors.append(f"{p}: 向量库不可用")
-                    _record_vec(doc_id, sig, "", "failed", "向量库不可用")
-                    continue
-                batch = 10 if p == "cloud" else 8
-                added = 0
-                try:
-                    for i in range(0, len(ids), batch):
-                        cr = _conn()
-                        try:
-                            st = cr.execute("SELECT status FROM kb_docs WHERE id=?", (doc_id,)).fetchone()
-                        finally:
-                            cr.close()
-                        if not st or st["status"] == "deleted":
-                            _delete_vectors(_collection_name(sig), ids[:added])
-                            c2 = _conn()
-                            try:
-                                c2.execute("DELETE FROM kb_chunks WHERE doc_id=?", (doc_id,))
-                                c2.execute("DELETE FROM kb_doc_vec WHERE doc_id=?", (doc_id,))
-                                c2.commit()
-                            finally:
-                                c2.close()
-                            _count_cache["t"] = 0
-                            return
-                        part = ids[i:i + batch]
-                        texts = [chunks[j]["text"] for j in range(i, i + len(part))]
-                        vecs = embed_texts(texts, provider=p)
-                        metas = [{"doc_id": doc_id, "ord": i + j,
-                                  "title": (chunks[i + j].get("title") or "")[:200]}
-                                 for j in range(len(part))]
-                        col.add(ids=[str(x) for x in part], embeddings=vecs, metadatas=metas)
-                        added += len(part)
-                        prog = 30 + int(seg * (ci + added / max(1, len(ids))))
-                        _set_doc(doc_id, progress=min(95, prog))
-                        time.sleep(0.05 if p == "cloud" else 0.2)
-                    done_any = True
-                    _record_vec(doc_id, sig, _collection_name(sig), "done", "")
-                    if not col_name:
-                        col_name = _collection_name(sig)      # 兼容字段：第一成功通道
-                except Exception as e:
-                    msg = str(e)[:200]
-                    errors.append(f"{p}: {msg}")
-                    _record_vec(doc_id, sig, _collection_name(sig), "failed", msg)
-                    logger.warning(f"[KB] 向量化失败通道={p} id={doc_id}: {msg}")
-            vec_state = "done" if done_any else ("off" if not channels else "failed")
-            vec_err = "; ".join(errors)[:300]
+        vec_state, vec_err, col_name = "off", "", ""
+        if enabled():
+            vec_state, vec_err, col_name = _vectorize_chunks(
+                doc_id, ids, chunks, _target_channels(), set(), cleanup_on_delete=True)
+            if vec_state == "deleted":
+                return
 
         _set_doc(doc_id, status="ready", progress=100, vec_state=vec_state,
                  vec_collection=col_name, error=vec_err)
@@ -784,18 +873,52 @@ def _worker_loop() -> None:
 
 def _housekeeping_loop() -> None:
     last_reconcile = 0.0
+    last_audit = time.time()
+    ticks = 0
     while True:
         time.sleep(600)
+        ticks += 1
         try:
             _purge_expired_trash()
         except Exception as e:
             logger.warning(f"[KB] 回收站清理失败: {e}")
+        if ticks % 3 == 0:
+            # 自愈：embedding 通道恢复后，自动补上此前瞬时失败/集合缺失的向量（限 20 篇/轮）
+            try:
+                res = refill_vectors(limit=20)
+                if res.get("ok") and res.get("targeted"):
+                    logger.info(f"[KB] 自动补向量：成功 {res.get('done')}，失败 {res.get('failed')}")
+            except Exception as e:
+                logger.warning(f"[KB] 自动补向量失败: {e}")
         if time.time() - last_reconcile > 3600:
             last_reconcile = time.time()
             try:
                 reconcile()
             except Exception as e:
                 logger.warning(f"[KB] 对账失败: {e}")
+        if time.time() - last_audit > 24 * 3600:
+            last_audit = time.time()
+            try:
+                _purge_old_audit()
+            except Exception as e:
+                logger.warning(f"[KB] 审计日志清理失败: {e}")
+
+
+def _purge_old_audit() -> None:
+    """kb_audit 只增不删，按保留天数截断（默认 365 天）。"""
+    try:
+        keep = int(_cfg("LOCAL_KB_AUDIT_KEEP_DAYS", 365) or 365)
+    except Exception:
+        keep = 365
+    cutoff = (datetime.now() - timedelta(days=keep)).strftime("%Y-%m-%d %H:%M:%S")
+    c = _conn()
+    try:
+        n = c.execute("DELETE FROM kb_audit WHERE created_at < ?", (cutoff,)).rowcount
+        c.commit()
+    finally:
+        c.close()
+    if n:
+        logger.info(f"[KB] 审计日志清理 {n} 条（保留 {keep} 天）")
 
 
 def _purge_expired_trash() -> None:
@@ -993,7 +1116,7 @@ def _vector_hits(query: str, k: int) -> tuple[list[tuple[int, float]], dict]:
     mode = str(_cfg("AI_MODE", "cloud") or "cloud")
     primary = embed_provider()
     candidates = [primary]
-    if bool(_cfg("LOCAL_KB_DUAL_INDEX", True)):
+    if bool(_cfg("LOCAL_KB_DUAL_INDEX", _DUAL_DEFAULT)):
         alt = "local" if primary == "cloud" else "cloud"
         if alt == "cloud" and mode == "local":
             alt = ""                       # local 模式承诺不出网
@@ -1011,7 +1134,8 @@ def _vector_hits(query: str, k: int) -> tuple[list[tuple[int, float]], dict]:
                 info["error"] = "sig_mismatch"
                 continue
             vec = _query_vector(query, p)
-            n = max(1, min(20, int(col.count() or 0)))
+            # 候选数跟随 VEC_TOP_K（配置上限 50），不再钉死 20
+            n = max(1, min(max(20, k), int(col.count() or 0)))
             res = col.query(query_embeddings=[vec], n_results=n, include=["distances"])
             ids = (res.get("ids") or [[]])[0]
             dists = (res.get("distances") or [[]])[0]
@@ -1143,7 +1267,7 @@ def list_docs(q: str = "", status: str = "", scope: str = "all",
     try:
         total = int(c.execute(f"SELECT COUNT(*) FROM kb_docs WHERE {cond}", args).fetchone()[0])
         rows = c.execute(
-            f"SELECT id,name,size,pages,chunks,status,progress,vec_state,error,owner,visibility,"
+            f"SELECT id,name,size,pages,chunks,status,progress,vec_state,error,owner,"
             f"folder_id,created_at,updated_at FROM kb_docs WHERE {cond} ORDER BY id DESC LIMIT ? OFFSET ?",
             args + [page_size, (page - 1) * page_size]).fetchall()
     finally:
@@ -1151,12 +1275,18 @@ def list_docs(q: str = "", status: str = "", scope: str = "all",
     return {"items": [dict(r) for r in rows], "total": total}
 
 
-def list_trash() -> list[dict]:
+def list_trash(username: Optional[str] = None) -> list[dict]:
+    """回收站列表：username 为空看全部（管理员），否则只看该用户上传的（教师自助）。"""
     c = _conn()
     try:
-        rows = c.execute(
-            "SELECT id,name,size,chunks,deleted_at,deleted_by,status FROM kb_docs "
-            "WHERE status='deleted' ORDER BY deleted_at DESC").fetchall()
+        if username:
+            rows = c.execute(
+                "SELECT id,name,size,chunks,deleted_at,deleted_by,owner,status FROM kb_docs "
+                "WHERE status='deleted' AND owner=? ORDER BY deleted_at DESC", (username,)).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT id,name,size,chunks,deleted_at,deleted_by,owner,status FROM kb_docs "
+                "WHERE status='deleted' ORDER BY deleted_at DESC").fetchall()
     finally:
         c.close()
     out = []
@@ -1169,6 +1299,19 @@ def list_trash() -> list[dict]:
             d["remaining_days"] = _trash_days()
         out.append(d)
     return out
+
+
+def caps() -> dict:
+    """容量/格式上限：随配置即时生效，供前端校验与文案驱动（不再写死）。"""
+    return {
+        "extensions": sorted(allowed_exts()),
+        "max_file_mb": _max_file_mb(),
+        "max_total_mb": _max_total_mb(),
+        "max_docs": _max_docs(),
+        "max_pages": _max_pages(),
+        "trash_days": _trash_days(),
+        "max_chars": int(_cfg("LOCAL_KB_MAX_CHARS", 2500) or 2500),
+    }
 
 
 def stats() -> dict:
@@ -1196,7 +1339,7 @@ def stats() -> dict:
     finally:
         c.close()
     p = embed_provider()
-    dual = bool(_cfg("LOCAL_KB_DUAL_INDEX", False))
+    dual = bool(_cfg("LOCAL_KB_DUAL_INDEX", _DUAL_DEFAULT))
     alive = _ollama_alive() if dual else False
     local_model = embed_model("local")
     local_present = bool(dual and alive and _ollama_model_present(local_model))
@@ -1213,6 +1356,7 @@ def stats() -> dict:
                           "docs": int(r["n"])} for r in ch_rows],
         "vec_coverage": round(vec_done / ready, 3) if ready else 0,
         "quota_docs": _max_docs(), "quota_mb": _max_total_mb(),
+        "caps": caps(),
         "embed": {"provider": p, "model": embed_model(p), "dim": _embed_dim(),
                   "sig": embed_sig(p)},
     }
@@ -1243,6 +1387,7 @@ def doc_detail(doc_id: int) -> dict:
         return {}
     d = dict(row)
     d.pop("path", None)
+    d.pop("visibility", None)   # 可见性未实现：不进接口契约，避免"看似有私有库"的误导
     d["chunks_preview"] = [dict(x) for x in chunks]
     d["audit"] = [dict(x) for x in audit]
     return d
@@ -1307,7 +1452,7 @@ def register_upload(tmp: Path, filename: str, username: str, sha256: str, size: 
             c.execute("DELETE FROM kb_docs WHERE id=?", (doc_id,))
             c.commit()
             return {"ok": False, "error": f"文件保存失败: {move_err}"}
-        c.execute("UPDATE kb_docs SET path=? WHERE id=?", (str(dest), doc_id))
+        c.execute("UPDATE kb_docs SET path=? WHERE id=?", (_rel_path(dest), doc_id))
         c.commit()
     finally:
         c.close()
@@ -1375,7 +1520,7 @@ def purge_doc(doc_id: int, username: str) -> dict:
     finally:
         c.close()
     freed = int(row["size"] or 0)
-    p = Path(row["path"]) if row["path"] else None
+    p = Path(_abs_path(row["path"])) if row["path"] else None
     if p and p.exists():
         try:
             p.unlink()
@@ -1410,13 +1555,13 @@ def replace_doc(doc_id: int, tmp: Path, filename: str, sha256: str, size: int) -
             qerr = _check_quota(extra)
             if qerr:
                 return {"ok": False, "error": qerr}
-        old_path = Path(row["path"]) if row["path"] else None
+        old_path = Path(_abs_path(row["path"])) if row["path"] else None
         dest = files_dir() / _disk_name(doc_id, row["name"])
         if tmp:
             shutil.move(str(tmp), str(dest))
         try:
             c.execute("UPDATE kb_docs SET path=?,sha256=?,size=?,status='pending',progress=0,vec_state='pending',"
-                      "error='',updated_at=? WHERE id=?", (str(dest), sha256, size, _now(), doc_id))
+                      "error='',updated_at=? WHERE id=?", (_rel_path(dest), sha256, size, _now(), doc_id))
         except sqlite3.IntegrityError:
             return {"ok": False, "error": "该文件内容已存在于知识库"}
         c.commit()
@@ -1457,6 +1602,58 @@ def rebuild_all() -> dict:
     _ensure_workers()
     _enqueue_pending()
     return {"ok": True}
+
+
+def refill_vectors(limit: int = 200) -> dict:
+    """增量补向量：对 ready 文档复用现有切片，只重嵌未成功的通道——不重新解析原件、不动关键词索引。
+
+    - 页面「维护 → 补齐向量索引」与 housekeeping 半小时自动补灌共用此入口；
+    - 目标通道全部已有 done 记录 → 跳过；部分通道缺失（如刚开双通道）→ 只补缺的通道；
+    - 向量库不可用等瞬时错误已在 _vectorize_chunks 内重试过，仍失败的文档等下一轮自动补。
+    """
+    if not enabled():
+        return {"ok": False, "error": "本地知识库未启用"}
+    channels = _target_channels()
+    if not channels:
+        return {"ok": False, "error": "当前无可用向量通道（云 Key 或 Ollama 未就绪）"}
+    want = {embed_sig(p) for p in channels}
+    targets: list[tuple[int, list[int], list[dict], set]] = []
+    c = _conn()
+    try:
+        rows = c.execute("SELECT id FROM kb_docs WHERE status='ready' ORDER BY id").fetchall()
+        for r in rows:
+            if len(targets) >= limit:
+                break
+            did = int(r["id"])
+            done = {x["sig"] for x in c.execute(
+                "SELECT sig FROM kb_doc_vec WHERE doc_id=? AND state='done'", (did,)).fetchall()}
+            if want <= done:
+                continue
+            ch = c.execute("SELECT id, ord, title, text FROM kb_chunks WHERE doc_id=? ORDER BY ord", (did,)).fetchall()
+            if not ch:
+                continue
+            targets.append((did, [int(x["id"]) for x in ch],
+                            [{"text": x["text"], "title": x["title"] or ""} for x in ch], done))
+    finally:
+        c.close()
+    done_n = fail_n = 0
+    for did, ids, chunks, done in targets:
+        vec_state, vec_err, col_name = _vectorize_chunks(did, ids, chunks, channels, done,
+                                                         cleanup_on_delete=False)
+        if vec_state == "deleted":
+            continue
+        fields: dict[str, Any] = {"vec_state": vec_state, "error": vec_err}
+        if col_name:
+            fields["vec_collection"] = col_name
+        _set_doc(did, **fields)
+        if vec_state == "done":
+            done_n += 1
+        else:
+            fail_n += 1
+    _count_cache["t"] = 0
+    if done_n:
+        logger.info(f"[KB] 增量补向量完成：成功 {done_n}，失败 {fail_n}，通道 {'+'.join(channels)}")
+    return {"ok": True, "targeted": len(targets), "done": done_n, "failed": fail_n, "channels": channels}
 
 
 def verify_vector_collections() -> dict:

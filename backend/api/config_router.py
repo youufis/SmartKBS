@@ -364,6 +364,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "LOCAL_KB_MAX_PAGES": 500,               # 单篇 PDF 页数上限（超限解析阶段拒收）
     "LOCAL_KB_MAX_TOTAL_MB": 200,
     "LOCAL_KB_TRASH_DAYS": 30,
+    "LOCAL_KB_AUDIT_KEEP_DAYS": 365,
     "LOCAL_KB_EXTENSIONS": [".md", ".txt", ".docx", ".pdf"],  # 仅可在已支持解析的格式内增减
     "LOCAL_KB_RRF_W": 0.6,
     "LOCAL_KB_QUERY_TIMEOUT_MS": 1500,
@@ -730,6 +731,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "LOCAL_KB_MAX_TOTAL_MB": (10, 10000),
     "LOCAL_KB_QUERY_TIMEOUT_MS": (100, 5000),
     "LOCAL_KB_TRASH_DAYS": (1, 365),
+    "LOCAL_KB_AUDIT_KEEP_DAYS": (1, 3650),
     # ── 知识问答输出质量（backend/chat_intent.py / chat_prompts.py）──
     "CHAT_META_MAX_TOKENS": (100, 4000),
     # ── 语音合成（backend/tts_service.py）──

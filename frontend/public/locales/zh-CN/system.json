@@ -1976,5 +1976,7 @@
   "placeholder_LOCAL_KB_EMBED_MODEL_CLOUD": "例如：text-embedding-v4",
   "ollamaModelMismatch": "以下本地模型是向量模型，不能用于对话：{{models}}。请改选对话模型。",
   "localKbEmbedChangeTitle": "向量模型/维度已修改",
-  "localKbEmbedChangeBody": "保存后请到「本地文库 → 维护 → 重建向量索引」，否则新向量不会写入；重建期间检索自动使用关键词。只改维度也需要重建。"
+  "localKbEmbedChangeBody": "保存后请到「本地文库 → 维护 → 重建向量索引」，否则新向量不会写入；重建期间检索自动使用关键词。只改维度也需要重建。",
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS": "本地文库审计保留天数",
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "默认 365 天，到期自动清理操作审计日志"
 }

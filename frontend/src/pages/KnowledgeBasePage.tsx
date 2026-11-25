@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Alert, Button, Card, Col, Descriptions, Drawer, Dropdown, Empty, Input, Modal,
+  Alert, Button, Card, Col, Descriptions, Drawer, Dropdown, Empty, Grid, Input, Modal,
   Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Tooltip, Typography, message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -11,10 +11,11 @@ import {
   MoreOutlined, ReloadOutlined, SearchOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { kbApi } from '../api/kb'
-import type { KbDoc, KbStats } from '../api/kb'
+import type { KbAiMode, KbDoc, KbStats } from '../api/kb'
 
-const EXT_OK = ['.md', '.txt', '.docx', '.pdf']
-const MAX_MB = 20
+const EXT_OK_FALLBACK = ['.md', '.txt', '.docx', '.pdf']
+const MAX_MB_FALLBACK = 20
+const MAX_BATCH_FILES = 200
 
 type QItem = {
   uid: string
@@ -26,6 +27,9 @@ type QItem = {
   reason?: string
   docId?: number
   skipId?: number
+  skipReason?: 'duplicate' | 'in_trash'
+  skipName?: string
+  attempted?: boolean
 }
 
 function fmtSize(n?: number) {
@@ -40,6 +44,9 @@ export default function KnowledgeBasePage() {
   const [docs, setDocs] = useState<KbDoc[]>([])
   const [total, setTotal] = useState(0)
   const [stats, setStats] = useState<KbStats | null>(null)
+  const [aiMode, setAiMode] = useState<KbAiMode | null>(null)
+  const [folderDrawer, setFolderDrawer] = useState(false)
+  const screens = Grid.useBreakpoint()
   const [loading, setLoading] = useState(false)
   const [disabled, setDisabled] = useState(false)
   const [q, setQ] = useState('')
@@ -67,6 +74,7 @@ export default function KnowledgeBasePage() {
   const [testRes, setTestRes] = useState<any>(null)
   const [testLoading, setTestLoading] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
+  const [refillBusy, setRefillBusy] = useState(false)
   const [purgeTarget, setPurgeTarget] = useState<KbDoc | null>(null)
   const [purgeName, setPurgeName] = useState('')
   const [replaceTarget, setReplaceTarget] = useState<KbDoc | null>(null)
@@ -77,6 +85,13 @@ export default function KnowledgeBasePage() {
     try { return JSON.parse(localStorage.getItem('smartkb_user') || 'null') } catch { return null }
   }, [])
   const isAdmin = me?.role === 'admin'
+
+  // 限制来自后端配置（stats.caps），前端不再写死格式/大小
+  const caps = stats?.caps
+  const extOkList = caps?.extensions?.length ? caps.extensions : EXT_OK_FALLBACK
+  const maxMb = caps?.max_file_mb || MAX_MB_FALLBACK
+  const acceptAttr = extOkList.map((e) => (e.startsWith('.') ? e : `.${e}`)).join(',')
+  const extsText = extOkList.map((e) => e.replace(/^\./, '')).join(' / ')
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -98,6 +113,14 @@ export default function KnowledgeBasePage() {
     }
   }, [q, status, scope, folderId, page, pageSize, t])
 
+  const loadRef = useRef(load)
+  const docsRef = useRef(docs)
+  useEffect(() => { loadRef.current = load; docsRef.current = docs })
+
+  const loadMode = useCallback(async () => {
+    try { setAiMode(await kbApi.aiMode()) } catch { /* 状态提示失败不阻塞页面 */ }
+  }, [])
+
   const loadTrash = useCallback(async () => {
     try {
       const r = await kbApi.trash()
@@ -108,9 +131,14 @@ export default function KnowledgeBasePage() {
   }, [t])
 
   useEffect(() => { load() }, [load])
+  // 启用状态优先用 stats 判定（该接口无启用守卫、不抛错），load() 里的字符串兜底仅在异常时生效
   useEffect(() => {
-    if (tab === 'trash' && isAdmin) loadTrash()
-  }, [tab, isAdmin, loadTrash])
+    kbApi.stats().then((s) => { if (s && s.enabled === false) setDisabled(true) }).catch(() => {})
+    loadMode()
+  }, [loadMode])
+  useEffect(() => {
+    if (tab === 'trash') loadTrash()
+  }, [tab, loadTrash])
 
   const loadFolders = useCallback(async () => {
     try {
@@ -128,29 +156,54 @@ export default function KnowledgeBasePage() {
     .map(d => `${d.id}:${d.status}`).join(',')
   useEffect(() => {
     if (!activeKey) return
-    const ids = docs.filter(d => d.status === 'pending' || d.status === 'indexing').map(d => d.id)
     const timer = setInterval(async () => {
+      // docs/load 一律经 ref 读取：闭包里的旧值会在切筛选后用旧参数覆盖列表
+      const ids = docsRef.current
+        .filter(d => d.status === 'pending' || d.status === 'indexing')
+        .map(d => d.id)
+      if (!ids.length) {
+        clearInterval(timer)
+        loadRef.current(true)
+        return
+      }
       try {
         const r = await kbApi.status(ids)
         const map = new Map<number, any>((r.items || []).map((x: any) => [x.id, x]))
         setDocs(prev => prev.map(d => (map.has(d.id) ? { ...d, ...map.get(d.id) } : d)))
         if ((r.items || []).every((x: any) => x.status !== 'pending' && x.status !== 'indexing')) {
-          load(true)
+          loadRef.current(true)
         }
       } catch { /* 轮询失败静默，下一轮再试 */ }
     }, 3000)
     return () => clearInterval(timer)
-  }, [activeKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeKey])
 
   const patchQ = (uid: string, patch: Partial<QItem>) =>
     setQueue(prev => prev.map(x => (x.uid === uid ? { ...x, ...patch } : x)))
 
+  const applyUploadResult = (uid: string, res: any, fallbackName: string) => {
+    if (res.uploaded?.length) {
+      patchQ(uid, { state: 'done', progress: 100, docId: res.uploaded[0].id })
+    } else if (res.skipped?.length) {
+      const sk = res.skipped[0]
+      const inTrash = sk.reason === 'in_trash'
+      patchQ(uid, {
+        state: 'failed',
+        reason: inTrash ? t('inTrash') : (sk.name ? t('duplicateNamed', { name: sk.name }) : t('duplicate')),
+        skipId: sk.id, skipReason: inTrash ? 'in_trash' : 'duplicate', skipName: sk.name || fallbackName,
+      })
+    } else {
+      patchQ(uid, { state: 'failed', reason: res.errors?.[0]?.reason || t('uploadFailed') })
+    }
+  }
+
   const processFiles = async (files: File[]) => {
-    const items: QItem[] = files.slice(0, 20).map((f, i) => {
+    if (files.length > MAX_BATCH_FILES) message.warning(t('tooManyFiles', { n: MAX_BATCH_FILES }))
+    const items: QItem[] = files.slice(0, MAX_BATCH_FILES).map((f, i) => {
       const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase()
       let reason = ''
-      if (!EXT_OK.includes(ext)) reason = t('errExt')
-      else if (f.size > MAX_MB * 1048576) reason = t('errSize', { mb: MAX_MB })
+      if (!extOkList.includes(ext)) reason = t('errExt')
+      else if (f.size > maxMb * 1048576) reason = t('errSize', { mb: maxMb })
       else if (f.size === 0) reason = t('errEmpty')
       return {
         uid: `${Date.now()}-${i}-${f.name}`, file: f, name: f.name, size: f.size,
@@ -163,17 +216,10 @@ export default function KnowledgeBasePage() {
     const worker = async () => {
       while (idx < valid.length) {
         const item = valid[idx++]
-        patchQ(item.uid, { state: 'uploading' })
+        patchQ(item.uid, { state: 'uploading', attempted: true })
         try {
           const res = await kbApi.upload(item.file!, (p) => patchQ(item.uid, { progress: p }), uploadFolder)
-          if (res.uploaded?.length) {
-            patchQ(item.uid, { state: 'done', progress: 100, docId: res.uploaded[0].id })
-          } else if (res.skipped?.length) {
-            const why = res.skipped[0].reason === 'in_trash' ? t('inTrash') : t('duplicate')
-            patchQ(item.uid, { state: 'failed', reason: why, skipId: res.skipped[0].id })
-          } else {
-            patchQ(item.uid, { state: 'failed', reason: res.errors?.[0]?.reason || t('uploadFailed') })
-          }
+          applyUploadResult(item.uid, res, item.name)
         } catch (e: any) {
           patchQ(item.uid, { state: 'failed', reason: e?.response?.data?.detail || t('uploadFailed') })
         }
@@ -182,7 +228,7 @@ export default function KnowledgeBasePage() {
     await Promise.all([worker(), worker()])
     load(true)
     loadFolders()
-    if (isAdmin) loadTrash()
+    loadTrash()
   }
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -255,10 +301,11 @@ export default function KnowledgeBasePage() {
     if (!item.skipId) return
     try {
       await kbApi.restore(item.skipId)
-      patchQ(item.uid, { state: 'done', progress: 100, skipId: undefined })
+      patchQ(item.uid, { state: 'done', progress: 100, skipId: undefined, skipReason: undefined, skipName: undefined })
       message.success(t('restored'))
       load(true)
       loadFolders()
+      loadTrash()
     } catch (e: any) {
       message.error(e?.response?.data?.detail || t('opFailed'))
     }
@@ -266,19 +313,40 @@ export default function KnowledgeBasePage() {
 
   const uploadAnyway = async (item: QItem) => {
     if (!item.file) return
-    patchQ(item.uid, { state: 'uploading', progress: 0, reason: '', skipId: undefined })
+    patchQ(item.uid, { state: 'uploading', progress: 0, reason: '', skipId: undefined, skipReason: undefined, attempted: true })
     try {
       const res = await kbApi.upload(item.file, (p) => patchQ(item.uid, { progress: p }), uploadFolder, true)
-      if (res.uploaded?.length) {
-        patchQ(item.uid, { state: 'done', progress: 100 })
-        load(true)
-        loadFolders()
-      } else {
-        patchQ(item.uid, { state: 'failed', reason: res.errors?.[0]?.reason || t('uploadFailed') })
-      }
+      applyUploadResult(item.uid, res, item.name)
+      load(true)
+      loadFolders()
+      loadTrash()
     } catch (e: any) {
       patchQ(item.uid, { state: 'failed', reason: e?.response?.data?.detail || t('uploadFailed') })
     }
+  }
+
+  const retryItem = async (item: QItem) => {
+    if (!item.file) return
+    patchQ(item.uid, { state: 'uploading', progress: 0, reason: '', skipId: undefined, skipReason: undefined, attempted: true })
+    try {
+      const res = await kbApi.upload(item.file, (p) => patchQ(item.uid, { progress: p }), uploadFolder)
+      applyUploadResult(item.uid, res, item.name)
+      load(true)
+      loadFolders()
+    } catch (e: any) {
+      patchQ(item.uid, { state: 'failed', reason: e?.response?.data?.detail || t('uploadFailed') })
+    }
+  }
+
+  const locateDoc = (item: QItem) => {
+    if (!item.skipName) return
+    setUploadOpen(false)
+    setTab('docs')
+    setQ(item.skipName)
+    setStatus('')
+    setScope('all')
+    setFolderId('all')
+    setPage(1)
   }
 
   const batchRemove = () => {
@@ -389,6 +457,33 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  const doRefill = () => {
+    Modal.confirm({
+      title: t('refillTitle'),
+      content: t('refillConfirm'),
+      okText: t('ok'), cancelText: t('cancel'),
+      onOk: async () => {
+        setRefillBusy(true)
+        let done = 0, failed = 0, rounds = 0
+        try {
+          // 服务端每轮最多处理 10 篇：自动多轮直到补完 / 出现失败 / 安全上限
+          for (;;) {
+            const r = await kbApi.refillVectors()
+            if (!r?.ok) { message.warning(r?.error || t('opFailed')); break }
+            done += r.done ?? 0; failed += r.failed ?? 0; rounds += 1
+            if (!r.targeted || failed > 0 || rounds >= 20) break
+          }
+          if (rounds) message.success(t('refillDone', { done, failed, rounds }))
+        } catch (e: any) {
+          message.error(e?.response?.data?.detail || t('opFailed'))
+        } finally {
+          setRefillBusy(false)
+          load(true)
+        }
+      },
+    })
+  }
+
   const runTest = async () => {
     if (!testQ.trim()) return
     setTestLoading(true)
@@ -415,6 +510,28 @@ export default function KnowledgeBasePage() {
       message.error(err?.response?.data?.detail || t('opFailed'))
     }
   }
+
+  const modeTag = useMemo(() => {
+    if (!aiMode) return null
+    const label = aiMode.mode === 'kb_direct' ? t('modeCloud')
+      : aiMode.mode === 'kb_local' ? t('modeLocal')
+      : !aiMode.cloud_enabled && !aiMode.local_enabled ? t('modeOff')
+      : t('modeDirect')
+    const color = aiMode.mode === 'kb_direct' ? 'blue'
+      : aiMode.mode === 'kb_local' ? 'green'
+      : aiMode.cloud_enabled || aiMode.local_enabled ? 'orange' : undefined
+    return <Tooltip title={t('modeTip')}><Tag color={color}>{label}</Tag></Tooltip>
+  }, [aiMode, t])
+
+  // 页数只对 PDF 有语义（md/txt/docx 恒为 0）：以切片数为主值，页数仅作灰色后缀，不再出现悬空的 "-"
+  const chunksCell = (v: { pages?: number; chunks?: number }) => (
+    <span>
+      {v.chunks || 0}
+      {!!v.pages && (
+        <span style={{ color: '#999', fontSize: 12 }}> · {v.pages} {t('pagesUnit')}</span>
+      )}
+    </span>
+  )
 
   const statusCell = (d: KbDoc) => {
     if (d.status === 'pending') return <Tag>{t('stPending')}</Tag>
@@ -471,8 +588,8 @@ export default function KnowledgeBasePage() {
     },
     { title: t('colSize'), dataIndex: 'size', width: 100, render: (v: number) => fmtSize(v) },
     {
-      title: t('colPages'), width: 110,
-      render: (_: any, d) => `${d.pages || '-'} / ${d.chunks || 0}`,
+      title: t('colPages'), width: 120,
+      render: (_: any, d) => chunksCell(d),
     },
     { title: t('colStatus'), width: 190, render: (_: any, d) => statusCell(d) },
     { title: t('colUpdated'), dataIndex: 'updated_at', width: 170 },
@@ -485,8 +602,10 @@ export default function KnowledgeBasePage() {
           { key: 'download', label: t('actDownload') },
           { key: 'move', label: t('moveTo'), disabled: !(isAdmin || d.owner === me?.username) },
         ]
-        if (isAdmin) {
+        if (isAdmin || d.owner === me?.username) {
           items.push({ key: 'reindex', label: t('actReindex'), disabled: d.status === 'indexing' })
+        }
+        if (isAdmin) {
           items.push({ key: 'replace', label: t('actReplace') })
         }
         if (canRemove) items.push({ key: 'remove', label: t('actRemove'), danger: true })
@@ -531,20 +650,84 @@ export default function KnowledgeBasePage() {
       title: t('colActions'), width: 180,
       render: (_: any, d) => (
         <Space>
-          <Button size="small" onClick={() => doRestore(d)}>{t('actRestore')}</Button>
-          <Button size="small" danger onClick={() => { setPurgeTarget(d); setPurgeName('') }}>
-            {t('actPurge')}
+          <Button size="small" onClick={() => doRestore(d)} disabled={!isAdmin && d.owner !== me?.username}>
+            {t('actRestore')}
           </Button>
+          {isAdmin && (
+            <Button size="small" danger onClick={() => { setPurgeTarget(d); setPurgeName('') }}>
+              {t('actPurge')}
+            </Button>
+          )}
         </Space>
       ),
     },
   ]
 
+  const currentFolderName = useMemo(() => {
+    if (folderId === 'all') return t('folderAll')
+    if (folderId === 'none') return t('folderNone')
+    return folders.items.find((x: any) => String(x.id) === folderId)?.name || t('folders')
+  }, [folderId, folders, t])
+
+  const folderPanel = (
+  <Card size="small" styles={{ body: { padding: 8 } }}
+    title={<span style={{ fontSize: 13 }}>{t('folders')}</span>}
+    extra={<Button size="small" type="text" icon={<PlusOutlined />}
+      onClick={() => { setFolderModal({ mode: 'create' }); setFolderName('') }} />}>
+    <div style={folderRowStyle(folderId === 'all')} onClick={() => { setFolderId('all'); setPage(1); setFolderDrawer(false) }}>
+      <FolderOutlined /><span style={{ flex: 1 }}>{t('folderAll')}</span>
+      <span style={{ color: '#999' }}>{stats?.docs || 0}</span>
+    </div>
+    <div style={folderRowStyle(folderId === 'none')} onClick={() => { setFolderId('none'); setPage(1); setFolderDrawer(false) }}>
+      <FolderOutlined /><span style={{ flex: 1 }}>{t('folderNone')}</span>
+      <span style={{ color: '#999' }}>{folders.uncategorized}</span>
+    </div>
+    {folders.items.map((f) => (
+      <div key={f.id} style={folderRowStyle(folderId === String(f.id))}
+        onClick={() => { setFolderId(String(f.id)); setPage(1); setFolderDrawer(false) }}>
+        <FolderOpenOutlined />
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={f.name}>{f.name}</span>
+        <span style={{ color: '#999' }}>{f.cnt}</span>
+        {(isAdmin || f.owner === me?.username) && (
+          <Dropdown trigger={['click']} menu={{
+            items: [
+              { key: 'rename', label: t('folderRename') },
+              { key: 'del', label: t('folderDelete'), danger: true },
+            ],
+            onClick: ({ key, domEvent }) => {
+              domEvent.stopPropagation()
+              if (key === 'rename') {
+                setFolderModal({ mode: 'rename', id: f.id })
+                setFolderName(f.name)
+              } else {
+                removeFolder(f)
+              }
+            },
+          }}>
+            <MoreOutlined style={{ cursor: 'pointer' }} onClick={(e) => e.stopPropagation()} />
+          </Dropdown>
+        )}
+      </div>
+    ))}
+    {folders.items.length === 0 && (
+      <div style={{ padding: '6px 4px', color: '#999', fontSize: 12 }}>
+        {t('quickCreate')}
+        <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {[t('quickExam'), t('quickTextbook'), t('quickLessonPlan')].map((n) => (
+            <Tag key={n} style={{ cursor: 'pointer', margin: 0 }} onClick={() => quickCreate(n)}>+{n}</Tag>
+          ))}
+        </div>
+      </div>
+    )}
+  </Card>
+  )
+
   if (disabled) {
     return (
       <div style={{ padding: 16 }}>
         <Card>
-          <Alert type="warning" showIcon message={t('disabledTitle')} description={t('disabledHint')} />
+          <Alert type="warning" showIcon title={t('disabledTitle')} description={t('disabledHint')} />
         </Card>
       </div>
     )
@@ -552,24 +735,46 @@ export default function KnowledgeBasePage() {
 
   return (
     <div style={{ padding: 16 }}>
-      <Row gutter={[12, 12]}>
+      <Row gutter={[12, 12]} align="stretch">
         <Col xs={12} md={6}>
-          <Card size="small"><Statistic title={t('statDocs')} value={stats?.docs || 0}
-            suffix={`/ ${stats?.quota_docs || '-'}`} /></Card>
+          <Card size="small" style={{ height: '100%' }}>
+            <Statistic title={t('statDocs')} value={stats?.docs || 0} suffix={`/ ${stats?.quota_docs || '-'}`} />
+            <div style={{ fontSize: 12, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              <a onClick={() => { setStatus('ready'); setPage(1) }}>{t('stReady')} {stats?.ready ?? 0}</a>
+              {' · '}<a onClick={() => { setStatus('processing'); setPage(1) }}>{t('stProcessing')} {Math.max(0, (stats?.docs ?? 0) - (stats?.ready ?? 0) - (stats?.failed ?? 0) - (stats?.empty ?? 0))}</a>
+              {' · '}<a onClick={() => { setStatus('failed'); setPage(1) }}>{t('stFailed')} {stats?.failed ?? 0}</a>
+              {' · '}<a onClick={() => { setStatus('empty'); setPage(1) }}>{t('stEmpty')} {stats?.empty ?? 0}</a>
+            </div>
+          </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card size="small"><Statistic title={t('statChunks')} value={stats?.chunks || 0} /></Card>
+          <Card size="small" style={{ height: '100%' }}>
+            <Statistic title={t('statChunks')} value={stats?.chunks || 0} />
+            <div style={{ fontSize: 12, color: '#999', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {t('statChunksSub', { n: caps?.max_chars ?? 2500 })}
+            </div>
+          </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card size="small"><Statistic title={t('statVec')} value={Math.round((stats?.vec_coverage || 0) * 100)} suffix="%" /></Card>
+          <Card size="small" style={{ height: '100%' }}>
+            <Statistic title={t('statVec')} value={Math.round((stats?.vec_coverage || 0) * 100)} suffix="%" />
+            <Tooltip title={stats?.embed ? `${t('embedSig')}: ${stats.embed.sig}` : undefined}>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {(stats?.vec_channels || []).length
+                  ? (stats!.vec_channels || []).map((c) => `${c.provider}·${c.model}×${c.docs}`).join('  ')
+                  : `${stats?.embed?.provider || '-'}·${stats?.embed?.model || '-'}`}
+              </div>
+            </Tooltip>
+          </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card size="small">
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>{t('statCapacity')}</div>
-            <Progress percent={stats?.quota_mb ? Math.min(100, Math.round(((stats?.used_mb ?? stats?.size_mb ?? 0) / stats.quota_mb) * 100)) : 0} size="small" />
-            <div style={{ fontSize: 12, color: '#999' }}>
-              {stats?.used_mb ?? stats?.size_mb ?? 0} / {stats?.quota_mb || '-'} MB
-              {stats?.trash_docs ? ` · ${t('trashHint', { n: stats.trash_docs })}` : ''}
+          <Card size="small" style={{ height: '100%' }}>
+            <Statistic title={t('statCapacity')} value={stats?.used_mb ?? stats?.size_mb ?? 0}
+              suffix={`/ ${stats?.quota_mb || '-'} MB`} />
+            {/* 底行与其它三卡的说明行同高（18px），进度条在其中垂直居中 */}
+            <div style={{ marginTop: 2, minHeight: 18, display: 'flex', alignItems: 'center' }}>
+              <Progress percent={stats?.quota_mb ? Math.min(100, Math.round(((stats?.used_mb ?? stats?.size_mb ?? 0) / stats.quota_mb) * 100)) : 0}
+                size="small" style={{ marginBottom: 0, flex: 1 }} />
             </div>
           </Card>
         </Col>
@@ -577,22 +782,27 @@ export default function KnowledgeBasePage() {
 
       <Card
         style={{ marginTop: 12 }}
-        title={<Space><DatabaseOutlined />{t('title')}</Space>}
+        title={<Space><DatabaseOutlined />{t('title')}{modeTag}</Space>}
         extra={
           <Space>
             <Button type="primary" icon={<CloudUploadOutlined />}
               onClick={() => { setUploadFolder(folderId === 'all' ? 'none' : folderId); setUploadOpen(true) }}>
               {t('upload')}
             </Button>
+            {!isAdmin && (
+              <Button icon={<SearchOutlined />} onClick={() => { setTestOpen(true); setTestRes(null) }}>{t('menuTest')}</Button>
+            )}
             {isAdmin && (
               <Dropdown
                 menu={{
                   items: [
                     { key: 'test', label: t('menuTest') },
+                    { key: 'refill', label: t('menuRefill'), disabled: refillBusy },
                     { key: 'rebuild', label: t('menuRebuild') },
                   ],
                   onClick: ({ key }) => {
                     if (key === 'test') { setTestOpen(true); setTestRes(null) }
+                    if (key === 'refill') doRefill()
                     if (key === 'rebuild') setRebuildOpen(true)
                   },
                 }}
@@ -608,7 +818,18 @@ export default function KnowledgeBasePage() {
             type="info"
             showIcon
             style={{ marginBottom: 12 }}
-            message={t('localChannelHint', { model: stats?.local_ready?.model || 'bge-m3' })}
+            title={t('localChannelHint', { model: stats?.local_ready?.model || 'bge-m3' })}
+          />
+        )}
+        {!!stats && stats.ready > 0 && stats.vec_coverage < 1 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            title={t('vecGapAlert', { n: Math.max(0, stats.ready - (stats.vec_docs || 0)) })}
+            action={isAdmin ? (
+              <Button size="small" danger loading={refillBusy} onClick={doRefill}>{t('vecGapAction')}</Button>
+            ) : undefined}
           />
         )}
         <Tabs
@@ -621,61 +842,14 @@ export default function KnowledgeBasePage() {
               children: (
                 <>
                   <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                    <div style={{ width: 210, flexShrink: 0 }}>
-                      <Card size="small" bodyStyle={{ padding: 8 }}
-                        title={<span style={{ fontSize: 13 }}>{t('folders')}</span>}
-                        extra={<Button size="small" type="text" icon={<PlusOutlined />}
-                          onClick={() => { setFolderModal({ mode: 'create' }); setFolderName('') }} />}>
-                        <div style={folderRowStyle(folderId === 'all')} onClick={() => { setFolderId('all'); setPage(1) }}>
-                          <FolderOutlined /><span style={{ flex: 1 }}>{t('folderAll')}</span>
-                          <span style={{ color: '#999' }}>{stats?.docs || 0}</span>
-                        </div>
-                        <div style={folderRowStyle(folderId === 'none')} onClick={() => { setFolderId('none'); setPage(1) }}>
-                          <FolderOutlined /><span style={{ flex: 1 }}>{t('folderNone')}</span>
-                          <span style={{ color: '#999' }}>{folders.uncategorized}</span>
-                        </div>
-                        {folders.items.map((f) => (
-                          <div key={f.id} style={folderRowStyle(folderId === String(f.id))}
-                            onClick={() => { setFolderId(String(f.id)); setPage(1) }}>
-                            <FolderOpenOutlined />
-                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              title={f.name}>{f.name}</span>
-                            <span style={{ color: '#999' }}>{f.cnt}</span>
-                            {(isAdmin || f.owner === me?.username) && (
-                              <Dropdown trigger={['click']} menu={{
-                                items: [
-                                  { key: 'rename', label: t('folderRename') },
-                                  { key: 'del', label: t('folderDelete'), danger: true },
-                                ],
-                                onClick: ({ key, domEvent }) => {
-                                  domEvent.stopPropagation()
-                                  if (key === 'rename') {
-                                    setFolderModal({ mode: 'rename', id: f.id })
-                                    setFolderName(f.name)
-                                  } else {
-                                    removeFolder(f)
-                                  }
-                                },
-                              }}>
-                                <MoreOutlined style={{ cursor: 'pointer' }} onClick={(e) => e.stopPropagation()} />
-                              </Dropdown>
-                            )}
-                          </div>
-                        ))}
-                        {folders.items.length === 0 && (
-                          <div style={{ padding: '6px 4px', color: '#999', fontSize: 12 }}>
-                            {t('quickCreate')}
-                            <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                              {['试题', '教材', '教案'].map((n) => (
-                                <Tag key={n} style={{ cursor: 'pointer', margin: 0 }} onClick={() => quickCreate(n)}>+{n}</Tag>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </Card>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 320 }}>
+                    {screens.md !== false ? (
+                      <div style={{ width: 210, flexShrink: 0 }}>{folderPanel}</div>
+                    ) : null}
+                    <div style={{ flex: 1, minWidth: screens.md !== false ? 320 : 0 }}>
                   <Space wrap style={{ marginBottom: 12 }}>
+                    {screens.md === false && (
+                      <Button icon={<FolderOutlined />} onClick={() => setFolderDrawer(true)}>{currentFolderName}</Button>
+                    )}
                     <Input allowClear prefix={<SearchOutlined />} placeholder={t('searchPh')}
                       value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} style={{ width: 220 }} />
                     <Select value={status} onChange={(v) => { setStatus(v); setPage(1) }} style={{ width: 150 }}
@@ -691,7 +865,7 @@ export default function KnowledgeBasePage() {
                         { value: 'all', label: t('scopeAll') },
                         { value: 'mine', label: t('scopeMine') },
                       ]} />
-                    <Button icon={<ReloadOutlined />} onClick={() => load()}>{t('refresh')}</Button>
+                    <Button icon={<ReloadOutlined />} onClick={() => { load(); loadMode() }}>{t('refresh')}</Button>
                     {selected.length > 0 && (
                       <Button danger icon={<DeleteOutlined />} onClick={batchRemove}>
                         {t('batchRemove', { n: selected.length })}
@@ -724,24 +898,27 @@ export default function KnowledgeBasePage() {
                 </>
               ),
             },
-            ...(isAdmin ? [{
+            {
               key: 'trash',
-              label: `${t('tabTrash')}${stats?.trash_docs ? ` (${stats.trash_docs})` : ''}`,
+              // 教师回收站只列自己的文档，徽标计数不能借用全校 stats.trash_docs
+              label: `${t('tabTrash')}${isAdmin && stats?.trash_docs ? ` (${stats.trash_docs})` : ''}`,
               children: (
                 <>
-                  <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={t('trashNotice')} />
+                  <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+                    title={t('trashNotice', { days: caps?.trash_days ?? 30 })}
+                    description={!isAdmin ? t('trashMine') : undefined} />
                   <Table rowKey="id" size="middle" columns={trashColumns} dataSource={trash}
                     pagination={false} scroll={{ x: 700 }} />
                 </>
               ),
-            }] : []),
+            },
           ]}
         />
       </Card>
 
-      <input ref={fileRef} type="file" multiple accept=".md,.txt,.docx,.pdf"
+      <input ref={fileRef} type="file" multiple accept={acceptAttr}
         style={{ display: 'none' }} onChange={onPick} />
-      <input ref={replaceRef} type="file" accept=".md,.txt,.docx,.pdf"
+      <input ref={replaceRef} type="file" accept={acceptAttr}
         style={{ display: 'none' }} onChange={onReplacePick} />
 
       <Modal
@@ -750,7 +927,7 @@ export default function KnowledgeBasePage() {
         title={<Space><CloudUploadOutlined style={{ color: '#1677ff' }} />{t('uploadTitle')}</Space>}
         width={560}
         centered
-        maskClosable={false}
+        mask={{ closable: false }}
         footer={[
           <Button key="clear" onClick={() => setQueue([])} disabled={queue.some((x) => x.state === 'uploading')}>
             {t('clearDone')}
@@ -785,7 +962,7 @@ export default function KnowledgeBasePage() {
             <CloudUploadOutlined style={{ fontSize: 28, color: '#1677ff' }} />
           </div>
           <div style={{ fontSize: 15, fontWeight: 500 }}>{t('dropHint')}</div>
-          <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6 }}>{t('uploadRules', { mb: MAX_MB })}</div>
+          <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6 }}>{t('uploadRules', { exts: extsText, mb: maxMb })}</div>
         </div>
 
         <div style={{ marginTop: 16 }}>
@@ -811,10 +988,18 @@ export default function KnowledgeBasePage() {
                   {item.state === 'uploading' && <Progress percent={item.progress} size="small" />}
                   {item.state === 'done' && <Tag color="success">{t('qDone')}</Tag>}
                   {item.state === 'failed' && <Tag color="error">{item.reason || t('qFailed')}</Tag>}
-                  {item.state === 'failed' && item.skipId && (
+                  {item.state === 'failed' && !item.skipId && item.attempted && (
+                    <Button size="small" style={{ marginLeft: 6 }} onClick={() => retryItem(item)}>{t('retry')}</Button>
+                  )}
+                  {item.state === 'failed' && item.skipId && item.skipReason === 'in_trash' && (
                     <Space size={4} style={{ marginTop: 4 }}>
                       <Button size="small" onClick={() => restoreSkipped(item)}>{t('restoreExisting')}</Button>
                       <Button size="small" type="primary" onClick={() => uploadAnyway(item)}>{t('uploadAnyway')}</Button>
+                    </Space>
+                  )}
+                  {item.state === 'failed' && item.skipId && item.skipReason === 'duplicate' && (
+                    <Space size={4} style={{ marginTop: 4 }}>
+                      <Button size="small" type="primary" onClick={() => locateDoc(item)}>{t('locate')}</Button>
                     </Space>
                   )}
                 </div>
@@ -824,18 +1009,18 @@ export default function KnowledgeBasePage() {
         )}
       </Modal>
 
-      <Drawer open={detailOpen} onClose={() => setDetailOpen(false)} width={640} title={detail?.name}>
+      <Drawer open={detailOpen} onClose={() => setDetailOpen(false)} size={640} title={detail?.name}>
         {detail && (
           <>
             <Descriptions size="small" column={2} bordered items={[
               { key: 'size', label: t('colSize'), children: fmtSize(detail.size) },
-              { key: 'pages', label: t('colPages'), children: `${detail.pages || '-'} / ${detail.chunks || 0}` },
+              { key: 'pages', label: t('colPages'), children: chunksCell(detail) },
               { key: 'status', label: t('colStatus'), children: statusCell(detail) },
               { key: 'owner', label: t('colOwner'), children: detail.owner || '-' },
               { key: 'created', label: t('colCreated'), children: detail.created_at || '-' },
               { key: 'updated', label: t('colUpdated'), children: detail.updated_at || '-' },
             ]} />
-            {detail.error && <Alert style={{ marginTop: 12 }} type="warning" showIcon message={detail.error} />}
+            {detail.error && <Alert style={{ marginTop: 12 }} type="warning" showIcon title={detail.error} />}
             <Typography.Title level={5} style={{ marginTop: 16 }}>{t('previewTitle')}</Typography.Title>
             {(detail.chunks_preview || []).length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('noPreview')} />}
             {(detail.chunks_preview || []).map((c: any, i: number) => (
@@ -904,8 +1089,12 @@ export default function KnowledgeBasePage() {
 
       <Modal open={rebuildOpen} onCancel={() => setRebuildOpen(false)} title={t('rebuildTitle')}
         okText={t('ok')} cancelText={t('cancel')} onOk={doRebuild}>
-        <Alert type="warning" showIcon message={t('rebuildWarn')} />
+        <Alert type="warning" showIcon title={t('rebuildWarn')} />
       </Modal>
+
+      <Drawer open={screens.md === false && folderDrawer} onClose={() => setFolderDrawer(false)} size={280} title={t('folders')}>
+        {folderPanel}
+      </Drawer>
 
       <Modal open={!!purgeTarget} onCancel={() => setPurgeTarget(null)} title={t('purgeTitle')}
         okText={t('purgeOk')} cancelText={t('cancel')}

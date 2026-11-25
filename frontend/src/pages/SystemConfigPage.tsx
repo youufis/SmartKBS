@@ -473,6 +473,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'LOCAL_KB_MAX_PAGES', labelKey: 'field_LOCAL_KB_MAX_PAGES', descKey: 'field_LOCAL_KB_MAX_PAGES_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'LOCAL_KB_MAX_TOTAL_MB', labelKey: 'field_LOCAL_KB_MAX_TOTAL_MB', descKey: 'field_LOCAL_KB_MAX_TOTAL_MB_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'LOCAL_KB_TRASH_DAYS', labelKey: 'field_LOCAL_KB_TRASH_DAYS', descKey: 'field_LOCAL_KB_TRASH_DAYS_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'LOCAL_KB_AUDIT_KEEP_DAYS', labelKey: 'field_LOCAL_KB_AUDIT_KEEP_DAYS', descKey: 'field_LOCAL_KB_AUDIT_KEEP_DAYS_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'LOCAL_KB_EXTENSIONS', labelKey: 'field_LOCAL_KB_EXTENSIONS', descKey: 'field_LOCAL_KB_EXTENSIONS_desc', type: 'tags_select', extMode: true, group: 'knowledgebase', required: false, presets: LOCAL_KB_EXT_PRESETS },
   { key: 'LOCAL_KB_VEC_TOP_K', labelKey: 'field_LOCAL_KB_VEC_TOP_K', descKey: 'field_LOCAL_KB_VEC_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'LOCAL_KB_KW_TOP_K', labelKey: 'field_LOCAL_KB_KW_TOP_K', descKey: 'field_LOCAL_KB_KW_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },

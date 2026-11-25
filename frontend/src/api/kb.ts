@@ -12,7 +12,6 @@ export interface KbDoc {
   vec_state: 'pending' | 'done' | 'failed' | 'off'
   error?: string
   owner?: string
-  visibility?: string
   folder_id?: number | null
   created_at?: string
   updated_at?: string
@@ -38,11 +37,29 @@ export interface KbStats {
   vec_coverage: number
   quota_docs: number
   quota_mb: number
+  caps?: {
+    extensions: string[]
+    max_file_mb: number
+    max_total_mb: number
+    max_docs: number
+    max_pages: number
+    trash_days: number
+    max_chars: number
+  }
   embed?: { provider: string; model: string; dim: number; sig: string }
+}
+
+export interface KbAiMode {
+  mode: 'kb_direct' | 'kb_local' | 'direct'
+  cloud_enabled: boolean
+  cloud_ready: boolean
+  local_enabled: boolean
+  local_ready: boolean
 }
 
 export const kbApi = {
   stats: () => apiClient.get<KbStats>('/api/kb/stats').then(r => r.data),
+  aiMode: () => apiClient.get<KbAiMode>('/api/kb/ai-mode').then(r => r.data),
   docs: (params: Record<string, unknown>) =>
     apiClient.get('/api/kb/docs', { params }).then(r => r.data),
   status: (ids: number[]) =>
@@ -78,6 +95,7 @@ export const kbApi = {
   purge: (id: number, confirmName: string) =>
     apiClient.delete(`/api/kb/trash/${id}`, { params: { confirm_name: confirmName } }).then(r => r.data),
   rebuild: () => apiClient.post('/api/kb/rebuild').then(r => r.data),
+  refillVectors: () => apiClient.post('/api/kb/refill-vectors', {}, { timeout: 180000 }).then(r => r.data),
   searchTest: (q: string) => apiClient.post('/api/kb/search-test', { q }, { timeout: 60000 }).then(r => r.data),
   folders: () => apiClient.get('/api/kb/folders').then(r => r.data),
   createFolder: (name: string) => apiClient.post('/api/kb/folders', { name }).then(r => r.data),
