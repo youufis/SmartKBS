@@ -19,6 +19,7 @@ import { useWhiteboardStore } from '../stores/whiteboardStore'
 import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
 import { AIPanel } from '../components/whiteboard/AIPanel'
 import { useWhiteboardWS } from '../hooks/useWhiteboardWS'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import * as whiteboardApi from '../api/whiteboard'
 import apiClient from '../api/client'
 import type { Editor } from 'tldraw'
@@ -397,6 +398,8 @@ const WhiteboardRoomPage: React.FC = () => {
               />
             </Tooltip>
           )}
+          {/* 白板工具条很挤：只交代引擎，知识库口径在白板大厅那颗胶囊上看 */}
+          <AiRuntimeChips show="model" density="compact" />
           {isTeacher && (
             <Tooltip title={t('wbAiAssistant')}>
               <Button

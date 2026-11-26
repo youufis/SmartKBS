@@ -23,6 +23,7 @@ import { RowList } from '../components/RowList'
 import ScopeTag from '../components/ScopeTag'
 import ListFilterBar from '../components/ListFilterBar'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import { reportLoadError } from '../utils/loadError'
 import PollOptionsEditor, { POLL_OPTION_MAX, POLL_OPTION_MIN } from '../components/polls/PollOptionsEditor'
@@ -357,6 +358,8 @@ const QuickPollPage: React.FC = () => {
         subtitle={t('pollSubtitle')}
         extra={(
           <>
+            {/* 课堂投票：AI 生成投票议题 */}
+            <AiRuntimeChips />
             <Tooltip title={t('refresh')}>
               <Button icon={<ReloadOutlined />} onClick={() => void loadPolls()} />
             </Tooltip>

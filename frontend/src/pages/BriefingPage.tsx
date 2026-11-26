@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import dayjs, { type Dayjs } from 'dayjs'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { message } from '../utils/feedback'
 import { useAuthStore } from '../stores/authStore'
@@ -495,6 +496,7 @@ const BriefingPage: React.FC = () => {
             <span>{periodText}</span>
             {currentFilterLabel && !isMobile && <Text type="secondary">{currentFilterLabel}</Text>}
             {statusTag}
+            <AiRuntimeChips show="model" density="compact" />
           </Space>
         }
         extra={isMobile ? (

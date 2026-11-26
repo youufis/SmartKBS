@@ -20,6 +20,7 @@ import { asrSelfCheck, type AsrCheckResult } from '../api/explore'
 import StoragePanel from '../components/explore/StoragePanel'
 import { TLDrawLicenseStatus } from '../components/TLDrawLicenseGate'
 import PageHeader from '../components/PageHeader'
+import { useAiRuntimeStore } from '../stores/aiRuntimeStore'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
   fetchSkillStats,
@@ -2670,6 +2671,8 @@ const SystemConfigPage: React.FC = () => {
     try {
       await apiClient.put('/api/config', { config: values })
       message.success(t('configSavedMsg'))
+      // 管理员改完模型/知识库配置，教师端那颗 AI 状态胶囊要立刻重取，不要继续显示改之前的引擎名
+      useAiRuntimeStore.getState().invalidate()
       await loadConfig()
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string }

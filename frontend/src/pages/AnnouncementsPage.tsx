@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { Card, Table, Typography, Button, Space, Modal, Form, Input, Select, Empty, Tag, Switch, Popconfirm, Pagination, Tooltip } from 'antd'
 import { message } from '../utils/feedback'
 import {
@@ -384,6 +385,8 @@ const AnnouncementsPage: React.FC = () => {
         subtitle={t('announcementsSubtitle')}
         extra={(
           <>
+            {/* 公告管理：AI 草稿生成 */}
+            <AiRuntimeChips />
             <Button icon={<ReloadOutlined />} onClick={() => fetchAnnouncements(page, pageSize)}
               aria-label={t('refresh')} />
             {isAdminOrTeacher && (

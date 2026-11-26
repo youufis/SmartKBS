@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { pollAiTaskWithProgress } from '../api/aiTask'
@@ -449,6 +450,7 @@ const AnalyticsPage: React.FC = () => {
         icon={<RobotOutlined />}
         title={t('analytics.title')}
         subtitle={t('analytics.description')}
+        extra={<AiRuntimeChips show="model" />}
       />
 
       <Card style={{ borderRadius: 8 }}>

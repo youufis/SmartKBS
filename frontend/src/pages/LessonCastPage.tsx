@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { getCurriculumTree, getKpResources } from '../api/curriculum';
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import {
   getCast,
   saveCastProgress,
@@ -412,6 +413,8 @@ const LessonCastPage: React.FC = () => {
           </div>
         </div>
         <div className="lc-grow" />
+        {/* 讲演页本体：档位与知识库口径在生成弹层已有，这里让教师一进页面就能看到 */}
+        <AiRuntimeChips density="compact" />
         <div className="lc-pillgroup">
           <button
             type="button"

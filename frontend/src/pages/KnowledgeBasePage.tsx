@@ -11,7 +11,9 @@ import {
   MoreOutlined, ReloadOutlined, SearchOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { kbApi } from '../api/kb'
-import type { KbAiMode, KbDoc, KbStats } from '../api/kb'
+import type { KbDoc, KbStats } from '../api/kb'
+import AiRuntimeChips from '../components/AiRuntimeChips'
+import { useAiRuntimeStore } from '../stores/aiRuntimeStore'
 
 const EXT_OK_FALLBACK = ['.md', '.txt', '.docx', '.pdf']
 const MAX_MB_FALLBACK = 20
@@ -44,7 +46,6 @@ export default function KnowledgeBasePage() {
   const [docs, setDocs] = useState<KbDoc[]>([])
   const [total, setTotal] = useState(0)
   const [stats, setStats] = useState<KbStats | null>(null)
-  const [aiMode, setAiMode] = useState<KbAiMode | null>(null)
   const [folderDrawer, setFolderDrawer] = useState(false)
   const screens = Grid.useBreakpoint()
   const [loading, setLoading] = useState(false)
@@ -117,10 +118,6 @@ export default function KnowledgeBasePage() {
   const docsRef = useRef(docs)
   useEffect(() => { loadRef.current = load; docsRef.current = docs })
 
-  const loadMode = useCallback(async () => {
-    try { setAiMode(await kbApi.aiMode()) } catch { /* 状态提示失败不阻塞页面 */ }
-  }, [])
-
   const loadTrash = useCallback(async () => {
     try {
       const r = await kbApi.trash()
@@ -134,8 +131,8 @@ export default function KnowledgeBasePage() {
   // 启用状态优先用 stats 判定（该接口无启用守卫、不抛错），load() 里的字符串兜底仅在异常时生效
   useEffect(() => {
     kbApi.stats().then((s) => { if (s && s.enabled === false) setDisabled(true) }).catch(() => {})
-    loadMode()
-  }, [loadMode])
+    // 链路状态（云端/本地哪一路生效）改由 AiRuntimeChips 统一读取，这里不再单独拉 /kb/ai-mode
+  }, [])
   useEffect(() => {
     if (tab === 'trash') loadTrash()
   }, [tab, loadTrash])
@@ -511,18 +508,6 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  const modeTag = useMemo(() => {
-    if (!aiMode) return null
-    const label = aiMode.mode === 'kb_direct' ? t('modeCloud')
-      : aiMode.mode === 'kb_local' ? t('modeLocal')
-      : !aiMode.cloud_enabled && !aiMode.local_enabled ? t('modeOff')
-      : t('modeDirect')
-    const color = aiMode.mode === 'kb_direct' ? 'blue'
-      : aiMode.mode === 'kb_local' ? 'green'
-      : aiMode.cloud_enabled || aiMode.local_enabled ? 'orange' : undefined
-    return <Tooltip title={t('modeTip')}><Tag color={color}>{label}</Tag></Tooltip>
-  }, [aiMode, t])
-
   // 页数只对 PDF 有语义（md/txt/docx 恒为 0）：以切片数为主值，页数仅作灰色后缀，不再出现悬空的 "-"
   const chunksCell = (v: { pages?: number; chunks?: number }) => (
     <span>
@@ -782,7 +767,7 @@ export default function KnowledgeBasePage() {
 
       <Card
         style={{ marginTop: 12 }}
-        title={<Space><DatabaseOutlined />{t('title')}{modeTag}</Space>}
+        title={<Space wrap><DatabaseOutlined />{t('title')}<AiRuntimeChips density="compact" /></Space>}
         extra={
           <Space>
             <Button type="primary" icon={<CloudUploadOutlined />}
@@ -865,7 +850,7 @@ export default function KnowledgeBasePage() {
                         { value: 'all', label: t('scopeAll') },
                         { value: 'mine', label: t('scopeMine') },
                       ]} />
-                    <Button icon={<ReloadOutlined />} onClick={() => { load(); loadMode() }}>{t('refresh')}</Button>
+                    <Button icon={<ReloadOutlined />} onClick={() => { load(); useAiRuntimeStore.getState().load(true) }}>{t('refresh')}</Button>
                     {selected.length > 0 && (
                       <Button danger icon={<DeleteOutlined />} onClick={batchRemove}>
                         {t('batchRemove', { n: selected.length })}

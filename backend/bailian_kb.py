@@ -140,6 +140,28 @@ def kb_ready() -> tuple[bool, str]:
     return True, ""
 
 
+def runtime_info() -> dict[str, Any]:
+    """云端知识库链路的状态快照（供 /api/config/ai-runtime）。
+
+    只做配置校验、不打网络 —— kb_ready() 本身就是纯配置判定，状态胶囊因此不会
+    因为百炼瞬时抖动而蓝绿闪。服务 ID / 域名原样返回：掩码与角色裁剪是接口层按
+    调用者身份决定的事，这里不猜。
+    """
+    cfg = _get_cfg()
+    ready, reason = kb_ready()
+    return {
+        "enabled": cfg["enabled"],
+        "ready": ready,
+        "reason": reason if cfg["enabled"] else "",
+        "agent_id": cfg["agent_id"],
+        "base": cfg["base"],
+        "top_k": cfg["top_k"],
+        "min_score": cfg["min_score"],
+        "rel_gap": cfg["rel_gap"],
+        "timeout_ms": cfg["timeout_ms"],
+    }
+
+
 def kb_search(query: str, api_key: Optional[str] = None) -> list[dict[str, Any]]:
     """检索百炼知识库。返回 [{text, score, doc_name, title}]；任何异常返回空列表（调用方降级）"""
     cfg = _get_cfg()

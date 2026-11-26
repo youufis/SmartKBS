@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import StatLine from '../components/StatLine'
 import { useAuthStore } from '../stores/authStore'
 import {
@@ -216,6 +217,8 @@ const NewsAdminPage: React.FC = () => {
         subtitle={t('newsSubtitle')}
         extra={(
           <>
+            {/* 新闻管理：AI 摘要重生成（这里只标引擎） */}
+            <AiRuntimeChips show="model" density="compact" />
             <Button icon={<EyeOutlined />} onClick={() => window.open('/news-hub', '_blank')}>
               {t('previewStudent')}
             </Button>

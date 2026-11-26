@@ -14,6 +14,7 @@ import {
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import ScopeTag from '../components/ScopeTag'
@@ -687,6 +688,8 @@ const InteractionPage: React.FC = () => {
           : t('ipMyProgress', { todo: quizTodoCount, done: quizDoneCount })}
         extra={isTeacherOrAdmin ? (
           <>
+            {/* 随堂测验：AI 出题与测后分析 */}
+            <AiRuntimeChips />
             <Button icon={<RobotOutlined />} onClick={() => {
               setAiQuizModal(true); setAiQuizResult(null)
               aiQuizForm.resetFields()

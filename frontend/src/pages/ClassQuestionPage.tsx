@@ -16,6 +16,7 @@ import {
   EditOutlined, BulbOutlined, ExportOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import useSubjectOptions from '../hooks/useSubjectOptions'
@@ -411,6 +412,8 @@ const ClassQuestionPage: React.FC = () => {
           <Tag color="geekblue" style={{ fontSize: 11 }}>{t('subtitle')}</Tag></Space>}
         extra={
           <Space>
+            {/* 课堂抽问：AI 生题与回答建议 */}
+            <AiRuntimeChips density="compact" />
             <Popconfirm title={t('confirmReset')} onConfirm={resetSession} disabled={!grade || !cls}>
               <Button size="small" icon={<ReloadOutlined />} disabled={!grade || !cls}>{t('resetSession')}</Button>
             </Popconfirm>

@@ -6,6 +6,7 @@ import { DeleteOutlined, MoreOutlined, PlusOutlined, PlusSquareOutlined, RestOut
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useAuthStore } from '../stores/authStore'
 import { authedFileUrl } from '../api/client'
 import { BUILTIN_TEMPLATES, type BuiltinTemplate } from '../constants/exploreTemplates'
@@ -495,6 +496,8 @@ const ExploreCanvasPage: React.FC = () => {
              「搜索200 + 回收站 + 新建画布」不换行实测排到 459px（视口 390），
              手机上「新建画布」整颗按钮掉到屏外，只剩一个「+」。 */
           <Space wrap size={8}>
+            {/* 画布里所有 AI 问答/生成吃的都是这条全局链路，大厅先交代一次口径 */}
+            <AiRuntimeChips density="compact" />
             <Input.Search allowClear placeholder={t('searchPh')} style={{ width: 200, maxWidth: '100%' }}
               onChange={(e) => { setQuery(e.target.value); setPage(1) }} />
             <Button icon={<RestOutlined />} onClick={openTrash}>{t('trash')}</Button>

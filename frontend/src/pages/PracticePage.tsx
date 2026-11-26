@@ -31,6 +31,7 @@ import { relativeTime } from '../utils/relativeTime'
 import AnswerNav from '../components/AnswerNav'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { draftKey, loadDraft, clearDraft, useDebouncedDraft, countAnswered } from '../utils/answerDraft'
 import { toPercent, percentStatus, percentColor, percentLevelKey } from '../utils/score'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -1236,6 +1237,7 @@ const TeacherView: React.FC = () => {
         icon={<FormOutlined />}
         title={t('syncPractice')}
         subtitle={t('teacherSubtitle')}
+        extra={<AiRuntimeChips />}
       >
         <Segmented
           value={tab}

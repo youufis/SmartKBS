@@ -7,6 +7,7 @@ import { AppstoreOutlined, ArrowLeftOutlined, CustomerServiceOutlined, DeleteOut
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import ExploreCanvas from '../components/explore/ExploreCanvas'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import PageThumb from '../components/explore/PageThumb'
 import { useAuthStore } from '../stores/authStore'
 import ExploreAIPanel from '../components/explore/ExploreAIPanel'
@@ -443,6 +444,8 @@ const ExploreWorkspacePage: React.FC = () => {
             <Tooltip title={t('clearTip')}>
               <Button size="small" icon={<DeleteOutlined />} onClick={doClearPage}>{t('clearPage')}</Button>
             </Tooltip>
+            {/* 画布工具条很挤：只交代引擎，知识库口径在画布大厅那颗胶囊上看 */}
+            <AiRuntimeChips show="model" density="compact" />
             <Button size="small" type={panelOpen ? 'primary' : 'default'} icon={<CustomerServiceOutlined />} onClick={togglePanel}>{t('aiAssistant')}</Button>
           </>
         )}

@@ -11,6 +11,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import FormulaRenderer from '../components/FormulaRenderer'
 
 const { Text } = Typography
@@ -424,6 +425,8 @@ const DiscussionRoomPage: React.FC = () => {
             </div>
           </Space>
           <Space>
+            {/* 房间里的 AI 助教/小结用的是全局链路，先在这里交代清楚 */}
+            <AiRuntimeChips density="compact" />
             {/* 成员列表（点击查看明细） */}
             <Tooltip title={t('viewMembers')}>
               <Tag

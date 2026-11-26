@@ -15,6 +15,7 @@ import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import ListFilterBar from '../components/ListFilterBar'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import ScopeTag from '../components/ScopeTag'
@@ -564,6 +565,8 @@ const DiscussionPage: React.FC = () => {
         subtitle={t('pageSubtitle')}
         extra={isTeacherOrAdmin && !isMobile ? (
           <>
+            {/* 分组讨论：AI 生成讨论方案与角色分工 */}
+            <AiRuntimeChips />
             <Button icon={<BulbOutlined />} onClick={() => { setAiModal(true); aiForm.resetFields(); }}>
               {t('aiGeneratePlan')}
             </Button>

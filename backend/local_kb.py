@@ -1314,6 +1314,40 @@ def caps() -> dict:
     }
 
 
+def runtime_counts() -> dict[str, Any]:
+    """AI 运行状态位专用的轻量计数（供 /api/config/ai-runtime 的知识库胶囊）。
+
+    与 stats() 的分工：stats() 是知识库管理页的全量体检（配额、向量通道清单、覆盖率，
+    且 LOCAL_KB_DUAL_INDEX=True 时会为 local_ready 打一次网络探 Ollama）；状态胶囊只要
+    "现在库里有多少料"，所以这里纯 SQL、零外呼 —— 一颗可能被七八个页面同时刷新的胶囊，
+    不该为了一次计数去等探活。
+    """
+    p = embed_provider()
+    out: dict[str, Any] = {
+        "enabled": enabled(), "docs": 0, "chunks": 0, "vec_docs": 0,
+        "embed_provider": p, "embed_model": embed_model(p),
+    }
+    if not out["enabled"]:
+        return out
+    try:
+        c = _conn()
+        try:
+            row = c.execute("SELECT COUNT(*) AS n, COALESCE(SUM(chunks),0) AS ch "
+                            "FROM kb_docs WHERE status != 'deleted'").fetchone()
+            out["docs"] = int(row["n"] or 0)
+            out["chunks"] = int(row["ch"] or 0)
+            out["vec_docs"] = int(c.execute(
+                "SELECT COUNT(*) FROM kb_doc_vec v JOIN kb_docs d ON d.id=v.doc_id "
+                "WHERE d.status='ready' AND v.state='done' AND v.sig=?",
+                (embed_sig(p),)).fetchone()[0])
+        finally:
+            c.close()
+    except Exception as e:
+        # 计数读失败按"没有料"返回：状态位宁可保守，也不能因为一次查询异常而 500
+        logger.warning(f"[本地文库] 状态计数失败: {e}")
+    return out
+
+
 def stats() -> dict:
     if not enabled():
         return {"enabled": False}

@@ -2,6 +2,7 @@ import { downloadBlob } from '../utils/downloadBlob'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { Card, Typography, Button, Space, Tag, Modal, Spin, Tabs, Empty, Select, Table, Descriptions, Input, Alert, InputNumber, Pagination, Grid, Switch, Tooltip, Row, Col, Statistic, Segmented, Progress } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 import {
@@ -1252,6 +1253,7 @@ const CodePracticePage: React.FC = () => {
         icon={<CodeOutlined />}
         title={t('codePractice')}
         subtitle={t('codePracticeIntro')}
+        extra={<AiRuntimeChips />}
       />
 
       <Card style={{ borderRadius: 8, height: '100%' }}>

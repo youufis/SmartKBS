@@ -12,6 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useAuthStore } from '../stores/authStore'
 import * as whiteboardApi from '../api/whiteboard'
 import type { WhiteboardRoom, WhiteboardMode } from '../types'
@@ -295,6 +296,8 @@ const WhiteboardPage: React.FC = () => {
         extra={(
           <>
             <Button icon={<ReloadOutlined />} onClick={loadRooms}>{t('wpRefresh')}</Button>
+            {/* 教学白板：AI 助手与整板生成 */}
+            <AiRuntimeChips />
             {isStudent && (
               <Button icon={<EyeOutlined />} onClick={() => setJoinOpen(true)}>{t('wpJoin')}</Button>
             )}

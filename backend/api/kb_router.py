@@ -188,27 +188,9 @@ async def kb_stats(request: Request):
     return local_kb.stats()
 
 
-@router.get("/ai-mode", summary="当前 AI 检索链路（云端知识库/本地文库/大模型）")
-async def kb_ai_mode(request: Request):
-    user = _user(request)
-    _need_editor(user)
-    from backend.api.ai_service import get_ai_config
-    mode = get_ai_config().get("mode", "direct")
-    cloud_enabled = bool(_cfg("KB_ENABLED", False))
-    cloud_ready = False
-    if cloud_enabled:
-        try:
-            from backend import bailian_kb
-            cloud_ready, _reason = bailian_kb.kb_ready()
-        except Exception:
-            cloud_ready = False
-    return {
-        "mode": mode,
-        "cloud_enabled": cloud_enabled,
-        "cloud_ready": bool(cloud_ready),
-        "local_enabled": local_kb.enabled(),
-        "local_ready": local_kb.ready(),
-    }
+# /ai-mode 已下线（v9.3）：它回答的"现在走云端知识库还是本地文库"，与
+# /api/config/ai-runtime 的 kb.chain / kb.effective 同源，但只给编辑者读、字段也更窄。
+# 两处口径并存迟早和真实调用链漂开 —— 前端统一状态胶囊已改读后者。
 
 
 @router.get("/docs", summary="文档列表")

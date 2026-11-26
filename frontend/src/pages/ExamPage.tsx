@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
@@ -1192,6 +1193,8 @@ const ExamPage: React.FC = () => {
           style={{ marginBottom: 0 }}
           extra={(
             <>
+              {/* 考试发布：AI 组卷、错题讲解与自动判分 */}
+              <AiRuntimeChips density="compact" />
               <Button icon={<ReloadOutlined />} onClick={loadExams} loading={loading}>
                 {t('refresh')}
               </Button>

@@ -4,6 +4,7 @@ import { Card, Typography, Switch, Input, Button, Space, Spin, Tag, Alert, Radio
 import { message } from '../utils/feedback'
 import { ArrowLeftOutlined, ReloadOutlined, CheckOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useCompanionStore } from '../stores/companionStore'
 const { Title, Text, Paragraph } = Typography
 
@@ -84,6 +85,8 @@ const CompanionSettings: React.FC = () => {
         <Divider type="vertical" />
         <span style={{ fontSize: 20 }}>🧠</span>
         <Title level={4} style={{ margin: 0 }}>{t('aiCompanionSettings')}</Title>
+        {/* 学伴/助手实际吃的就是这条链路，配置页直接标出来 */}
+        <AiRuntimeChips density="compact" />
       </div>
 
       <Row gutter={[16, 16]}>

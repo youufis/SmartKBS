@@ -4,6 +4,7 @@ import { Layout, Typography, Spin, Button, Dropdown, Modal, Space, Tag } from 'a
 import { message } from '../utils/feedback'
 import { ArrowLeftOutlined, RobotOutlined, DownloadOutlined } from '@ant-design/icons'
 import ComposeWizard from '../components/ComposeWizard'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import * as examsApi from '../api/exams'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -134,6 +135,10 @@ const ExamComposePage: React.FC = () => {
             <Tag style={{ marginLeft: 8 }}>{exam.subject}</Tag>
             <Tag>{exam.status === 'draft' ? t('ecDraft') : exam.status === 'published' ? t('ecPublished') : t('ecEnded')}</Tag>
           </Typography.Text>
+          <div style={{ marginTop: 8 }}>
+            {/* 智能组卷走的是全局 AI 链路：这里给一次一眼可见的口径 */}
+            <AiRuntimeChips density="compact" />
+          </div>
         </div>
       </div>
 

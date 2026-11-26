@@ -28,6 +28,7 @@ import {
   type SpeakerMode,
 } from '../../api/lessonCast';
 import { OutlineEditor } from './OutlineEditor';
+import AiRuntimeChips from '../../components/AiRuntimeChips';
 
 interface CastGenerateModalProps {
   open: boolean;
@@ -361,6 +362,10 @@ export function CastGenerateModal({ open, kp, onClose, onDone, onChanged }: Cast
         <div style={{ padding: 32, textAlign: 'center' }}><Spin /></div>
       ) : (
         <>
+          {/* 生成前先看一眼：谁在写讲稿、有没有走知识库（引用来源就取决于这颗胶囊） */}
+          <div style={{ marginBottom: 12 }}>
+            <AiRuntimeChips density="compact" />
+          </div>
           {meta && !meta.tts_enabled ? (
             <Alert
               type="warning"

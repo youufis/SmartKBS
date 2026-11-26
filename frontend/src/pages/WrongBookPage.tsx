@@ -5,6 +5,7 @@ import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined, SearchOu
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -693,6 +694,8 @@ const WrongBookPage: React.FC = () => {
           )}
           extra={(
             <>
+              {/* 错题管理：AI 讲解与变式练习 */}
+              <AiRuntimeChips density="compact" />
               <Button icon={<ReloadOutlined />} loading={loading} aria-label={t('refresh')} onClick={() => {
                 if (isStudent) { void loadData(); return }
                 void loadData(selectedStudent)

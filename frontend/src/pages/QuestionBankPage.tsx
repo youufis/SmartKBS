@@ -19,6 +19,7 @@ import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import AnswerLine from '../components/AnswerLine'
 import QuestionFormModal from '../components/QuestionFormModal'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -1117,6 +1118,8 @@ const QuestionBankPage: React.FC = () => {
           subtitle={t('pageSubtitle')}
           extra={(
             <>
+              {/* AI 出题/提取题面：先看是谁在生成、有没有走知识库 */}
+              <AiRuntimeChips />
               <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}
                 aria-label={t('refresh')} />
               {user?.role === 'admin' && untaggedCount > 0 && (
@@ -1131,9 +1134,13 @@ const QuestionBankPage: React.FC = () => {
                   </Badge>
                 </Tooltip>
               )}
-              <Button icon={<BarChartOutlined />} onClick={() => navigate('/question-bank/analytics')}>
-                {t('analyticsTitle')}
-              </Button>
+              {/* 统计分析是"跳去另一个页面"，不是本页动作：收成图标位。
+                  原来它和 手动录入/题库治理/生成提取 同权重排在一起，右侧 7 个控件
+                  把页头挤到换行（课程管理只有 4 个，一行就放得下）。 */}
+              <Tooltip title={t('analyticsTitle')}>
+                <Button icon={<BarChartOutlined />} onClick={() => navigate('/question-bank/analytics')}
+                  aria-label={t('analyticsTitle')} />
+              </Tooltip>
               {/* 低频维护动作收进一个菜单：原来「更多操作」只有一个 AI 补标，
                   去重又单独占一个按钮，7 个按钮同权重反而看不出主次 */}
               <Dropdown

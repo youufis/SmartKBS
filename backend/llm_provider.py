@@ -76,6 +76,24 @@ def ollama_model_for(capability: str) -> str:
     return name or DEFAULT_OLLAMA_MODELS.get(capability) or DEFAULT_OLLAMA_MODELS["chat"]
 
 
+def effective_engine() -> tuple[str, bool]:
+    """真实会由谁应答：(engine, 配置矛盾)。
+
+    engine = cloud | local | hybrid，判定与 route() 同源 —— 只有 ollama_active()
+    为真（档位开了 **且** 地址填了）流量才可能进本地，光看 AI_MODE 会误报。
+    配置矛盾 = AI_MODE 说好用本地（hybrid/local）却没填 OLLAMA_API_BASE：承诺的
+    "不出网"落空、实际仍在用云端。状态位必须把它和正常云端档分开，否则教师只看到
+    "云端模型"四个字，永远想不到是管理员漏填了本地引擎地址。
+
+    注意与 /api/chat/usage 的 engine 口径不同：那里只看 AI_MODE 三档、不看地址是否
+    填了（历史徽章文案跟着它写）。统一状态组件以本函数为准。
+    """
+    m = ai_mode()
+    if not ollama_active():
+        return "cloud", m != "cloud"
+    return ("local" if m == "local" else "hybrid"), False
+
+
 def capability_of(model: str) -> str:
     """从「调用点准备用的云端模型名」推断能力档，业务侧因此零改动。
 

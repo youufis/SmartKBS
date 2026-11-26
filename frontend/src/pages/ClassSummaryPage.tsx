@@ -15,6 +15,7 @@ import {
 import dayjs, { type Dayjs } from 'dayjs'
 import FormulaRenderer from '../components/FormulaRenderer'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import apiClient from '../api/client'
 import { pollAiTaskWithProgress } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -269,6 +270,7 @@ const ClassSummaryPage: React.FC = () => {
         subtitle={t('classSummaryDesc')}
         extra={(
           <>
+            <AiRuntimeChips show="model" />
             <Button icon={<DownloadOutlined />} onClick={handleExport} loading={exporting}
               disabled={!summary} title={!summary ? t('classSummaryReportNotReady') : undefined}>
               {t('exportWord')}

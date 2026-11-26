@@ -37,18 +37,22 @@
 
 > 📌 **Highlights of V9.3.0** (outline)
 >
+> - 📚 **Local library**: standalone knowledge base (upload / folders / trash; keyword + vector hybrid retrieval)
+> - 🔌 **Embedding channel**: cloud or local, cloud by default; dimension checks and switch hints
+> - 🔗 **AI chain**: fixed as cloud KB → local library → LLM, one retrieval funnel for every feature
+> - 🧭 **Visible wiring**: teacher pages show the active model and knowledge-base path
 > - 🧠 **Learning companion**: multi-turn context fixed; long-term memory settles as you chat
 > - 🎓 **Teaching assistant**: teaching snapshot injected automatically — class questions answered with real data
 > - 📖 **Citations**: knowledge-base sources visible in companion / assistant answers
 > - 🛡 **Care**: sensitive signals comforted immediately and surfaced to administrators
 > - 💌 **Notifications**: delivered at login, personalised copy, milestone & weak-point reminders, auto-archived
 > - 🧾 **Question authoring**: structured output imported into the bank in one click
+> - 📐 **Figures**: one quality gate for every image request; function / statistic / geometry charts rendered deterministically
 > - ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
-> - ✅ **Quality**: three full review passes
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed.
 
 ---
 
@@ -69,6 +73,8 @@ AI capabilities go through a single invocation service, taken over by priority a
 3. **Direct model invocation** — the fallback path, compatible with DashScope and DeepSeek
 
 **Dual engine**: the generation step can run on the cloud (DashScope / DeepSeek) or a local Ollama engine, switched across cloud / hybrid / local tiers; cloud KB retrieval stays on Bailian, while the local library can use cloud or local embeddings (capability matrix in System Settings).
+
+Every teacher-facing AI page shows which engine and which knowledge-base path is actually serving the answer (model name, cloud / local, why it degraded); students do not see it.
 
 Conversations and their attachments share one lifetime: images and documents uploaded with a question are archived together with it, so reopening a history entry still shows the original image and the file stays downloadable. Attachments are visible to their owner only, and both capacity and idle recycling are managed from System Configuration.
 
@@ -201,7 +207,7 @@ Student-specific task aggregation board:
 - 🎒 Multi-facet filters: status chips / category / type / teacher / subject-course (2-level) / due window / resource kind / keyword — AND across facets, click to apply
 - 🗂 Multi-view: grouped list (status / type / teacher / course axis) + deadline timeline + compact density; inline filter panel, collapse state & checks all remembered
 - 🧘 Focus mode (on by default): only overdue + due-in-3-days + live items, long tail collapsed to one line; home shows the same "N to do today"
-- 🔗 URL deep links (?f_teacher=…&view=timeline&simple=0…) override preferences without writing them back; filtered-empty vs truly-empty separated
+- 🔗 Links can carry filters and views, taking priority over personal preferences without writing them back; filtered-empty vs truly-empty separated
 - ⚡ Persistent today-focus bar; live pulse badge; retryable failures; auto re-check on foreground; done review (30 days, semantic score colors)
 
 > **Available to students**
@@ -466,6 +472,7 @@ A knowledge-base module fully independent from the File Center / Resource Center
 - Retrieval: SQLite FTS keywords + Chroma vectors (cloud or local models) with source citations
 - Position in the chain: cloud Bailian KB → local library → direct LLM
 - Backup: originals and index are part of full backups; vectors can be rebuilt from the originals
+- Visible state: the shared status chips show which chain and model are active
 
 ## Learning and Practice
 
@@ -481,6 +488,7 @@ Core intelligent Q&A interface based on SSE streaming, providing a smooth AI con
 - **🖼️ Multimodal Dialogue**: The chat model must accept image input, so images and text can be sent together without a summary pass first
 - **📄 File Summary Enhancement**: Automatically summarizes uploaded documents to enhance AI dialogue context
 - **🔍 RAG Knowledge Enhancement**: Retrieves relevant knowledge from question bank and course syllabus to improve answer accuracy
+- **🧭 Visible Wiring**: The page header shows the active model and knowledge-base path (teachers / admins only; hidden from students)
 - **📜 Chat History**: A docked sidebar on desktop (pushes content aside); new chats show up right after saving, today / yesterday expand by default and years are separated; a single click only previews, never replaces the running chat; title and full-text search, rename and download included; previews render tables and formulas like the answer body
 - **👁️ HTML Preview**: One-click preview of HTML code blocks in conversations
 - **📋 Example Prompts**: Built-in multiple teaching scenario examples, one-click fill
@@ -1246,14 +1254,18 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.3.0
 
+- 📚 **Local library**: standalone knowledge-base module (upload / folders / 30-day trash; keyword + vector hybrid retrieval with source citations)
+- 🔌 **Embedding channel**: cloud or local, cloud by default; dimension checks, switch hints, optional dual index
+- 🔗 **AI chain**: fixed as cloud KB → local library → LLM; question authoring, lesson prep and whiteboards share one retrieval funnel
+- 🧭 **Visible wiring**: unified status chips on teacher pages show the active model name and knowledge-base path (including degradation reasons)
 - 🧠 **Learning companion**: multi-turn context fixed; long-term memory (preferences / goals / difficulties) captured and injected
 - 🎓 **Teaching assistant**: teaching snapshot injected automatically (scope, recent exams, pending grading, class weak points)
 - 📖 **Citations**: knowledge-base sources shown in companion / assistant answers
 - 🛡 **Care**: sensitive signals comforted immediately (real help channels), administrators notified
 - 💌 **Notifications**: delivered at login, personalised copy, milestone / weak-point reminders, auto-archived
 - 🧾 **Question authoring**: structured output imported into the bank in one click (types and answers normalised)
+- 📐 **Figures**: one quality gate for every image request; deterministic function / statistic / geometry charts with formulas inside the image
 - ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
-- ✅ **Quality**: three full review passes, build artifacts and permission surface verified
 
 ### v7.x – v9.2.0
 

@@ -22,6 +22,7 @@ import { RowList } from '../components/RowList'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
 import KnowledgePointSelect from '../components/KnowledgePointSelect'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { relativeTime, fullTime } from '../utils/relativeTime'
 
 const { Text } = Typography
@@ -836,6 +837,7 @@ const StudentQuestionsPage: React.FC = () => {
         icon={<QuestionCircleOutlined />}
         title={t('studentQuestions')}
         subtitle={isStudent ? t('subtitle') : t('teacherSubtitle')}
+        extra={<AiRuntimeChips density="compact" />}
       />
 
       {isStudent && (

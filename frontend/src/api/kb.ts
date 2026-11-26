@@ -49,17 +49,12 @@ export interface KbStats {
   embed?: { provider: string; model: string; dim: number; sig: string }
 }
 
-export interface KbAiMode {
-  mode: 'kb_direct' | 'kb_local' | 'direct'
-  cloud_enabled: boolean
-  cloud_ready: boolean
-  local_enabled: boolean
-  local_ready: boolean
-}
+// 链路状态（云端知识库 / 本地文库 / 直连大模型 哪一路生效）不再从这里读：
+// 统一走 /api/config/ai-runtime（见 api/aiRuntime.ts），由 AiRuntimeChips 一处呈现，
+// 免得同一个"哪一路生效"在前端留两个口径、迟早和真实调用链漂开。
 
 export const kbApi = {
   stats: () => apiClient.get<KbStats>('/api/kb/stats').then(r => r.data),
-  aiMode: () => apiClient.get<KbAiMode>('/api/kb/ai-mode').then(r => r.data),
   docs: (params: Record<string, unknown>) =>
     apiClient.get('/api/kb/docs', { params }).then(r => r.data),
   status: (ids: number[]) =>

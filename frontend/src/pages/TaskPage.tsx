@@ -11,6 +11,7 @@ import {
 import * as tasksApi from '../api/tasks'
 import ListFilterBar from '../components/ListFilterBar'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -1018,6 +1019,8 @@ const TaskPage: React.FC = () => {
         subtitle={t('taskPageSubtitle')}
         extra={(
           <>
+            {/* 作业中心：AI 建草稿与逐份批改都走这条链路 */}
+            <AiRuntimeChips />
             <Button icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)}>
               {t('guide.showTip')}
             </Button>

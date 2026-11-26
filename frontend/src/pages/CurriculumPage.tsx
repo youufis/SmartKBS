@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { fetchGrades } from '../api/gradeClass'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import ResizableModal from '../components/ResizableModal'
 import { previewSrc } from '../api/files'
 import { Layout, Card, Tree, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress, Collapse, Segmented, Drawer, Grid, Alert, Switch } from 'antd'
@@ -2080,6 +2081,8 @@ const CurriculumPage: React.FC = () => {
           subtitle={t('pageSubtitle')}
           extra={(
             <>
+              {/* AI 生成大纲/知识点：教师端在这里核对生成链路（学生端组件自身不渲染） */}
+              <AiRuntimeChips />
               <Button icon={<ReloadOutlined />} onClick={loadTree} aria-label={t('refresh')} />
               {isTeacherOrAdmin && (
                 <>

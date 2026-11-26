@@ -517,6 +517,10 @@ def save_config(config: dict[str, Any]):
         _cfg_cache_key = None
     _rotate_config_history()
 
+    # AI 运行状态快照随之作废：管理员改完模型/知识库配置，教师端的胶囊最迟 15s
+    # （通常下一次刷新）就该反映新链路，不该继续显示改之前的引擎名
+    _invalidate_ai_runtime_cache()
+
 
 def _config_history_dir() -> Path:
     """配置滚动历史目录（跟着 CONFIG_FILE 走：Web 版=项目根，桌面版=%APPDATA%）"""
@@ -1745,6 +1749,160 @@ async def get_multimodal_status(request: Request):
     get_current_user(request)
     # 多模态不再可关：对话模型按约定必须支持图片，读不到键也按 True 返回
     return {"multimodal_enabled": True}
+
+
+# ── AI 运行状态（模型接入 + 知识库选用 的统一数据源） ──
+#
+# 为什么单独开一个接口，而不是让前端拼 /chat/usage + /kb/ai-mode + /kb/stats：
+#   1. 口径只有一份 —— "谁在应答 / 走了哪条知识库链"必须由服务端裁决。前端自己排
+#      优先级迟早和真实调用链漂移（历史上已经漂过一次：AI_MODE=local 却没填本地地址时，
+#      usage.engine 仍报 local，而流量其实全在云端）；
+#   2. /kb/* 是编辑者权限，学生端调不到，拼接口会让状态组件按角色分叉；
+#   3. 这颗胶囊同时挂在对话/题库/大纲/讲演/简报/学情/课堂总结等页面上，
+#      一个接口 + 一份快照缓存，远比 N 次 SQL 便宜。
+# 全程零网络外呼：kb_ready() 是纯配置判定，胶囊不会因为云端抖动而蓝绿闪。
+
+_AI_RUNTIME_TTL = 15.0          # 秒：状态位不是实时数据，15s 内的重复请求共用一份快照
+_ai_runtime_cache: dict[str, Any] = {"t": 0.0, "data": None}
+_ai_runtime_lock = threading.Lock()
+
+
+def _invalidate_ai_runtime_cache() -> None:
+    """配置写盘后调用：让状态胶囊最迟 15s（通常下一次刷新）就反映新配置"""
+    with _ai_runtime_lock:
+        _ai_runtime_cache["t"] = 0.0
+        _ai_runtime_cache["data"] = None
+
+
+def _mask_identifier(raw: Any, head: int = 8, tail: int = 4) -> str:
+    """服务 ID / 域名掩码：留头留尾，够教师核对"是不是配的那一路"，不整串外泄"""
+    s = str(raw or "").strip()
+    if not s or len(s) <= head + tail + 1:
+        return s
+    return f"{s[:head]}…{s[-tail:]}"
+
+
+def _host_of(url: Any) -> str:
+    s = str(url or "").strip()
+    return s.split("://")[-1].split("/")[0] if s else ""
+
+
+def _ai_runtime_snapshot() -> dict[str, Any]:
+    """算一份全量状态：配置读取 + 本地文库计数。不含角色裁剪。"""
+    from backend import bailian_kb, llm_provider, local_kb
+    from backend.api.ai_service import get_ai_config
+
+    # ── 模型接入：档位是配置，应答者是现实，两者可能不一致 ──
+    engine, conflict = llm_provider.effective_engine()
+    local_active = llm_provider.ollama_active()
+    cloud_chat = str(get_config_value("MODEL_NAME", DEFAULT_CHAT_MODEL) or "").strip() or DEFAULT_CHAT_MODEL
+    model = {
+        "mode": llm_provider.ai_mode(),                     # 配置档位 cloud|hybrid|local
+        "engine": engine,                                   # 实际应答者 cloud|local|hybrid
+        "provider": "ollama" if local_active else "dashscope",
+        "active": llm_provider.ollama_model_for("chat") if local_active else cloud_chat,
+        "cloud": {
+            "chat": cloud_chat,
+            "long": str(get_config_value("MODEL_LONG_NAME", DEFAULT_LONG_MODEL) or "").strip() or DEFAULT_LONG_MODEL,
+            "vl": str(get_config_value("MODEL_VL_NAME", DEFAULT_VL_MODEL) or "").strip() or DEFAULT_VL_MODEL,
+        },
+        "local": {
+            "chat": llm_provider.ollama_model_for("chat"),
+            "long": llm_provider.ollama_model_for("long"),
+            "vl": llm_provider.ollama_model_for("vl"),
+            "base": llm_provider.ollama_base(),
+        },
+        # 混合档的兜底名：本地应答失败时实际换成它，明细里必须说清楚
+        "hybrid_fallback": cloud_chat if engine == "hybrid" else "",
+        "config_conflict": conflict,
+        # 与 /api/chat/usage 同口径：对话模型按约定必须支持图片，多模态不再提供开关
+        "multimodal": True,
+    }
+
+    # ── 知识库选用：优先级 云端知识库 → 本地文库 → 直连大模型 ──
+    cloud = bailian_kb.runtime_info()
+    lc = local_kb.runtime_counts()
+    local_ready = False
+    try:
+        local_ready = local_kb.ready()
+    except Exception as e:
+        logger.warning(f"[AI 状态] 本地文库就绪判定失败: {e}")
+    chain = get_ai_config().get("mode", "direct")           # kb_direct|kb_local|direct
+    effective = {"kb_direct": "cloud", "kb_local": "local"}.get(chain, "llm")
+
+    # ⚠ 的唯一触发条件：某一路"已启用但没就绪"，把链路压到了更低的一级。
+    # "已就绪但被更高优先级压制"不是问题，绝不写进 reasons —— 否则教师会看到一堆
+    # 既不用处理、也解释不清的告警（这正是"待命"那版方案被否掉的原因）。
+    reasons: list[str] = []
+    if effective in ("local", "llm") and cloud["enabled"] and not cloud["ready"]:
+        reasons.append(f"云端知识库未就绪：{cloud['reason'] or '配置不完整'}")
+    if effective == "llm" and lc["enabled"] and not local_ready:
+        reasons.append("本地文库无可用索引（文档尚未索引完成）")
+
+    kb = {
+        "chain": chain,
+        "effective": effective,
+        "degraded": bool(reasons),
+        "reasons": reasons,
+        "cloud": {
+            "enabled": cloud["enabled"],
+            "ready": cloud["ready"],
+            "reason": cloud["reason"],
+            "agent_id": _mask_identifier(cloud["agent_id"]),
+            "endpoint_host": _host_of(cloud["base"]),
+            "top_k": cloud["top_k"],
+            "min_score": cloud["min_score"],
+        },
+        "local": {
+            "enabled": lc["enabled"],
+            "ready": local_ready,
+            "docs": lc["docs"],
+            "chunks": lc["chunks"],
+            "vec_docs": lc["vec_docs"],
+            "embed_provider": lc["embed_provider"],
+            "embed_model": lc["embed_model"],
+            "dual_index": bool(get_config_value("LOCAL_KB_DUAL_INDEX", False)),
+        },
+    }
+    return {"version": 1, "generated_at": int(time.time()), "detail": "full",
+            "model": model, "kb": kb}
+
+
+def _ai_runtime_masked(snap: dict[str, Any]) -> dict[str, Any]:
+    """学生视角：只留"云端还是本地""走没走知识库"两件事，模型名/服务 ID/文档数不给。
+
+    前端组件本身对学生不渲染（学生端不显示这颗胶囊），这个裁剪是给接口兜底的 ——
+    状态接口是个谁都能猜的 GET，不该因为"前端没显示"就默认谁都能读到学校的模型清单。
+    """
+    m, kb = snap["model"], snap["kb"]
+    return {
+        "version": 1,
+        "generated_at": snap["generated_at"],
+        "detail": "masked",
+        "model": {"mode": m["mode"], "engine": m["engine"]},
+        "kb": {"effective": kb["effective"], "degraded": kb["degraded"]},
+    }
+
+
+@router.get("/ai-runtime", summary="AI 接入能力与知识库链路（统一状态组件数据源）")
+async def get_ai_runtime(request: Request):
+    """一颗状态胶囊需要的全部事实，一次给齐（登录后即可读，按角色裁剪明细）。"""
+    user = get_current_user(request)
+    with _ai_runtime_lock:
+        data = _ai_runtime_cache["data"]
+        fresh = data is not None and (time.time() - float(_ai_runtime_cache["t"])) < _AI_RUNTIME_TTL
+    if not fresh:
+        try:
+            data = _ai_runtime_snapshot()
+        except Exception as e:
+            logger.warning(f"[AI 状态] 快照生成失败: {e}")
+            raise HTTPException(status_code=503, detail="AI 运行状态暂时读不到，请稍后重试")
+        with _ai_runtime_lock:
+            _ai_runtime_cache["t"] = time.time()
+            _ai_runtime_cache["data"] = data
+    if user.get("role", 2) == 2:
+        return _ai_runtime_masked(data)
+    return data
 
 
 # 自检接口的等待上限：必须短于前端按钮的超时（120 秒），否则浏览器先掐断，

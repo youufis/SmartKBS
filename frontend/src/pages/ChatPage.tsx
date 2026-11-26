@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import CameraCapture from '../components/CameraCapture'
 import VoiceInput from '../components/VoiceInput'
 import { RowList, RowItem } from '../components/RowList'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import apiClient, { authedFileUrl } from '../api/client'
 import { chatAssetUrl, formatSize, parseAttachments, stripAttachmentsComment } from '../utils/chatAttachments'
 
@@ -2032,39 +2033,8 @@ const ChatPage: React.FC = () => {
             <Button size="small" icon={<HistoryOutlined />} onClick={handleOpenHistory}>
               {t('chatHistory')}
             </Button>
-            {usage && (
-              <Tooltip title={usage.multimodal_enabled ? t('multimodalTip') : t('textModelTip')}>
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  fontSize: 12, padding: '2px 8px', borderRadius: 4,
-                  background: usage.multimodal_enabled ? '#e6f7ff' : '#f6f6f6',
-                  color: usage.multimodal_enabled ? '#1677ff' : '#999',
-                  border: '1px solid', borderColor: usage.multimodal_enabled ? '#91caff' : '#e8e8e8',
-                  cursor: 'default', whiteSpace: 'nowrap',
-                }}>
-                  {usage.multimodal_enabled ? t('multimodal') : t('textOnly')}
-                </span>
-              </Tooltip>
-            )}
-            {usage && (
-              <Tooltip title={t('modeBadgeTip')}>
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  fontSize: 12, padding: '2px 8px', borderRadius: 4,
-                  background: usage.chat_mode === 'kb' ? '#f9f0ff' : usage.chat_mode === 'kb_local' ? '#e6fffb'
-                    : usage.engine === 'local' ? '#f6ffed' : usage.engine === 'hybrid' ? '#fffbe6' : '#f6f6f6',
-                  color: usage.chat_mode === 'kb' ? '#722ed1' : usage.chat_mode === 'kb_local' ? '#13a8a8'
-                    : usage.engine === 'local' ? '#389e0d' : usage.engine === 'hybrid' ? '#d48806' : '#999',
-                  border: '1px solid',
-                  borderColor: usage.chat_mode === 'kb' ? '#d3adf7' : usage.chat_mode === 'kb_local' ? '#87e8de'
-                    : usage.engine === 'local' ? '#b7eb8f' : usage.engine === 'hybrid' ? '#ffe58f' : '#e8e8e8',
-                  cursor: 'default', whiteSpace: 'nowrap',
-                }}>
-                  {usage.chat_mode === 'kb' ? t('modeKb') : usage.chat_mode === 'kb_local' ? t('modeLocalKb')
-                    : usage.engine === 'local' ? t('modeLlmLocal') : usage.engine === 'hybrid' ? t('modeLlmHybrid') : t('modeLlmCloud')}
-                </span>
-              </Tooltip>
-            )}
+            {/* 模型接入 + 知识库选用：统一状态胶囊（学生端不显示，明细含模型名与降级原因） */}
+            <AiRuntimeChips />
             <div style={{ flex: 1, minWidth: 0 }} />
             {usage && isWide && (
               <div style={{ fontSize: 12, color: token.colorTextTertiary, whiteSpace: 'nowrap' }}>

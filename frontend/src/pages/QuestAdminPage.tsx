@@ -19,6 +19,7 @@ import { relativeTime, fullTime } from '../utils/relativeTime'
 import { reportLoadError } from '../utils/loadError'
 import FormulaRenderer from '../components/FormulaRenderer'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import SVGViewer from '../components/SVGViewer'
 import PlaceholderManager from '../components/PlaceholderManager'
 import MobileCardTable from '../components/MobileCardTable'
@@ -1153,6 +1154,7 @@ const QuestAdminPage: React.FC = () => {
         icon={<TrophyOutlined />}
         title={t('questManagement')}
         subtitle={t('questManageSubtitle')}
+        extra={<AiRuntimeChips />}
       />
       <Card style={{ borderRadius: 8 }}>
         <Tabs activeKey={activeTab}

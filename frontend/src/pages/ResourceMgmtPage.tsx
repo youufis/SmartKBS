@@ -10,6 +10,7 @@ import { getFileIcon } from '../utils/fileIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../components/PageHeader'
+import AiRuntimeChips from '../components/AiRuntimeChips'
 import { reportLoadError } from '../utils/loadError'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 
@@ -415,7 +416,11 @@ const ResourceMgmtPage: React.FC = () => {
         title={t('resource.title')}
         subtitle={t('resource.subtitle')}
         extra={(
-          <Button icon={<ReloadOutlined />} onClick={loadTree} loading={loading}>{t('refresh')}</Button>
+          <>
+            {/* 资源中心：AI 生成 HTML 资源与主题推荐 */}
+            <AiRuntimeChips />
+            <Button icon={<ReloadOutlined />} onClick={loadTree} loading={loading}>{t('refresh')}</Button>
+          </>
         )}
       />
       <Tabs defaultActiveKey="files" items={[
