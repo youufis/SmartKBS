@@ -1615,6 +1615,13 @@ SmartKBS/
 ## License
 
 This project is released under the **AGPL-3.0**; the full text lives in [LICENSE](LICENSE).
+The copyright belongs to **youufis (UNET)**. The real identity behind that handle is not disclosed in this
+repository; it is bound by four cross-checks — the handle, the verified account holder at the trusted-timestamp
+service, youufis@sina.com and the timestamp certificate serial — recorded in the out-of-repo Copyright Statement.
+
+To deploy commercially **without open-sourcing** your changes (sale, integration or SaaS delivery outside your
+own school), obtain a commercial licence from the copyright holder, who is not bound by the AGPL terms and may
+grant both open-source and commercial licences.
 
 - ✅ You may use, modify and distribute it freely, including deploying it inside a school;
 - ⚠️ If you modify it and **offer it over a network**, you must publish your modified source under the same licence;
