@@ -1830,6 +1830,12 @@ def _ai_runtime_snapshot() -> dict[str, Any]:
     chain = get_ai_config().get("mode", "direct")           # kb_direct|kb_local|direct
     effective = {"kb_direct": "cloud", "kb_local": "local"}.get(chain, "llm")
 
+    # 离线档旁路云端检索：这是 AI_MODE=local「绝不出网」的设计结果，不是故障，
+    # 所以绝不进 reasons（不亮 ⚠）。以前它被归成"未启用知识库"，把按设计的旁路说成
+    # 配置缺失 —— 教师去翻知识库开关，两头都查不出问题。
+    bypassed = (effective != "cloud" and cloud["enabled"] and cloud["ready"]
+                and llm_provider.ai_mode() == "local")
+
     # ⚠ 的唯一触发条件：某一路"已启用但没就绪"，把链路压到了更低的一级。
     # "已就绪但被更高优先级压制"不是问题，绝不写进 reasons —— 否则教师会看到一堆
     # 既不用处理、也解释不清的告警（这正是"待命"那版方案被否掉的原因）。
@@ -1842,6 +1848,7 @@ def _ai_runtime_snapshot() -> dict[str, Any]:
     kb = {
         "chain": chain,
         "effective": effective,
+        "bypassed": bypassed,
         "degraded": bool(reasons),
         "reasons": reasons,
         "cloud": {
