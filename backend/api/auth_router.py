@@ -158,6 +158,18 @@ async def login(req: LoginRequest, fastapi_request: Request):
 
     logger.info(f"用户登录成功: {username}")
 
+    # 学伴早安推送：登录即触发（此前只有打开学生首页才发，直接进 /chat 收不到）
+    if role_val == 2:
+        try:
+            import threading
+            from backend.companion_push import push_morning_greeting
+            threading.Thread(
+                target=push_morning_greeting,
+                args=(username, name_val or username), daemon=True,
+            ).start()
+        except Exception as e:
+            logger.debug(f"登录触发早安推送失败: {e}")
+
     # 管理员登录时触发远程配置同步
     if role_val == 0:
         try:

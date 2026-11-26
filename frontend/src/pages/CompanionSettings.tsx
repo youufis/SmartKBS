@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Typography, Switch, Input, Button, Space, Spin, Tag, Alert, Radio, Row, Col, Divider } from 'antd'
+import { Card, Typography, Switch, Input, Button, Space, Spin, Tag, Alert, Radio, Row, Col, Divider, theme } from 'antd'
 import { message } from '../utils/feedback'
 import { ArrowLeftOutlined, ReloadOutlined, CheckOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -21,6 +21,7 @@ const PREVIEW_TEXT: Record<string, string> = {
 
 const CompanionSettings: React.FC = () => {
   const { t } = useTranslation('system')
+  const { token } = theme.useToken()
   const navigate = useNavigate()
   const { config, loadConfig, loadProfile, updateConfig, refreshProfile, profile } = useCompanionStore()
 
@@ -132,8 +133,8 @@ const CompanionSettings: React.FC = () => {
                       style={{
                         display: 'flex', alignItems: 'center', padding: '10px 14px', width: '100%',
                         borderRadius: 10,
-                        border: personality === p.value ? '2px solid #667eea' : '1px solid #f0f0f0',
-                        background: personality === p.value ? '#f5f0ff' : '#fff',
+                        border: personality === p.value ? `2px solid ${token.colorPrimary}` : `1px solid ${token.colorBorderSecondary}`,
+                        background: personality === p.value ? token.colorPrimaryBg : token.colorBgContainer,
                         transition: 'all 0.2s',
                       }}
                     >
@@ -156,12 +157,13 @@ const CompanionSettings: React.FC = () => {
             size="small"
             style={{
               marginBottom: 16,
-              background: 'linear-gradient(135deg, #faf8ff, #f0f4ff)',
-              border: '1px solid #e0daf5',
+              backgroundColor: token.colorBgContainer,
+              backgroundImage: 'linear-gradient(135deg, rgba(102,126,234,0.07), rgba(118,75,162,0.05))',
+              border: `1px solid ${token.colorBorderSecondary}`,
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text strong style={{ color: '#5b4fa0' }}>👁️ {t('personalityPreview')}</Text>
+              <Text strong style={{ color: token.colorPrimary }}>👁️ {t('personalityPreview')}</Text>
               {hasChanges && <Text type="warning" style={{ fontSize: 11 }}>⚡ {t('unsavedChanges')}</Text>}
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -176,7 +178,7 @@ const CompanionSettings: React.FC = () => {
               </div>
               <div style={{
                 flex: 1, padding: '10px 14px', borderRadius: '16px 16px 16px 4px',
-                background: 'var(--bg-container)', border: '1px solid #e8ecf4',
+                background: token.colorBgElevated, border: `1px solid ${token.colorBorderSecondary}`,
                 boxShadow: '0 2px 8px rgba(102,126,234,0.08)',
                 fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)',
               }}>
@@ -206,8 +208,9 @@ const CompanionSettings: React.FC = () => {
             title={<span style={{ fontSize: 14 }}>📊 {t('currentLearningProfile')}</span>}
             size="small"
             style={{
-              background: 'linear-gradient(180deg, #faf8ff, #fff)',
-              border: '1px solid #e0daf5',
+              backgroundColor: token.colorBgContainer,
+              backgroundImage: 'linear-gradient(180deg, rgba(102,126,234,0.06), rgba(0,0,0,0) 160px)',
+              border: `1px solid ${token.colorBorderSecondary}`,
               position: 'sticky', top: 16,
             }}
           >
@@ -233,7 +236,7 @@ const CompanionSettings: React.FC = () => {
                       {profile.weakness.slice(0, 3).map((w, i) => (
                         <div key={i} style={{
                           fontSize: 12, padding: '4px 8px', marginTop: 4,
-                          background: '#fff2f0', borderRadius: 6,
+                          background: token.colorErrorBg, borderRadius: 6,
                         }}>
                           {w.kp} <Tag color="error" style={{ fontSize: 10 }}>{t('wrongCount', { count: w.wrong_count })}</Tag>
                         </div>

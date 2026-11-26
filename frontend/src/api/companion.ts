@@ -1,5 +1,6 @@
 /** 学伴 API */
 import apiClient from './client';
+import type { KbReference } from '../types';
 
 export interface CompanionConfig {
   username: string;
@@ -137,6 +138,8 @@ export async function companionChat(
   signal?: AbortSignal,
   file_paths?: string[],
   context_enhance?: boolean,
+  session_id?: string | null,
+  onReferences?: (items: KbReference[]) => void,
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token');
 
@@ -147,7 +150,7 @@ export async function companionChat(
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ prompt, session_id: null, file_paths, context_enhance }),
+      body: JSON.stringify({ prompt, session_id: session_id ?? null, file_paths, context_enhance }),
       signal,
     });
 
@@ -185,6 +188,9 @@ export async function companionChat(
               break;
             case 'done':
               sessionId = data.session_id || '';
+              break;
+            case 'references':
+              onReferences?.(data.items || []);
               break;
             case 'error':
               onError(data.content);

@@ -144,7 +144,8 @@ MAX_NOTIFY_PER_STUDENT_PER_DAY = 2
 
 
 def notify_care(user: dict, *, tag: str = "", title: str = "探索画布·关怀提醒",
-                link: str = "/activity-monitor?tab=explore-usage", source_type: str = "explore_care") -> bool:
+                link: str = "/activity-monitor?tab=explore-usage", source_type: str = "explore_care",
+                scene_label: str = "探索画布") -> bool:
     """给全体管理员推一条零原文关怀提醒。返回是否真的投递。
 
     只发管理员是当前的产品决定（不按班主任/心理教师做角色路由）：
@@ -171,7 +172,7 @@ def notify_care(user: dict, *, tag: str = "", title: str = "探索画布·关怀
                 " AND COALESCE(source_id, '') = ? AND created_at >= ? GROUP BY recipient_username",
                 (uname, day_start)).fetchall())
 
-        detail = ("学生 " + name + "（" + uname + "）在探索画布中的表达触发了敏感意图，"
+        detail = ("学生 " + name + "（" + uname + "）在" + scene_label + "中的表达触发了敏感意图，"
                   "系统已按关怀话术应答，请关注该生状态。系统未保留提问原文。")
         pushed = 0
         for admin in admins:

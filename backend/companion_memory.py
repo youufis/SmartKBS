@@ -111,12 +111,17 @@ def build_companion_system_prompt(username: str) -> str:
     config = get_companion_config(username)
     profile_text = _format_profile_text(profile)
 
-    return build_companion_prompt(
+    prompt = build_companion_prompt(
         student_name=profile.get("name", username),
         companion_name=config.get("companion_name", "小智"),
         personality=config.get("personality", "encouraging"),
         student_profile_text=profile_text,
     )
+    # 长期记忆：对话中抽取的偏好/目标/困难，画像数据覆盖不到的部分由它补上
+    mem_text = get_memory_text(username)
+    if mem_text:
+        prompt += "\n\n## 已记住的学生信息（来自以往对话，自然提及即可，勿逐条复述）\n" + mem_text
+    return prompt
 
 
 # ═══════════════════════════════════════════════
@@ -132,7 +137,7 @@ def _analyze_weakness(username: str) -> list[dict[str, Any]]:
         rows = execute_query(
             """SELECT knowledge_points, COUNT(*) as wrong_count
                FROM wrong_book
-               WHERE student_username=? AND status IN ('active', 'reviewing')
+               WHERE student_username=? AND status='pending'
                GROUP BY knowledge_points
                ORDER BY wrong_count DESC
                LIMIT 5""",
@@ -440,6 +445,62 @@ def save_memory(student_username: str, memory_type: str, content: str, confidenc
            VALUES (?, ?, ?, ?, ?, ?)""",
         (student_username, memory_type, json.dumps(content, ensure_ascii=False), confidence, now, now),
     )
+
+
+_VALID_MEMORY_TYPES = {"preference", "goal", "difficulty", "emotion", "fact"}
+
+
+def get_memory_text(student_username: str, limit: int = 12) -> str:
+    """把最近的长期记忆压成 system prompt 片段（无则空串）"""
+    try:
+        items = get_memories(student_username)[:limit]
+    except Exception:
+        return ""
+    lines = []
+    for m in items:
+        c = m.get("content")
+        if isinstance(c, (dict, list)):
+            c = json.dumps(c, ensure_ascii=False)
+        c = str(c or "").strip()
+        if c:
+            lines.append(f"- [{m.get('memory_type', 'fact')}] {c}")
+    return "\n".join(lines)
+
+
+def extract_and_save_memories(student_username: str, user_text: str, ai_text: str, api_key: str) -> int:
+    """对话后用 LLM 抽取长期记忆（后台线程调用；失败静默）"""
+    try:
+        from backend.api.ai_service import call_ai_sync
+        from backend.json_repair import try_parse_repaired
+        from backend.prompts.companion import MEMORY_EXTRACT_PROMPT
+
+        existing = {str(m.get("content")) for m in get_memories(student_username)}
+        prompt = MEMORY_EXTRACT_PROMPT.format(user=user_text[:600], ai=ai_text[:900])
+        raw = call_ai_sync(prompt, api_key, max_tokens=400, json_mode=True, use_kb=False)
+        data = try_parse_repaired(raw or "") if raw else None
+        if isinstance(data, dict):
+            data = data.get("memories") or []
+        if not isinstance(data, list):
+            return 0
+        added = 0
+        for it in data[:3]:
+            if not isinstance(it, dict):
+                continue
+            content = str(it.get("content") or "").strip()
+            mtype = str(it.get("type") or "fact").strip().lower()
+            if mtype not in _VALID_MEMORY_TYPES:
+                mtype = "fact"
+            if not content or len(content) > 60 or content in existing:
+                continue
+            save_memory(student_username, mtype, content, confidence=0.6)
+            existing.add(content)
+            added += 1
+        if added:
+            logger.debug(f"学伴记忆抽取 {student_username}: +{added}")
+        return added
+    except Exception as e:
+        logger.debug(f"学伴记忆抽取失败 ({student_username}): {e}")
+        return 0
 
 
 def get_memories(student_username: str, memory_type: Optional[str] = None) -> list[dict[str, Any]]:

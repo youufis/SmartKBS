@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout, Input, Button, Space, Checkbox, Modal, Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag, Empty, theme, Dropdown, Popover } from 'antd'
 import { message } from '../utils/feedback'
+import { cyan } from '@ant-design/colors'
 import {
   SendOutlined, StopOutlined, PlusOutlined,
   EyeOutlined, UploadOutlined,
@@ -22,7 +23,7 @@ import { useTranslation } from 'react-i18next'
 import CameraCapture from '../components/CameraCapture'
 import VoiceInput from '../components/VoiceInput'
 import { RowList, RowItem } from '../components/RowList'
-import { authedFileUrl } from '../api/client'
+import apiClient, { authedFileUrl } from '../api/client'
 import { chatAssetUrl, formatSize, parseAttachments, stripAttachmentsComment } from '../utils/chatAttachments'
 
 const { TextArea } = Input
@@ -76,6 +77,7 @@ const MessageBubble: React.FC<{
   showRefs?: boolean
 }> = ({ msg, isStreaming, onPreviewHtml, companionMode, companionName, companionPersonality, showRefs }) => {
   const { t } = useTranslation('chat')
+  const { token } = theme.useToken()
   const isUser = msg.role === 'user'
   const companionAvatar = COMPANION_AVATARS[companionPersonality || 'encouraging'] || '🧠'
 
@@ -112,8 +114,8 @@ const MessageBubble: React.FC<{
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
           <div style={{
             maxWidth: '70%', padding: '10px 16px', borderRadius: '16px 16px 4px 16px',
-            background: 'linear-gradient(135deg, #e8f4fd 0%, #d6ecff 100%)',
-            border: '1px solid #bae0ff',
+            background: token.colorPrimaryBg,
+            border: `1px solid ${token.colorPrimaryBorder}`,
             boxShadow: '0 2px 4px rgba(22,119,255,0.08)',
           }}>
             <Typography.Text style={{ fontSize: 14, lineHeight: 1.6 }}>{msg.content}</Typography.Text>
@@ -134,13 +136,13 @@ const MessageBubble: React.FC<{
           {companionAvatar}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: '#667eea', fontWeight: 600, marginBottom: 4, paddingLeft: 4 }}>
+          <div style={{ fontSize: 12, color: token.colorPrimary, fontWeight: 600, marginBottom: 4, paddingLeft: 4 }}>
             {companionName || t('assistant')}
           </div>
           <div style={{
             maxWidth: '85%', padding: '12px 16px', borderRadius: '16px 16px 16px 4px',
-            background: 'linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%)',
-            border: '1px solid #e8ecf4',
+            background: token.colorBgElevated,
+            border: `1px solid ${token.colorBorderSecondary}`,
             boxShadow: '0 2px 8px rgba(102,126,234,0.08)',
             display: 'inline-block',
           }}>
@@ -167,8 +169,8 @@ const MessageBubble: React.FC<{
     }}>
       <div style={{
         maxWidth: '75%', padding: '10px 16px', borderRadius: 12,
-        backgroundColor: isUser ? '#e6f4ff' : '#ffffff',
-        border: isUser ? 'none' : '1px solid #f0f0f0',
+        backgroundColor: isUser ? token.colorPrimaryBg : token.colorBgElevated,
+        border: isUser ? 'none' : `1px solid ${token.colorBorderSecondary}`,
         boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
       }}>
         {isUser ? (
@@ -282,6 +284,7 @@ const ChatPage: React.FC = () => {
   const companionMarkPushRead = useCompanionStore((s) => s.markPushRead)
   const companionMarkAllPushesRead = useCompanionStore((s) => s.markAllPushesRead)
   const companionLoadPushes = useCompanionStore((s) => s.loadPushes)
+  const companionRegenerate = useCompanionStore((s) => s.regenerate)
 
   const [companionMode, setCompanionMode] = useState(() => {
     // 从 URL 参数初始化：?companion=1 自动打开学伴模式
@@ -290,6 +293,7 @@ const ChatPage: React.FC = () => {
   })
   const [companionSidebar, setCompanionSidebar] = useState(false)
   const [pushModalOpen, setPushModalOpen] = useState(false)
+  const [importingQuestions, setImportingQuestions] = useState(false)
   const navigate = useNavigate()
 
   // 组件挂载时预加载学伴配置（保证从设置页返回时 config 最新）
@@ -1094,6 +1098,66 @@ const ChatPage: React.FC = () => {
     }
   }, [messages, companionMode, companionMessages, t]);
 
+  // 助手模式结构化出题：提取回答末尾的 ```json:questions 块
+  const extractQuestionsJson = (content: string): string => {
+    const m = content.match(/```json:questions\s*([\s\S]*?)```/)
+    return m ? m[1].trim() : ''
+  }
+
+  const handleImportQuestions = async (raw: string) => {
+    let items: any[]
+    try { items = JSON.parse(raw) } catch { message.error(t('importParseFail')); return }
+    if (!Array.isArray(items) || items.length === 0) { message.warning(t('importNone')); return }
+    setImportingQuestions(true)
+    let ok = 0, fail = 0, lastErr = ''
+    const TYPE_ALIAS: Record<string, string> = { multi: 'multiple', judge: 'true_false', tf: 'true_false', tfq: 'true_false' }
+    const TYPES = ['single', 'multiple', 'true_false', 'fill', 'short', 'essay', 'subjective']
+    for (const raw of items) {
+      try {
+        // 归一化：兼容模型常见的 multi/judge 写法、"A. xxx" 数组选项、"正确/错误" 答案
+        const it: any = { ...(raw || {}) }
+        let type = String(it.type || 'single').trim().toLowerCase()
+        type = TYPE_ALIAS[type] || type
+        if (!TYPES.includes(type)) type = 'single'
+        let answer = String(it.correct_answer ?? '').trim()
+        if (type === 'true_false') {
+          answer = ({ '正确': '对', '错误': '错', '是的': '对', '错': '错', '对': '对', 'true': '对', 'false': '错', 't': '对', 'f': '错' } as Record<string, string>)[answer.toLowerCase ? answer.toLowerCase() : answer] || answer
+          if (answer !== '对' && answer !== '错') answer = answer.includes('错') ? '错' : '对'
+        }
+        let options = it.options
+        if (Array.isArray(options)) {
+          if (type === 'true_false' || type === 'fill' || type === 'short') options = {}
+          else {
+            const map: Record<string, string> = {}
+            options.forEach((op: any, idx: number) => {
+              const m = String(op ?? '').match(/^\s*([A-Ha-h])[.、．]\s*([\s\S]*)$/)
+              if (m) map[m[1].toUpperCase()] = m[2].trim()
+              else map[String.fromCharCode(65 + idx)] = String(op ?? '')
+            })
+            options = map
+          }
+        } else if (options == null) options = {}
+        await apiClient.post('/api/questions/import', {
+          type,
+          question_text: String(it.question_text || ''),
+          options,
+          correct_answer: answer,
+          explanation: String(it.explanation || ''),
+          knowledge_points: String(it.knowledge_points || ''),
+          difficulty: ['easy', 'medium', 'hard'].includes(it.difficulty) ? it.difficulty : 'medium',
+          source: 'ai',
+        })
+        ok++
+      } catch (e: any) {
+        fail++
+        lastErr = String(e?.response?.data?.detail || e?.message || '')
+      }
+    }
+    setImportingQuestions(false)
+    if (ok) message.success(t('importDone', { ok }) + (fail ? t('importFailSuffix', { fail }) : ''))
+    else message.error(t('importFailed') + (lastErr ? `：${lastErr}` : ''))
+  }
+
   // 判断是否处于流式状态（普通模式或学伴模式）
   const isAnyStreaming = companionMode ? companionIsStreaming : isStreaming
   const activeMessages = companionMode ? companionMessages : messages
@@ -1331,11 +1395,12 @@ const ChatPage: React.FC = () => {
       {/* 顶部模式切换 */}
       <div className="chat-mode-bar" style={{
         padding: '8px 24px',
-        borderBottom: companionMode ? '1px solid #d6d0f0' : '1px solid #f0f0f0',
+        borderBottom: `1px solid ${token.colorBorderSecondary}`,
         display: 'flex', alignItems: 'center', gap: 12,
-        background: companionMode
-          ? 'linear-gradient(90deg, #f0ecff 0%, #f5f0ff 50%, #f0f4ff 100%)'
-          : '#fff',
+        backgroundColor: token.colorBgContainer,
+        backgroundImage: companionMode
+          ? 'linear-gradient(90deg, rgba(102,126,234,0.10) 0%, rgba(118,75,162,0.07) 50%, rgba(102,126,234,0.05) 100%)'
+          : 'none',
         transition: 'all 0.3s ease',
       }}>
         {/* 页面标识：聊天页是全高工作区，不额外压一条页头，标题并进这条模式栏 */}
@@ -1388,7 +1453,7 @@ const ChatPage: React.FC = () => {
                   {curRole === 'teacher' || curRole === 'admin' ? '🎓' : (COMPANION_AVATARS[companionConfig?.personality || 'encouraging'] || '🧠')}
                 </div>
                 <div className="chat-companion-id">
-                  <Typography.Text strong style={{ fontSize: 14, color: curRole === 'teacher' || curRole === 'admin' ? '#13c2c2' : '#5b4fa0' }}>
+                  <Typography.Text strong style={{ fontSize: 14, color: curRole === 'teacher' || curRole === 'admin' ? cyan[5] : token.colorPrimary }}>
                     {curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
                   </Typography.Text>
                   <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6, color: '#8c7fbf' }}>
@@ -1397,13 +1462,13 @@ const ChatPage: React.FC = () => {
                 </div>
                 <div style={{ flex: 1 }} />
                 <Button size="small" type="text" onClick={() => setCompanionSidebar(!companionSidebar)}
-                  style={{ color: curRole === 'teacher' || curRole === 'admin' ? '#13c2c2' : '#667eea' }}>
-                  📊 {t('teachingData')}
+                  style={{ color: curRole === 'teacher' || curRole === 'admin' ? cyan[5] : token.colorPrimary }}>
+                  {curRole === 'teacher' || curRole === 'admin' ? t('teachingData') : t('learningProfile')}
                 </Button>
                 {curRole === 'student' && (
                   <Button size="small" type="text" icon={<span>⚙️</span>}
                     onClick={() => navigate('/companion-settings')}
-                    style={{ color: '#667eea' }}
+                    style={{ color: token.colorPrimary }}
                   />
                 )}
               </>
@@ -1415,12 +1480,12 @@ const ChatPage: React.FC = () => {
         )}
       </div>
 
-      <div className="chat-body" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="chat-body" style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         {/* 桌面端历史侧栏：推挤布局（不遮罩），窄屏仍走抽屉 */}
         {isWide && historySideOpen && (
           <aside style={{
             width: sideW, flex: '0 0 auto', minWidth: 0, minHeight: 0, alignSelf: 'stretch', position: 'relative',
-            background: '#fff', borderRight: '1px solid var(--border-color)',
+            background: token.colorBgContainer, borderRight: '1px solid var(--border-color)',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}>
             <div className="chat-history-panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{historyContent}</div>
@@ -1446,7 +1511,7 @@ const ChatPage: React.FC = () => {
         )}
         {isWide && !historySideOpen && (
           <div style={{
-            width: 52, flex: '0 0 auto', background: '#fff', borderRight: '1px solid var(--border-color)',
+            width: 52, flex: '0 0 auto', background: token.colorBgContainer, borderRight: '1px solid var(--border-color)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 0',
           }}>
             <Tooltip title={t('chatHistory')} placement="right">
@@ -1466,9 +1531,10 @@ const ChatPage: React.FC = () => {
         {/* 消息列表 */}
         <div ref={messagesRef} className="chat-messages" style={{
           flex: 1, overflow: 'auto', padding: 24,
-          background: companionMode
-            ? 'linear-gradient(135deg, #f5f0ff 0%, #f0f4ff 50%, #f5f8ff 100%)'
-            : '#fafafa',
+          backgroundColor: token.colorBgLayout,
+          backgroundImage: companionMode
+            ? 'linear-gradient(135deg, rgba(102,126,234,0.08) 0%, rgba(118,75,162,0.05) 50%, rgba(102,126,234,0.04) 100%)'
+            : 'none',
           transition: 'background 0.3s ease',
         }}>
           {activeMessages.length === 0 ? (
@@ -1488,30 +1554,30 @@ const ChatPage: React.FC = () => {
                   }}>
                     🎓
                   </div>
-                  <Typography.Title level={4} style={{ color: '#13c2c2', margin: 0 }}>
+                  <Typography.Title level={4} style={{ color: cyan[5], margin: 0 }}>
                     {t('greetingTeacher')}
                   </Typography.Title>
                   <Typography.Text style={{ color: token.colorTextTertiary, marginTop: 8, maxWidth: 520, fontSize: 14 }}>
                     {t('greetingTeacherDesc')}
                   </Typography.Text>
                   <div style={{ marginTop: 20, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                    <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
-                      onClick={() => companionSendMsg('请替我生成一份完整的教案，课题是「网络协议」，附带课堂活动和作业设计')}
+                    <Button size="small" style={{ borderColor: cyan[5], color: cyan[5] }}
+                      onClick={() => companionSendMsg(t('quickPromptLessonPlan'))}
                     >
                       {t('genLessonPlan')}
                     </Button>
-                    <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
-                      onClick={() => companionSendMsg('请出10道关于进制转换的题目，包含单选、多选和判断，附答案和解析')}
+                    <Button size="small" style={{ borderColor: cyan[5], color: cyan[5] }}
+                      onClick={() => companionSendMsg(t('quickPromptExam'))}
                     >
                       {t('genExam')}
                     </Button>
-                    <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
-                      onClick={() => companionSendMsg('帮我分析高一1班最近一次考试的成绩，指出整体薄弱点')}
+                    <Button size="small" style={{ borderColor: cyan[5], color: cyan[5] }}
+                      onClick={() => companionSendMsg(t('quickPromptClassAnalysis'))}
                     >
                       {t('classAnalysis')}
                     </Button>
-                    <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
-                      onClick={() => companionSendMsg('请帮我设计一个45分钟的课堂活动方案，主题是「算法与程序设计」')}
+                    <Button size="small" style={{ borderColor: cyan[5], color: cyan[5] }}
+                      onClick={() => companionSendMsg(t('quickPromptActivityPlan'))}
                     >
                       {t('activityPlan')}
                     </Button>
@@ -1532,7 +1598,7 @@ const ChatPage: React.FC = () => {
                   }}>
                     {COMPANION_AVATARS[companionConfig?.personality || 'encouraging'] || '🧠'}
                   </div>
-                  <Typography.Title level={4} style={{ color: '#667eea', margin: 0 }}>
+                  <Typography.Title level={4} style={{ color: token.colorPrimary, margin: 0 }}>
                     {t('greetingStudent', { name: companionConfig?.companion_name || t('companionName') })}
                   </Typography.Title>
                   <Typography.Text style={{ color: token.colorTextTertiary, marginTop: 8, maxWidth: 400, fontSize: 14 }}>
@@ -1541,18 +1607,18 @@ const ChatPage: React.FC = () => {
                   <div style={{ marginTop: 20, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                     {companionProfile?.weakness?.length ? (
                       <Button size="small" type="primary" ghost
-                        onClick={() => companionSendMsg('帮我复习一下薄弱知识点')}
+                        onClick={() => companionSendMsg(t('quickPromptReviewWeakness'))}
                       >
                         {t('reviewWeakness')}
                       </Button>
                     ) : null}
                     <Button size="small" type="primary" ghost
-                      onClick={() => companionSendMsg('给我做个学习计划')}
+                      onClick={() => companionSendMsg(t('quickPromptMakePlan'))}
                     >
                       {t('makePlan')}
                     </Button>
                     <Button size="small" type="primary" ghost
-                      onClick={() => companionSendMsg('今天有什么建议？')}
+                      onClick={() => companionSendMsg(t('quickPromptTodayAdvice'))}
                     >
                       {t('todayAdvice')}
                     </Button>
@@ -1595,32 +1661,71 @@ const ChatPage: React.FC = () => {
               </div>
             )
           ) : (
-          activeMessages.map((msg: { role: string; content: string; id?: string }, i: number) => (
-            <MessageBubble
-              key={msg.id || i}
-              msg={msg as Message}
-              isStreaming={isAnyStreaming && i === activeMessages.length - 1 && msg.role === 'assistant'}
-              onPreviewHtml={(html) => {
-                setPreviewHtml(html);
-                setShowPreview(true);
-              }}
-              companionMode={companionMode}
-              companionName={curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
-              companionPersonality={companionConfig?.personality}
-              showRefs={curRole === 'teacher' || curRole === 'admin'}
-            />
-          ))
+          activeMessages.map((msg: { role: string; content: string; id?: string }, i: number) => {
+            const isLastAssistant = companionMode && msg.role === 'assistant'
+              && i === activeMessages.length - 1 && !isAnyStreaming
+            const qJson = isLastAssistant && (curRole === 'teacher' || curRole === 'admin')
+              ? extractQuestionsJson(msg.content || '') : ''
+            return (
+            <React.Fragment key={msg.id || i}>
+              <MessageBubble
+                msg={msg as Message}
+                isStreaming={isAnyStreaming && i === activeMessages.length - 1 && msg.role === 'assistant'}
+                onPreviewHtml={(html) => {
+                  setPreviewHtml(html);
+                  setShowPreview(true);
+                }}
+                companionMode={companionMode}
+                companionName={curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
+                companionPersonality={companionConfig?.personality}
+                showRefs={curRole === 'teacher' || curRole === 'admin'}
+              />
+              {isLastAssistant && (
+                <div style={{ display: 'flex', gap: 6, margin: '-8px 0 14px 46px', flexWrap: 'wrap' }}>
+                  <Button size="small" type="text" icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard?.writeText(msg.content || '')
+                        .then(() => message.success(t('copied')))
+                        .catch(() => message.error(t('copyFailed')))
+                    }}>
+                    {t('copy')}
+                  </Button>
+                  <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => companionRegenerate()}>
+                    {t('regenerate')}
+                  </Button>
+                  {qJson && (
+                    <Button size="small" type="primary" ghost icon={<PlusOutlined />}
+                      loading={importingQuestions} onClick={() => handleImportQuestions(qJson)}>
+                      {t('importToBank')}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </React.Fragment>
+            )
+          })
         )}
         <div ref={messagesEndRef} />
       </div>
 
+      {/* 学伴侧边栏：移动端浮层遮罩，点击关闭 */}
+      {companionMode && companionSidebar && !isWide && (
+        <div onClick={() => setCompanionSidebar(false)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 49,
+        }} />
+      )}
       {/* 学伴侧边栏 */}
       {companionMode && companionSidebar && (
         <div className="companion-sidebar" style={{
-          width: 280, borderLeft: '1px solid #e0daf5', padding: 16,
-          overflow: 'auto', background: 'linear-gradient(180deg, #faf8ff 0%, #ffffff 100%)',
+          width: isWide ? 280 : 300, padding: 16, overflow: 'auto',
+          borderLeft: isWide ? `1px solid ${token.colorBorderSecondary}` : 'none',
+          backgroundColor: token.colorBgContainer,
+          backgroundImage: 'linear-gradient(180deg, rgba(102,126,234,0.06) 0%, rgba(0,0,0,0) 240px)',
+          position: isWide ? 'relative' : 'absolute',
+          right: 0, top: 0, bottom: 0, zIndex: isWide ? 'auto' : 50,
+          boxShadow: isWide ? 'none' : token.boxShadow,
         }}>
-          <Typography.Text strong style={{ fontSize: 14, display: 'block', marginBottom: 12, color: curRole === 'teacher' || curRole === 'admin' ? '#13c2c2' : '#5b4fa0' }}>
+          <Typography.Text strong style={{ fontSize: 14, display: 'block', marginBottom: 12, color: curRole === 'teacher' || curRole === 'admin' ? cyan[5] : token.colorPrimary }}>
             {curRole === 'teacher' || curRole === 'admin' ? t('teachingData') : t('learningProfile')}
           </Typography.Text>
 
@@ -1637,7 +1742,7 @@ const ChatPage: React.FC = () => {
                   boxShadow: '0 2px 8px rgba(82,196,26,0.25)',
                 }}>🎓</div>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: '#13c2c2' }}>{t('assistantMode')}</div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: cyan[5] }}>{t('assistantMode')}</div>
                   <div style={{ fontSize: 11, color: token.colorTextTertiary }}>{t('greetingTeacherDesc')}</div>
                 </div>
               </div>
@@ -1718,6 +1823,9 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                     )}
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 11, color: token.colorTextTertiary, lineHeight: 1.6 }}>
+                    💡 {t('assistantAutoSnapshot')}
                   </div>
                 </>
               ) : (
@@ -1820,8 +1928,9 @@ const ChatPage: React.FC = () => {
       {/* 输入区域 */}
       <div style={{
         padding: '12px 24px',
-        borderTop: companionMode ? '1px solid #e0daf5' : '1px solid #f0f0f0',
-        background: companionMode ? 'linear-gradient(0deg, #f8f6ff 0%, #ffffff 100%)' : '#fff',
+        borderTop: `1px solid ${token.colorBorderSecondary}`,
+        backgroundColor: token.colorBgContainer,
+        backgroundImage: companionMode ? 'linear-gradient(0deg, rgba(102,126,234,0.06) 0%, rgba(0,0,0,0) 120px)' : 'none',
         transition: 'all 0.3s ease',
       }}>
         <Space orientation="vertical" style={{ width: '100%' }} size={6}>
@@ -1957,7 +2066,7 @@ const ChatPage: React.FC = () => {
               </Tooltip>
             )}
             <div style={{ flex: 1, minWidth: 0 }} />
-            {usage && (
+            {usage && isWide && (
               <div style={{ fontSize: 12, color: token.colorTextTertiary, whiteSpace: 'nowrap' }}>
                 {usage.remaining === -1 ? (
                   <span style={{ color: token.colorTextDescription }}>{t('adminUnlimited')}</span>

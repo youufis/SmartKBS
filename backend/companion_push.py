@@ -2,7 +2,7 @@
 AI 学伴主动推送引擎
 在关键时机向学生推送学伴消息（登录时/考试后/称号升级等）
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Any, Optional
 
 from backend.database import execute_query, execute_insert_update, get_connection
@@ -32,7 +32,16 @@ def _today() -> str:
 # ═══════════════════════════════════════════════
 
 def get_unread_pushes(student_username: str) -> list[dict[str, Any]]:
-    """获取学生未读的推送消息"""
+    """获取学生未读的推送消息（顺带清理：超过 2 天的早安问候自动转已读，不再堆积）"""
+    try:
+        cutoff = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        execute_insert_update(
+            "UPDATE ai_companion_push_log SET read_status=1 "
+            "WHERE student_username=? AND read_status=0 AND push_type='morning' AND created_at < ?",
+            (student_username, cutoff),
+        )
+    except Exception as e:
+        logger.debug(f"早安推送清理失败 ({student_username}): {e}")
     rows = execute_query(
         "SELECT id, push_type, title, content, created_at FROM ai_companion_push_log "
         "WHERE student_username=? AND read_status=0 ORDER BY created_at DESC LIMIT 20",
@@ -138,6 +147,19 @@ def batch_delete_push(push_ids: list[int], student_username: str) -> bool:
 # 推送触发
 # ═══════════════════════════════════════════════
 
+def _push_today(student_username: str, push_type: str) -> int:
+    """今天已推过几条该类型（触发器去重用）"""
+    try:
+        rows = execute_query(
+            "SELECT COUNT(*) FROM ai_companion_push_log "
+            "WHERE student_username=? AND push_type=? AND DATE(created_at)=?",
+            (student_username, push_type, _today()),
+        )
+        return int(rows[0][0] or 0) if rows else 0
+    except Exception:
+        return 0
+
+
 def _create_push(student_username: str, push_type: str, title: str, content: str):
     """创建一条推送记录"""
     now = _now()
@@ -167,20 +189,64 @@ def push_morning_greeting(student_username: str, student_name: str):
     streak_days = _get_streak_days(student_username)
     companion_name = _get_companion_name(student_username)
 
-    # 组装推送文案
-    parts = [f"☀️ 早安，{student_name}！"]
+    # 组装推送文案（标题已带 ☀️，正文不再重复；待办与问候之间用句号衔接，避免「！，」）
+    todos = []
     if pending_exam_count > 0:
-        parts.append(f"今天有 {pending_exam_count} 场考试待参加")
+        todos.append(f"今天有 {pending_exam_count} 场考试待参加")
     if pending_task_count > 0:
-        parts.append(f"还有 {pending_task_count} 个任务待完成")
+        todos.append(f"还有 {pending_task_count} 个任务待完成")
+    content = f"早安，{student_name}！"
+    if todos:
+        content += "，".join(todos) + "。"
     if streak_days >= 3:
-        parts.append(f"已连续学习 {streak_days} 天，太棒了继续保持！🔥")
+        content += f"已连续学习 {streak_days} 天，太棒了继续保持！🔥"
     else:
-        parts.append("新的一天，一起加油吧！💪")
+        content += "新的一天，一起加油吧！💪"
+
+    # 优先 LLM 生成个性化文案（MORNING_PUSH_PROMPT 此前定义了却没人用）；失败回退上面的模板
+    content = _llm_morning_content(
+        student_username, student_name, pending_exam_count, pending_task_count, streak_days,
+    ) or content
 
     title = f"☀️ {companion_name}的早安问候"
-    content = "，".join(parts)
     _create_push(student_username, "morning", title, content)
+
+    # 里程碑：连续学习的整数关口当天顺带祝贺（每天最多一次）
+    if streak_days in (7, 21, 30, 50, 100) and _push_today(student_username, "milestone") == 0:
+        push_milestone(student_username, f"已连续学习 {streak_days} 天")
+
+    # 薄弱点提醒：存在连错≥3次的知识点且今天还没提醒过（内部已按 cnt>=3 过滤）
+    if _push_today(student_username, "reminder") == 0:
+        push_weakness_reminder(student_username)
+
+
+def _llm_morning_content(student_username: str, student_name: str,
+                         pending_exam_count: int, pending_task_count: int, streak_days: int) -> str:
+    """用 LLM 生成早安推送文案；无 Key、异常或长度失控时返回空串（由调用方回退模板）。
+
+    登录线程里调用，允许几秒延迟；但绝不抛错、绝不把原文发出去。
+    """
+    try:
+        from backend.api.chat_router import get_api_keys
+        from backend.api.ai_service import call_ai_sync
+        from backend.prompts.companion import MORNING_PUSH_PROMPT
+        api_key, _ = get_api_keys(student_username)
+        if not api_key:
+            return ""
+        prompt = MORNING_PUSH_PROMPT.format(
+            student_name=student_name,
+            pending_exam_count=pending_exam_count,
+            pending_task_count=pending_task_count,
+            today_courses="未提供",
+            streak_days=streak_days,
+        )
+        text = (call_ai_sync(prompt, api_key, max_tokens=160, use_kb=False) or "").strip()
+        text = text.strip('"“”\'')
+        if 8 <= len(text) <= 120:
+            return text
+    except Exception as e:
+        logger.debug(f"早安文案生成失败({student_username}): {e}")
+    return ""
 
 
 def push_exam_result(student_username: str, exam_title: str, score: float, total_score: float, passed: bool):
@@ -204,7 +270,7 @@ def push_exam_result(student_username: str, exam_title: str, score: float, total
         content = f"{student_name}，你在「{exam_title}」中得了 {score}/{total_score} 分（{percentage}%），{praise}！"
     else:
         title = "💪 再接再厉"
-        content = f"{student_name}，这次「{exam_title}」得了 {score}/{total_score} 分，别灰心！让小智帮你分析错题，下次一定能过！"
+        content = f"{student_name}，这次「{exam_title}」得了 {score}/{total_score} 分，别灰心！让{companion_name}帮你分析错题，下次一定能过！"
 
     # 获取最新错题知识点，添加到推送中
     weakness = _get_recent_weakness(student_username)
@@ -311,7 +377,7 @@ def _get_recent_weakness(username: str) -> Optional[str]:
         rows = execute_query(
             """SELECT knowledge_points, COUNT(*) as cnt
                FROM wrong_book
-               WHERE student_username=? AND status='active'
+               WHERE student_username=? AND status='pending'
                GROUP BY knowledge_points
                ORDER BY cnt DESC
                LIMIT 1""",
@@ -328,7 +394,7 @@ def _analyze_weakness_summary(username: str) -> Optional[dict[str, Any]]:
         rows = execute_query(
             """SELECT knowledge_points, COUNT(*) as cnt
                FROM wrong_book
-               WHERE student_username=? AND status='active'
+               WHERE student_username=? AND status='pending'
                GROUP BY knowledge_points
                HAVING cnt >= 3
                ORDER BY cnt DESC

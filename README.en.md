@@ -7,8 +7,8 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 52 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant, smart question bank (generate / extract / manual entry / id link), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
-> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion, explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot), smart question bank (generate / extract / manual entry / id link), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
+> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion (profile · memory · care), explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions (CSV import in seconds), announcements, notification centre, AI skill management, system configuration (cloud/local dual engine + briefing policy + log rotation), online incremental upgrade, multi-theme appearance
@@ -37,17 +37,18 @@
 
 > 📌 **Highlights of V9.3.0** (outline)
 >
-> - 📐 **Figure pipeline**: every generation entry point funnels through one quality gate
-> - 📊 **More figure types**: function graphs rendered deterministically; charts and geometry added
-> - 🖼 **Formulas inside figures**: real sub/superscripts and fractions, matched in paper and practice exports
-> - 🛡 **Figure screening**: off-canvas / degenerate / answer-leaking / raw-LaTeX figures blocked before saving
-> - 📚 **Local library**: standalone knowledge-base module (upload / folders / trash; keyword + vector hybrid retrieval)
-> - 🔗 **AI chain**: cloud KB → local library → LLM
-> - ✅ **Quality**: end-to-end regression across all pipelines plus static checks
+> - 🧠 **Learning companion**: multi-turn context fixed; long-term memory settles as you chat
+> - 🎓 **Teaching assistant**: teaching snapshot injected automatically — class questions answered with real data
+> - 📖 **Citations**: knowledge-base sources visible in companion / assistant answers
+> - 🛡 **Care**: sensitive signals comforted immediately and surfaced to administrators
+> - 💌 **Notifications**: delivered at login, personalised copy, milestone & weak-point reminders, auto-archived
+> - 🧾 **Question authoring**: structured output imported into the bank in one click
+> - ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
+> - ✅ **Quality**: three full review passes
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is enabled by default — upload materials under Local Library first; for a fully offline setup switch the vector channel to local and install Ollama + bge-m3.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed.
 
 ---
 
@@ -126,8 +127,8 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant, question bank management (generate / extract / manual entry / id link · deterministic figures) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre, local library | 13 |
-| 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion, explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot · structured output), question bank management (generate / extract / manual entry / id link · deterministic figures) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre, local library | 13 |
+| 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion (profile · long-term memory · care), explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, teaching briefing, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 12 |
 | ⚙️ Manage | [System Management](#ch-manage) | Users, announcements, configuration (cloud/local dual engine), skills, notifications, upgrade, about, other services | 8 |
@@ -243,7 +244,9 @@ AI-powered teaching tool assistant for teachers and administrators:
 - **📄 Auto Exam Generation**: Generates exam papers and class quizzes by knowledge point/question type/difficulty
 - **📊 Learning Analytics**: Analyzes class or individual student performance data, identifies weak points and areas for improvement
 - **🎯 Activity Planning**: Designs classroom interaction plans (group discussions, quick-answer, class quizzes, etc.)
-- **📋 Teaching Data Sidebar**: Real-time display of student count, exam statistics, task submissions, classroom interactions, and other teaching overviews
+- **🧠 Teaching Snapshot**: automatically carries teaching scope, recent exams, pending grading and class weak points
+- **📥 Structured Question Output**: appends a question block that can be imported into the bank in one click
+- **📋 Teaching Data Sidebar**: Real-time display of student count, exam statistics, task submissions, classroom interactions, and other teaching overviews (automatically referenced by the assistant)
 - **🎨 Visual Differentiation**: Teal-green assistant-style chat bubbles and avatar
 
 > **Available to Teacher/Admin (switch at the top of the Smart Answer page)**
@@ -498,6 +501,8 @@ An intelligent upgrade of AI dialogue, providing personalized learning companion
   - 🌟 **Encouraging**: Warm and enthusiastic, full of positive energy, uses encouraging language
   - 📐 **Rigorous**: Precise and detailed, focuses on analyzing "why it's wrong" and "how to fix it", draws inferences
   - 😄 **Humorous**: Witty and fun, appropriately uses memes and banter to make learning enjoyable
+- **🧠 Long-Term Memory**: preferences / goals / difficulties settle across conversations and are remembered later
+- **🛡 Safety Care**: sensitive signals get immediate comfort plus real help channels
 - **📊 Learning Profile Sidebar**: Real-time display of title, points, weak knowledge points, exam trends, consecutive learning days
 - **🔔 Proactive Push**: Morning greetings, exam result analysis, title upgrade congratulations, learning reminders
 - **💾 Unified Chat History Management**: Shares the same chat history system as Smart Answer mode
@@ -1241,16 +1246,14 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.3.0
 
-- 📐 **Figure pipeline**: all six generation entry points (bank, quest, ladder, quiz, courseware, lesson cast) funnel through one quality gate
-- 📊 **More figure types**: function graphs now "model declares, backend draws"; charts (bar / line / combo / pie) and geometry added
-- 🖼 **Formulas inside figures**: real sub/superscripts and fractions, matched in Word/PDF and practice-page exports
-- 🛡 **Figure screening**: off-canvas, degenerate, answer-leaking and raw-LaTeX figures blocked; rejection reasons separate bad data from model failure
-- 📚 **Local library**: standalone KB module (upload / folders / trash / batch management) with keyword + vector hybrid retrieval
-- 🔌 **Vector channel**: cloud or local models, cloud by default, dual channel off by default; switch prompt and dimension validation
-- 🔗 **AI chain**: unified as cloud KB → local library → LLM
-- 🧠 **Retrieval everywhere**: authoring, lesson prep and whiteboard use one retrieval funnel; vectors verified after restore
-- 🛡 **Ops & backup**: local library included in full backups; index rebuildable and health visible
-- ✅ **Quality**: end-to-end regression across all pipelines plus static checks
+- 🧠 **Learning companion**: multi-turn context fixed; long-term memory (preferences / goals / difficulties) captured and injected
+- 🎓 **Teaching assistant**: teaching snapshot injected automatically (scope, recent exams, pending grading, class weak points)
+- 📖 **Citations**: knowledge-base sources shown in companion / assistant answers
+- 🛡 **Care**: sensitive signals comforted immediately (real help channels), administrators notified
+- 💌 **Notifications**: delivered at login, personalised copy, milestone / weak-point reminders, auto-archived
+- 🧾 **Question authoring**: structured output imported into the bank in one click (types and answers normalised)
+- ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
+- ✅ **Quality**: three full review passes, build artifacts and permission surface verified
 
 ### v7.x – v9.2.0
 

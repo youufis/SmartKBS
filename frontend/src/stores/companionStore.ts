@@ -7,7 +7,7 @@ import * as historyApi from '../api/history';
 import { fileUploadCache } from './chatStore';
 import { promoteChatAssets } from '../api/files';
 import { buildAttachmentsComment } from '../utils/chatAttachments';
-import type { ChatAttachment } from '../types';
+import type { ChatAttachment, KbReference } from '../types';
 
 async function uploadFiles(filePaths: string[]): Promise<{ path: string; name: string }[]> {
   const results: { path: string; name: string }[] = [];
@@ -65,9 +65,11 @@ interface CompanionStore {
   pushLoading: boolean;
 
   // 对话
-  companionMessages: { role: 'user' | 'assistant'; content: string; attachments?: ChatAttachment[] }[];
+  companionMessages: { role: 'user' | 'assistant'; content: string; attachments?: ChatAttachment[]; references?: KbReference[] }[];
   isStreaming: boolean;
   currentText: string;
+  /** 直连记忆会话号：与智答模式共用 chat_memory，done 帧带回、下一轮凭它续上下文 */
+  sessionId: string | null;
 
   // 操作
   loadConfig: () => Promise<void>;
@@ -82,6 +84,7 @@ interface CompanionStore {
   // 对话
   sendMessage: (prompt: string, file_paths?: string[], context_enhance?: boolean) => Promise<void>;
   stopStreaming: () => void;
+  regenerate: () => Promise<void>;
   clearMessages: () => void;
 
   // 初始化
@@ -113,7 +116,7 @@ export function loadCompanionHistory(msgs: { role: 'user' | 'assistant'; content
   _companionLoadingHistory = true
   _companionSaveFilename = null
   _companionLastSavedCount = msgs.length
-  useCompanionStore.setState({ companionMessages: msgs, currentText: '' })
+  useCompanionStore.setState({ companionMessages: msgs, currentText: '', sessionId: null })
   _companionLoadingHistory = false
 }
 
@@ -130,6 +133,7 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
   companionMessages: [],
   isStreaming: false,
   currentText: '',
+  sessionId: null,
 
   loadConfig: async () => {
     set({ configLoading: true });
@@ -232,7 +236,7 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
   },
 
   sendMessage: async (prompt, file_paths, context_enhance) => {
-    const { companionMessages } = get();
+    const { companionMessages, sessionId } = get();
     if (!prompt.trim() && (!file_paths || file_paths.length === 0)) return;
 
     // 上传到暂存区后立即入档（与智答模式同一套逻辑）
@@ -290,9 +294,10 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
         acc += inc;
         scheduleFlush();
       },
-      () => {
+      (newSessionId: string) => {
         flush();
-        set({ isStreaming: false, currentText: '' });
+        // 后端 done 帧带回直连记忆会话号（d_ 前缀），下一轮凭它续上多轮上下文
+        set({ isStreaming: false, currentText: '', ...(newSessionId ? { sessionId: newSessionId } : {}) });
         abortController = null;
       },
       (error) => {
@@ -308,6 +313,16 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
       abortController.signal,
       serverFilePaths,
       context_enhance,
+      sessionId,
+      (items: KbReference[]) => {
+        // 知识库引用帧先于正文到达：挂到本轮助手气泡，教师端 showRefs 可见
+        const msgs = get().companionMessages;
+        const last = msgs[msgs.length - 1];
+        if (last && last.role === 'assistant') {
+          last.references = items;
+          set({ companionMessages: [...msgs] });
+        }
+      },
     );
   },
 
@@ -319,11 +334,26 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
     set({ isStreaming: false, currentText: '' });
   },
 
+  regenerate: async () => {
+    const { companionMessages, isStreaming } = get();
+    if (isStreaming) return;
+    let ui = -1;
+    for (let i = companionMessages.length - 1; i >= 0; i--) {
+      if (companionMessages[i].role === 'user') { ui = i; break; }
+    }
+    if (ui < 0) return;
+    const prompt = companionMessages[ui].content;
+    if (!prompt.trim()) return;
+    // 截掉该用户消息及其后的回答，重新发问（会话号不变，上下文延续）
+    set({ companionMessages: companionMessages.slice(0, ui) });
+    await get().sendMessage(prompt);
+  },
+
   clearMessages: () => {
     _companionLoadingHistory = false
     _companionLastSavedCount = 0
     _companionSaveFilename = null
-    set({ companionMessages: [], currentText: '' });
+    set({ companionMessages: [], currentText: '', sessionId: null });
   },
 
   checkMorningPush: async () => {

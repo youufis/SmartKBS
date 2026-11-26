@@ -12,6 +12,7 @@
     "build:https-site": "set VITE_REACT_DEV=1&& tsc -b && vite build"
   },
   "dependencies": {
+    "@ant-design/colors": "^8.0.1",
     "@ant-design/icons": "^6.2.3",
     "@monaco-editor/react": "^4.7.0",
     "antd": "^6.4.3",

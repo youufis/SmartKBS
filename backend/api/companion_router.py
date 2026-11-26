@@ -4,6 +4,7 @@ AI 学伴 API 路由
 """
 import json
 import os
+import threading
 from datetime import datetime
 from typing import Any, Optional
 
@@ -28,12 +29,10 @@ from backend.companion_profile import (
 )
 from backend.companion_memory import (
     get_student_profile,
-    get_student_profile_text,
     build_companion_system_prompt,
     clear_profile_cache,
-    save_memory,
-    get_memories,
 )
+from backend import safety_care
 from backend.companion_push import (
     get_unread_pushes,
     mark_push_read,
@@ -90,6 +89,16 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
     if role not in (0, 1, 2):
         raise HTTPException(status_code=403, detail="无权限使用学伴功能")
 
+    # ── 关怀闸（与探索画布同口径）：安全判定先于配额、开关与 Key 检查 ──
+    if role == 2:
+        care_tag = safety_care.should_care(user, req.prompt)
+        if care_tag:
+            safety_care.notify_care(
+                user, tag=care_tag, title="学伴·关怀提醒",
+                link="/chat?companion=1", source_type="companion_care",
+                scene_label="AI 学伴对话")
+            return StreamingResponse(_care_stream(), media_type="text/event-stream")
+
     # 检查学伴是否启用
     if role == 2 and not is_enabled(username):
         return StreamingResponse(
@@ -134,8 +143,7 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
     # 调用流式对话生成器（与智答模式共用 _chat_event_generator）
     # 注意：user_payload=None 避免 enhance_prompt_with_user_context 二次包装，
     # 因为学伴/助手模式已有自己的系统提示词
-    return StreamingResponse(
-        _chat_event_generator(
+    inner = _chat_event_generator(
             prompt=enhanced_prompt,
             file_paths=req.file_paths,
             session_id=req.session_id,
@@ -147,9 +155,75 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
             memory_prompt=req.prompt,
             scene="companion",
             award_chat_title="学伴对话",
-        ),
+        )
+    return StreamingResponse(
+        _companion_stream_wrapper(inner, user, req.prompt, dashscope_api_key),
         media_type="text/event-stream",
     )
+
+
+def _care_stream():
+    """命中关怀规则时的固定应答（不耗模型、不占配额）"""
+    yield f"data: {json.dumps({'type': 'delta', 'content': safety_care.CARE_REPLY}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'done', 'session_id': ''}, ensure_ascii=False)}\n\n"
+
+
+def _companion_stream_wrapper(inner, user: dict, user_prompt: str, api_key: str):
+    """透传 SSE 帧，同时做两件事：
+    1) 摘掉模型输出的 [[CARE_SIGNAL]] 软标记（增量协议下按累计文本净化后再发差值），
+       命中则零原文通知管理员；
+    2) 学生轮次结束后，后台线程抽取长期记忆（偏好/目标/困难/情绪/事实）。
+    """
+    username = user.get("username", "")
+    role = int(user.get("role", 2) or 2)
+    acc, sent, mark_hit = "", 0, False
+    for frame in inner:
+        if isinstance(frame, bytes):
+            frame = frame.decode("utf-8", "ignore")
+        payload = frame[6:].strip() if frame.startswith("data: ") else ""
+        obj = None
+        if payload:
+            try:
+                obj = json.loads(payload)
+            except Exception:
+                obj = None
+        if obj is None:
+            yield frame
+            continue
+        ftype = obj.get("type")
+        if ftype == "delta" and isinstance(obj.get("content"), str):
+            acc += obj["content"]
+            cleaned, hit = safety_care.scrub(acc)
+            if hit:
+                mark_hit = True
+            out = cleaned[sent:]
+            sent = len(cleaned)
+            if out:
+                yield f"data: {json.dumps({'type': 'delta', 'content': out}, ensure_ascii=False)}\n\n"
+            continue
+        if ftype == "done":
+            if mark_hit:
+                try:
+                    safety_care.notify_care(
+                        user, tag="model_mark", title="学伴·关怀提醒",
+                        link="/chat?companion=1", source_type="companion_care",
+                        scene_label="AI 学伴对话")
+                except Exception:
+                    pass
+            if role == 2 and acc and user_prompt:
+                threading.Thread(
+                    target=_extract_memories_safe,
+                    args=(username, user_prompt, acc, api_key), daemon=True,
+                ).start()
+        yield frame
+
+
+def _extract_memories_safe(username: str, user_prompt: str, ai_text: str, api_key: str):
+    try:
+        from backend.companion_memory import extract_and_save_memories
+        extract_and_save_memories(username, user_prompt, ai_text, api_key)
+    except Exception as e:
+        logger.debug(f"学伴记忆抽取线程异常: {e}")
 
 
 def _build_companion_prompt_with_profile(user_prompt: str, username: str, role: int) -> str:
@@ -174,51 +248,14 @@ def _build_companion_prompt_with_profile(user_prompt: str, username: str, role: 
         teacher_name = name_row[0][0] if name_row and name_row[0][0] else username
         role_label = "管理员" if role == 0 else "老师"
         role_header = f"{ai_role}，你是{teacher_name}的教学助手。" if teacher_subjects else ""
-        return f"{role_header}{TEACHER_COMPANION_PROMPT.format(teacher_name=teacher_name)}\n\n---\n\n{role_label}说：{user_prompt}"
-
-
-def _companion_event_generator(
-    prompt: str,
-    session_id: Optional[str],
-    username: str,
-    dashscope_api_key: str,
-):
-    """学伴流式事件生成器（保留用于兼容，新代码直接使用 _chat_event_generator）"""
-    from backend.api.chat_router import _chat_event_generator as _cg
-
-    try:
-        # _chat_event_generator 直接产出 SSE 帧，且已是「增量 content」协议：原样透传。
-        # 不能再按累计快照二次累加（否则前端 += 后会出现重复叠加），
-        # 也不要在它之后补发第二个 done——空 session_id 会覆盖掉真实会话号。
-        # _chat_event_generator 直接产出 SSE 帧，且已是「增量 content」协议：原样透传。
-        # 不能再按累计快照二次累加（否则前端 += 后会出现重复叠加），
-        # 也不要在它之后补发第二个 done——空 session_id 会覆盖掉真实会话号。
-        for sse in _cg(prompt, [], session_id, username, None, dashscope_api_key, False):
-            yield sse
-
-        # 异步保存对话记忆（不阻塞响应）
+        # 教学快照：让助手拿到任教范围/近期考试/待批改/班级薄弱点等实时数据
         try:
-            _save_chat_memory_async(username, prompt)
+            from backend.teacher_context import build_teacher_snapshot
+            snapshot = build_teacher_snapshot(username, role)
         except Exception:
-            pass
-
-    except Exception as e:
-        logger.error(f"学伴对话流式生成失败: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'content': f'对话生成失败：{str(e)}'})}\n\n"
-
-
-def _save_chat_memory_async(username: str, prompt: str):
-    """异步保存对话记忆（简化版：记录对话中提到的知识点）"""
-    # 从对话中提取常见知识点关键词
-    kp_keywords = [
-        "进制转换", "网络协议", "OSI模型", "TCP/IP", "IP地址",
-        "数据结构", "算法", "排序", "查找", "二叉树",
-        "Python", "JavaScript", "HTML", "CSS", "SQL",
-        "电路", "传感器", "控制系统", "流程图", "编程",
-    ]
-    mentioned = [kp for kp in kp_keywords if kp in prompt]
-    if mentioned:
-        save_memory(username, "preference", {"mentioned_kps": mentioned}, confidence=0.3)
+            snapshot = ""
+        snap_txt = f"\n\n{snapshot}\n（引用快照数据作答；快照未覆盖的明确说明暂缺，不要捏造。）" if snapshot else ""
+        return f"{role_header}{TEACHER_COMPANION_PROMPT.format(teacher_name=teacher_name)}{snap_txt}\n\n---\n\n{role_label}说：{user_prompt}"
 
 
 def _error_stream(msg: str):
