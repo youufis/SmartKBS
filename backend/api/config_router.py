@@ -64,7 +64,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     # ── 本地引擎（Ollama，OpenAI 兼容端点）──
     # AI_MODE：cloud=现状全走百炼；hybrid=本地优先、连不上/超时回落云端；
-    #          local=只走本地、绝不出网（百炼知识库检索一并旁路）。
+    #          local=生成只走本地（知识库检索与语音/生图按各自开关，可能出网）。
     # 默认 cloud：不显式切换就等于没装这个功能，现网行为零变化。
     "AI_MODE": "cloud",
     "OLLAMA_API_BASE": "http://localhost:11434/v1",
@@ -348,7 +348,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "KB_TIMEOUT_MS": 5000,   # 检索超时（毫秒），超时静默降级本地检索，不阻塞对话
     # ── 本地知识库（backend/local_kb.py；独立模块，与文件中心/资源中心零耦合）──
     "LOCAL_KB_ENABLED": True,                # 默认开启（2026-11-24 拍板）：云端优先、本地兜底；关闭不影响现有功能
-    "LOCAL_KB_EMBED_PROVIDER": "cloud",      # 默认云端；auto/cloud/local（local 模式下强制本地）
+    "LOCAL_KB_EMBED_PROVIDER": "cloud",      # 默认云端；auto/cloud/local
+    #   显式选 cloud/local 时不被 AI_MODE 覆盖（检索出不出网只看这里）；auto 才按 AI_MODE 解析。
+    #   v9.3 起 AI_MODE 不再旁路任何检索。
     "LOCAL_KB_EMBED_MODEL_CLOUD": "text-embedding-v4",
     "LOCAL_KB_EMBED_MODEL_LOCAL": "bge-m3",
     "LOCAL_KB_EMBED_DIM": 1024,
@@ -1830,12 +1832,6 @@ def _ai_runtime_snapshot() -> dict[str, Any]:
     chain = get_ai_config().get("mode", "direct")           # kb_direct|kb_local|direct
     effective = {"kb_direct": "cloud", "kb_local": "local"}.get(chain, "llm")
 
-    # 离线档旁路云端检索：这是 AI_MODE=local「绝不出网」的设计结果，不是故障，
-    # 所以绝不进 reasons（不亮 ⚠）。以前它被归成"未启用知识库"，把按设计的旁路说成
-    # 配置缺失 —— 教师去翻知识库开关，两头都查不出问题。
-    bypassed = (effective != "cloud" and cloud["enabled"] and cloud["ready"]
-                and llm_provider.ai_mode() == "local")
-
     # ⚠ 的唯一触发条件：某一路"已启用但没就绪"，把链路压到了更低的一级。
     # "已就绪但被更高优先级压制"不是问题，绝不写进 reasons —— 否则教师会看到一堆
     # 既不用处理、也解释不清的告警（这正是"待命"那版方案被否掉的原因）。
@@ -1848,7 +1844,6 @@ def _ai_runtime_snapshot() -> dict[str, Any]:
     kb = {
         "chain": chain,
         "effective": effective,
-        "bypassed": bypassed,
         "degraded": bool(reasons),
         "reasons": reasons,
         "cloud": {

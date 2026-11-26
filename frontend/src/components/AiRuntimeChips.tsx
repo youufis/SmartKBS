@@ -178,7 +178,6 @@ const KbDetail: React.FC<{ kb: AiRuntimeKb }> = ({ kb }) => {
       {kb.degraded && kb.reasons.length > 0 && (
         <Tip>{kb.reasons.join('；')}</Tip>
       )}
-      {kb.bypassed && <Tip tone="info">{t('aiRuntimeKbBypassTip')}</Tip>}
       <div style={{ marginTop: 6 }}>
         <Row k={t('aiRuntimeKbCloud')} v={<StateWord state={cloudState} />} note={cloudNote} />
         <Row k={t('aiRuntimeKbLocal')} v={<StateWord state={localState} />} note={localNote} />
@@ -275,13 +274,11 @@ const AiRuntimeChips: React.FC<AiRuntimeChipsProps> = ({ show = 'both', density 
       : t('aiRuntimeKbLocal')
   }
   if (kb.effective === 'llm') {
-    // 三态分开说，别把"按设计不参与"和"配不通"和"没启用"混成一句"未启用"：
-    //   离线旁路 = 本地档绝不出网（正常）；未就绪 = 开了但用不了（要修）；未启用 = 就没开
-    kbLabel = kb.bypassed
-      ? (dense ? t('aiRuntimeKbOfflineShort') : t('aiRuntimeKbOffline'))
-      : (kb.cloud.enabled || kb.local.enabled)
-        ? (dense ? t('aiRuntimeKbNotReadyShort') : t('aiRuntimeKbNotReady'))
-        : (dense ? t('aiRuntimeKbNone') : `${t('aiRuntimeKbNone')} · ${t('aiRuntimeKbDirectLlm')}`)
+    // 两态分开说，别把"配不通"和"没启用"混成一句"未启用"：
+    //   未就绪 = 开了但用不了（要修，⚠ 带原因）；未启用 = 就没开（正常，不报警）
+    kbLabel = (kb.cloud.enabled || kb.local.enabled)
+      ? (dense ? t('aiRuntimeKbNotReadyShort') : t('aiRuntimeKbNotReady'))
+      : (dense ? t('aiRuntimeKbNone') : `${t('aiRuntimeKbNone')} · ${t('aiRuntimeKbDirectLlm')}`)
   }
   const kbChip = (
     <Chip

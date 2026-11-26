@@ -338,20 +338,22 @@ def get_ai_config(use_agent: bool = True):
     固定优先级：云端百炼知识库 → 本地文库 → 直连大模型。
     use_agent=False 仅表示「本次不做知识库接管」（数据类任务强制直连），
     字段名保留是为了兼容既有调用点。
+
+    v9.3 解耦：这里不再读 AI_MODE。AI_MODE 只管"生成走哪个引擎"，检索是否出网
+    由「启用知识库检索」与向量化通道自己决定 —— 于是「本地模型 + 云端知识库」是
+    合法组合（本地生成、云端检索）；要真离线就关掉知识库检索并把向量通道切本地。
     """
     from backend.api.config_router import get_config_value
-    mode = llm_provider.ai_mode()
     if use_agent:
-        # 1) 云端百炼知识库（local 模式承诺不出网，旁路）
-        if mode != "local":
-            try:
-                from backend import bailian_kb
-                kb_ok, _ = bailian_kb.kb_ready()
-            except Exception:
-                kb_ok = False
-            if kb_ok:
-                return {"mode": "kb_direct"}
-        # 2) 本地文库（不出网，local 模式同样可用）
+        # 1) 云端百炼知识库（就绪即接管，与生成引擎无关）
+        try:
+            from backend import bailian_kb
+            kb_ok, _ = bailian_kb.kb_ready()
+        except Exception:
+            kb_ok = False
+        if kb_ok:
+            return {"mode": "kb_direct"}
+        # 2) 本地文库（向量通道由 LOCAL_KB_EMBED_PROVIDER 决定，同样不看 AI_MODE）
         try:
             from backend import local_kb
             if local_kb.ready():

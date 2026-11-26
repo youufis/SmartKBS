@@ -180,12 +180,8 @@ def retrieve_knowledge_v2(prompt: str, username: str = "") -> tuple[str, list[di
     q = resolve_search_query(prompt)
 
     def _cloud_leg() -> list:
-        try:
-            from backend import llm_provider
-            if llm_provider.ai_mode() == "local":
-                return []          # local 模式承诺不出网
-        except Exception:
-            pass
+        # 只看「启用知识库检索」与检索服务是否就绪，不看 AI_MODE（v9.3 解耦）：
+        # AI_MODE 决定生成走哪个引擎，检索是否出网归知识库自己的开关管。
         try:
             from backend import bailian_kb
             return bailian_kb.kb_search(q) or []

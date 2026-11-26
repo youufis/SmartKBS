@@ -320,11 +320,11 @@ async def get_usage(request: Request):
     from backend.api.ai_service import get_ai_config
     chat_mode = {"kb_direct": "kb", "kb_local": "kb_local"}.get(get_ai_config()["mode"], "llm")
 
-    # 引擎徽章：只有「直连大模型」且本地分流开着时，应答者才可能是本地引擎。
-    # kb/agent 与 cloud 档一律标 cloud；hybrid 的实际应答者可能回落云端，标 hybrid（本地优先）。
+    # 引擎＝生成侧真实应答者，与走没走知识库无关（v9.3 解耦）：kb_direct 接管下
+    # 生成步骤照样可能被路由到 Ollama，所以不能按 chat_mode 反推引擎。
+    # 与 /api/config/ai-runtime 用同一个判定，两处口径不会各说各话。
     from backend import llm_provider
-    _m = llm_provider.ai_mode()
-    engine = ("local" if _m == "local" else "hybrid" if _m == "hybrid" else "cloud") if chat_mode == "llm" else "cloud"
+    engine, _conflict = llm_provider.effective_engine()
     # 回显真正会跑的模型名：只要本地分流开着（模型由平台配置决定），
     # 生成步骤就路由到 Ollama —— kb_direct 接管下同样如此，不能只按 llm 档判断
     _gen_local = llm_provider.ollama_active()

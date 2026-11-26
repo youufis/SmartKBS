@@ -1113,13 +1113,12 @@ def _channel_done(sig: str) -> bool:
 def _vector_hits(query: str, k: int) -> tuple[list[tuple[int, float]], dict]:
     """向量检索：当前通道优先，失败自动切另一通道（各查各的 collection，绝不混空间）。"""
     info = {"provider": "", "ok": False, "error": "", "fallback": False}
-    mode = str(_cfg("AI_MODE", "cloud") or "cloud")
+    # 通道只看 LOCAL_KB_EMBED_PROVIDER（显式选择优先，不被 AI_MODE 覆盖）：
+    # 向量通道是"检索要不要出网"的唯一开关，与生成引擎无关（v9.3 解耦）。
     primary = embed_provider()
     candidates = [primary]
     if bool(_cfg("LOCAL_KB_DUAL_INDEX", _DUAL_DEFAULT)):
         alt = "local" if primary == "cloud" else "cloud"
-        if alt == "cloud" and mode == "local":
-            alt = ""                       # local 模式承诺不出网
         if alt and _channel_done(embed_sig(alt)):
             candidates.append(alt)
     for idx, p in enumerate(candidates):

@@ -40,6 +40,7 @@
 > - 📚 **Local library**: standalone knowledge base (upload / folders / trash; keyword + vector hybrid retrieval)
 > - 🔌 **Embedding channel**: cloud or local, cloud by default; dimension checks and switch hints
 > - 🔗 **AI chain**: fixed as cloud KB → local library → LLM, one retrieval funnel for every feature
+> - 🔀 **Decoupled tiers**: the AI tier only picks the generation engine; knowledge-base retrieval works independently
 > - 🧭 **Visible wiring**: teacher pages show the active model and knowledge-base path
 > - 🧠 **Learning companion**: multi-turn context fixed; long-term memory settles as you chat
 > - 🎓 **Teaching assistant**: teaching snapshot injected automatically — class questions answered with real data
@@ -73,6 +74,8 @@ AI capabilities go through a single invocation service, taken over by priority a
 3. **Direct model invocation** — the fallback path, compatible with DashScope and DeepSeek
 
 **Dual engine**: the generation step can run on the cloud (DashScope / DeepSeek) or a local Ollama engine, switched across cloud / hybrid / local tiers; cloud KB retrieval stays on Bailian, while the local library can use cloud or local embeddings (capability matrix in System Settings).
+
+**Two independent dimensions**: the AI tier (cloud / hybrid / local) only decides which engine does the *generation*; whether knowledge-base retrieval runs — and whether it leaves the network — is set by the knowledge-base switch and the embedding channel. So "local model + cloud knowledge base" is a normal combination (generate locally, retrieve in the cloud). For a truly offline box: turn off cloud KB retrieval and set the embedding channel to local.
 
 Every teacher-facing AI page shows which engine and which knowledge-base path is actually serving the answer (model name, cloud / local, why it degraded); students do not see it.
 
@@ -1257,6 +1260,7 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 📚 **Local library**: standalone knowledge-base module (upload / folders / 30-day trash; keyword + vector hybrid retrieval with source citations)
 - 🔌 **Embedding channel**: cloud or local, cloud by default; dimension checks, switch hints, optional dual index
 - 🔗 **AI chain**: fixed as cloud KB → local library → LLM; question authoring, lesson prep and whiteboards share one retrieval funnel
+- 🔀 **Decoupled tiers**: the AI tier no longer bypasses retrieval, so a local model still uses the cloud and local knowledge bases
 - 🧭 **Visible wiring**: unified status chips on teacher pages show the active model name and knowledge-base path (including degradation reasons)
 - 🧠 **Learning companion**: multi-turn context fixed; long-term memory (preferences / goals / difficulties) captured and injected
 - 🎓 **Teaching assistant**: teaching snapshot injected automatically (scope, recent exams, pending grading, class weak points)

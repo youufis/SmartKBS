@@ -30,8 +30,6 @@ export interface AiRuntimeModel {
 export interface AiRuntimeKb {
   chain: 'kb_direct' | 'kb_local' | 'direct'
   effective: KbEffective
-  /** 本地（完全离线）档主动旁路云端检索 —— 设计如此，不是故障 */
-  bypassed: boolean
   /** 仅当某一路"已启用但未就绪"把链路压到更低一级时为 true */
   degraded: boolean
   reasons: string[]
