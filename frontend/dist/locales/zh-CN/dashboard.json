@@ -750,6 +750,8 @@
     "unitHomework": "作业{{n}}",
     "unitLiveExams": "考试{{n}}",
     "unitPapers": "答卷{{n}}",
+    "unitPracticePapers": "练习{{n}}",
+    "unitQuizPapers": "测验{{n}}",
     "unitExams": "{{n}}场",
     "unitTasks": "任务{{n}}",
     "unitQuizzes": "测验{{n}}",
@@ -837,6 +839,8 @@
   "teacherTodo": {
     "title": "今日待办",
     "grading": "待批改答卷",
+    "practiceGrading": "练习待批改",
+    "quizGrading": "测验待批改",
     "taskGrades": "待批改作业",
     "questions": "待处理提问",
     "answers": "待审核回答",

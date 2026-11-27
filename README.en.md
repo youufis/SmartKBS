@@ -7,9 +7,9 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 52 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot), smart question bank (generate / extract / manual entry / id link), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams, paper composing with Word export (native formulas), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
-> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion (profile · memory · care), explore canvas (AI-powered infinite canvas), course exercises, targeted practice, wrong-answer review, daily picks and trending news, code practice
-> - 🎪 **Practise · Classroom Activities** — class quiz, classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot), smart question bank (generate / extract / manual entry / id link), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams (pre-publish checklist · zero-attempt unpublish), paper composing with Word export (native formulas, no dropped questions), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
+> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion (profile · memory · care), explore canvas (AI-powered infinite canvas), course exercises, targeted practice (AI-graded subjective answers), wrong-answer review, daily picks and trending news, code practice
+> - 🎪 **Practise · Classroom Activities** — class quiz (AI-graded subjective answers · manual re-grading), classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions (CSV import in seconds), announcements, notification centre, AI skill management, system configuration (cloud/local dual engine + briefing policy + log rotation), online incremental upgrade, multi-theme appearance
 >
@@ -50,10 +50,16 @@
 > - 🧾 **Question authoring**: structured output imported into the bank in one click
 > - 📐 **Figures**: one quality gate for every image request; function / statistic / geometry charts rendered deterministically
 > - ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
+> - 🧮 **Grading**: unified batch-grading / fallback / review rules for subjective questions across exams, practice and quizzes; audit trail, spot-check re-grading, per-point rubrics
+> - ✅ **Publishing**: pre-publish checklist (paper audit, time-window blocking, audience estimate) plus zero-attempt unpublish
+> - 📤 **Export**: unified Chinese type labels with no question dropped; answer sheets cover every subjective type
+> - 🎛 **Composing**: two compose cards merged into one with a rule / AI engine switch
+> - 📊 **Loop**: clickable pending-grading badge, unified to-do counts, manual quiz re-grading
+> - 🔧 **Settings**: new Subjective-Question Grading section (dedicated model, spot-check rate, engine throttling)
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed; the grading, publishing and composing upgrades land silently, and the dedicated grading model / spot-check rate live under System Settings → Subjective-Question Grading.
 
 ---
 
@@ -1270,6 +1276,12 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🧾 **Question authoring**: structured output imported into the bank in one click (types and answers normalised)
 - 📐 **Figures**: one quality gate for every image request; deterministic function / statistic / geometry charts with formulas inside the image
 - ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
+- 🧮 **Grading**: subjective-question batch grading, fallback and review now share one rule set across exams / practice / quizzes; grading audit trail, optional spot-check re-grading, per-point rubrics and a dedicated grading model
+- ✅ **Publishing**: pre-publish checklist — paper audit, time-window blocking, audience estimate, Word preview; zero-attempt exams can be unpublished to draft
+- 📤 **Export**: section labels unified in Chinese with dynamic numbering; no question type can silently drop; answer sheets now include fill / essay / subjective areas
+- 🎛 **Composing**: the two compose cards merged into one with a rule / AI engine switch; knowledge points multi-select with subject linkage
+- 📊 **Loop**: pending-grading badge clicks straight to the result sheet, practice / quiz counts join the daily to-do, teachers can manually re-grade quiz answers
+- 🔧 **Settings**: new Subjective-Question Grading section holds the grading model, spot-check rate and engine throttling
 
 ### v7.x – v9.2.0
 

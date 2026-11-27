@@ -750,6 +750,8 @@
     "unitHomework": "{{n}} homework",
     "unitLiveExams": "{{n}} live",
     "unitPapers": "{{n}} sheets",
+    "unitPracticePapers": "{{n}} practice",
+    "unitQuizPapers": "{{n}} quizzes",
     "unitExams": "{{n}} exams",
     "unitTasks": "{{n}} tasks",
     "unitQuizzes": "{{n}} quizzes",
@@ -837,6 +839,8 @@
   "teacherTodo": {
     "title": "Today's Queue",
     "grading": "Exams to grade",
+    "practiceGrading": "Practice to grade",
+    "quizGrading": "Quizzes to grade",
     "taskGrades": "Homework to grade",
     "questions": "Questions to handle",
     "answers": "Answers to review",
