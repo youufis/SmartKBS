@@ -973,7 +973,21 @@ async def unpublish_exam(exam_id: int, request: Request):
         raise HTTPException(status_code=409, detail=reason)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    execute_update("UPDATE exams SET status = 'draft', updated_at = ? WHERE id = ?", (now, exam_id))
+    # V2: "仍然零答卷"的判定并进 UPDATE 本身 —— 先查后改存在 TOCTOU 窗口：
+    # 计数通过的瞬间恰好有学生开考，卷子会被撤成"有答卷的草稿"、答卷成孤儿。
+    # SQLite 单语句原子，条件不满足即 0 行，如实拒绝。预检查仍保留：报错能报数。
+    rows = execute_update(
+        """UPDATE exams SET status = 'draft', updated_at = ?
+           WHERE id = ? AND status = 'published'
+             AND NOT EXISTS (
+               SELECT 1 FROM exam_attempts ea
+               WHERE ea.exam_id = exams.id
+                 AND ea.status IN ('in_progress', 'grading', 'submitted'))""",
+        (now, exam_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=409,
+                            detail="状态已变化或有学生刚刚开始了作答，撤回未生效，请刷新后重试")
     logger.info(f"用户 {user['username']} 撤回考试发布: {exam['title']} (id={exam_id})")
     return {"message": "已撤回为草稿，学生端不再显示该考试", "status": "draft"}
 

@@ -434,13 +434,15 @@ const ExamPage: React.FC = () => {
   }
 
   // ── 发布/结束考试 ──
-  const handlePublish = async (id: number) => {
+  const handlePublish = async (id: number): Promise<boolean> => {
     try {
       const res = await examsApi.publishExam(id)
       message.success(res.message)
       loadExams()
+      return true
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('publishFailed'))
+      return false
     }
   }
 
@@ -463,8 +465,8 @@ const ExamPage: React.FC = () => {
     if (!pubCheckExam) return
     setPubPublishing(true)
     try {
-      await handlePublish(pubCheckExam.id)
-      closePubCheck()
+      // V1: 发布失败保持确认单打开 —— 清单就是排查上下文，跟着报错一起消失最气人
+      if (await handlePublish(pubCheckExam.id)) closePubCheck()
     } finally { setPubPublishing(false) }
   }
   const handleUnpublish = async (id: number) => {
