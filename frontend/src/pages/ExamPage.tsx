@@ -1861,7 +1861,7 @@ const ExamPage: React.FC = () => {
           {/* ── 智能选题卡片 ── */}
           <Card
             size="small"
-            title={<Space><FileAddOutlined />{t('smartSelect')}</Space>}
+            title={<Space><FileAddOutlined />{t('smartSelect')} <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>{t('smartSelectSub')}</Typography.Text></Space>}
             style={{ marginBottom: 16, background: '#fafaff', border: '1px solid #1677ff22' }}
             extra={
               <Button type="primary" size="small" icon={<FileAddOutlined />}
@@ -1870,42 +1870,45 @@ const ExamPage: React.FC = () => {
               </Button>
             }
           >
-            <Form form={autoSelectForm} layout="inline" initialValues={{ count: 10 }}
-              style={{ flexWrap: 'wrap', gap: 8 }}>
-              <Form.Item name="subject" style={{ minWidth: 120 }}>
-                <Select allowClear placeholder={t('subject')}>
+            {/* S-EXAM: 竖排网格（标签在上、控件在下、等宽自适应）—— 旧 inline 排版
+                把「选题数量」的标签和输入框挤成两行，控件宽窄不一，整卡看着错乱 */}
+            <Form form={autoSelectForm} layout="vertical" size="small" initialValues={{ count: 10 }}
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '2px 12px' }}>
+              <Form.Item name="subject" label={t('subject')} style={{ marginBottom: 8 }}>
+                <Select allowClear placeholder={t('subjectAny')}>
                   {subjects.map(s => <Option key={s} value={s}>{s}</Option>)}
                 </Select>
               </Form.Item>
-              <Form.Item name="question_types" style={{ minWidth: 160 }}>
+              <Form.Item name="question_types" label={t('questionType')} style={{ marginBottom: 8 }}>
                 <Select allowClear mode="multiple" placeholder={t('questionTypeAny')} maxTagCount={2}>
                   {TYPE_OPTIONS.map(opt => (
                     <Option key={opt.value} value={opt.value}>{opt.label}</Option>
                   ))}
                 </Select>
               </Form.Item>
-              <Form.Item name="difficulty" style={{ minWidth: 100 }}>
-                <Select allowClear placeholder={t('difficulty')}>
+              <Form.Item name="difficulty" label={t('difficulty')} style={{ marginBottom: 8 }}>
+                <Select allowClear placeholder={t('difficultyAny')}>
                   <Option value="easy">{t('easy')}</Option>
                   <Option value="medium">{t('medium')}</Option>
                   <Option value="hard">{t('hard')}</Option>
                 </Select>
               </Form.Item>
               {/* 与试题管理同款控件：下拉选课程知识点 + 手输；单个值（多选会把"或"语义变成"与"） */}
-              <Form.Item name="knowledge_keyword" style={{ minWidth: 220 }}>
+              <Form.Item name="knowledge_keyword" label={t('knowledgePoints')} style={{ marginBottom: 8 }}>
                 <KnowledgePointSelect
                   multiple={false}
                   subject={autoSelectSubject || ''}
                   placeholder={t('keywordPlaceholder')}
-                  style={{ width: 220 }}
+                  style={{ width: '100%' }}
                 />
               </Form.Item>
-              <Form.Item name="count" label={t('selectCount')} style={{ width: 100 }}>
-                <InputNumber min={1} max={100} />
+              <Form.Item name="count" label={t('selectCount')} style={{ marginBottom: 8 }}>
+                <InputNumber min={1} max={100} style={{ width: '100%' }} />
               </Form.Item>
               {/* 默认不勾：组卷的老行为是"凑不够就只报缺口"，判分链路只碰存量题更稳；
                   勾上后缺额由 AI 出新题，题目照常过入库关口并连知识点边 */}
-              <Form.Item name="fill_by_ai" valuePropName="checked" style={{ width: '100%' }}>
+              <Form.Item name="fill_by_ai" valuePropName="checked"
+                style={{ gridColumn: '1 / -1', marginBottom: 4 }}>
                 <Checkbox>{t('fillByAi')}</Checkbox>
               </Form.Item>
             </Form>
@@ -1917,7 +1920,7 @@ const ExamPage: React.FC = () => {
           {/* ── AI 智能组卷卡片 ── */}
           <Card
             size="small"
-            title={<Space><RobotOutlined />{t('aiCompose')}</Space>}
+            title={<Space><RobotOutlined />{t('aiCompose')} <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>{t('aiComposeSub')}</Typography.Text></Space>}
             style={{ marginBottom: 16, background: '#f0fff0', border: '1px solid #52c41a44' }}
             extra={
               <Button type="primary" size="small" icon={<RobotOutlined />}
@@ -1929,37 +1932,49 @@ const ExamPage: React.FC = () => {
           >
             {/* 与「自动选题」同一套筛选条件：题型与难度会真的决定候选池与配额，
                 不再只是塞进 prompt（旧实现候选池是 subject 精确等值 + ORDER BY difficulty） */}
-            <Space wrap style={{ gap: 8 }}>
-              <Typography.Text style={{ fontSize: 13 }}>{t('targetCount')}</Typography.Text>
-              <InputNumber size="small" min={1} max={100} value={aiComposeCount}
-                onChange={(v) => setAiComposeCount(v || 10)} style={{ width: 80 }} />
+            {/* S-EXAM: 与「自动选题」同款竖排网格 —— 旧 Space wrap 会把"知识点聚焦"
+                的标签留在上一行、控件掉到下一行，宽窄不一，整卡错乱 */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '2px 12px' }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('targetCount')}</div>
+                <InputNumber size="small" min={1} max={100} value={aiComposeCount}
+                  onChange={(v) => setAiComposeCount(v || 10)} style={{ width: '100%' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('questionType')}</div>
+                <Select size="small" allowClear mode="multiple" placeholder={t('questionTypeAny')}
+                  value={aiComposeTypes} onChange={(v) => setAiComposeTypes(v || [])}
+                  maxTagCount={2} style={{ width: '100%' }}>
+                  {TYPE_OPTIONS.map(opt => (
+                    <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('difficulty')}</div>
+                <Select size="small" allowClear placeholder={t('difficultyAny')}
+                  value={aiComposeDifficulty} onChange={(v) => setAiComposeDifficulty(v)}
+                  style={{ width: '100%' }}>
+                  <Option value="easy">{t('easy')}</Option>
+                  <Option value="medium">{t('medium')}</Option>
+                  <Option value="hard">{t('hard')}</Option>
+                </Select>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('knowledgeFocus')}</div>
+                <KnowledgePointSelect
+                  subject={questionExam?.subject || ''}
+                  value={aiComposeFocus}
+                  onChange={(v) => setAiComposeFocus(Array.isArray(v) ? v.map(String) : (v ? [String(v)] : []))}
+                  placeholder={t('aiComposePlaceholder')}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+            <Space wrap size={12} style={{ marginTop: 8, alignItems: 'center' }}>
               <Checkbox checked={aiComposeFill} onChange={(e) => setAiComposeFill(e.target.checked)}>
                 {t('fillByAi')}
               </Checkbox>
-              <Select size="small" allowClear mode="multiple" placeholder={t('questionTypeAny')}
-                value={aiComposeTypes} onChange={(v) => setAiComposeTypes(v || [])}
-                maxTagCount={2} style={{ minWidth: 160 }}>
-                {TYPE_OPTIONS.map(opt => (
-                  <Option key={opt.value} value={opt.value}>{opt.label}</Option>
-                ))}
-              </Select>
-              <Select size="small" allowClear placeholder={t('difficulty')}
-                value={aiComposeDifficulty} onChange={(v) => setAiComposeDifficulty(v)}
-                style={{ width: 100 }}>
-                <Option value="easy">{t('easy')}</Option>
-                <Option value="medium">{t('medium')}</Option>
-                <Option value="hard">{t('hard')}</Option>
-              </Select>
-              <Typography.Text style={{ fontSize: 13 }}>{t('knowledgeFocus')}</Typography.Text>
-              {/* S-EXAM: 与「自动选题」「题库筛选」「组卷向导」统一为 KnowledgePointSelect
-                  （下拉选课程知识点 + 可手输）。自由文本错一个字，候选池知识点召回就整体落空 */}
-              <KnowledgePointSelect
-                subject={questionExam?.subject || ''}
-                value={aiComposeFocus}
-                onChange={(v) => setAiComposeFocus(Array.isArray(v) ? v.map(String) : (v ? [String(v)] : []))}
-                placeholder={t('aiComposePlaceholder')}
-                style={{ width: 220 }}
-              />
               {aiComposing && (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   <ThunderboltOutlined spin /> {aiComposeNote || t('aiComposing')}
