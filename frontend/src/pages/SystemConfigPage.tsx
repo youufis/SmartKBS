@@ -437,8 +437,6 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 模型与端点
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models', level: 'basic' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models', level: 'basic' },
-    { key: 'MODEL_GRADING', labelKey: 'field_MODEL_GRADING', descKey: 'field_MODEL_GRADING_desc', type: 'model_select', optionsKind: 'chat', group: 'models' },
-    { key: 'GRADING_SPOT_CHECK_PERCENT', labelKey: 'field_GRADING_SPOT_CHECK_PERCENT', descKey: 'field_GRADING_SPOT_CHECK_PERCENT_desc', type: 'number', group: 'models', required: false },
   // ── 图像理解：默认用对话模型看图（快、省），解题类交视觉模型 ──
   { key: 'MODEL_IMAGE_VIA_CHAT', labelKey: 'field_MODEL_IMAGE_VIA_CHAT', descKey: 'field_MODEL_IMAGE_VIA_CHAT_desc', longDescKey: 'field_MODEL_IMAGE_VIA_CHAT_tip', type: 'boolean', group: 'models', level: 'basic', required: false },
   { key: 'MODEL_IMAGE_SOLVE_VL', labelKey: 'field_MODEL_IMAGE_SOLVE_VL', descKey: 'field_MODEL_IMAGE_SOLVE_VL_desc', type: 'boolean', group: 'models', level: 'basic', required: false },
@@ -513,7 +511,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'CHAT_MEMORY_CONTENT_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS', descKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitChar' },
   { key: 'CHAT_MEMORY_MAX_ROWS', labelKey: 'field_CHAT_MEMORY_MAX_ROWS', descKey: 'field_CHAT_MEMORY_MAX_ROWS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitRow' },
   { key: 'CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', labelKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', descKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitMinute', scope: 'nextRound' },
-  // 主观题后台批量批改（backend/ai_grading.py；练习/考试/测验共用一套参数）
+  // 主观题批改（练习/考试/测验共用；引擎参数见 backend/ai_grading.py）
+  { key: 'MODEL_GRADING', labelKey: 'field_MODEL_GRADING', descKey: 'field_MODEL_GRADING_desc', type: 'model_select', optionsKind: 'chat', group: 'grading' },
+  { key: 'GRADING_SPOT_CHECK_PERCENT', labelKey: 'field_GRADING_SPOT_CHECK_PERCENT', descKey: 'field_GRADING_SPOT_CHECK_PERCENT_desc', type: 'number', group: 'grading', required: false },
   { key: 'AI_GRADING_INTERVAL_SEC', labelKey: 'field_AI_GRADING_INTERVAL_SEC', descKey: 'field_AI_GRADING_INTERVAL_SEC_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitSecond', scope: 'nextRound' },
   { key: 'AI_GRADING_BATCH_SIZE', labelKey: 'field_AI_GRADING_BATCH_SIZE', descKey: 'field_AI_GRADING_BATCH_SIZE_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitAnswer', scope: 'nextRound' },
   { key: 'AI_GRADING_CONCURRENCY', labelKey: 'field_AI_GRADING_CONCURRENCY', descKey: 'field_AI_GRADING_CONCURRENCY_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitThread', scope: 'nextRound' },
