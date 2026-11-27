@@ -55,7 +55,9 @@
 > - 📤 **Export**: unified Chinese type labels with no question dropped; answer sheets cover every subjective type
 > - 🎛 **Composing**: two compose cards merged into one with a rule / AI engine switch
 > - 📊 **Loop**: clickable pending-grading badge, unified to-do counts, manual quiz re-grading
-> - 🔧 **Settings**: new Subjective-Question Grading section (dedicated model, spot-check rate, engine throttling)
+> - 🔧 **Settings**: new Subjective-Question Grading section (spot-check rate, engine throttling; grading always uses the current chat model)
+> - 🧰 **Settings page**: a blocked save now names the offending field and scrolls to it; secret inputs resist browser autofill
+> - 🩹 **Chain**: with the local library in charge, async AI calls retrieve first too — same behaviour as the sync / streaming paths
 > - 🧪 **Quiz answering**: draft restore now matches the screen; a confirmation step guards against submitting blanks
 > - 📋 **Rosters & reminders**: quiz/practice rosters, participation rates and "remind pending" now follow the teacher's assigned classes
 > - ✏️ **Quiz building**: edit questions before any answers arrive, pick questions from the bank, drop unwanted AI-generated ones
@@ -65,7 +67,7 @@
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed; the grading, publishing and composing upgrades land silently, and the dedicated grading model / spot-check rate live under System Settings → Subjective-Question Grading.
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed; the grading, publishing and composing upgrades land silently, and the spot-check rate / engine throttling live under System Settings → Subjective-Question Grading.
 
 ---
 
@@ -1172,7 +1174,8 @@ Publish and manage system announcements:
 Centralized management of all system configuration parameters:
 
 - **🏷️ Brand Info**: Platform version name, organization name
-- **🔑 API Keys**: DashScope API Key
+- **🔑 API Keys**: DashScope API Key (the input is marked `new-password`, so browsers and password managers no longer overwrite it with a saved login)
+- **🧰 Save-time checks**: every field is validated before submitting; a missing required value is named and scrolled into view instead of the save silently doing nothing
 - **🤖 Model Configuration**: API key, API address, default chat model, long-text model, vision model, multimodal switch (all chosen from dropdowns)
 - **🖥️ AI Engines**: cloud / hybrid / local tiers (Ollama), live model list with auto-probe on entry, capability matrix notes
 - **📊 Teaching Briefing**: weekly/month/yearly auto-generation (all off by default), in-app notice, school-year basis — a single global policy, no longer set per teacher
@@ -1282,12 +1285,14 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🧾 **Question authoring**: structured output imported into the bank in one click (types and answers normalised)
 - 📐 **Figures**: one quality gate for every image request; deterministic function / statistic / geometry charts with formulas inside the image
 - ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
-- 🧮 **Grading**: subjective-question batch grading, fallback and review now share one rule set across exams / practice / quizzes; grading audit trail, optional spot-check re-grading, per-point rubrics and a dedicated grading model
+- 🧮 **Grading**: subjective-question batch grading, fallback and review now share one rule set across exams / practice / quizzes; grading audit trail, optional spot-check re-grading, per-point rubrics, with grading always on the current chat model
 - ✅ **Publishing**: pre-publish checklist — paper audit, time-window blocking, audience estimate, Word preview; zero-attempt exams can be unpublished to draft
 - 📤 **Export**: section labels unified in Chinese with dynamic numbering; no question type can silently drop; answer sheets now include fill / essay / subjective areas
 - 🎛 **Composing**: the two compose cards merged into one with a rule / AI engine switch; knowledge points multi-select with subject linkage
 - 📊 **Loop**: pending-grading badge clicks straight to the result sheet, practice / quiz counts join the daily to-do, teachers can manually re-grade quiz answers
-- 🔧 **Settings**: new Subjective-Question Grading section holds the grading model, spot-check rate and engine throttling
+- 🔧 **Settings**: new Subjective-Question Grading section holds the spot-check rate and engine throttling
+- 🧰 **Settings page**: blocked saves now report which required field is missing and jump to it; secret inputs are protected from browser autofill
+- 🩹 **Chain**: when the local library takes over (cloud retrieval off), async AI calls also retrieve before generating, matching the sync / streaming paths
 - 🧪 **Quiz answering**: draft restore matches what you see; unanswered confirmation prevents silent blank submissions
 - 📋 **Rosters & reminders**: quiz / practice rosters, participation rates and "remind pending" resolved against the teacher's assigned classes
 - ✏️ **Quiz building**: questions editable while no answers exist, pick-from-bank supported, individual AI questions can be dropped
