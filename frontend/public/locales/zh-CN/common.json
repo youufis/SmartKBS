@@ -446,5 +446,6 @@
   "aiRuntimeLocalNoBase": "未配置本地引擎地址",
   "aiRuntimeConflictTip": "已开启本地模式，但未配置本地引擎地址，实际仍由云端应答。",
   "aiRuntimeModelFootNote": "走知识库时，这个模型负责在检索到的资料之上生成回答。",
-  "aiRuntimeKbFootNote": "云端检索不可用时自动由本地文库补位，无需重新配置。"
+  "aiRuntimeKbFootNote": "云端检索不可用时自动由本地文库补位，无需重新配置。",
+  "mdImageMissing": "配图文件已丢失，请教师重新生成"
 }

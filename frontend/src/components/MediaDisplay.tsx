@@ -5,9 +5,11 @@
  * 用于在试卷、练习、错题本等页面中展示
  */
 import { useTranslation } from 'react-i18next'
-import React from 'react'
+import React, { useState } from 'react'
 import { Image } from 'antd'
+import { PictureOutlined } from '@ant-design/icons'
 import SVGViewer from './SVGViewer'
+import { authedFileUrl } from '../api/client'
 import type { MediaFile } from '../types'
 
 interface MediaDisplayProps {
@@ -103,17 +105,46 @@ const MediaDisplay: React.FC<MediaDisplayProps> = ({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           overflow: 'hidden', cursor: 'pointer',
         }}>
-          <Image
-            src={f.url}
-            alt={f.alt || t('mdQuestionFigure')}
-            style={isFluid
-              ? { maxWidth: '100%', maxHeight: maxHeight - 10, width: 'auto', height: 'auto', objectFit: 'contain' }
-              : { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-            preview={{ mask: null }}
-          />
+          <MediaImage url={f.url} alt={f.alt || t('mdQuestionFigure')} isFluid={isFluid} maxHeight={maxHeight} />
         </div>
       ))}
     </div>
+  )
+}
+
+/**
+ * 单张配图：加载失败（文件被清理/丢失，如 2026-11 题库修复只还原了 DB 行、
+ * 配图目录已随回收站清理物理删除）时显示可读占位，而不是"裂图图标 + 整段 alt 文本"。
+ * URL 统一过 authedFileUrl：/api/files 登录后可读，<img> 不带 Authorization 头，
+ * 正常靠登录态 cookie；cookie 失效（单点登录顶号/滑动续期后未回种）时 ?token= 兜底。
+ */
+const MediaImage: React.FC<{ url: string; alt: string; isFluid: boolean; maxHeight: number }> = ({
+  url, alt, isFluid, maxHeight,
+}) => {
+  const { t } = useTranslation('common')
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div style={{
+        width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 4,
+        color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center', padding: 4,
+      }}>
+        <PictureOutlined style={{ fontSize: 20 }} />
+        <span>{t('mdImageMissing')}</span>
+      </div>
+    )
+  }
+  return (
+    <Image
+      src={authedFileUrl(url)}
+      alt={alt}
+      style={isFluid
+        ? { maxWidth: '100%', maxHeight: maxHeight - 10, width: 'auto', height: 'auto', objectFit: 'contain' }
+        : { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+      preview={{ mask: null }}
+      onError={() => setFailed(true)}
+    />
   )
 }
 

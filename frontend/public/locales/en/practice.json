@@ -455,5 +455,8 @@
   "exportWord": "Download Word",
   "exportWordTip": "Save the AI analysis above as a Word document",
   "exportWordNeed": "Run “AI analysis” first, then export it as Word",
-  "exportResultTip": "Download the per-student result sheet of this practice (CSV)"
+  "exportResultTip": "Download the per-student result sheet of this practice (CSV)",
+  "removeQuestion": "Remove this question",
+  "removeQuestionConfirm": "Remove this question from the generated set?",
+  "questionRemoved": "Question removed"
 }

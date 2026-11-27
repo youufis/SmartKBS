@@ -273,22 +273,6 @@ def _user_info_map(usernames: set[str]) -> dict[str, dict[str, str]]:
     return out
 
 
-def _grade_class_totals() -> tuple[dict[tuple[str, str], int], dict[str, int], int]:
-    """一次统计全校学生分布: {(年级,班级): 人数}, {年级: 人数}, 总人数"""
-    rows = db_execute_query("SELECT grade, class, COUNT(*) FROM users WHERE role=2 GROUP BY grade, class")
-    by_gc: dict[tuple[str, str], int] = {}
-    by_grade: dict[str, int] = {}
-    total = 0
-    for r in rows or []:
-        g = (r[0] or "").strip()
-        c = _num_class(r[1])
-        n = r[2] or 0
-        by_gc[(g, c)] = by_gc.get((g, c), 0) + n
-        by_grade[g] = by_grade.get(g, 0) + n
-        total += n
-    return by_gc, by_grade, total
-
-
 # ════════════════════════════════════════════
 # 教师端
 # ════════════════════════════════════════════
@@ -679,28 +663,26 @@ async def list_teacher_sessions(request: Request):
         u for r in rows for u in _parse_target_students(r.get("target_students"))
     })
 
-    by_gc: dict[tuple[str, str], int] = {}
-    by_grade: dict[str, int] = {}
-    all_students = 0
-    if any(not _parse_target_students(r.get("target_students")) for r in rows):
-        by_gc, by_grade, all_students = _grade_class_totals()
+    # P3/P0-2: 目标人数与详情名册、学生可见性同一口径。
+    # 旧写法在"任教班级"范围下用全校人数当分母（列表 1/1406 的来源）。
+    from backend.permission_service import get_target_students
+    _count_cache: dict[tuple, int] = {}
+
+    def _target_count(r: dict) -> int:
+        ts = _parse_target_students(r.get("target_students"))
+        if ts:
+            return len(ts)
+        key = (r.get("creator_username") or "", (r.get("target_scope") or "").strip(),
+               (r.get("target_grade") or "").strip(), str(r.get("target_class") or "").strip())
+        if key not in _count_cache:
+            _count_cache[key] = len(get_target_students(
+                key[0], key[1], key[2], key[3], "", []))
+        return _count_cache[key]
 
     sessions = []
     for r in rows:
         target_students = _parse_target_students(r.get("target_students"))
-        grade = (r.get("target_grade") or "").strip()
-        cls = _num_class(r.get("target_class"))
-        # P3: 之前按年级布置(未指定班级)时目标人数恒为 0, 列表显示 "2/0"
-        if target_students:
-            student_count = len(target_students)
-        elif grade and cls:
-            student_count = by_gc.get((grade, cls), 0)
-        elif grade:
-            student_count = by_grade.get(grade, 0)
-        elif cls:
-            student_count = sum(n for (_g, c), n in by_gc.items() if c == cls)
-        else:
-            student_count = all_students
+        student_count = _target_count(r)
 
         sessions.append({
             "id": r["id"], "title": r["title"],
@@ -793,26 +775,16 @@ async def get_session_detail(session_id: int, request: Request):
     )
     target_students = _parse_target_students(sess.get("target_students"))
 
-    # 目标学生名单(定向名单优先, 否则按年级/班级范围), 用于教师看"谁没交"
-    if target_students:
-        tph = ",".join("?" for _ in target_students)
-        urows = db_execute_query(
-            f"SELECT username, name, class FROM users WHERE role=2 AND username IN ({tph})",
-            tuple(target_students),
-        ) or []
-    else:
-        grade = (sess.get("target_grade") or "").strip()
-        if grade:
-            urows = db_execute_query(
-                "SELECT username, name, class FROM users WHERE role=2 AND grade=?", (grade,)
-            ) or []
-        else:
-            urows = db_execute_query(
-                "SELECT username, name, class FROM users WHERE role=2"
-            ) or []
-        want_cls = _num_class(sess.get("target_class"))
-        if want_cls:
-            urows = [r for r in urows if _num_class(r[2]) == want_cls]
+    # 目标学生名单：与学生端可见性同一口径（P0-2）。
+    # 旧实现在 scope=teacher_classes 且没填年级/班级时直接查"全部 role=2"——
+    # 名册 1406 人、参与率 0.1%、「提醒未交」推给全校，都是这一个回退造成的。
+    from backend.permission_service import get_target_students
+    _roster = get_target_students(
+        sess.get("creator_username") or username,
+        sess.get("target_scope") or "", sess.get("target_grade") or "",
+        sess.get("target_class") or "", "", target_students,
+    ) or []
+    urows = [(r["username"], r.get("name"), r.get("class")) for r in _roster]
 
     info = _user_info_map({a["student_username"] for a in attempts} | {r[0] for r in urows})
     for a in attempts:
@@ -1035,6 +1007,9 @@ async def notify_unsubmitted(session_id: int, request: Request):
 
     detail = await get_session_detail(session_id, request)   # 权限与名单口径共用
     sess = detail.get("session") or {}
+    # 二轮审查：草稿练习学生端根本看不到，"提醒未交"只会把没发布的活动推给全任教范围
+    if (sess.get("status") or "").strip() == "draft":
+        raise HTTPException(status_code=400, detail="该练习还是草稿（学生看不到），请先发布再提醒")
     todo = [s["username"] for s in (detail.get("students") or []) if not s.get("submitted")]
     if not todo:
         return {"message": "所有学生都已提交，无需提醒", "notified": 0}

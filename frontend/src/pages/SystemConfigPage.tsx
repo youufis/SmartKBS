@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
+import { authedFileUrl } from '../api/client'
 import BackupPanel from '../components/BackupPanel'
 import { TagListInput, DurationPicker, SuggestionInput } from '../components/systemConfig/FieldControls'
 import { useAuthStore } from '../stores/authStore'
@@ -3545,7 +3546,7 @@ const SystemConfigPage: React.FC = () => {
                         <div>{t('ttsTestMismatch', { configured: ttsTestResult.voice_configured })}</div>
                       )}
                       {ttsTestResult.ok && ttsTestResult.url && (
-                        <audio controls src={ttsTestResult.url} style={{ width: '100%', marginTop: 6 }} />
+                        <audio controls src={authedFileUrl(ttsTestResult.url)} style={{ width: '100%', marginTop: 6 }} />
                       )}
                       {/* 失败时把技术原文留给管理员排查（点名页同样失败只显示上面那句人话） */}
                       {!ttsTestResult.ok && ttsTestResult.error_detail && (

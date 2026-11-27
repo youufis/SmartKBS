@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import AnswerLine from '../components/AnswerLine'
-import { Card, Button, Input, InputNumber, Select, Tag, Spin, Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Pagination, Checkbox, Switch, Tooltip, Tabs, Statistic, Row, Col, Skeleton, Alert, Segmented } from 'antd'
+import { Card, Button, Input, InputNumber, Select, Tag, Spin, Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Pagination, Checkbox, Switch, Tooltip, Tabs, Statistic, Row, Col, Skeleton, Alert, Segmented, Dropdown, Popconfirm, theme } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, DeleteOutlined,
   ThunderboltOutlined, DownloadOutlined, BellOutlined,
-  SearchOutlined, EyeOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined, EditOutlined, ExportOutlined,
+  SearchOutlined, EyeOutlined, PlayCircleOutlined, PauseCircleOutlined, RedoOutlined, EditOutlined, ExportOutlined, MoreOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import { RowList } from '../components/RowList'
@@ -29,6 +29,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { reportLoadError } from '../utils/loadError'
 import { relativeTime } from '../utils/relativeTime'
 import AnswerNav from '../components/AnswerNav'
+import SessionRoster from '../components/SessionRoster'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import PageHeader from '../components/PageHeader'
 import AiRuntimeChips from '../components/AiRuntimeChips'
@@ -58,128 +59,6 @@ const scoreColor = (ratio: number) => (ratio >= 0.999 ? "green" : ratio > 0 ? "o
 const SUBJ_TYPES = ["short", "fill", "essay", "subjective"]
 /** S-GRADING: 主观题已转后台批改队列 —— 分数未定, 先不显示得分与对错 */
 const isGradingPending = (r: any) => r?.grading === "pending" || r?.graded_by === "queued"
-
-// ════════════════════════════════════════
-// 练习提交名册 — 已交/未交 + 班级 + 按学生查询
-// ════════════════════════════════════════
-const SessionRoster: React.FC<{
-  attempts: any[]
-  students: any[]
-  /** S-GRADE: 点开某个学生的答卷(含主观题作答与批改, 可逐题改分) */
-  onShowSheet?: (attempt: any) => void
-}> = ({ attempts, students, onShowSheet }) => {
-  const { t } = useTranslation('practice')
-  const [kw, setKw] = useState('')
-  const [filter, setFilter] = useState<'all' | 'done' | 'undone'>('all')
-
-  const attMap = useMemo(() => {
-    const m = new Map<string, any>()
-    ;(attempts || []).forEach((a: any) => m.set(a.student_username, a))
-    return m
-  }, [attempts])
-
-  const rows = useMemo(() => {
-    const map = new Map<string, any>()
-    ;(students || []).forEach((x: any) => map.set(x.username, { ...x }))
-    ;(attempts || []).forEach((a: any) => {
-      if (!map.has(a.student_username)) {
-        map.set(a.student_username, {
-          username: a.student_username,
-          name: a.student_name || a.student_username,
-          grade: a.student_grade || '',
-          class: a.student_class || '',
-          submitted: true, score: a.score, total_score: a.total_score, submitted_at: a.submitted_at,
-        })
-      }
-    })
-    const k = kw.trim().toLowerCase()
-    return Array.from(map.values()).filter((r: any) => {
-      if (filter === 'done' && !r.submitted) return false
-      if (filter === 'undone' && r.submitted) return false
-      if (!k) return true
-      // 学号/姓名/年级/班级都可搜(学号即登录用户名)
-      return [r.name, r.username, String(r.class || ''), String(r.grade || '')]
-        .some(v => String(v).toLowerCase().includes(k))
-    })
-  }, [students, attempts, kw, filter])
-
-  const pendingCount = (attempts || []).reduce((n: number, a: any) => n + (a.pending_review || 0), 0)
-  // S-GRADING: 还在后台批改的题数, 教师据此决定要不要「立即批改」
-  const aiPending = (attempts || []).reduce((n: number, a: any) => n + (a.pending_ai || 0), 0)
-  const reviewedCount = (attempts || []).filter((a: any) => a.teacher_reviewed).length
-
-  return (
-    <div>
-      <Space style={{ marginBottom: 8 }} wrap>
-        <Input allowClear style={{ width: 220 }} value={kw} onChange={e => setKw(e.target.value)}
-          placeholder={`${t('studentId')} / ${t('studentName')} / ${t('grade')}`} />
-        <Radio.Group value={filter} onChange={e => setFilter(e.target.value)}>
-          <Radio.Button value="all">{t('all')}</Radio.Button>
-          <Radio.Button value="done">{t('submitted')}</Radio.Button>
-          <Radio.Button value="undone">{t('notStarted')}</Radio.Button>
-        </Radio.Group>
-        <Text type="secondary">{t('totalItems', { count: rows.length })}</Text>
-        {reviewedCount > 0 && <Tag color="green">{t('reviewedStudents', { count: reviewedCount })}</Tag>}
-        {aiPending > 0 && <Tag color="processing">{t('pendingAiN', { count: aiPending })}</Tag>}
-        {pendingCount > 0 && <Tag color="orange">{t('pendingReviewTotal', { count: pendingCount })}</Tag>}
-      </Space>
-      <Table size="small" rowKey="username" dataSource={rows}
-        locale={{ emptyText: t('noStudentSubmissions') }}
-        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }) }}
-        columns={[
-          // 姓名只留一行（下面那行学号去掉）：名册本来就要短，学号对老师是噪音
-          { title: t('studentName'), key: 'student', width: 104,
-            render: (_: any, r: any) => <div>{r.name || '-'}</div> },
-          { title: t('gradeClass'), key: 'grade_class', width: 116,
-            render: (_: any, r: any) => (
-              <ScopeTag variant="text" grade={r.grade} classes={String(r.class ?? '')} />
-            ) },
-          {
-            title: t('status'), dataIndex: 'submitted', width: 84,
-            render: (v: boolean) => (v ? <Tag color="success">{t('submitted')}</Tag> : <Tag>{t('notStarted')}</Tag>),
-          },
-          {
-            title: t('questionScore'), key: 'score', width: 104,
-            render: (_: any, r: any) => {
-              if (!r.submitted) return '-'
-              const pct = toPercent(r.score, r.total_score)
-              // 得分统一 100 分制: 按 x/y 展示（满分即 100），不再附"原始得分 x/y"
-              return (
-                <Text strong color={percentStatus(pct)}>
-                  {r.score ?? 0} / {r.total_score ?? 100}
-                </Text>
-              )
-            },
-          },
-          {
-            // S-GRADE: 谁判的分、还剩几题待批改, 教师一眼可见
-            title: t('gradingState'), key: 'grading', width: 124,
-            render: (_: any, r: any) => {
-              const a = attMap.get(r.username)
-              if (!a) return '-'
-              if (a.teacher_reviewed) return <Tag color="green">{t('gradedByTeacher')}</Tag>
-              if (a.pending_ai) return <Tag color="processing">{t('pendingAiN', { count: a.pending_ai })}</Tag>
-              if (a.pending_review) return <Tag color="orange">{t('pendingReviewN', { count: a.pending_review })}</Tag>
-              // 判分来源(AI/系统/要点)已经在逐题标签里显示, 这一列只说「判完没判完」,
-              // 三处(练习/考试/测验)口径统一用「已批改」
-              return <Tag color="green">{t('gradedDone')}</Tag>
-            },
-          },
-          { title: t('submitTime'), dataIndex: 'submitted_at', width: 138, ellipsis: true, render: (v: string) => v || '-' },
-          {
-            title: t('actions'), key: 'op', width: 88,
-            render: (_: any, r: any) => {
-              const a = attMap.get(r.username)
-              return a && onShowSheet
-                ? <Button size="small" onClick={() => onShowSheet(a)}>{t('viewSheet')}</Button>
-                : <Text type="secondary">-</Text>
-            },
-          },
-        ] as any}
-      />
-    </div>
-  )
-}
 
 // ════════════════════════════════════════
 // 学生端
@@ -500,29 +379,35 @@ const StudentView: React.FC = () => {
             )}
           </Card>
         ))}
-        <div style={{ textAlign: 'center', marginTop: 16 }}>
-          {/* P2: 提交失败 → 就地重试，不用刷新页面重做一遍 */}
-          {submitError && (
-            <Alert
-              type="error" showIcon closable style={{ marginBottom: 12, textAlign: 'left' }}
-              title={t('submitFailed')}
-              description={submitError}
-              onClose={() => setSubmitError(null)}
-              action={
-                <Button size="small" type="primary" danger loading={submitting}
-                  onClick={() => { void submitAnswers(true) }}>
-                  {t('common:retry')}
-                </Button>
-              }
-            />
-          )}
+        {/* P2: 提交失败 → 就地重试，不用刷新页面重做一遍 */}
+        {submitError && (
+          <Alert
+            type="error" showIcon closable style={{ marginBottom: 12, textAlign: 'left' }}
+            title={t('submitFailed')}
+            description={submitError}
+            onClose={() => setSubmitError(null)}
+            action={
+              <Button size="small" type="primary" danger loading={submitting}
+                onClick={() => { void submitAnswers(true) }}>
+                {t('common:retry')}
+              </Button>
+            }
+          />
+        )}
+        {/* P2-17: 提交按钮原来压在长列表末端，5~20 题答完要滚到底（移动端尤甚）—— 改吸底条 */}
+        <div style={{
+          position: 'sticky', bottom: 0, zIndex: 5, marginTop: 16,
+          padding: '10px 12px', display: 'flex', justifyContent: 'center', alignItems: 'center',
+          gap: 12, flexWrap: 'wrap',
+          background: 'var(--bg-container)', borderTop: '1px solid var(--border-color)',
+        }}>
           {/* A2: 未答完也能提交（点击后走 confirmUnanswered 二次确认） */}
           <Button type="primary" size="large" loading={submitting}
             onClick={() => { void submitAnswers() }}>
             {`${t('submit')} (${answeredCount}/${questions.length})`}
           </Button>
           {/* A1: 有未提交作答时，离开前确认一次（草稿已存本机，不会真丢） */}
-          <Button style={{ marginLeft: 12 }} onClick={() => {
+          <Button onClick={() => {
             const leave = () => { setActiveSession(null); setDraftInfo(null); loadSessions() }
             if (!answeredCount) { leave(); return }
             modalApi.confirm({
@@ -702,6 +587,7 @@ const StudentView: React.FC = () => {
 // ════════════════════════════════════════
 const TeacherView: React.FC = () => {
   const { t } = useTranslation('practice')
+  const { token } = theme.useToken()   // P3-21: 发布/结束图标用语义色
   const [searchParams, setSearchParams] = useSearchParams()
   const openedRef = useRef(false)
   // 默认落在「已发布练习」：教师进页面多是看/管已有练习，AI 生成是想建新练习时才点
@@ -1172,7 +1058,8 @@ const TeacherView: React.FC = () => {
               {r.source === 'wrong_book' && <Tag color="purple">{t('sourceWrongBook')}</Tag>}
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {t('questionCountTitle')} {r.question_count} · {t('totalScoreTitle')} {r.total_score}
-                {' · '}{t('submitted')} {r.submitted_count}/{r.student_count}
+                {/* P2-18: 草稿学生根本看不到，"已提交 0/N"是噪音 */}
+                {r.status !== 'draft' && ` · ${t('submitted')} ${r.submitted_count}/${r.student_count}`}
                 {/* 创建时间：与抢答/白板/测验的卡片同口径，方便按时间找最近布置的那份 */}
                 {' · '}{t('createdAt')} {relativeTime(r.created_at)}
               </Text>
@@ -1180,18 +1067,19 @@ const TeacherView: React.FC = () => {
           </div>
           <span onClick={(e) => e.stopPropagation()}>
             <Space size={2} wrap={false} style={{ whiteSpace: 'nowrap' }}>
-              {/* 发布 / 结束 / 重开：与考试中心同一套（绿=发布、红=结束、灰=重开），图标 + tooltip */}
+              {/* 发布 / 结束 / 重开：与考试中心同一套。P3-21: 颜色走主题 token（写死 #52c41a/#ff4d4f
+                  在暗夜星空主题下刺眼，也违反第一轮"颜色用 CSS 变量"硬约束）。P2-16: 补 aria-label。 */}
               {r.status === 'draft' && (
                 <Tooltip title={t('publishAction')}>
-                  <Button size="small" icon={<PlayCircleOutlined />}
-                    style={{ color: '#52c41a' }} loading={statusBusy === r.id}
+                  <Button size="small" aria-label={t('publishAction')} icon={<PlayCircleOutlined />}
+                    style={{ color: token.colorSuccess }} loading={statusBusy === r.id}
                     onClick={() => publishOrReopen(r)} />
                 </Tooltip>
               )}
               {r.status === 'active' && (
                 <Tooltip title={t('endAction')}>
-                  <Button size="small" icon={<PauseCircleOutlined />}
-                    style={{ color: '#ff4d4f' }}
+                  <Button size="small" aria-label={t('endAction')} icon={<PauseCircleOutlined />}
+                    style={{ color: token.colorError }}
                     onClick={() => modalApi.confirm({
                       title: t('endConfirm'), okText: t('endAction'), cancelText: t('cancel'),
                       okButtonProps: { danger: true },
@@ -1201,30 +1089,42 @@ const TeacherView: React.FC = () => {
               )}
               {r.status === 'ended' && (
                 <Tooltip title={t('reopenAction')}>
-                  <Button size="small" icon={<RedoOutlined />}
+                  <Button size="small" aria-label={t('reopenAction')} icon={<RedoOutlined />}
                     loading={statusBusy === r.id} onClick={() => publishOrReopen(r)} />
                 </Tooltip>
               )}
               <Tooltip title={t('detail')}>
-                <Button size="small" icon={<EyeOutlined />} onClick={() => viewSessionDetail(r.id)} />
+                <Button size="small" aria-label={t('detail')} icon={<EyeOutlined />} onClick={() => viewSessionDetail(r.id)} />
               </Tooltip>
               {/* 改名称：任何状态都能改（学生看到的标题同步更新） */}
               <Tooltip title={t('renameTitle')}>
-                <Button size="small" icon={<EditOutlined />}
+                <Button size="small" aria-label={t('renameTitle')} icon={<EditOutlined />}
                   onClick={() => { setRenameTarget(r); setRenameValue(r.title || '') }} />
               </Tooltip>
               <ResetActivityButton activityType="practice" activityId={r.id} iconOnly onSuccess={loadSessions} />
-              {/* 导出 / 删除 直接摊成图标显示（不再藏进"更多"菜单），都配 tooltip */}
-              <Tooltip title={t('exportResult')}>
-                <Button size="small" icon={<DownloadOutlined />}
-                  onClick={() => window.open(`/api/export/practice/${r.id}`, '_blank')} />
-              </Tooltip>
-              <Tooltip title={t('delete')}>
-                <Button size="small" danger icon={<DeleteOutlined />} onClick={() => modalApi.confirm({
-                  title: t('deleteConfirm'), okText: t('delete'), okButtonProps: { danger: true },
-                  cancelText: t('cancel'), onOk: () => deleteSession(r.id),
-                })} />
-              </Tooltip>
+              {/* P2-16: 导出/删除收进「更多」—— 一行 6-7 个纯图标里"重置(红)/删除(红)"最难分，
+                  删除这种不可逆操作也不该和"详情"平铺同级 */}
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'export', icon: <DownloadOutlined />, label: t('exportResult'),
+                      onClick: () => window.open(`/api/export/practice/${r.id}`, '_blank'),
+                    },
+                    {
+                      key: 'delete', icon: <DeleteOutlined />, danger: true, label: t('delete'),
+                      onClick: () => modalApi.confirm({
+                        title: t('deleteConfirm'), okText: t('delete'), okButtonProps: { danger: true },
+                        cancelText: t('cancel'), onOk: () => deleteSession(r.id),
+                      }),
+                    },
+                  ],
+                }}>
+                <Tooltip title={t('moreActions')}>
+                  <Button size="small" aria-label={t('moreActions')} icon={<MoreOutlined />} />
+                </Tooltip>
+              </Dropdown>
             </Space>
           </span>
         </div>
@@ -1297,7 +1197,19 @@ const TeacherView: React.FC = () => {
 
           {questions.map((q, i) => (
             <Card key={q.id} size="small" title={t('questionNWithType', { n: i+1, type: typeLabel[q.type] || q.type })}
-              extra={<Tag>{q.difficulty === 'easy' ? t('easy') : q.difficulty === 'hard' ? t('hard') : t('medium')}</Tag>}
+              extra={
+                <Space size={4}>
+                  <Tag>{q.difficulty === 'easy' ? t('easy') : q.difficulty === 'hard' ? t('hard') : t('medium')}</Tag>
+                  {/* P1-7: 整卷接受或整卷重来 —— 1 题坏了要再烧一次 token。单题可直接剔除 */}
+                  <Popconfirm title={t('removeQuestionConfirm')}
+                    onConfirm={() => {
+                      setQuestions((prev: any[]) => prev.filter((_, x) => x !== i))
+                      message.success(t('questionRemoved'))
+                    }}>
+                    <Button size="small" type="text" danger aria-label={t('removeQuestion')} icon={<DeleteOutlined />} />
+                  </Popconfirm>
+                </Space>
+              }
               style={{ marginBottom: 8, overflowX: 'auto' }}>
               <div style={{ overflowX: 'auto' }}>
                 <FormulaRenderer content={q.question} />
@@ -1457,8 +1369,9 @@ const TeacherView: React.FC = () => {
                 {detailAiAnalysis ? t('aiReAnalyze') : t('aiAnalyze')}
               </Button>
             )}
-            {/* P1-6: 一键提醒未交 */}
-            {!detailReadonly && !detailLoading && (detail?.students || []).some((s: any) => !s.submitted) && (
+            {/* P1-6: 一键提醒未交（草稿学生看不到，提醒只会变成噪音——后端同样有 400 闸） */}
+            {!detailReadonly && !detailLoading && detail?.session?.status !== 'draft'
+              && (detail?.students || []).some((s: any) => !s.submitted) && (
               <Button icon={<BellOutlined />} loading={notifying} onClick={notifyUnsubmitted}>
                 {t('notifyUnsubmitted')}
               </Button>

@@ -11,6 +11,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
+import { authedFileUrl } from '../api/client'
 import KnowledgePointSelect, { splitKps, joinKps } from '../components/KnowledgePointSelect'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import { pollAiTask } from '../api/aiTask'
@@ -989,7 +990,7 @@ const QuestionBankPage: React.FC = () => {
         if (mf.length > 0 && mf[0].url) {
           return (
             <div style={{ width: 60, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              <Image src={mf[0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              <Image src={authedFileUrl(mf[0].url)} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                 preview={{ mask: null }} />
             </div>
           )

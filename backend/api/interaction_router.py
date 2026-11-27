@@ -544,6 +544,11 @@ class QuizUpdate(BaseModel):
     questions: str | None = None
     subject: str | None = None      # 学科（老测验可以补上，列表/活动监控随即显示）
     knowledge_points: str | None = None   # 知识点（老测验可以补）
+    # 编辑题目弹窗会整卷保存，范围选择器一并回传（仅零答卷时可改题目，范围同步可改）
+    target_scope: str | None = None
+    target_grade: str | None = None
+    target_class: str | None = None
+    target_users: str | None = None
     auto_scores: bool = True
     # 状态不再走编辑接口：发布/结束/重开各有显式端点，避免绕过"发布前校验"，
     # 也避免历史上那个 `closed`（与 ended 两套写法并存）再被写进来
@@ -572,9 +577,12 @@ def _get_quiz_row(quiz_id: int) -> dict[str, Any] | None:
 
 def _answer_matches(user_ans: str, correct_ans: str, q_type: str, options: Any = None) -> bool:
     """判分口径与提交端保持一致：统一走 backend.answer_norm
-    （多选乱序等价、忽略大小写空白，并兼容下标/判断词写法）"""
+    （多选乱序等价、忽略大小写空白，并兼容下标/判断词写法）。
+    P0-4: 老卷答案是"选项首字符"写法(如"光")，两边先归一到位置字母再比。"""
     from backend.answer_norm import answers_equal
-    return answers_equal(user_ans, correct_ans, options, q_type)
+    from backend.quiz_stats import coerce_choice_answer
+    return answers_equal(coerce_choice_answer(user_ans, options),
+                         coerce_choice_answer(correct_ans, options), options, q_type)
 
 
 def _teacher_hits_scope(viewer: str, target_grade: str, target_class: str) -> bool:
@@ -692,11 +700,27 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
     if not _can_manage_quiz(user["username"], role, quiz_id):
         raise HTTPException(status_code=403, detail="无权修改此测验")
 
+    # R5/P1-5: 编辑题目弹窗会整卷回传 target_*。范围必须仍落在本人任教内
+    # （与 create_quiz 同一道闸），否则教师可以把已有/新建测验改发到不任教的年级班级。
+    if any(getattr(req, f, None) is not None for f in
+           ("target_scope", "target_grade", "target_class", "target_users")):
+        cur = _get_quiz_row(quiz_id) or {}
+        merged = {
+            "target_scope": req.target_scope if req.target_scope is not None else (cur.get("target_scope") or ""),
+            "target_grade": req.target_grade if req.target_grade is not None else (cur.get("target_grade") or ""),
+            "target_class": req.target_class if req.target_class is not None else (cur.get("target_class") or ""),
+            "target_users": req.target_users if req.target_users is not None else (cur.get("target_users") or ""),
+        }
+        from backend.api.notification_router import validate_activity_scope
+        validate_activity_scope(user, merged["target_scope"], merged["target_grade"],
+                                merged["target_class"], merged["target_users"], what="随堂测验")
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     updates = ["updated_at = ?"]
     params: list[Any] = [now]
     # 状态不在编辑接口里改（发布/结束/重开各有显式端点，带各自的前置校验）
-    for field in ("title", "description", "subject", "knowledge_points"):
+    for field in ("title", "description", "subject", "knowledge_points",
+                  "target_scope", "target_grade", "target_class", "target_users"):
         val = getattr(req, field, None)
         if val is not None:
             updates.append(f"{field} = ?")
@@ -706,10 +730,16 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
             edited = json.loads(req.questions)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="试题格式错误")
-        # 已有答卷时不动分值: 老答卷的分数是按旧满分(题数)记的, 改了分母就对不上了
-        has_answers = bool(execute_query(
-            "SELECT 1 FROM interaction_quiz_answers WHERE quiz_id = ? LIMIT 1", (quiz_id,)))
-        if isinstance(edited, list) and not has_answers:
+        if isinstance(edited, list):
+            # P0-3(A 方案): 判分留痕(graded)按题目序号建键，改题=整体错位。
+            # 已有答卷的测验题目一律不可改（标题/说明/学科仍可改）；要出新卷请复制新建。
+            n_ans = execute_query(
+                "SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = ?", (quiz_id,))
+            n = int(n_ans[0][0]) if n_ans else 0
+            if n:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"该测验已有 {n} 份答卷，题目不可修改（历史判分会错位）。如需调整请新建测验")
             edited = normalize_quiz_scores(edited, req.auto_scores)
         updates.append("questions = ?")
         params.append(json.dumps(edited, ensure_ascii=False) if isinstance(edited, list) else req.questions)
@@ -836,6 +866,16 @@ async def delete_quiz_question(quiz_id: int, question_index: int, request: Reque
         raise HTTPException(status_code=403, detail="无权修改此测验")
 
     # 读出当前测验
+    # P0-3(A 方案): graded 留痕按题号建键、score 按旧分值累计 —— 删题不重算必然错位，
+    # 已有答卷一律禁删（此前只重排 answers、不动 graded/score，是实打实的数据事故入口）。
+    n_ans = execute_query(
+        "SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = ?", (quiz_id,))
+    n = int(n_ans[0][0]) if n_ans else 0
+    if n:
+        raise HTTPException(
+            status_code=400,
+            detail=f"该测验已有 {n} 份答卷，不能删题（判分留痕会错位）。如需停止作答请用「结束」")
+
     rows = execute_query("SELECT questions FROM interaction_quizzes WHERE id = ?", (quiz_id,))
     if not rows:
         raise HTTPException(status_code=404, detail="测验不存在")
@@ -1220,17 +1260,27 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         return str(next((ua.get("answer", "") for ua in user_answers
                          if isinstance(ua, dict) and ua.get("question_index") == idx), "")).strip()
 
-    # 客观题：归一化精确匹配(多选按集合比较)
+    # 客观题：归一化精确匹配(多选按集合比较)。
+    # P0-4: 学生答案与标准答案都先归一到位置字母 —— 老卷存"光"这类首字符答案、
+    # 新前端提交 A/B/C，也能互相判对；留痕里写归一后的字母，显示/统计不再混两种写法。
+    from backend.quiz_stats import coerce_choice_answer
     for idx in other_indices:
         q = questions[idx]
         mx = float(q.get("score", 1) or 0)
-        user_ans = _ans_at(idx)
-        correct_ans = str(q.get("answer", "")).strip()
+        _opts = q.get("options")
         _qtype = q.get("type", "single")
-        ok = _answer_matches(user_ans, correct_ans, _qtype)
+        if _qtype == "true_false":
+            # 判断题的答案永远是"对/错"字面值（答题页硬编码，不存在 charAt 老写法），
+            # 归一反而会把留痕写成 A/B —— 学生结果页"我的答案/参考答案"就看不懂了。
+            user_ans = _ans_at(idx)
+            correct_ans = str(q.get("answer", "")).strip()
+        else:
+            user_ans = coerce_choice_answer(_ans_at(idx), _opts)
+            correct_ans = coerce_choice_answer(str(q.get("answer", "")).strip(), _opts)
+        ok = _answer_matches(user_ans, correct_ans, _qtype, _opts)
         if _qtype == "multiple":
             from backend.answer_norm import score_multiple_choice
-            q_earned = score_multiple_choice(user_ans, correct_ans, q.get("options"), mx)
+            q_earned = score_multiple_choice(user_ans, correct_ans, _opts, mx)
         else:
             q_earned = mx if ok else 0
         earned += q_earned
@@ -1392,6 +1442,7 @@ def _build_quiz_details(questions: list[Any], user_answers: Any,
     """
     user_answers = user_answers if isinstance(user_answers, list) else []
     details = []
+    from backend.quiz_stats import coerce_choice_answer as coerce
     for i, q in enumerate(questions):
         user_ans = ""
         for ua in user_answers:
@@ -1412,18 +1463,26 @@ def _build_quiz_details(questions: list[Any], user_answers: Any,
             comment = str(g.get("comment") or "")
             feedback = str(g.get("feedback") or "")
             teacher_comment = str(g.get("teacher_comment") or "")
-        else:                       # 老数据没留痕: 只能沿用旧的精确匹配口径
-            is_correct = _answer_matches(user_ans, correct_ans, q_type)
+        else:                       # 老数据没留痕: 只能沿用旧的精确匹配口径(带选项归一)
+            is_correct = _answer_matches(user_ans, correct_ans, q_type, q.get("options"))
             got_score = mx if is_correct else 0
             grading, graded_by, needs_review, comment, feedback = "", "", False, "", ""
             teacher_comment = ""
+        # P0-4: 参考答案展示统一为位置字母（老卷存"光"这类首字符时，学生看得懂 A/B/C）；
+        # 判断题保持"对/错"字面值，不归一。
+        # 自查修复：coerce_choice_answer 需要 (value, options) 两个参数——原来按一元调用，
+        # 任何"无留痕的选择题"my-result 都会 TypeError 500。
+        if q_type in ("single", "multiple"):
+            _disp_correct = coerce(correct_ans, q.get("options"))
+        else:
+            _disp_correct = correct_ans
         details.append({
             "index": i,
             "question": q.get("question", q.get("question_text", "")),
             "options": q.get("options", None),
             "type": q_type,
             "user_answer": user_ans,
-            "correct_answer": correct_ans,
+            "correct_answer": _disp_correct,
             "is_correct": is_correct,
             "score": got_score,
             "max_score": mx,
@@ -1698,12 +1757,48 @@ async def get_quiz_results(quiz_id: int, request: Request):
     rates = [s["percentage"] for s in student_answers
              if not s["pending_ai"] and s["percentage"] is not None]
 
+    # ── P1-6: 目标名单与未交统计（此前测验结果只有"已交的人"，教师看不出谁没答）──
+    # 名单口径 = 学生端可见性同一函数（含 P0-2 的任教班级修复），错题本/练习同套。
+    from backend.permission_service import get_target_students
+    roster = get_target_students(
+        quiz_row.get("creator_username") or user["username"],
+        quiz_row.get("target_scope") or "", quiz_row.get("target_grade") or "",
+        quiz_row.get("target_class") or "", quiz_row.get("target_users") or "",
+    ) or []
+    att_by_stu = {s["student"]: s for s in student_answers}
+    roster_students = [{
+        "username": r.get("username"),
+        "name": r.get("name") or r.get("username"),
+        "grade": str(r.get("grade") or ""),
+        "class": str(r.get("class") or ""),
+        "submitted": r.get("username") in att_by_stu,
+        # 得分统一百分制（与练习名册同口径；老卷原始分在 student_answers.raw_* 里）
+        "score": att_by_stu.get(r.get("username"), {}).get("score"),
+        "total_score": 100.0 if quiz_total > 0 else quiz_total,
+        "submitted_at": att_by_stu.get(r.get("username"), {}).get("submitted_at"),
+    } for r in roster]
+    roster_students.sort(key=lambda x: (not x["submitted"], str(x.get("class") or ""), str(x["name"])))
+    roster_attempts = [{
+        "student_username": s["student"],
+        "student_name": s["student_name"],
+        "pending_ai": s["pending_ai"],
+        "pending_review": s["pending_review"],
+        "score": s["score"], "total_score": s["total_score"],
+        "submitted_at": s["submitted_at"],
+    } for s in student_answers]
+    not_submitted = [x["username"] for x in roster_students if not x["submitted"]]
+
     return {
         # P2-14: 显式声明视角(前端不必再靠 quiz_title 是否存在来判断)
         "view": "teacher",
         # 「绑定即授权」只读预览：非创建者教师不下发逐人成绩
         "is_owner": is_owner,
         "student_answers": student_answers if is_owner else [],
+        # P1-6: 名册（含未交）；只读预览不下发
+        "students": roster_students if is_owner else [],
+        "attempts": roster_attempts if is_owner else [],
+        "target_count": len(roster_students) if is_owner else 0,
+        "not_submitted_count": len(not_submitted) if is_owner else 0,
         "quiz": {
             "id": quiz_row.get("id"),
             "title": quiz_row.get("title"),
@@ -1717,6 +1812,9 @@ async def get_quiz_results(quiz_id: int, request: Request):
         # 班级整体统计(与同步练习详情同口径)
         "stats": {
             "submitted_count": len(answers),
+            "student_count": len(roster_students) if is_owner else 0,
+            "participation_rate": (round(len(answers) / max(len(roster_students), 1) * 100, 1)
+                                   if is_owner else 0),
             "graded_count": sum(1 for s in student_answers if not s["pending_ai"]),
             "avg_score": round(sum(s["score"] or 0 for s in student_answers) / max(len(student_answers), 1), 1),
             "avg_rate": round(sum(rates) / len(rates), 1) if rates else None,
@@ -3998,6 +4096,50 @@ QUIZ_SUBJECTIVE_TYPES = ("short", "fill")
 class QuizGradeNowRequest(BaseModel):
     """教师：立即批改该测验的主观题"""
     retry_review: bool = False     # 同时把「转人工」的题重新排队再试一次 AI
+
+
+@router.post("/quizzes/{quiz_id}/notify-unsubmitted", summary="一键提醒未提交测验的学生")
+async def notify_quiz_unsubmitted(quiz_id: int, request: Request):
+    """P1-6: 提醒该测验尚未提交的学生（通知中心）。名单口径与结果名册/学生可见性一致，
+    不再是"全校未交"（练习侧同病已在 P0-2 一并修）。"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    if not _can_manage_quiz(user["username"], role, quiz_id):
+        raise HTTPException(status_code=403, detail="无权提醒此测验")
+
+    quiz_row = _get_quiz_row(quiz_id)
+    if not quiz_row:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    # 二轮审查：与练习同闸 —— 草稿测验学生看不到，提醒即噪音
+    if str(quiz_row.get("status") or "").strip() == "draft":
+        raise HTTPException(status_code=400, detail="该测验还是草稿（学生看不到），请先发布再提醒")
+
+    from backend.permission_service import get_target_students
+    roster = get_target_students(
+        quiz_row.get("creator_username") or user["username"],
+        quiz_row.get("target_scope") or "", quiz_row.get("target_grade") or "",
+        quiz_row.get("target_class") or "", quiz_row.get("target_users") or "",
+    ) or []
+    submitted = {r[0] for r in execute_query(
+        "SELECT student_username FROM interaction_quiz_answers WHERE quiz_id = ?", (quiz_id,))}
+    todo = [r.get("username") for r in roster if r.get("username") and r.get("username") not in submitted]
+    if not todo:
+        return {"message": "所有学生都已提交，无需提醒", "notified": 0}
+
+    from backend.api.notification_router import notify_users
+    from backend.text_utils import clip
+    n_q = len(_quiz_questions(quiz_row))
+    notify_users(
+        todo, "info",
+        f"请完成随堂测验「{clip(quiz_row.get('title') or '', 30)}」",
+        f"共 {n_q} 题，提交后不能重复作答。",
+        "/interaction",
+        source_type="quiz", source_id=str(quiz_id),
+    )
+    logger.info(f"教师 {user['username']} 提醒测验 {quiz_id} 未提交学生 {len(todo)} 人")
+    return {"message": f"已提醒 {len(todo)} 名学生", "notified": len(todo)}
 
 
 @router.post("/quizzes/{quiz_id}/grade-now", summary="教师：立即批改测验待判的主观题")

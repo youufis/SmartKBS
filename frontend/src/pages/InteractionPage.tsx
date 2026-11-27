@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
-import { Card, Tabs, Button, Space, Typography, Tag, Modal, Form, Input, InputNumber, Select, Empty, Spin, Radio, Result, Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination, Tooltip, Alert, Segmented } from 'antd'
+import { Card, Tabs, Button, Space, Typography, Tag, Modal, Form, Input, InputNumber, Select, Empty, Spin, Radio, Result, Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination, Tooltip, Alert, Segmented, Dropdown, Divider, theme } from 'antd'
 import { message, modalApi } from '../utils/feedback'
 import {
   ThunderboltOutlined, BarChartOutlined,
@@ -9,20 +9,21 @@ import {
   FileTextOutlined,
   RobotOutlined,
   EditOutlined, DeleteOutlined, DownloadOutlined,
-  SearchOutlined,
+  SearchOutlined, BellOutlined, MoreOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import PageHeader from '../components/PageHeader'
 import AiRuntimeChips from '../components/AiRuntimeChips'
 import { useTranslation } from 'react-i18next'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import ScopeTag from '../components/ScopeTag'
 import AnswerLine from '../components/AnswerLine'
 import { useAuthStore } from '../stores/authStore'
 import { ExamWatermark, GUARD_PROPS, useExamProtect } from '../components/ExamProtect'
-import KnowledgePointSelect, { joinKps } from '../components/KnowledgePointSelect'
+import KnowledgePointSelect, { joinKps, splitKps } from '../components/KnowledgePointSelect'
 import QuizEditor from '../components/QuizEditor'
+import SessionRoster from '../components/SessionRoster'
 import type { Question } from '../components/QuizEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
@@ -34,6 +35,7 @@ import AnswerNav from '../components/AnswerNav'
 import { draftKey, loadDraft, clearDraft, useDebouncedDraft, countAnswered } from '../utils/answerDraft'
 import { RowList } from '../components/RowList'
 import { toPercent, toPercentInt, percentStatus, percentColor, percentLevelKey } from '../utils/score'
+import { optionLetter, stripOptionPrefix, coerceAnswerToLetters } from '../utils/quizOptions'
 const { Title, Text } = Typography
 
 /** S-GRADING(P3): 这道题的分是谁给的 */
@@ -45,6 +47,8 @@ const GRADED_BY_KEYS: Record<string, string> = {
 const isQuizPending = (r: any) => r?.grading === 'pending' || r?.graded_by === 'queued'
 
 const InteractionPage: React.FC = () => {
+  const navigate = useNavigate()
+  const { token } = theme.useToken()
   const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
   const protect = useExamProtect()   // 防复制与水印开关（系统配置，默认全关）
@@ -56,6 +60,9 @@ const InteractionPage: React.FC = () => {
   const [quizzes, setQuizzes] = useState<any[]>([])
   const [quizLoading, setQuizLoading] = useState(false)
   const [quizEditorOpen, setQuizEditorOpen] = useState(false)
+  // P1-5: 编辑器双用途 —— null=新建, 数字=编辑该测验的题目（仅零答卷可进）
+  const [quizEditorEditId, setQuizEditorEditId] = useState<number | null>(null)
+  const [quizEditorInit, setQuizEditorInit] = useState<any>(null)
   const [takingQuiz, setTakingQuiz] = useState<any>(null)
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({})
   // A1: 随堂测验同样有本机草稿（原先关掉弹窗即清空作答）
@@ -64,9 +71,9 @@ const InteractionPage: React.FC = () => {
   const [quizSubmitError, setQuizSubmitError] = useState<string | null>(null)
   // 列表工具条：测验多了以后靠翻页找太累（筛选/排序只在已加载的这页数据里做，不动接口）
   const [quizKeyword, setQuizKeyword] = useState('')
-  const [quizFilter, setQuizFilter] = useState<'all' | 'todo' | 'done'>('all')
+  const [quizFilter, setQuizFilter] = useState<'all' | 'todo' | 'draft' | 'done'>('all')
   // 教师端分类：全部 / 进行中 / 已结束；外加按学科筛
-  const [quizStatus, setQuizStatus] = useState<'all' | 'active' | 'ended'>('all')
+  const [quizStatus, setQuizStatus] = useState<'all' | 'draft' | 'active' | 'ended'>('all')
   const [quizSubject, setQuizSubject] = useState('')
   const [quizSort, setQuizSort] = useState<'newest' | 'oldest' | 'title'>('newest')
   const [quizSubmitting, setQuizSubmitting] = useState(false)
@@ -82,6 +89,8 @@ const InteractionPage: React.FC = () => {
   const quizPollTries = useRef(0)
   const quizSubmitTries = useRef(0)
   const [quizGradingNow, setQuizGradingNow] = useState(false)
+  // P1-6: 一键提醒未提交（与同步练习同款）
+  const [quizNotifying, setQuizNotifying] = useState(false)
   const [quizStuSearch, setQuizStuSearch] = useState('')
   const [quizAiAnalysis, setQuizAiAnalysis] = useState<string | null>(null)
   const [quizAiAnalysisLoading, setQuizAiAnalysisLoading] = useState(false)
@@ -203,10 +212,12 @@ const InteractionPage: React.FC = () => {
     }
   }
 
-  // ── 创建测验（使用 QuizEditor） ──
+  // ── 创建/编辑测验（使用 QuizEditor） ──
   const handleCreateQuiz = async (title: string, description: string, questions: Question[],
                                   scope?: any, subject?: string, kps?: string[], publish = true) => {
     try {
+      // P1-8 配套: 题库选题带进来的配图/媒体必须落库 —— 旧映射只留 6 个字段，
+      // svg 与 media_files 全被丢掉，学生端永远看不到图。
       const formatted = questions.map(q => ({
         type: q.type,
         question: q.question,
@@ -214,28 +225,86 @@ const InteractionPage: React.FC = () => {
         answer: q.answer,
         score: q.score || 1,
         explanation: q.explanation || '',
+        ...(q.svg_content ? { svg_content: q.svg_content, has_svg: 1 } : {}),
+        ...(q.media_files?.length ? { media_files: q.media_files } : {}),
       }))
-      await apiClient.post('/api/interaction/quizzes', {
-        title,
-        description: description || '',
-        questions: JSON.stringify(formatted),
-        subject: subject || '',
-        knowledge_points: joinKps(kps || []),
-        target_scope: scope?.target_scope || 'teacher_classes',
-        target_grade: scope?.target_grade || '',
-        target_class: scope?.target_class || '',
-        target_users: scope?.target_users || '',
-        publish,
-      })
-      message.success(publish
-        ? t('quizCreatedWithTitle', { title, count: questions.length })
-        : t('savedAsDraft'))
+      if (quizEditorEditId) {
+        // P1-5: 编辑零答卷测验的题目。有答卷时后端 400（判分留痕按题号建键），错误原样提示。
+        await apiClient.put(`/api/interaction/quizzes/${quizEditorEditId}`, {
+          title,
+          description: description || '',
+          questions: JSON.stringify(formatted),
+          subject: subject || '',
+          knowledge_points: joinKps(kps || []),
+          target_scope: scope?.target_scope || 'teacher_classes',
+          target_grade: scope?.target_grade || '',
+          target_class: scope?.target_class || '',
+          target_users: scope?.target_users || '',
+        })
+        message.success(t('updated'))
+      } else {
+        await apiClient.post('/api/interaction/quizzes', {
+          title,
+          description: description || '',
+          questions: JSON.stringify(formatted),
+          subject: subject || '',
+          knowledge_points: joinKps(kps || []),
+          target_scope: scope?.target_scope || 'teacher_classes',
+          target_grade: scope?.target_grade || '',
+          target_class: scope?.target_class || '',
+          target_users: scope?.target_users || '',
+          publish,
+        })
+        message.success(publish
+          ? t('quizCreatedWithTitle', { title, count: questions.length })
+          : t('savedAsDraft'))
+      }
       setQuizEditorOpen(false)
+      setQuizEditorEditId(null)
+      setQuizEditorInit(null)
       await loadQuizzes()
     } catch (err: any) {
       message.error(err.response?.data?.detail || t('createFailed'))
       throw err
     }
+  }
+
+  // P1-5: 零答卷测验进编辑器改题目。老数据两种写法都要归一：
+  // 选项可能是对象字典（{A:文本}），答案可能是"选项首字符"（P0-4 老口径）→ 回填时映射成位置字母。
+  const openQuizEditorForEdit = (quiz: any) => {
+    const qs = (quiz.questions || []).map((q: any, i: number) => {
+      const opts: string[] = Array.isArray(q.options)
+        ? q.options.map(String)
+        : (q.options && typeof q.options === 'object'
+            ? Object.keys(q.options).sort().map(k => String(q.options[k])) : [])
+      return {
+        id: `edit_${Date.now()}_${i}`,
+        type: q.type === 'multiple' ? 'multiple' : q.type === 'true_false' ? 'true_false' : 'single',
+        question: q.question || q.question_text || '',
+        options: opts,
+        answer: coerceAnswerToLetters(q.answer ?? '', opts),
+        score: Number(q.score || 1),
+        explanation: q.explanation || '',
+        svg_content: q.svg_content || q.svg_code || undefined,
+        has_svg: q.has_svg || undefined,
+        media_files: q.media_files || undefined,
+      }
+    })
+    setQuizEditorInit({
+      title: quiz.title || '', description: quiz.description || '',
+      subject: quiz.subject || '', kps: splitKps(quiz.knowledge_points || ''),
+      questions: qs,
+      // 自查修复：不回填范围的话，编辑保存会把"指定年级/班级"重置回任教班级
+      scope: {
+        target_scope: quiz.target_scope || 'teacher_classes',
+        target_grade: quiz.target_grade || '',
+        target_class: quiz.target_class || '',
+        target_users: quiz.target_users || '',
+      },
+    })
+    setQuizEditorEditId(quiz.id)
+    setEditQuizModal(null)
+    setQuizEditorOpen(true)
   }
 
   // ── 开始答题 ──
@@ -446,6 +515,20 @@ const InteractionPage: React.FC = () => {
     } finally { setQuizReviewSaving(false) }
   }
 
+  /** P1-6: 提醒未提交测验的学生（后端名单口径=学生可见性，不再是全校） */
+  const quizNotifyUnsubmitted = async () => {
+    const qid = quizResultsView?.quiz?.id ?? quizResultsId
+    if (!qid) return
+    setQuizNotifying(true)
+    try {
+      const { data } = await apiClient.post(`/api/interaction/quizzes/${qid}/notify-unsubmitted`)
+      if (data?.notified > 0) message.success(t('notifySent', { count: data.notified }))
+      else message.info(t('notifyNone'))
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('notifyFailed'))
+    } finally { setQuizNotifying(false) }
+  }
+
   /** 关闭结果弹窗: 同时停掉后台批改轮询(否则关掉后又被回调"复活") */
   const closeQuizResults = () => {
     setQuizResultsView(null)
@@ -497,14 +580,28 @@ const InteractionPage: React.FC = () => {
     setQuizAiAnalysisLoading(false)
   }
 
-  // 学生端「待作答 / 已完成」的判定与筛选排序 —— 都在本页已加载的数据里做
-  const quizStateOf = (q: any): 'todo' | 'done' => (q?.answered ? 'done' : 'todo')
+  // 学生端「待作答 / 作答中 / 已完成」：与同步练习同一套三态（P2-15）。
+  // 本机草稿（answerDraft）也算状态——答了一半关掉弹窗的学生，回来能一眼看到"继续作答"。
+  const quizDraftOf = (q: any) => (q?.answered ? null
+    : loadDraft<Record<number, string>>(draftKey('quiz', q.id, user?.username), (q.questions || []).length))
+  const quizDraftAnswered = (q: any) => {
+    const d = quizDraftOf(q)
+    return d && countAnswered(d.answers as any) > 0 ? d : null
+  }
+  const quizStateOf = (q: any): 'todo' | 'draft' | 'done' =>
+    (q?.answered ? 'done' : (quizDraftAnswered(q) ? 'draft' : 'todo'))
   const quizTodoCount = quizzes.filter(q => quizStateOf(q) === 'todo').length
-  const quizDoneCount = quizzes.length - quizTodoCount
-  // 教师端的分类：进行中 / 已结束（closed 与 ended 同义，后端两种状态值并存）
-  const quizLiveOf = (q: any) => (q?.status === 'active' ? 'active' : 'ended')
+  const quizDraftCount = quizzes.filter(q => quizStateOf(q) === 'draft').length
+  const quizDoneCount = quizzes.filter(q => quizStateOf(q) === 'done').length
+  // 教师端的分类：草稿 / 进行中 / 已结束（closed 与 ended 同义，后端两种状态值并存）。
+  // P2-13: 旧实现"非 active 即 ended"，草稿被并进已结束——AI 建卷默认存草稿，
+  // 老师建完在"已结束"里找自己刚出的卷子。
+  const quizLiveOf = (q: any) => (q?.status === 'active' ? 'active'
+    : (q?.status === 'draft' ? 'draft' : 'ended'))
   const quizLiveCount = quizzes.filter(q => quizLiveOf(q) === 'active').length
-  const quizEndedCount = quizzes.length - quizLiveCount
+  const quizDraftTabCount = quizzes.filter(q => quizLiveOf(q) === 'draft').length
+  const quizEndedCount = quizzes.filter(q => quizLiveOf(q) === 'ended').length
+  const quizAnswersTotal = quizzes.reduce((s: number, q: any) => s + (Number(q.answer_count) || 0), 0)
   const qkw = quizKeyword.trim().toLowerCase()
   const visibleQuizzes = [...quizzes]
     .filter(q => {
@@ -529,7 +626,14 @@ const InteractionPage: React.FC = () => {
           {/* 使用 QuizEditor 组件（完整编辑器） */}
           <QuizEditor
             open={quizEditorOpen}
-            onCancel={() => setQuizEditorOpen(false)}
+            editing={!!quizEditorEditId}
+            initialTitle={quizEditorInit?.title || ''}
+            initialDescription={quizEditorInit?.description || ''}
+            initialSubject={quizEditorInit?.subject || ''}
+            initialKps={quizEditorInit?.kps || []}
+            initialQuestions={quizEditorInit?.questions || []}
+            initialScope={quizEditorInit?.scope}
+            onCancel={() => { setQuizEditorOpen(false); setQuizEditorEditId(null); setQuizEditorInit(null) }}
             onSave={handleCreateQuiz}
           />
           <Spin spinning={quizLoading}>
@@ -540,17 +644,19 @@ const InteractionPage: React.FC = () => {
                 onChange={e => { setQuizKeyword(e.target.value); setQuizPage(1) }} />
               {isStudent ? (
                 <Segmented value={quizFilter}
-                  onChange={(v) => { setQuizFilter(v as 'all' | 'todo' | 'done'); setQuizPage(1) }}
+                  onChange={(v) => { setQuizFilter(v as 'all' | 'todo' | 'draft' | 'done'); setQuizPage(1) }}
                   options={[
                     { value: 'all', label: t('ipFilterAll') },
                     { value: 'todo', label: `${t('ipFilterTodo')} (${quizTodoCount})` },
+                    { value: 'draft', label: `${t('ipFilterDrafting')} (${quizDraftCount})` },
                     { value: 'done', label: `${t('ipFilterDone')} (${quizDoneCount})` },
                   ]} />
               ) : (
                 <Segmented value={quizStatus}
-                  onChange={(v) => { setQuizStatus(v as 'all' | 'active' | 'ended'); setQuizPage(1) }}
+                  onChange={(v) => { setQuizStatus(v as 'all' | 'draft' | 'active' | 'ended'); setQuizPage(1) }}
                   options={[
                     { value: 'all', label: `${t('ipFilterAll')} (${quizzes.length})` },
+                    { value: 'draft', label: `${t('draft')} (${quizDraftTabCount})` },
                     { value: 'active', label: `${t('playing')} (${quizLiveCount})` },
                     { value: 'ended', label: `${t('ended')} (${quizEndedCount})` },
                   ]} />
@@ -613,8 +719,12 @@ const InteractionPage: React.FC = () => {
                             : <Tag color="red">{t('ended')}</Tag>}
                           {/* 学生最关心的是"我答没答"，教师名单里则没这一格 */}
                           {isStudent && (
-                            quiz.answered
+                            quizStateOf(quiz) === 'done'
                               ? <Tag color="success">{t('ipFilterDone')}</Tag>
+                              : quizStateOf(quiz) === 'draft'
+                              ? <Tag color="warning">{t('ipFilterDrafting')} · {t('ipDraftProgress', {
+                                  done: countAnswered(quizDraftAnswered(quiz)?.answers as any),
+                                  total: (quiz.questions || []).length })}</Tag>
                               : <Tag color="warning">{t('ipFilterTodo')}</Tag>
                           )}
                           <Tag color="blue">{quiz.creator_username || quiz.creator_name}</Tag>
@@ -631,7 +741,9 @@ const InteractionPage: React.FC = () => {
                       <Space>
                         {quiz.status === 'active' && isStudent && !quiz.answered && (
                           <Button size="small" type="primary" icon={<PlayCircleOutlined />}
-                            onClick={(e) => { e.stopPropagation(); void handleStartQuiz(quiz) }}>{t('startQuiz')}</Button>
+                            onClick={(e) => { e.stopPropagation(); void handleStartQuiz(quiz) }}>
+                            {quizStateOf(quiz) === 'draft' ? t('ipContinueQuiz') : t('startQuiz')}
+                          </Button>
                         )}
                         {/* 已结束的测验仍留在学生列表里（自己答过），给「结果」入口 */}
                         {isStudent && quiz.answered && (
@@ -642,18 +754,20 @@ const InteractionPage: React.FC = () => {
                         )}
                         {isTeacherOrAdmin && (
                           <>
-                            {/* 发布 / 结束 / 重开：与考试中心同一套（绿=发布、红=结束、灰=重开） */}
+                            {/* 发布 / 结束 / 重开：与考试中心同一套（绿=发布、红=结束、灰=重开）。
+                                P3-21: 颜色走主题 token，不再写死 #52c41a/#ff4d4f（暗夜星空主题下会刺眼）。
+                                P2-16: 每个图标补 aria-label（原来整排按钮在无障碍树里是"无名按钮"）。 */}
                             {quiz.status === 'draft' && (
                               <Tooltip title={t('publishAction')}>
-                                <Button size="small" icon={<PlayCircleOutlined />}
-                                  style={{ color: '#52c41a' }} loading={quizStatusBusy === quiz.id}
+                                <Button size="small" aria-label={t('publishAction')} icon={<PlayCircleOutlined />}
+                                  style={{ color: token.colorSuccess }} loading={quizStatusBusy === quiz.id}
                                   onClick={(e) => { e.stopPropagation(); void toggleQuizStatus(quiz, 'active') }} />
                               </Tooltip>
                             )}
                             {quiz.status === 'active' && (
                               <Tooltip title={t('endAction')}>
-                                <Button size="small" icon={<PauseCircleOutlined />}
-                                  style={{ color: '#ff4d4f' }}
+                                <Button size="small" aria-label={t('endAction')} icon={<PauseCircleOutlined />}
+                                  style={{ color: token.colorError }}
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     modalApi.confirm({
@@ -668,31 +782,55 @@ const InteractionPage: React.FC = () => {
                             )}
                             {quiz.status === 'ended' && (
                               <Tooltip title={t('reopenAction')}>
-                                <Button size="small" icon={<RedoOutlined />}
+                                <Button size="small" aria-label={t('reopenAction')} icon={<RedoOutlined />}
                                   loading={quizStatusBusy === quiz.id}
                                   onClick={(e) => { e.stopPropagation(); void toggleQuizStatus(quiz, 'active') }} />
                               </Tooltip>
                             )}
-                            {/* 操作按钮只留图标 + tooltip：文字按钮太占地方，整行会被挤长 */}
+                            {/* P2-16: 一行 6-7 个纯图标里"重置(红)/删除(红)"最难分 —— 低频的导出/删除收进「更多」，
+                                重置保留直显（它自带三段式确认，且与删除语义不同） */}
                             <Tooltip title={t('results')}>
-                              <Button size="small" icon={<BarChartOutlined />}
+                              <Button size="small" aria-label={t('results')} icon={<BarChartOutlined />}
                                 onClick={(e) => { e.stopPropagation(); void handleViewQuizResults(quiz.id) }} />
                             </Tooltip>
-                            <Tooltip title={t('ipExportCsv')}>
-                              <Button size="small" icon={<DownloadOutlined />}
-                                onClick={(e) => { e.stopPropagation(); window.open(`/api/export/quiz/${quiz.id}`, '_blank') }} />
-                            </Tooltip>
                             <Tooltip title={t('ipEdit')}>
-                              <Button size="small" icon={<EditOutlined />}
+                              <Button size="small" aria-label={t('ipEdit')} icon={<EditOutlined />}
                                 onClick={(e) => { e.stopPropagation(); editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }} />
                             </Tooltip>
                             <ResetActivityButton activityType="quiz" activityId={quiz.id}
                                 iconOnly stopPropagation onSuccess={loadQuizzes} />
-                            <Popconfirm title={t('confirmDeleteQuiz')} onConfirm={() => handleDeleteQuiz(quiz.id)}>
-                              <Tooltip title={t('delete')}>
-                                <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                            <Dropdown
+                              trigger={['click']}
+                              menu={{
+                                items: [
+                                  {
+                                    key: 'export',
+                                    icon: <DownloadOutlined />,
+                                    label: t('ipExportCsv'),
+                                    onClick: ({ domEvent }) => { domEvent.stopPropagation(); window.open(`/api/export/quiz/${quiz.id}`, '_blank') },
+                                  },
+                                  {
+                                    key: 'delete',
+                                    icon: <DeleteOutlined />,
+                                    danger: true,
+                                    label: t('delete'),
+                                    onClick: ({ domEvent }) => {
+                                      domEvent.stopPropagation()
+                                      modalApi.confirm({
+                                        title: t('confirmDeleteQuiz'),
+                                        okText: t('delete'),
+                                        okButtonProps: { danger: true },
+                                        onOk: () => handleDeleteQuiz(quiz.id),
+                                      })
+                                    },
+                                  },
+                                ],
+                              }}>
+                              <Tooltip title={t('moreActions')}>
+                                <Button size="small" aria-label={t('moreActions')} icon={<MoreOutlined />}
+                                  onClick={(e) => e.stopPropagation()} />
                               </Tooltip>
-                            </Popconfirm>
+                            </Dropdown>
                           </>
                         )}
                       </Space>
@@ -725,7 +863,7 @@ const InteractionPage: React.FC = () => {
         title={t('title')}
         subtitle={isStudent
           ? t('ipListSub')
-          : t('ipMyProgress', { todo: quizTodoCount, done: quizDoneCount })}
+          : t('ipTeacherSummary', { active: quizLiveCount, ended: quizEndedCount, answers: quizAnswersTotal })}
         extra={isTeacherOrAdmin ? (
           <>
             {/* 随堂测验：AI 出题与测后分析 */}
@@ -737,7 +875,8 @@ const InteractionPage: React.FC = () => {
             }}>
               AI {t('createQuiz')}
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setQuizEditorOpen(true)}>
+            <Button type="primary" icon={<PlusOutlined />}
+              onClick={() => { setQuizEditorEditId(null); setQuizEditorInit(null); setQuizEditorOpen(true) }}>
               {t('createQuiz')}
             </Button>
           </>
@@ -841,31 +980,41 @@ const InteractionPage: React.FC = () => {
             </div>
             <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="normal" />
             <div style={{ marginTop: 8, paddingLeft: 8 }}>
+              {/* P0-1: 三个控件全部受控（value 绑 quizAnswers）。
+                  旧写法只挂 onChange：Modal 关闭不销毁 DOM，重进/恢复草稿后
+                  "选项显示已选、状态却是空的" —— 学生点提交交出去的是白卷。
+                  P0-4: 选项身份=位置字母（A/B/C…），不再取选项文本首字符；
+                  老数据自带的 "A. " 前缀剥掉再显示，避免双字母。 */}
               {q.type === 'single' && q.options ? (
-                <Radio.Group onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}>
+                <Radio.Group value={quizAnswers[i] ?? null}
+                  onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}>
                   <Space orientation="vertical">
                     {q.options.map((opt: string, j: number) => (
-                      <Radio key={j} value={opt.charAt(0)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><FormulaRenderer content={opt} inline /></Radio>
+                      <Radio key={j} value={optionLetter(j)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{optionLetter(j)}. <FormulaRenderer content={stripOptionPrefix(opt)} inline /></Radio>
                     ))}
                   </Space>
                 </Radio.Group>
               ) : q.type === 'multiple' && q.options ? (
-                <Checkbox.Group onChange={(vals) => setQuizAnswers({ ...quizAnswers, [i]: (vals as string[]).sort().join(',') })}>
+                <Checkbox.Group
+                  value={quizAnswers[i] ? String(quizAnswers[i]).split(',').filter(Boolean) : []}
+                  onChange={(vals) => setQuizAnswers({ ...quizAnswers, [i]: (vals as string[]).sort().join(',') })}>
                   <Space orientation="vertical">
                     {q.options.map((opt: string, j: number) => (
-                      <Checkbox key={j} value={opt.charAt(0)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><FormulaRenderer content={opt} inline /></Checkbox>
+                      <Checkbox key={j} value={optionLetter(j)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{optionLetter(j)}. <FormulaRenderer content={stripOptionPrefix(opt)} inline /></Checkbox>
                     ))}
                   </Space>
                 </Checkbox.Group>
               ) : q.type === 'true_false' ? (
-                <Radio.Group onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}>
+                <Radio.Group value={quizAnswers[i] ?? null}
+                  onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}>
                   <Space>
                     <Radio value="对" style={{ lineHeight: 2 }}>{t('judgeTrue')}</Radio>
                     <Radio value="错" style={{ lineHeight: 2 }}>{t('judgeFalse')}</Radio>
                   </Space>
                 </Radio.Group>
               ) : (
-                <Input onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}
+                <Input value={quizAnswers[i] || ''}
+                  onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}
                   placeholder={t('inputAnswer')} />
               )}
             </div>
@@ -934,7 +1083,15 @@ const InteractionPage: React.FC = () => {
         onCancel={closeQuizResults}
         width="min(980px, 94vw)"
         footer={isStudent
-          ? <Button type="primary" onClick={closeQuizResults}>{t('close')}</Button>
+          ? (
+            <Space wrap>
+              {/* P3-22: 测验错题同样进错题本，闭环入口不该只有练习有 */}
+              {(quizResultsView?.details || []).some((d: any) => d.is_correct === false && d.grading !== 'pending') && (
+                <Button icon={<FileTextOutlined />} onClick={() => navigate('/wrong-book')}>{t('goWrongBook')}</Button>
+              )}
+              <Button type="primary" onClick={closeQuizResults}>{t('close')}</Button>
+            </Space>
+          )
           : (
             <Space wrap>
               {/* S-GRADING(P3): 后台还没判完 / 有题判不准时, 教师可以立刻催批 */}
@@ -959,6 +1116,14 @@ const InteractionPage: React.FC = () => {
                     </Popconfirm>
                   )}
                 </>
+              )}
+              {/* P1-6: 还有没交的学生 → 一键提醒（名单口径与学生可见性一致；草稿未发布不给提醒） */}
+              {!quizResultsReadonly && Number(quizResultsView?.not_submitted_count || 0) > 0
+                && (quizzes.find((q: any) => q.id === quizResultsId)?.status !== 'draft') && (
+                <Button icon={<BellOutlined />} size="small" loading={quizNotifying}
+                  onClick={() => void quizNotifyUnsubmitted()}>
+                  {t('notifyUnsubmitted')}
+                </Button>
               )}
               {/* 只读预览：AI 分析为创建者专属 */}
               {!quizResultsReadonly && (
@@ -1028,7 +1193,7 @@ const InteractionPage: React.FC = () => {
                       <div style={{ marginTop: 4, paddingLeft: 8 }}>
                         {r.options.map((opt: string, j: number) => (
                           <div key={j} style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                            <FormulaRenderer content={opt} inline />
+                            {r.type === 'true_false' ? '' : `${optionLetter(j)}. `}<FormulaRenderer content={stripOptionPrefix(opt)} inline />
                           </div>
                         ))}
                       </div>
@@ -1080,7 +1245,15 @@ const InteractionPage: React.FC = () => {
                         <>
                 <Row gutter={[16, 12]} style={{ marginBottom: 16 }}>
                   <Col xs={12} sm={8} md={4}><Statistic title={t('ipQCount')} value={quizResultsView.quiz?.question_count} /></Col>
-                  <Col xs={12} sm={8} md={4}><Statistic title={t('ipParticipants')} value={quizResultsView.total_answers} /></Col>
+                  <Col xs={12} sm={8} md={4}>
+                    <Statistic title={t('ipParticipants')} value={quizResultsView.total_answers} />
+                    {Number(quizResultsView.target_count || 0) > 0 && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('statParticipation')} {quizResultsView.stats?.participation_rate ?? 0}%
+                        （{quizResultsView.total_answers}/{quizResultsView.target_count}）
+                      </Text>
+                    )}
+                  </Col>
                   <Col xs={12} sm={8} md={4}>
                     <Statistic title={t('statAvgScore')} value={quizResultsView.stats?.avg_score ?? 0}
                       suffix={`/ ${quizResultsView.quiz?.total_score ?? 0}`} />
@@ -1124,7 +1297,7 @@ const InteractionPage: React.FC = () => {
                           .some((x: any) => String(x || '').toLowerCase().includes(kw))
                       })}
                       rowKey="student" size="small"
-                      pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (num: number) => t('ipNTotal', { count: num }) }}
+                      pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (num: number) => t('ipNPeople', { count: num }) }}
                       columns={[
                         // 列合并(去横向滚动): 姓名+学号、年级+班级、答对/总题 双行; 得分改百分制并带得分率
                         { title: t('ipIdx'), key: 'idx', width: 44, render: (_: any, __: any, i: number) => i + 1 },
@@ -1188,6 +1361,16 @@ const InteractionPage: React.FC = () => {
                       ),
                     },
                     {
+                      key: 'roster',
+                      label: t('tabRoster'),
+                      children: (
+                        // P1-6: 与同步练习共用名册组件 —— 教师第一次能看到"谁没答"
+                        <SessionRoster students={quizResultsView.students || []}
+                          attempts={quizResultsView.attempts || []}
+                          onShowSheet={(a: any) => void openQuizReview(a.student_username)} />
+                      ),
+                    },
+                    {
                       key: 'questions',
                       label: t('tabQuestions'),
                       children: (
@@ -1204,7 +1387,7 @@ const InteractionPage: React.FC = () => {
                           <div style={{ marginTop: 4, paddingLeft: 8 }}>
                             {r.options.map((opt: string, j: number) => (
                               <div key={j} style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                                <FormulaRenderer content={opt} inline />
+                                {r.type === 'true_false' ? '' : `${optionLetter(j)}. `}<FormulaRenderer content={stripOptionPrefix(opt)} inline />
                               </div>
                             ))}
                           </div>
@@ -1253,7 +1436,7 @@ const InteractionPage: React.FC = () => {
                       ),
                     },
                   // 只读预览：学生逐人成绩为创建者的教学数据，不展示
-                  ].filter((ti: any) => !(quizResultsReadonly && ti.key === 'students'))}
+                  ].filter((ti: any) => !(quizResultsReadonly && (ti.key === 'students' || ti.key === 'roster')))}
                 />
               </>
             )}
@@ -1315,12 +1498,23 @@ const InteractionPage: React.FC = () => {
                 padding: 10, marginTop: 8, borderRadius: 6,
                 background: 'var(--bg-layout)', border: '1px solid var(--border-color)',
               }}>
-                <Text strong>{i + 1}. </Text><FormulaRenderer content={q.question} />
+                {/* P1-7: 整卷接受或整卷重来太浪费 —— 单题可直接剔除，剔除后为 0 题时「填入表单」自动禁用 */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Text strong>{i + 1}. </Text><FormulaRenderer content={q.question} />
+                  </div>
+                  <Popconfirm title={t('removeQuestionConfirm')}
+                    onConfirm={() => setAiQuizResult({ ...aiQuizResult, questions: aiQuizResult.questions.filter((_: any, x: number) => x !== i) })}>
+                    <Button size="small" type="text" danger aria-label={t('removeQuestion')} icon={<DeleteOutlined />} />
+                  </Popconfirm>
+                </div>
                 <MediaDisplay svgContent={q.svg_content || q.svg_code} hasSvg={q.has_svg || (q.svg_code ? 1 : 0)} mediaFiles={(q as any).media_files} size="normal" />
                 {q.options && (
                   <div style={{ marginTop: 4, paddingLeft: 16 }}>
                     {q.options.map((opt: string, j: number) => (
-                      <div key={j} style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{opt}</div>
+                      <div key={j} style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                        {q.type === 'true_false' ? '' : `${optionLetter(j)}. `}{stripOptionPrefix(opt)}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1361,6 +1555,16 @@ const InteractionPage: React.FC = () => {
           </Form.Item>
           {/* 状态不在这里改：列表上的「发布开关」负责发布/结束/重开，各有前置校验 */}
         </Form>
+        {/* P1-5: 建卷即封卷收口——零答卷的测验可直接进编辑器改题目/选项/答案；
+            已有答卷时不给入口（后端同样 400：判分留痕按题号建键，改题=整体错位） */}
+        {editQuizModal && Number(editQuizModal.answer_count || 0) === 0 && (
+          <>
+            <Divider style={{ margin: '4px 0 12px' }} />
+            <Button block icon={<EditOutlined />} onClick={() => openQuizEditorForEdit(editQuizModal)}>
+              {t('editQuestions')}
+            </Button>
+          </>
+        )}
       </Modal>
     </div>
   )

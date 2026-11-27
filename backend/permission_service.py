@@ -702,6 +702,74 @@ def check_activity_visibility(
     return is_student_in_teacher_scope(student_username, creator_username)
 
 
+def get_target_students(
+    creator_username: str,
+    target_scope: str = "",
+    target_grade: str = "",
+    target_class: str = "",
+    target_users: str = "",
+    target_students: list | None = None,
+) -> list[dict]:
+    """活动的目标学生名单 —— 与 check_activity_visibility 完全同口径的"枚举形态"。
+
+    背景：教师端名册/参与率/一键提醒此前各路由自己解析范围，`teacher_classes`
+    一律回退成"全校学生"：参与率分母大一个数量级，「提醒未交」会推给全校。
+    学生端可见性（check_activity_visibility）一直是对的——本函数把两套口径合一：
+    名单 = 能看到这场活动的人。
+    """
+    import re as _re
+    from backend.auth import is_admin
+
+    def _all_active_students() -> list[dict]:
+        return execute_query_dict(
+            "SELECT username, name, grade, class FROM users "
+            "WHERE role=2 AND IFNULL(status,'active')='active'") or []
+
+    def _students_in_grades(grades: list[str]) -> list[dict]:
+        ph = ",".join("?" for _ in grades)
+        return execute_query_dict(
+            f"SELECT username, name, grade, class FROM users "
+            f"WHERE role=2 AND IFNULL(status,'active')='active' AND grade IN ({ph})",
+            tuple(grades)) or []
+
+    # 1) 显式名单优先（individual / 错题巩固按人推送）
+    names = [str(x).strip() for x in (target_students or []) if str(x).strip()]
+    if not names:
+        names = [s.strip() for s in str(target_users or "").replace("，", ",").split(",") if s.strip()]
+    if names:
+        ph = ",".join("?" for _ in names)
+        return execute_query_dict(
+            f"SELECT username, name, grade, class FROM users WHERE role=2 AND username IN ({ph})",
+            tuple(names)) or []
+
+    scope = (target_scope or "teacher_classes").strip()
+    grades = [g.strip() for g in str(target_grade or "").replace("，", ",").split(",") if g.strip()]
+    classes = [c.strip() for c in str(target_class or "").replace("，", ",").split(",") if c.strip()]
+
+    # 2) 明确"全体"
+    if scope in ("all", "school"):
+        return _all_active_students()
+
+    # 3) 指定年级（含值）/ 指定年级+班级（含值）—— 与可见性一样按 grade 文本 + 班级号匹配
+    if scope == "grade" and grades:
+        return _students_in_grades(grades)
+    if scope == "class" and grades and classes:
+        out = []
+        for r in _students_in_grades(grades):
+            cls = str(r.get("class") or "").strip()
+            for tc in classes:
+                tc_num = _re.sub(r"[^\d]", "", tc)
+                if cls == tc or (tc_num and (cls == tc_num or cls == f"{tc_num}班")):
+                    out.append(r)
+                    break
+        return out
+
+    # 4) 其余一律 = 任教范围（teacher_classes；grade/class 缺值时的回退与可见性一致）
+    if is_admin(creator_username):
+        return _all_active_students()
+    return get_students_in_scope(creator_username) or []
+
+
 def filter_activities_by_scope(
     activities: list[dict[str, Any]],
     student_username: str,

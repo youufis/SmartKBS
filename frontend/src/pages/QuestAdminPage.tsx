@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
+import { authedFileUrl } from '../api/client'
 import { relativeTime, fullTime } from '../utils/relativeTime'
 import { reportLoadError } from '../utils/loadError'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -818,7 +819,7 @@ const QuestBankTab: React.FC = () => {
     if (mf.length > 0 && mf[0].url) {
       return (
         <div style={{ width: 60, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          <Image src={mf[0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          <Image src={authedFileUrl(mf[0].url)} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             preview={{ mask: null }} />
         </div>
       )

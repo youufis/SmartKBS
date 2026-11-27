@@ -68,6 +68,13 @@ const ScopeTag: React.FC<ScopeTagProps> = ({
     return <TruncatedScopeText txt={onlyText} maxWidth={maxWidth} grade={grade} classes={classes} />
   }
 
+  // P2-18: 空值范围兜底 —— check_activity_visibility 对"grade 没填年级 /
+  // class 没填年级班级 / individual 没填名单"都回退任教班级可见，标签必须同口径，
+  // 否则教师列表出现"任教班级却显示 -"的悬空标签（实测首卡）。
+  if (scope === 'grade' && !splitMulti(grade).length) scope = 'teacher_classes'
+  else if (scope === 'class' && !(splitMulti(grade).length && splitMulti(classes).length)) scope = 'teacher_classes'
+  else if (scope === 'individual' && !String(users || '').trim()) scope = 'teacher_classes'
+
   if (scope === 'individual') {
     const n = String(users || '').split(',').map((s) => s.trim()).filter(Boolean).length
     return <Tag color="green">{t('scopeTargetedN', { n })}</Tag>

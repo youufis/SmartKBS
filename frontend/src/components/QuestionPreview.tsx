@@ -4,6 +4,7 @@ import { Table, Tag, Typography, Space, Button, Popconfirm, Empty, Card, Row, Co
 import { DeleteOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons'
 import FormulaRenderer from './FormulaRenderer'
 import SVGViewer from './SVGViewer'
+import { authedFileUrl } from '../api/client'
 
 const TYPE_LABELS: Record<string, string> = {
   single: 'qt_single',
@@ -275,7 +276,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
                         mf?.url ? (
                           <Image
                             key={idx}
-                            src={mf.url}
+                            src={authedFileUrl(mf.url)}
                             alt={mf.alt || ''}
                             width={120}
                             style={{ borderRadius: 4, border: '1px solid #f0f0f0' }}

@@ -11,6 +11,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
+import { authedFileUrl } from '../api/client'
 import FormulaRenderer from './FormulaRenderer'
 import SVGViewer from './SVGViewer'
 import MediaDisplay from './MediaDisplay'
@@ -156,8 +157,9 @@ const QuizManager: React.FC = () => {
       await apiClient.delete(`/api/interaction/quizzes/${record._quizId}/questions/${questionIndex}`)
       message.success(t('qmQuestionDeleted'))
       loadQuestions()
-    } catch {
-      message.error(t('qmDeleteFailed'))
+    } catch (e: any) {
+      // P0-3 闸门：有答卷的测验删题会被后端拒绝，把"已有 N 份答卷"的具体原因带给老师
+      message.error(e?.response?.data?.detail || t('qmDeleteFailed'))
     }
   }
 
@@ -222,7 +224,7 @@ const QuizManager: React.FC = () => {
         if (hasMediaImages && record.media_files![0].url) {
           return (
             <div style={{ width: 60, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              <Image src={record.media_files![0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} preview={{ mask: null }} />
+              <Image src={authedFileUrl(record.media_files![0].url)} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} preview={{ mask: null }} />
             </div>
           )
         }

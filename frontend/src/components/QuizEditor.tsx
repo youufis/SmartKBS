@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Modal, Form, Input, Button, Space, Select, Radio, Checkbox, Typography, Divider, Tag, Empty, Popconfirm, InputNumber, Switch } from 'antd'
 import { message } from '../utils/feedback'
-import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined, SearchOutlined } from '@ant-design/icons'
 import FormulaRenderer from './FormulaRenderer'
 import ActivityScopeSelector from './ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +9,8 @@ import type { ActivityScopeValue } from './ActivityScopeSelector'
 import { distributeScores } from '../utils/score'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import KnowledgePointSelect from './KnowledgePointSelect'
+import QuizBankPicker from './QuizBankPicker'
+import { optionLetter, stripOptionPrefix, coerceAnswerToLetters } from '../utils/quizOptions'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -21,6 +23,10 @@ interface Question {
   answer: string
   score: number
   explanation: string
+  // P1-8: 题库选题带入的配图/媒体（手动出题不填）
+  svg_content?: string
+  has_svg?: number
+  media_files?: any[]
 }
 
 interface QuizEditorProps {
@@ -32,19 +38,29 @@ interface QuizEditorProps {
   initialTitle?: string
   initialDescription?: string
   initialQuestions?: Question[]
+  // P1-5: 编辑模式（零答卷测验改题目）；编辑时不显示"发布/草稿"双按钮
+  editing?: boolean
+  initialSubject?: string
+  initialKps?: string[]
+  // 自查修复：编辑态必须回填原目标范围，否则保存会把"指定年级/班级"重置回任教班级
+  initialScope?: ActivityScopeValue
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 10)
 
+// P0-4: 选项文本不再自带 "A. " 前缀 —— 字母由位置生成，
+// 旧写法会让答题页取 opt.charAt(0) 当答案键（首字符相同即串答案），也导致编辑器"A | A. 选项A"双字母。
 const defaultOptions = {
-  single: ['A. 选项A', 'B. 选项B', 'C. 选项C', 'D. 选项D'],
-  multiple: ['A. 选项A', 'B. 选项B', 'C. 选项C', 'D. 选项D'],
+  single: ['选项A', '选项B', '选项C', '选项D'],
+  multiple: ['选项A', '选项B', '选项C', '选项D'],
   true_false: ['对', '错'],
 }
 
 const QuizEditor: React.FC<QuizEditorProps> = ({
   open, onCancel, onSave,
   initialTitle = '', initialDescription = '', initialQuestions,
+  editing = false, initialSubject = '', initialKps,
+  initialScope,
 }) => {
   const { t } = useTranslation('interaction')
   const { subjects, defaultSubject } = useSubjectOptions()      // 学科（与 AI 建测验同一份清单）
@@ -54,6 +70,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   const [kps, setKps] = useState<string[]>([])   // 知识点（多选，落库后可按知识点统计）
   const [questions, setQuestions] = useState<Question[]>(initialQuestions || [])
   const [saving, setSaving] = useState(false)
+  const [bankOpen, setBankOpen] = useState(false)
   // R2(Step B): 默认由系统把总分均摊成 100(与同步练习/考试同一口径); 教师改过任一题分值即转手动
   const [autoScore, setAutoScore] = useState(true)
   const [scope, setScope] = useState<ActivityScopeValue>({
@@ -67,18 +84,30 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     if (open) {
       setTitle(initialTitle)
       setDescription(initialDescription)
-      setSubject('')
-      setKps([])
+      setSubject(initialSubject)
+      setKps(initialKps || [])
       setQuestions(initialQuestions || [])
-      setAutoScore(true)
-      setScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
+      // 自查二轮：编辑态不能硬置"自动均摊"——手动配过 30/70 的卷子重开会被
+      // 显示成 50/50，保存即静默覆盖。按原分值推导：全 1 分(老卷)或恰好等于
+      // 均摊值 → 自动；否则视为教师手动配过 → 手动。
+      const qs0 = initialQuestions || []
+      if (qs0.length === 0) {
+        setAutoScore(true)
+      } else {
+        const dist = distributeScores(qs0.length, 100)
+        const allOne = qs0.every(x => Math.abs((Number(x.score) || 1) - 1) < 1e-9)
+        const matchesAuto = qs0.every((x, i2) => Math.abs((Number(x.score) || 0) - dist[i2]) < 1e-9)
+        setAutoScore(allOne || matchesAuto)
+      }
+      setScope(initialScope || { target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
     }
-  }, [open, initialTitle, initialDescription, initialQuestions])
+  }, [open, initialTitle, initialDescription, initialQuestions, initialSubject, initialKps, initialScope])
 
-  // 学科默认取第一个（与 AI 建测验弹窗一致）：留空太容易漏填，落库就是空学科
+  // 学科默认取第一个（与 AI 建测验弹窗一致）：留空太容易漏填，落库就是空学科。
+  // 编辑模式已带原学科（initialSubject），不兜底覆盖。
   useEffect(() => {
-    if (open && !subject && subjects.length > 0) setSubject(defaultSubject || subjects[0])
-  }, [open, subjects, subject])
+    if (open && !editing && !subject && subjects.length > 0) setSubject(defaultSubject || subjects[0])
+  }, [open, subjects, subject, editing])
 
   /** 自动模式下的每题分值(合计恒为 100); 手动模式用题目自身的 score */
   const autoScores = useMemo(() => distributeScores(questions.length, 100), [questions.length])
@@ -155,7 +184,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     // 校验每道题
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
-      if (!q.question.trim()) {
+      if (!(q.question || '').trim()) {
         message.warning(t('questionContentRequired', { n: i + 1 }))
         return
       }
@@ -167,10 +196,11 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
         message.warning(t('setCorrectAnswer', { n: i + 1 }))
         return
       }
-      // 验证 multiple 题型的答案格式：逗号分隔的选项字母
+      // P0-4: 答案键=位置字母（A/B/C…），与选项内容彻底解耦；
+      // 回填的老卷答案若是"选项首字符"写法，先归一再校验。
+      const validLetters = q.options.map((_, oi) => optionLetter(oi))
       if (q.type === 'multiple') {
         const answerLetters = q.answer.split(',').map(a => a.trim().toUpperCase())
-        const validLetters = q.options.map(o => o.charAt(0).toUpperCase())
         for (const letter of answerLetters) {
           if (!validLetters.includes(letter)) {
             message.warning(t('multiChoiceInvalid', { n: i + 1, letter }))
@@ -180,7 +210,6 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
       }
       if (q.type === 'single') {
         const letter = q.answer.toUpperCase()
-        const validLetters = q.options.map(o => o.charAt(0).toUpperCase())
         if (!validLetters.includes(letter)) {
           message.warning(t('singleChoiceInvalid', { n: i + 1, letter }))
           return
@@ -190,44 +219,41 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
     setSaving(true)
     try {
-      // 自动模式: 把均摊后的分值显式写进题目(后端据此判定"已配过分值"不再覆盖)
-      const payload = questions.map((q, i) => ({ ...q, score: effectiveScore(q, i) }))
+      // 自动模式: 把均摊后的分值显式写进题目(后端据此判定"已配过分值"不再覆盖)。
+      // P0-4: 选项文本剥掉可能残留的 "A. " 前缀；答案统一为位置字母。
+      const payload = questions.map((q, i) => ({
+        ...q,
+        score: effectiveScore(q, i),
+        options: q.type === 'true_false' ? q.options : q.options.map(o => stripOptionPrefix(o)),
+        answer: q.type === 'true_false'
+          ? q.answer
+          : coerceAnswerToLetters(q.answer, q.options.map(o => stripOptionPrefix(o))),
+      }))
       await onSave(title, description, payload, scope, subject, kps, publish)
     } finally {
       setSaving(false)
     }
   }
 
-  const questionTypeLabel = (type: string) => {
-    const map: Record<string, string> = {
-      single: t('quizSingleChoice'),
-      multiple: t('quizMultipleChoice'),
-      true_false: t('trueFalse'),
-    }
-    return map[type] || type
-  }
-
-  const questionTypeColor = (type: string) => {
-    const map: Record<string, string> = {
-      single: 'blue',
-      multiple: 'purple',
-      true_false: 'orange',
-    }
-    return map[type] || 'default'
-  }
-
   return (
     <Modal mask={{ closable: false }}
-      title={<Text strong style={{ fontSize: 18 }}>📝 {t('createQuiz')}</Text>}
+      title={<Text strong style={{ fontSize: 18 }}>{editing ? '✏️' : '📝'} {t(editing ? 'ipEditQuiz' : 'createQuiz')}</Text>}
       open={open}
       onCancel={onCancel}
-      footer={[
+      footer={editing ? [
         <Button key="cancel" onClick={onCancel}>{t('cancel')}</Button>,
-        <Button key="publish" loading={saving} onClick={() => handleSave(true)}>
-          {t('publishNow')}
+        <Button key="update" type="primary" loading={saving} onClick={() => handleSave(true)}>
+          {t('qeSaveChanges')}
         </Button>,
-        <Button key="save" type="primary" loading={saving} onClick={() => handleSave(false)}>
+      ] : [
+        <Button key="cancel" onClick={onCancel}>{t('cancel')}</Button>,
+        // P2-11: 测验建完基本就是要发的 —— 「保存并发布」升为主按钮，
+        // 「存为草稿」降为次要（原设计 primary 在草稿，重点反了）
+        <Button key="save" loading={saving} onClick={() => handleSave(false)}>
           {t('saveDraft')}
+        </Button>,
+        <Button key="publish" type="primary" loading={saving} onClick={() => handleSave(true)}>
+          {t('publishNow')}
         </Button>,
       ]}
       width="min(800px, 94vw)"
@@ -291,7 +317,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
           </Space>
         </div>
         <div style={{ marginTop: 8 }}>
-          <Space>
+          <Space wrap>
             <Button icon={<PlusOutlined />} type="primary" onClick={() => addQuestion('single')}>
               {t('addSingleChoice')}
             </Button>
@@ -301,8 +327,19 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             <Button size="small" icon={<PlusOutlined />} onClick={() => addQuestion('true_false')}>
               {t('addTrueFalse')}
             </Button>
+            {/* P1-8: 测验手动建题此前只能纯手打 —— 与练习的题库优先口径对称，直接勾选题库题目 */}
+            <Button size="small" icon={<SearchOutlined />} onClick={() => setBankOpen(true)}>
+              {t('bankPick')}
+            </Button>
           </Space>
         </div>
+        <QuizBankPicker open={bankOpen} defaultSubject={subject}
+          onCancel={() => setBankOpen(false)}
+          onPick={(qs) => {
+            setQuestions(prev => [...prev, ...qs.map(q => ({ ...q, id: generateId() }))])
+            setBankOpen(false)
+            message.success(t('bankAddedN', { count: qs.length }))
+          }} />
       </div>
 
       {/* 题目列表 */}
@@ -324,7 +361,6 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Space>
                 <Text strong style={{ fontSize: 15 }}>{t('qeQuestionNo', { no: index + 1 })}</Text>
-                <Tag color={questionTypeColor(q.type)}>{questionTypeLabel(q.type)}</Tag>
                 <Select
                   value={q.type}
                   onChange={v => updateQuestion(q.id, 'type', v)}
@@ -362,7 +398,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               rows={2}
               style={{ marginBottom: 4 }}
             />
-            {q.question.trim() && (
+            {(q.question || '').trim() && (
               <div style={{
                 marginBottom: 12, padding: '4px 8px',
                 borderRadius: 4, background: 'var(--bg-container)',
@@ -378,22 +414,22 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               <div style={{ marginBottom: 12 }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('qeOptionsLbl')}</Text>
                 {q.options.map((opt, oi) => (
-                  <div key={oi} style={{ display: 'flex', alignItems: 'center', marginTop: 6 }}>
-                    <Space style={{ flex: 1 }}>
-                      <Input
-                        value={opt}
-                        onChange={e => updateOption(q.id, oi, e.target.value)}
-                        style={{ flex: 1 }}
-                        size="small"
-                        addonBefore={String.fromCharCode(65 + oi)}
+                  <div key={oi} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                    {/* P2-10: addonBefore 已弃用（控制台 error），且与文本里的 "A." 叠加成双字母。
+                        字母=位置的纯文本标签，输入框只放选项内容。 */}
+                    <Text strong style={{ width: 20, textAlign: 'center', flexShrink: 0 }}>{optionLetter(oi)}</Text>
+                    <Input
+                      value={opt}
+                      onChange={e => updateOption(q.id, oi, e.target.value)}
+                      style={{ flex: 1 }}
+                      size="small"
+                    />
+                    {q.options.length > 2 && (
+                      <Button size="small" type="text" danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => removeOption(q.id, oi)}
                       />
-                      {q.options.length > 2 && (
-                        <Button size="small" type="text" danger
-                          icon={<DeleteOutlined />}
-                          onClick={() => removeOption(q.id, oi)}
-                        />
-                      )}
-                    </Space>
+                    )}
                   </div>
                 ))}
                 <Button size="small" type="dashed" icon={<PlusOutlined />}
@@ -420,20 +456,20 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                   onChange={e => updateQuestion(q.id, 'answer', e.target.value)}
                 >
                   {q.options.map((opt, oi) => (
-                    <Radio key={oi} value={opt.charAt(0)}>
-                      {opt.charAt(0)}. {opt.substring(opt.indexOf('.') + 1) || opt}
+                    <Radio key={oi} value={optionLetter(oi)}>
+                      {optionLetter(oi)}. {stripOptionPrefix(opt)}
                     </Radio>
                   ))}
                 </Radio.Group>
               )}
               {q.type === 'multiple' && (
                 <Checkbox.Group
-                  value={q.answer ? q.answer.split(',').map(s => s.trim()) : []}
+                  value={q.answer ? q.answer.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length === 1) : []}
                   onChange={vals => updateQuestion(q.id, 'answer', vals.sort().join(','))}
                 >
                   {q.options.map((opt, oi) => (
-                    <Checkbox key={oi} value={opt.charAt(0)}>
-                      {opt.charAt(0)}. {opt.substring(opt.indexOf('.') + 1) || opt}
+                    <Checkbox key={oi} value={optionLetter(oi)}>
+                      {optionLetter(oi)}. {stripOptionPrefix(opt)}
                     </Checkbox>
                   ))}
                 </Checkbox.Group>
@@ -457,7 +493,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                 placeholder={t('explanationPlaceholder')}
                 size="small"
               />
-              {q.explanation.trim() && (
+              {(q.explanation || '').trim() && (
                 <div style={{
                   marginTop: 4, padding: '4px 8px',
                   borderRadius: 4, background: 'var(--bg-container)',

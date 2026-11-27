@@ -169,13 +169,48 @@ def answer_index_map(raw: Any) -> dict[int, str]:
     return out
 
 
+_LETTERS = "ABCDEFGHIJ"
+
+
+def coerce_choice_answer(value: Any, options: Any) -> str:
+    """把测验选择题答案归一到"位置字母"（A/B/C…）。
+
+    历史口径：选项的"身份"取自选项文本首字符（opt.charAt(0)），老师不带 "A." 前缀
+    出题时答案就变成"光/线"这类汉字首字；两个选项首字符相同还会串答案。
+    新口径（本轮起）：字母=位置，与内容无关。本函数让两代答案互相判分：
+    - 已是合法位置字母（或判断词经 normalize 后的字母）→ 原样；
+    - 老答案命中某选项首字符 → 映射为该选项的位置字母（同名首字符取第一个，
+      与旧 UI"同值即同选项"的行为一致，不引入新的不确定性）；
+    - 其它（简答/填空/无选项）→ 原样返回。
+    """
+    raw = str(value if value is not None else "").strip()
+    if not raw or not isinstance(options, (list, tuple)) or not options:
+        return raw
+    from backend.answer_norm import normalize_answer
+    keys = _LETTERS[:len(options)]
+    norm = (normalize_answer(raw, options) or raw).upper()
+    if norm and all(ch in keys for ch in norm):
+        return norm
+    first_map: dict[str, str] = {}
+    for i, opt in enumerate(options):
+        fc = str(opt)[:1].upper()
+        if fc and fc not in first_map:
+            first_map[fc] = keys[i]
+    out = [ch if ch in keys else first_map.get(ch, ch) for ch in norm]
+    if out and all(len(ch) == 1 for ch in out):
+        return "".join(sorted(set(out)))
+    return norm
+
+
 def is_question_correct(g: Any, user_ans: str, correct_ans: str, q_type: str,
                         options: Any = None) -> bool:
     """该题是否判对: 有留痕以留痕为准, 没留痕(老数据)才按统一归一化重算。"""
     if isinstance(g, dict) and g:
         return bool(g.get("is_correct"))
     from backend.answer_norm import answers_equal
-    return answers_equal(user_ans, correct_ans, options, q_type)
+    # 老卷答案可能是"选项首字符"写法：两边都归一到位置字母再比（P0-4）
+    return answers_equal(coerce_choice_answer(user_ans, options),
+                         coerce_choice_answer(correct_ans, options), options, q_type)
 
 
 def is_pending(g: Any) -> bool:
