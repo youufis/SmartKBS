@@ -9,6 +9,7 @@ import platform
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1744,6 +1745,34 @@ def _read_backup_manifest(backup_dir: Path) -> dict[str, Any]:
         return {}
 
 
+def _clear_readonly(path: str) -> None:
+    """Windows 上只读文件/目录删不掉（WinError 5 拒绝访问），先把只读位清掉"""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+
+
+def _force_rmtree(path: Path) -> None:
+    """删目录树，对只读位免疫
+
+    为什么需要：备份副本是从内容目录拷来的，而 `root\\html\\puzzle\\*.swf` 这类老课件素材
+    常常带只读属性，一旦被带进备份，裸 `shutil.rmtree` 撞上它就整棵删不掉，管理员只看到
+    "删除失败：[WinError 5] 拒绝访问"。清掉只读再重试；仍失败就原样抛出，由调用方报出路径。
+    """
+    def _onerror(func, failed_path, _exc_info):
+        _clear_readonly(failed_path)
+        func(failed_path)
+
+    shutil.rmtree(path, onerror=_onerror)
+
+
+def _force_unlink(path: Path) -> None:
+    """删单个文件，同样先清只读"""
+    _clear_readonly(str(path))
+    path.unlink()
+
+
 def _content_backup_pairs() -> list[tuple[Path, str]]:
     """整站备份要附带的内容目录（相对 STORAGE_DIR 的名字）"""
     names = ("root", "stu", "question_media", "temp_uploads", "chat_assets", "ChatHistory", "kb_files")
@@ -1789,11 +1818,17 @@ def _copy_tree_into(src: Path, dst: Path, limit: int = 200000) -> int:
             if copied >= limit:
                 logger.warning("[备份] %s 文件数超过上限 %d，剩余未拷", src, limit)
                 return copied
+            src_file = Path(root) / name
+            dst_file = dst / rel / name
             try:
-                shutil.copy2(Path(root) / name, dst / rel / name)
+                # 不用 copy2：copystat 会把源文件的只读属性一起带进备份，这份备份以后
+                # 就删不掉了（WinError 5）。备份只保时间戳，属性一律按新建文件走。
+                shutil.copyfile(src_file, dst_file)
+                st = src_file.stat()
+                os.utime(dst_file, (st.st_atime, st.st_mtime))
                 copied += 1
             except Exception as exc:
-                logger.warning("[备份] 拷贝 %s 失败：%s", Path(root) / name, exc)
+                logger.warning("[备份] 拷贝 %s 失败：%s", src_file, exc)
     return copied
 
 
@@ -1818,7 +1853,12 @@ def _restore_content_missing(backup_dir: Path) -> dict[str, int]:
                 if target.exists():
                     continue
                 try:
-                    shutil.copy2(Path(base) / name, target)
+                    # 同 _copy_tree_into：只取内容与时间戳。用 copy2 会把备份里的只读属性
+                    # 带回线上目录，那个文件以后既改不动也删不动。
+                    src_file = Path(base) / name
+                    shutil.copyfile(src_file, target)
+                    st = src_file.stat()
+                    os.utime(target, (st.st_atime, st.st_mtime))
                     copied += 1
                 except Exception as exc:
                     logger.warning("[备份恢复] 补文件 %s 失败：%s", target, exc)
@@ -1940,9 +1980,9 @@ def _prune_backups(keep: int = BACKUP_KEEP_EACH) -> list[str]:
                 continue
             try:
                 tar = old_dir.with_suffix(".tar")
-                shutil.rmtree(old_dir)
+                _force_rmtree(old_dir)
                 if tar.is_file():
-                    tar.unlink()
+                    _force_unlink(tar)
                 removed.append(old_dir.name)
             except OSError as exc:
                 logger.warning("[备份] 清理 %s 失败：%s", old_dir.name, exc)
@@ -2112,11 +2152,18 @@ async def delete_backup(name: str, request: Request):
         except OSError:
             pass
     try:
-        shutil.rmtree(target)
+        _force_rmtree(target)          # 只读文件（老课件素材常见）不再挡住整棵删除
         if tar_path.is_file():
-            tar_path.unlink()
+            _force_unlink(tar_path)
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"删除失败：{exc}")
+        stuck = str(getattr(exc, "filename", "") or "")
+        raise HTTPException(status_code=500, detail=(
+            f"删除失败：{exc}"
+            + (f"（卡在 {stuck}）" if stuck else "")
+            + "。只读属性已自动清除，仍删不掉通常是该文件正被其他程序占用"
+              "（IIS 静态服务、杀毒实时扫描、资源管理器预览）或当前服务账号对该目录没有删除权限；"
+              "可先停掉占用程序再删，或在服务器上手工删除该备份目录。"
+        ))
     freed_mb = round(freed / 1024 / 1024, 2)
     remaining = len([d for d in BACKUP_DIR.iterdir() if d.is_dir()]) if BACKUP_DIR.is_dir() else 0
     logger.warning(f"管理员 {user['username']} 删除数据备份 {name}（释放 {freed_mb} MB，剩余 {remaining} 份）")
@@ -2362,9 +2409,12 @@ async def create_backup(request: Request,
     except Exception as e:
         try:
             if backup_path.is_dir() and not any((backup_path / "protected").glob("*.db")):
-                shutil.rmtree(backup_path, ignore_errors=True)
-        except OSError:
-            pass
+                _force_rmtree(backup_path)
+        except OSError as cleanup_exc:
+            # 半截备份留在盘上既占空间又会出现在备份列表里，必须说出来
+            # （以前 ignore_errors=True 是静默的，磁盘没降还以为删干净了）
+            logger.warning("[备份] 失败备份清理不彻底：%s（%s 可能残留，可在页面上删除或手工清理）",
+                           cleanup_exc, backup_path)
         raise HTTPException(status_code=500, detail=f"备份失败: {str(e)}")
 
 
