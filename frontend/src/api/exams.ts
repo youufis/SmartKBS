@@ -61,6 +61,18 @@ export async function publishExam(examId: number): Promise<{ message: string }> 
   return data;
 }
 
+/** 发布前确认单：卷面体检 + 时间窗 + 通知人数（与后端 publish 同源判定） */
+export async function getPublishCheck(examId: number): Promise<any> {
+  const { data } = await apiClient.get(`/api/exams/${examId}/publish-check`);
+  return data;
+}
+
+/** 撤回发布：仅零答卷时允许，回到草稿 */
+export async function unpublishExam(examId: number): Promise<{ message: string; status: string }> {
+  const { data } = await apiClient.put(`/api/exams/${examId}/unpublish`);
+  return data;
+}
+
 /** 结束考试 */
 export async function endExam(examId: number): Promise<{ message: string }> {
   const { data } = await apiClient.put(`/api/exams/${examId}/end`);

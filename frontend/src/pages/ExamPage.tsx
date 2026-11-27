@@ -9,7 +9,7 @@ import {
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
   DownloadOutlined, BulbOutlined, FileOutlined, RobotOutlined,
   FileTextOutlined, ThunderboltOutlined,
-  WarningOutlined,
+  WarningOutlined, UndoOutlined, PictureOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import PageHeader from '../components/PageHeader'
@@ -27,7 +27,7 @@ import FormulaRenderer from '../components/FormulaRenderer'
 import ScopeTag from '../components/ScopeTag'
 import NarrowTable from '../components/NarrowTable'
 import MediaDisplay from '../components/MediaDisplay'
-import { TYPE_OPTIONS } from '../constants/questionTypes'
+import { TYPE_OPTIONS, TYPE_LABELS } from '../constants/questionTypes'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import KnowledgePointSelect from '../components/KnowledgePointSelect'
@@ -69,7 +69,7 @@ const ExamPage: React.FC = () => {
       essay: t('essay'),
       subjective: t('subjective'),
     }
-    return map[type] || type
+    return map[type] || TYPE_LABELS[type] || type
   }
 
   // 难度标签映射
@@ -147,6 +147,10 @@ const ExamPage: React.FC = () => {
   const [qType, setQType] = useState<string>()
   const [qDifficulty, setQDifficulty] = useState<string>()
   const [qKeyword, setQKeyword] = useState('')
+  // S-EXAM(问题2): 题库筛选补维度 —— 知识点(与智能选题同款)、排序、隐藏已加入
+  const [qKp, setQKp] = useState('')
+  const [qSort, setQSort] = useState<'created_at' | 'updated_at'>('created_at')
+  const [qHideAdded, setQHideAdded] = useState(false)
   const [autoSelectForm] = Form.useForm()
   const [autoSelecting, setAutoSelecting] = useState(false)
   // 智能选题的知识点候选跟随所选学科过滤（下拉选课程知识点 + 手输关键词）
@@ -445,6 +449,39 @@ const ExamPage: React.FC = () => {
     }
   }
 
+  // ── S-EXAM: 发布前确认单 / 零答卷撤回 ──
+  const [pubCheck, setPubCheck] = useState<any | null>(null)
+  const [pubCheckExam, setPubCheckExam] = useState<ExamInfo | null>(null)
+  const [pubPublishing, setPubPublishing] = useState(false)
+  const openPublishCheck = async (exam: ExamInfo) => {
+    setPubCheckExam(exam)
+    setPubCheck(null)
+    try {
+      setPubCheck(await examsApi.getPublishCheck(exam.id))
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('publishCheckFailed'))
+      setPubCheckExam(null)
+    }
+  }
+  const closePubCheck = () => { setPubCheck(null); setPubCheckExam(null) }
+  const confirmPublish = async () => {
+    if (!pubCheckExam) return
+    setPubPublishing(true)
+    try {
+      await handlePublish(pubCheckExam.id)
+      closePubCheck()
+    } finally { setPubPublishing(false) }
+  }
+  const handleUnpublish = async (id: number) => {
+    try {
+      const res = await examsApi.unpublishExam(id)
+      message.success(res?.message || t('unpublishDone'))
+      loadExams()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('unpublishFailed'))
+    }
+  }
+
   const handleEnd = async (id: number) => {
     try {
       const res = await examsApi.endExam(id)
@@ -502,6 +539,9 @@ const ExamPage: React.FC = () => {
         subject: qSubject || undefined,
         type: qType || undefined,
         difficulty: qDifficulty || undefined,
+        knowledge_points: qKp || undefined,
+        sort: qSort,
+        order: 'desc',
       })
       setAllQuestions(res.questions || [])
       setQTotal(res.total || 0)
@@ -516,7 +556,7 @@ const ExamPage: React.FC = () => {
     const fn = async () => { if (questionModal) { loadAllQuestions(1) } }
     fn()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [questionModal, qSubject, qType, qDifficulty])
+  }, [questionModal, qSubject, qType, qDifficulty, qKp, qSort])
 
   // ── 计算当前总分 ──
   const currentTotal = Object.values(scoreInputs).reduce((s, v) => s + (Number(v) || 0), 0)
@@ -990,13 +1030,11 @@ const ExamPage: React.FC = () => {
                     style={{ color: '#722ed1' }}
                     onClick={() => handleComposeExam(record.id)} />
                 </Tooltip>
-                <Popconfirm title={t('confirmPublish')} description={t('publishDesc')}
-                  onConfirm={() => handlePublish(record.id)} okText={t('publish')} cancelText={t('cancel')}>
-                  <Tooltip title={t('publish')}>
-                    <Button type="link" size="small" icon={<PlayCircleOutlined />}
-                      style={{ color: '#52c41a' }} />
-                  </Tooltip>
-                </Popconfirm>
+                {/* S-EXAM: 一按即发 → 发布前确认单（体检/时间窗/通知人数/Word 预览） */}
+                <Tooltip title={t('publish')}>
+                  <Button type="link" size="small" icon={<PlayCircleOutlined />}
+                    style={{ color: '#52c41a' }} onClick={() => void openPublishCheck(record)} />
+                </Tooltip>
                 <Popconfirm title={t('confirmDelete')} onConfirm={() => handleDelete(record.id)}
                   okText={t('confirm')} cancelText={t('cancel')}>
                   <Tooltip title={t('deleteExam')}>
@@ -1020,6 +1058,13 @@ const ExamPage: React.FC = () => {
                   <Button type="link" size="small" icon={<BarChartOutlined />}
                     onClick={() => handleViewResults(record)} />
                 </Tooltip>
+                {/* S-EXAM(P1): 误发布救急 —— 零答卷才能撤回为草稿，后端二次校验 */}
+                <Popconfirm title={t('confirmUnpublish')} description={t('unpublishDesc')}
+                  onConfirm={() => handleUnpublish(record.id)} okText={t('confirm')} cancelText={t('cancel')}>
+                  <Tooltip title={t('unpublish')}>
+                    <Button type="link" size="small" icon={<UndoOutlined />} />
+                  </Tooltip>
+                </Popconfirm>
                 <Popconfirm title={t('confirmEnd')} description={t('endDesc')}
                   onConfirm={() => handleEnd(record.id)} okText={t('end')} cancelText={t('cancel')}>
                   <Tooltip title={t('endExam')}>
@@ -1537,6 +1582,58 @@ const ExamPage: React.FC = () => {
         </Form>
       </Modal>
 
+      {/* ── S-EXAM: 发布前确认单 ── */}
+      <Modal title={<Space><SafetyCertificateOutlined />{t('publishCheckTitle')}</Space>}
+        open={!!pubCheckExam} onCancel={closePubCheck} width={720}
+        footer={[
+          <Button key="preview" icon={<FileTextOutlined />} disabled={!pubCheck?.structure?.length}
+            onClick={() => pubCheckExam && window.open(examsApi.getExportPaperUrl(pubCheckExam.id), '_blank')}>
+            {t('previewPaper')}
+          </Button>,
+          <Button key="manage" icon={<OrderedListOutlined />}
+            onClick={() => { const e = pubCheckExam; closePubCheck(); if (e) void handleManageQuestions(e) }}>
+            {t('goManageQ')}
+          </Button>,
+          <Tooltip key="tip" title={pubCheck && !pubCheck.can_publish ? t('publishBlockedTip') : ''}>
+            <Button type="primary" icon={<PlayCircleOutlined />} loading={pubPublishing}
+              disabled={!pubCheck || !pubCheck.can_publish} onClick={confirmPublish}>
+              {t('confirmPublishBtn')}
+            </Button>
+          </Tooltip>,
+        ]}>
+        <Spin spinning={!pubCheck}>
+          {pubCheck && (
+            <>
+              {!!pubCheck.blockers?.length && (
+                <Alert type="error" showIcon style={{ marginBottom: 10 }} message={t('pbBlockers')}
+                  description={<ul style={{ margin: 0, paddingLeft: 18 }}>{pubCheck.blockers.map((b: string, i: number) => <li key={i}>{b}</li>)}</ul>} />
+              )}
+              {!!pubCheck.warnings?.length && (
+                <Alert type="warning" showIcon style={{ marginBottom: 10 }} message={t('pbWarns')}
+                  description={<ul style={{ margin: 0, paddingLeft: 18 }}>{pubCheck.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}</ul>} />
+              )}
+              {!pubCheck.blockers?.length && !pubCheck.warnings?.length && (
+                <Alert type="success" showIcon style={{ marginBottom: 10 }} message={t('pbAllClear')} />
+              )}
+              <Space wrap size={8} style={{ marginBottom: 10 }}>
+                <Tag>{t('duration')}: {pubCheck.duration}</Tag>
+                <Tag>{t('pbWindow')}: {String(pubCheck.start_time || '').slice(0, 16) || '-'} ~ {String(pubCheck.end_time || '').slice(0, 16) || '-'}</Tag>
+                <Tag color="blue">{t('pbTotals')}: {pubCheck.paper_total}/{pubCheck.target_total}{pubCheck.pass_score ? ` · ${t('passScoreShort')}${pubCheck.pass_score}` : ''}</Tag>
+                <Tag color={pubCheck.target_count === 0 ? 'red' : pubCheck.target_count < 0 ? 'orange' : 'green'}>
+                  {pubCheck.target_count < 0 ? t('notifyUnknown') : t('willNotifyN', { n: pubCheck.target_count })}
+                </Tag>
+              </Space>
+              <Table dataSource={pubCheck.structure || []} rowKey="type" size="small" pagination={false}
+                columns={[
+                  { title: t('questionType'), dataIndex: 'label' },
+                  { title: t('questionCount'), dataIndex: 'count', width: 90 },
+                  { title: t('pbScoreSubtotal'), dataIndex: 'score_total', width: 120 },
+                ]} />
+            </>
+          )}
+        </Spin>
+      </Modal>
+
       {/* ── 题目管理弹窗 ── */}
       <Modal title={`${t('manageQuestions')} - ${questionExam?.title || ''}`}
         open={questionModal}
@@ -1716,7 +1813,13 @@ const ExamPage: React.FC = () => {
                 { title: t('questionType'), dataIndex: 'type', width: 70,
                   // 题型是后台可配的，硬编码四种会把填空/作文/编程一律显示成"简答"
                   render: (v: string) => <Tag>{typeLabel(v)}</Tag> },
-                { title: t('questionText'), dataIndex: 'question_text', ellipsis: true },
+                // S-EXAM(问题2): 两行 clamp + 公式渲染 —— 不再把 $...$ 源码省略成一行
+                { title: t('questionText'), dataIndex: 'question_text',
+                  render: (v: string) => (
+                    <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+                      <FormulaRenderer content={String(v || '')} inline />
+                    </div>
+                  ) },
                 { title: t('scorePerQuestion'), dataIndex: 'question_score', width: 100,
                   render: (_: any, rec: any) => (
                     <InputNumber
@@ -1872,6 +1975,22 @@ const ExamPage: React.FC = () => {
               <Option value="medium">{t('medium')}</Option>
               <Option value="hard">{t('hard')}</Option>
             </Select>
+            <KnowledgePointSelect
+              multiple={false}
+              value={qKp}
+              onChange={(v) => { setQKp(String(v || '')); setQPage(1) }}
+              subject={qSubject || ''}
+              placeholder={t('kpFilter')}
+              style={{ width: 180 }}
+            />
+            <Select style={{ width: 110 }} value={qSort}
+              onChange={(v) => { setQSort(v); setQPage(1) }}>
+              <Option value="created_at">{t('sortCreatedDesc')}</Option>
+              <Option value="updated_at">{t('sortUpdatedDesc')}</Option>
+            </Select>
+            <Checkbox checked={qHideAdded} onChange={(e) => setQHideAdded(e.target.checked)}>
+              {t('hideAddedQs')}
+            </Checkbox>
             <Input.Search placeholder={t('searchQuestions')} allowClear
               value={qKeyword}
               onChange={(e) => setQKeyword(e.target.value)}
@@ -1884,7 +2003,7 @@ const ExamPage: React.FC = () => {
               {hasDuplicatesInSelection && <Typography.Text style={{ marginLeft: 4, fontSize: 11, opacity: 0.8 }}>({t('newCount', { count: newSelectedIds.length })})</Typography.Text>}
             </Button>
           </Space>
-          <Table dataSource={allQuestions} rowKey="id" size="small"
+          <Table dataSource={qHideAdded ? allQuestions.filter((q: any) => !existingQuestionIds.has(q.id)) : allQuestions} rowKey="id" size="small"
             pagination={{ current: qPage, pageSize: 10, total: qTotal, showSizeChanger: false, showTotal: (total) => t('totalQuestions', { count: total }),
               onChange: (page) => loadAllQuestions(page)
             }}
@@ -1898,12 +2017,15 @@ const ExamPage: React.FC = () => {
             columns={[
               { title: t('questionType'), dataIndex: 'type', width: 70,
                 render: (t: string) => <Tag>{typeLabel(t)}</Tag> },
-              { title: t('questionText'), dataIndex: 'question_text', ellipsis: true,
+              { title: t('questionText'), dataIndex: 'question_text',
                 render: (text: string, record: any) => (
-                  <span style={{ color: existingQuestionIds.has(record.id) ? '#bbb' : undefined }}>
+                  <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word', color: existingQuestionIds.has(record.id) ? '#bbb' : undefined }}>
                     {existingQuestionIds.has(record.id) && <Tag color="default" style={{ marginRight: 4, fontSize: 11 }}>{t('added')}</Tag>}
-                    {text}
-                  </span>
+                    {(record.has_svg || record.svg_content) && (
+                      <Tooltip title={t('hasFigure')}><PictureOutlined style={{ marginRight: 4, color: '#722ed1' }} /></Tooltip>
+                    )}
+                    <FormulaRenderer content={String(text || '')} inline />
+                  </div>
                 ),
               },
               { title: t('knowledgePoints'), dataIndex: 'knowledge_points', width: 150, ellipsis: true },

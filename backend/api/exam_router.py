@@ -823,6 +823,161 @@ async def publish_exam(exam_id: int, request: Request):
     return {"message": "考试已发布"}
 
 
+# ══════════════════════════════════════════════════════════════
+# S-EXAM: 发布前确认单 + 零答卷撤回
+# ══════════════════════════════════════════════════════════════
+
+def _publish_structure_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """卷面题目行 →「题型×数量×分值」摘要，按卷面出现顺序。纯函数可直接单测。
+
+    标签走 question_type_label —— 与 Word/Excel 导出同一口径，不再裸 key。
+    """
+    from backend.question_labels import question_type_label
+    by_type: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        tk = str(r.get("type") or "")
+        if not tk:
+            continue
+        one = by_type.setdefault(tk, {"type": tk, "label": question_type_label(tk) or tk,
+                                      "count": 0, "score_total": 0.0})
+        one["count"] += 1
+        one["score_total"] = round(one["score_total"] + float(r.get("score") or 0), 1)
+    return list(by_type.values())
+
+
+def _publish_window_advisories(exam: dict[str, Any],
+                               now: datetime | None = None) -> tuple[list[str], list[str]]:
+    """时间窗/时长体检 → (阻断, 提醒)。纯函数。
+
+    旧流程里"发布时 end_time 早已过期"要等学生进不去、教师来回排查才发现；
+    这里在发布确认单直接红字阻断。时长 <5 或 >300 分钟按疑似填错提醒。
+    """
+    blockers: list[str] = []
+    warns: list[str] = []
+
+    def _dt(v: Any) -> datetime | None:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+            try:
+                return datetime.strptime(str(v or "").strip(), fmt)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    st, et = _dt(exam.get("start_time")), _dt(exam.get("end_time"))
+    now = now or datetime.now()
+    if et and et <= now:
+        blockers.append(f"考试结束时间（{et:%m-%d %H:%M}）已过，发布后没有学生能作答，请先在「编辑考试」里调整时间")
+    if st and et and st >= et:
+        blockers.append("开始时间不早于结束时间，时间窗口无效")
+    try:
+        dur = float(exam.get("duration") or 0)
+    except (TypeError, ValueError):
+        dur = 0
+    if 0 < dur < 5:
+        warns.append(f"考试时长仅 {dur:g} 分钟，疑似填错")
+    elif dur > 300:
+        warns.append(f"考试时长 {dur:g} 分钟（超过 5 小时），请确认是否填错")
+    return blockers, warns
+
+
+def _unpublish_block_reason(started: int) -> str:
+    """撤回判定（纯函数）：任何答卷存在（含在动作答）即不可撤回。
+
+    拍板：有人动过笔就不给撤——答卷/通知/积分账目都已挂上，那种场景走「结束考试」。
+    """
+    if started > 0:
+        return f"已有 {started} 份答卷（含未交卷的在动作答），不能撤回发布，请改用「结束考试」"
+    return ""
+
+
+@router.get("/{exam_id}/publish-check", summary="发布前确认单：卷面体检 + 时间窗 + 通知对象人数")
+async def publish_check(exam_id: int, request: Request):
+    """把发布要用到的全部判定收进一张确认单（与 publish 端点同源，不会两套口径）：
+
+    - 卷面体检复用 _paper_preflight（= publish 的拦截条件本身）；
+    - 时间窗/时长走 _publish_window_advisories；
+    - 卷面结构 = paper_rows 按题型汇总；
+    - 通知人数 = permission_service.get_students_by_scope（学生真正会收到通知的那份名单）。
+    """
+    user = get_current_user(request)
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+    if not _can_manage_exam(user["username"], exam):
+        raise HTTPException(status_code=403, detail="无权查看此考试")
+
+    blockers = _paper_preflight(exam)
+    win_b, win_w = _publish_window_advisories(exam)
+    blockers += win_b
+    warns = list(win_w)
+
+    structure = _publish_structure_summary(exam_scoring.paper_rows(exam_id))
+    paper_total = exam_scoring.paper_total(exam_id)
+
+    target_count = -1
+    try:
+        from backend.permission_service import get_students_by_scope
+        students = get_students_by_scope(
+            exam.get("creator_username", "") or "",
+            target_scope=exam.get("target_scope", "teacher_classes") or "teacher_classes",
+            target_grade=exam.get("target_grade", "") or "",
+            target_class=exam.get("target_class", "") or "",
+            target_users=exam.get("target_users", "") or "",
+        )
+        target_count = len(students or [])
+    except Exception as sc_err:
+        logger.warning(f"[publish-check] 目标人数计算失败 exam={exam_id}: {sc_err}")
+    if target_count == 0:
+        warns.append("目标范围内没有学生，发布后不会有任何人收到通知，请检查「编辑考试」的目标范围")
+
+    return {
+        "status": exam.get("status"),
+        "title": exam.get("title"),
+        "can_publish": exam.get("status") == "draft" and not blockers,
+        "blockers": blockers,
+        "warnings": warns,
+        "structure": structure,
+        "paper_total": paper_total,
+        "target_total": round(float(exam.get("total_score") or 0), 1),
+        "pass_score": round(float(exam.get("pass_score") or 0), 1),
+        "duration": exam.get("duration"),
+        "start_time": exam.get("start_time") or "",
+        "end_time": exam.get("end_time") or "",
+        "target_count": target_count,
+    }
+
+
+@router.put("/{exam_id}/unpublish", summary="撤回已发布的考试（仅零答卷时允许）")
+async def unpublish_exam(exam_id: int, request: Request):
+    """误发布救急：已发布且没有任何答卷（含 in_progress/grading/submitted）才可撤回为草稿。
+
+    零答卷意味着没有学生被打扰过 —— 不需要补发"取消"通知，学生端列表自然消失即可。
+    有人动过笔时撤回会把答卷/成绩/通知变成无主数据，一律拒绝并引导走「结束考试」。
+    """
+    user = get_current_user(request)
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+    if not _can_manage_exam(user["username"], exam):
+        raise HTTPException(status_code=403, detail="无权操作此考试")
+    if exam.get("status") != "published":
+        raise HTTPException(status_code=400, detail="只有已发布的考试可以撤回")
+
+    started = execute_query_one(
+        """SELECT COUNT(*) AS c FROM exam_attempts
+           WHERE exam_id = ? AND status IN ('in_progress','grading','submitted')""",
+        (exam_id,),
+    )
+    reason = _unpublish_block_reason(int((started or {}).get("c") or 0))
+    if reason:
+        raise HTTPException(status_code=409, detail=reason)
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update("UPDATE exams SET status = 'draft', updated_at = ? WHERE id = ?", (now, exam_id))
+    logger.info(f"用户 {user['username']} 撤回考试发布: {exam['title']} (id={exam_id})")
+    return {"message": "已撤回为草稿，学生端不再显示该考试", "status": "draft"}
+
+
 @router.put("/{exam_id}/end")
 async def end_exam(exam_id: int, request: Request):
     """结束考试"""
