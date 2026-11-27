@@ -295,6 +295,8 @@
   "smartSelect": "Smart Compose",
   "smartSelectSub": "rule-based pick",
   "autoSelect": "Auto Select",
+  "engineRules": "Rules",
+  "engineAi": "AI",
   "questionTypeAny": "All Types",
   "keywordPlaceholder": "Enter knowledge keyword",
   "selectCount": "Select Count",

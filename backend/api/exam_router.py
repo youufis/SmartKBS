@@ -1399,10 +1399,12 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
     q_types = tuple(x for x in asked_types if exam_scoring.is_gradable(x)) or exam_scoring.GRADABLE_TYPES
     want = max(1, min(req.count, 200))
     easy_r, medium_r, hard_r = difficulty_split(req.difficulty or "")
+    # 合并卡知识点改多选串：与 ai-compose 的 knowledge_focus 同一套切词，列表在候选池做并集召回
+    kp_terms = [x for x in re.split(r"[,，、;；/|\s]+", req.knowledge_keyword or "") if x]
     pool, audit = get_question_pool(
         subject=req.subject or "",
         exclude_ids=set(existing_ids),
-        knowledge_points=[req.knowledge_keyword] if req.knowledge_keyword else None,
+        knowledge_points=kp_terms or None,
         types=q_types, seed="exam:%s" % exam_id, with_audit=True,
     )
     if not pool and not req.fill_by_ai:
@@ -1425,7 +1427,7 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
                 gap_types,
                 subject=str(req.subject or exam.get("subject") or ""),
                 difficulty=str(req.difficulty or "medium"),
-                knowledge_points=[req.knowledge_keyword] if req.knowledge_keyword else [],
+                knowledge_points=kp_terms,
                 username=username,
             )
             picked.extend(more)
@@ -3478,6 +3480,8 @@ class AIComposeRequest(BaseModel):
     knowledge_focus: str = ""
     question_types: list[str] | None = None
     difficulty: str | None = None
+    # 合并卡带入的学科；留空=跟随考试学科（与规则选题口径对齐，旧实现只能用考试学科）
+    subject: str = ""
     # 题库凑不够配额时是否让 AI 补差（默认关，同 AutoSelectRequest.fill_by_ai）
     fill_by_ai: bool = False
     # 旧字段 difficulty_distribution: str = "easy:medium:hard = 2:5:3" 声明了却从没被读过
@@ -3560,7 +3564,7 @@ async def _run_ai_compose(exam_id: int, req: AIComposeRequest, exam: dict[str, A
         raise HTTPException(status_code=400, detail="未配置 API Key，无法使用 AI 生成；可改用「自动选题」")
 
     pool, audit = get_question_pool(
-        subject=str(exam.get("subject") or ""),
+        subject=str(req.subject or exam.get("subject") or ""),
         exclude_ids={r["question_id"] for r in execute_query(
             "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []},
         knowledge_points=focus or None,
@@ -3588,7 +3592,7 @@ async def _run_ai_compose(exam_id: int, req: AIComposeRequest, exam: dict[str, A
         if gap_types:
             more, ai_notes = await ai_fill_gap(
                 gap_types,
-                subject=str(exam.get("subject") or ""),
+                subject=str(req.subject or exam.get("subject") or ""),
                 difficulty=str(req.difficulty or "medium"),
                 knowledge_points=list(focus or []),
                 username=username,

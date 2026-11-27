@@ -295,6 +295,8 @@
   "smartSelect": "智能组卷",
   "smartSelectSub": "按条件自动挑题",
   "autoSelect": "自动选题",
+  "engineRules": "规则选题",
+  "engineAi": "AI 选题",
   "questionTypeAny": "全部题型",
   "keywordPlaceholder": "输入知识点关键词",
   "selectCount": "选题数量",

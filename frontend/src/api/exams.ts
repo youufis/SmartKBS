@@ -198,6 +198,8 @@ export async function aiComposeExam(
     difficulty?: string;
     /** 同「自动选题」：勾选后题库不够的部分由 AI 补题并入题库 */
     fill_by_ai?: boolean;
+    /** 合并卡带入的学科；留空=跟随考试学科 */
+    subject?: string;
   },
   onProgress?: (p: AiTaskProgress) => void,
 ): Promise<AiComposeResult> {

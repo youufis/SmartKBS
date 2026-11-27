@@ -156,14 +156,9 @@ const ExamPage: React.FC = () => {
   // 智能选题的知识点候选跟随所选学科过滤（下拉选课程知识点 + 手输关键词）
   const autoSelectSubject = Form.useWatch('subject', autoSelectForm) as string | undefined
 
-  // ── AI 智能组卷 ──
+  // ── 智能组卷（合并后：一套条件，规则/AI 两个引擎就地切换） ──
+  const [composeEngine, setComposeEngine] = useState<'rules' | 'ai'>('rules')
   const [aiComposing, setAiComposing] = useState(false)
-  const [aiComposeCount, setAiComposeCount] = useState(10)
-  // 与「自动选题」同一个开关：题库凑不够配额时是否让 AI 按缺口补题（默认关）
-  const [aiComposeFill, setAiComposeFill] = useState(false)
-  const [aiComposeFocus, setAiComposeFocus] = useState<string[]>([])
-  const [aiComposeTypes, setAiComposeTypes] = useState<string[]>([])
-  const [aiComposeDifficulty, setAiComposeDifficulty] = useState<string>()
   const [aiComposeNote, setAiComposeNote] = useState('')
 
   // ── 成绩查看弹窗 ──
@@ -504,6 +499,8 @@ const ExamPage: React.FC = () => {
     setSelectedQIds([])
     setQPage(1)
     setScoreInputs({})
+    // 合并卡默认按考试学科起题（可手动清空）
+    autoSelectForm.setFieldsValue({ subject: exam.subject || undefined })
     await loadExamQuestions(exam.id)
   }
 
@@ -791,7 +788,7 @@ const ExamPage: React.FC = () => {
         subject: values.subject || undefined,
         question_types: values.question_types?.length ? values.question_types : undefined,
         difficulty: values.difficulty || undefined,
-        knowledge_keyword: values.knowledge_keyword || undefined,
+        knowledge_keyword: (values.knowledge_keyword || []).join('、') || undefined,
         count: values.count || 10,
         exclude_existing: true,
         fill_by_ai: values.fill_by_ai === true,
@@ -817,14 +814,19 @@ const ExamPage: React.FC = () => {
   // ── AI 智能组卷 ──
   const handleAiCompose = async () => {
     if (!questionExam) return
+    let values: any
+    try {
+      values = await autoSelectForm.validateFields()
+    } catch { return }   // 表单校验失败交给 antd 标红字段
     setAiComposing(true)
     try {
       const data = await examsApi.aiComposeExam(questionExam.id, {
-        target_count: aiComposeCount,
-        knowledge_focus: aiComposeFocus.join('、'),
-        question_types: aiComposeTypes.length ? aiComposeTypes : undefined,
-        difficulty: aiComposeDifficulty || undefined,
-        fill_by_ai: aiComposeFill,
+        target_count: values.count || 10,
+        knowledge_focus: (values.knowledge_keyword || []).join('、'),
+        question_types: values.question_types?.length ? values.question_types : undefined,
+        difficulty: values.difficulty || undefined,
+        fill_by_ai: values.fill_by_ai === true,
+        subject: values.subject || undefined,
       }, (p: AiTaskProgress) => setAiComposeNote(p?.message || ''))
       message.success(data.message || t('composeSuccess'))
       if (data.ai_filled) message.info(t('aiFilledNotice', { n: data.ai_filled }))
@@ -1861,13 +1863,23 @@ const ExamPage: React.FC = () => {
           {/* ── 智能选题卡片 ── */}
           <Card
             size="small"
-            title={<Space><FileAddOutlined />{t('smartSelect')} <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>{t('smartSelectSub')}</Typography.Text></Space>}
+            title={<Space><FileAddOutlined />{t('smartSelect')}</Space>}
             style={{ marginBottom: 16, background: '#fafaff', border: '1px solid #1677ff22' }}
             extra={
-              <Button type="primary" size="small" icon={<FileAddOutlined />}
-                loading={autoSelecting} onClick={handleAutoSelect}>
-                {t('autoSelect')}
-              </Button>
+              <Space size={8}>
+                {/* S-EXAM(合并): 原先两张卡共用同一条 召回→配额→入卷→配平 流水线，
+                    只差最后一步谁挑题，拆两卡是历史冗余 —— 合并为一卡，引擎就地切换 */}
+                <Segmented size="small" value={composeEngine}
+                  onChange={(v) => setComposeEngine(v as 'rules' | 'ai')}
+                  options={[{ value: 'rules', label: t('engineRules') },
+                            { value: 'ai', label: t('engineAi') }]} />
+                <Button type="primary" size="small"
+                  icon={composeEngine === 'ai' ? <RobotOutlined /> : <FileAddOutlined />}
+                  loading={composeEngine === 'ai' ? aiComposing : autoSelecting}
+                  onClick={() => (composeEngine === 'ai' ? void handleAiCompose() : void handleAutoSelect())}>
+                  {composeEngine === 'ai' ? t('aiComposeButton') : t('autoSelect')}
+                </Button>
+              </Space>
             }
           >
             {/* S-EXAM: 竖排网格（标签在上、控件在下、等宽自适应）—— 旧 inline 排版
@@ -1893,10 +1905,10 @@ const ExamPage: React.FC = () => {
                   <Option value="hard">{t('hard')}</Option>
                 </Select>
               </Form.Item>
-              {/* 与试题管理同款控件：下拉选课程知识点 + 手输；单个值（多选会把"或"语义变成"与"） */}
+              {/* 下拉选课程知识点 + 手输；多选。两引擎后端都按知识点列表做并集召回
+                  （旧单选是"或/与"顾虑下的保守值，实际候选池语义就是并集） */}
               <Form.Item name="knowledge_keyword" label={t('knowledgePoints')} style={{ marginBottom: 8 }}>
                 <KnowledgePointSelect
-                  multiple={false}
                   subject={autoSelectSubject || ''}
                   placeholder={t('keywordPlaceholder')}
                   style={{ width: '100%' }}
@@ -1912,77 +1924,13 @@ const ExamPage: React.FC = () => {
                 <Checkbox>{t('fillByAi')}</Checkbox>
               </Form.Item>
             </Form>
+            {composeEngine === 'ai' && aiComposing && (
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+                <ThunderboltOutlined spin /> {aiComposeNote || t('aiComposing')}
+              </Typography.Text>
+            )}
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-              {t('smartSelectHint')}
-            </Typography.Text>
-          </Card>
-
-          {/* ── AI 智能组卷卡片 ── */}
-          <Card
-            size="small"
-            title={<Space><RobotOutlined />{t('aiCompose')} <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>{t('aiComposeSub')}</Typography.Text></Space>}
-            style={{ marginBottom: 16, background: '#f0fff0', border: '1px solid #52c41a44' }}
-            extra={
-              <Button type="primary" size="small" icon={<RobotOutlined />}
-                loading={aiComposing} onClick={handleAiCompose}
-                disabled={!questionExam?.id}>
-                {t('aiComposeButton')}
-              </Button>
-            }
-          >
-            {/* 与「自动选题」同一套筛选条件：题型与难度会真的决定候选池与配额，
-                不再只是塞进 prompt（旧实现候选池是 subject 精确等值 + ORDER BY difficulty） */}
-            {/* S-EXAM: 与「自动选题」同款竖排网格 —— 旧 Space wrap 会把"知识点聚焦"
-                的标签留在上一行、控件掉到下一行，宽窄不一，整卡错乱 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '2px 12px' }}>
-              <div>
-                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('targetCount')}</div>
-                <InputNumber size="small" min={1} max={100} value={aiComposeCount}
-                  onChange={(v) => setAiComposeCount(v || 10)} style={{ width: '100%' }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('questionType')}</div>
-                <Select size="small" allowClear mode="multiple" placeholder={t('questionTypeAny')}
-                  value={aiComposeTypes} onChange={(v) => setAiComposeTypes(v || [])}
-                  maxTagCount={2} style={{ width: '100%' }}>
-                  {TYPE_OPTIONS.map(opt => (
-                    <Option key={opt.value} value={opt.value}>{opt.label}</Option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('difficulty')}</div>
-                <Select size="small" allowClear placeholder={t('difficultyAny')}
-                  value={aiComposeDifficulty} onChange={(v) => setAiComposeDifficulty(v)}
-                  style={{ width: '100%' }}>
-                  <Option value="easy">{t('easy')}</Option>
-                  <Option value="medium">{t('medium')}</Option>
-                  <Option value="hard">{t('hard')}</Option>
-                </Select>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.95)', marginBottom: 2 }}>{t('knowledgeFocus')}</div>
-                <KnowledgePointSelect
-                  subject={questionExam?.subject || ''}
-                  value={aiComposeFocus}
-                  onChange={(v) => setAiComposeFocus(Array.isArray(v) ? v.map(String) : (v ? [String(v)] : []))}
-                  placeholder={t('aiComposePlaceholder')}
-                  style={{ width: '100%' }}
-                />
-              </div>
-            </div>
-            <Space wrap size={12} style={{ marginTop: 8, alignItems: 'center' }}>
-              <Checkbox checked={aiComposeFill} onChange={(e) => setAiComposeFill(e.target.checked)}>
-                {t('fillByAi')}
-              </Checkbox>
-              {aiComposing && (
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  <ThunderboltOutlined spin /> {aiComposeNote || t('aiComposing')}
-                </Typography.Text>
-              )}
-            </Space>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-              {t('aiComposeHint')}
+              {composeEngine === 'ai' ? t('aiComposeHint') : t('smartSelectHint')}
             </Typography.Text>
           </Card>
 
