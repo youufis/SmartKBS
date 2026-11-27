@@ -161,7 +161,7 @@ const ExamPage: React.FC = () => {
   const [aiComposeCount, setAiComposeCount] = useState(10)
   // 与「自动选题」同一个开关：题库凑不够配额时是否让 AI 按缺口补题（默认关）
   const [aiComposeFill, setAiComposeFill] = useState(false)
-  const [aiComposeFocus, setAiComposeFocus] = useState('')
+  const [aiComposeFocus, setAiComposeFocus] = useState<string[]>([])
   const [aiComposeTypes, setAiComposeTypes] = useState<string[]>([])
   const [aiComposeDifficulty, setAiComposeDifficulty] = useState<string>()
   const [aiComposeNote, setAiComposeNote] = useState('')
@@ -821,7 +821,7 @@ const ExamPage: React.FC = () => {
     try {
       const data = await examsApi.aiComposeExam(questionExam.id, {
         target_count: aiComposeCount,
-        knowledge_focus: aiComposeFocus,
+        knowledge_focus: aiComposeFocus.join('、'),
         question_types: aiComposeTypes.length ? aiComposeTypes : undefined,
         difficulty: aiComposeDifficulty || undefined,
         fill_by_ai: aiComposeFill,
@@ -1951,9 +1951,15 @@ const ExamPage: React.FC = () => {
                 <Option value="hard">{t('hard')}</Option>
               </Select>
               <Typography.Text style={{ fontSize: 13 }}>{t('knowledgeFocus')}</Typography.Text>
-              <Input size="small" value={aiComposeFocus}
-                onChange={(e) => setAiComposeFocus(e.target.value)}
-                placeholder={t('aiComposePlaceholder')} style={{ width: 200 }} />
+              {/* S-EXAM: 与「自动选题」「题库筛选」「组卷向导」统一为 KnowledgePointSelect
+                  （下拉选课程知识点 + 可手输）。自由文本错一个字，候选池知识点召回就整体落空 */}
+              <KnowledgePointSelect
+                subject={questionExam?.subject || ''}
+                value={aiComposeFocus}
+                onChange={(v) => setAiComposeFocus(Array.isArray(v) ? v.map(String) : (v ? [String(v)] : []))}
+                placeholder={t('aiComposePlaceholder')}
+                style={{ width: 220 }}
+              />
               {aiComposing && (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   <ThunderboltOutlined spin /> {aiComposeNote || t('aiComposing')}
