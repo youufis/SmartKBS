@@ -58,6 +58,7 @@
 > - 🔧 **Settings**: new Subjective-Question Grading section (spot-check rate, engine throttling; grading always uses the current chat model)
 > - 🧰 **Settings page**: a blocked save now names the offending field and scrolls to it; secret inputs resist browser autofill
 > - 🩹 **Chain**: with the local library in charge, async AI calls retrieve first too — same behaviour as the sync / streaming paths
+> - 🧹 **Backups**: read-only legacy assets no longer block backup deletion; neither backup nor restore propagates the read-only flag
 > - 🧪 **Quiz answering**: draft restore now matches the screen; a confirmation step guards against submitting blanks
 > - 📋 **Rosters & reminders**: quiz/practice rosters, participation rates and "remind pending" now follow the teacher's assigned classes
 > - ✏️ **Quiz building**: edit questions before any answers arrive, pick questions from the bank, drop unwanted AI-generated ones
@@ -1293,6 +1294,7 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🔧 **Settings**: new Subjective-Question Grading section holds the spot-check rate and engine throttling
 - 🧰 **Settings page**: blocked saves now report which required field is missing and jump to it; secret inputs are protected from browser autofill
 - 🩹 **Chain**: when the local library takes over (cloud retrieval off), async AI calls also retrieve before generating, matching the sync / streaming paths
+- 🧹 **Backups**: read-only legacy assets no longer block backup deletion; backup and restore both stop propagating the read-only flag, and a failed delete now names the file and the next step
 - 🧪 **Quiz answering**: draft restore matches what you see; unanswered confirmation prevents silent blank submissions
 - 📋 **Rosters & reminders**: quiz / practice rosters, participation rates and "remind pending" resolved against the teacher's assigned classes
 - ✏️ **Quiz building**: questions editable while no answers exist, pick-from-bank supported, individual AI questions can be dropped
