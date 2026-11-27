@@ -176,6 +176,10 @@ export interface TeacherTodo {
   pending_task_grades: number
   pending_questions: number
   pending_answer_reviews: number
+  // S-GRADING(C5): 同步练习 / 随堂测验的待批改份数(与考试同口径), 以及三类合计
+  pending_practice_grading?: number
+  pending_quiz_grading?: number
+  pending_grading_total?: number
   in_progress_exam_count: number
   next_exam: { id: number; title: string; end_time: string | null } | null
   active_quizzes: number

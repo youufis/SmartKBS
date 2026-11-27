@@ -31,6 +31,7 @@ from backend.async_utils import spawn_bg as _spawn_bg
 from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
 # S-GRADING(P3): 判分规则集中一处, 三个业务模块共用
 from backend.grading_rules import (
+    blank_zero_entry as _blank_zero,
     _ANS_SEP_RE, MAX_POINT_LEN,
     norm_text as _norm_text, num_tokens as _num_tokens, split_points as _split_points,
     point_hit as _point_hit, ratio_score as _ratio_score,
@@ -1250,7 +1251,8 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
     (exam_router: POST /review)。改分后逐题 score 覆盖、graded_by 记为 teacher、
     该题撤销 needs_review，attempt.score 按新逐题分重算；学生端刷新即见最终分。
 
-    注意：积分奖励与错题本按提交当时的判定生成，复核改分不自动回滚(与考试模块一致)。
+    S-GRADING(B4)：复核后判定翻转的题会同步错题本（改对→标掌握，改错→入本），
+    并按终评分重发等级积分（award_grade 自带档位幂等，同档不重发）。
     """
     user = get_current_user(request)
     username = user["username"]
@@ -1275,6 +1277,8 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
             answers = {}
     if not isinstance(answers, dict):
         answers = {}
+    from copy import deepcopy
+    before_answers = deepcopy(answers)   # B4: 错题本回滚以复核前判定为基准
 
     touched = False
     touched_keys: set[str] = set()
@@ -1342,6 +1346,30 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
                 _settle_practice_attempt(again, wrong_only_keys=touched_keys)
         except Exception as settle_err:
             logger.warning(f"练习结算失败 attempt={req.attempt_id}: {settle_err}")
+
+    # S-GRADING(B4): 常规改判(不在收尾路径上)时回写错题本
+    if touched_keys and not (was_pending and not _pending_keys(answers)):
+        try:
+            from backend.grading_state import diff_bookkeeping
+            from backend.api.wrong_book_router import record_wrong_answers, mark_wrong_mastered
+            newly_correct, newly_wrong = diff_bookkeeping(before_answers, answers)
+            if newly_correct:
+                mark_wrong_mastered(attempt["student_username"], newly_correct)
+            if newly_wrong:
+                record_wrong_answers(attempt["student_username"], attempt["session_id"],
+                                     newly_wrong, source="practice")
+        except Exception as bk_err:
+            logger.warning(f"练习复核账目回写失败 attempt={req.attempt_id}: {bk_err}")
+
+    # S2: 只改总分(未动逐题判定)也要按新分补高档; was_pending 刚收尾过的不重复发
+    if not was_pending and (touched_keys or req.teacher_score is not None) and not _pending_keys(answers):
+        try:
+            from backend.reward_engine import award_grade
+            award_grade(attempt["student_username"], "practice", str(attempt["session_id"]),
+                        float(final_score or 0), float(attempt.get("total_score") or 0),
+                        sess.get("title") or f"练习#{attempt['session_id']}")
+        except Exception as rw_err:
+            logger.warning(f"练习复核补档失败 attempt={req.attempt_id}: {rw_err}")
 
     logger.info(f"教师 {username} 复核练习成绩 attempt={req.attempt_id}: "
                 f"{attempt.get('score')} → {final_score}")
@@ -1596,9 +1624,15 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
     if ai_questions:
         api_key, _ = get_api_keys(username)
         if (api_key or "").strip():
+            queued = 0                   # R1: 只数真正入队的题(C6 空白当场定稿的不算)
             for q in ai_questions:
                 qid = str(q["id"])
                 q_max = float(q["score"] or 10)
+                if not _ans_of(q["id"]).strip():
+                    # C6: 空白当场定 0 分, 不占后台额度(进错题本, 教师复核可改)
+                    graded[qid] = _blank_zero(q["correct_answer"], q_max, "")
+                    total += q_max
+                    continue
                 graded[qid] = {
                     "student_answer": _ans_of(q["id"]),
                     "correct_answer": q["correct_answer"] or "",
@@ -1610,12 +1644,16 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
                     "feedback": "",
                 }
                 total += q_max                  # 满分照常计入, 得分率才有意义
-            pending_ai = len(ai_questions)
+                queued += 1
+            pending_ai = queued
         else:
             # 没配 AI Key: 当场按要点兜底并标「待教师批改」, 不占用后台队列
             for q in ai_questions:
                 qid = str(q["id"])
-                one = _keyword_fallback(q, _ans_of(q["id"]))
+                if not _ans_of(q["id"]).strip():
+                    one = _blank_zero(q["correct_answer"], q["score"] or 10, "")   # C6
+                else:
+                    one = _keyword_fallback(q, _ans_of(q["id"]))
                 graded[qid] = one
                 earned += one["score"]
                 total += one["max_score"]
@@ -1807,6 +1845,8 @@ def _settle_practice_wrong_book(username: str, sid: Any, graded: dict[str, Any],
 
     items = {k: v for k, v in (graded or {}).items()
              if isinstance(v, dict) and v.get("grading") != "pending"
+             # B4: 判不准(needs_review)的题不先进错题本 —— 教师复核判定后再回写
+             and not v.get("needs_review")
              and (only_keys is None or k in only_keys)}
     correct = {k: v for k, v in items.items() if v.get("is_correct")}
     wrong = {k: v for k, v in items.items() if not v.get("is_correct")}
@@ -1879,7 +1919,8 @@ def _practice_fetch_jobs(limit: int) -> list[GradingJob]:
         if sid not in qcache:
             qcache[sid] = {
                 str(q["id"]): q for q in execute_query(
-                    """SELECT qb.id, qb.type, qb.question_text, qb.correct_answer, psq.score
+                    """SELECT qb.id, qb.type, qb.question_text, qb.correct_answer,
+                              qb.rubric, psq.score
                        FROM practice_session_questions psq
                        JOIN question_bank qb ON qb.id = psq.question_id
                        WHERE psq.session_id=?""",
@@ -1899,6 +1940,7 @@ def _practice_fetch_jobs(limit: int) -> list[GradingJob]:
                 max_score=float(q.get("score") or 10),
                 answer_text=str((graded.get(key) or {}).get("student_answer") or ""),
                 mode="essay" if q.get("type") in ("essay", "subjective") else "short",
+                rubric=str(q.get("rubric") or ""),   # C4
             ))
         if len(jobs) >= limit:
             break
@@ -1970,6 +2012,8 @@ def _practice_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str
                           "key_points_hit", "key_points_missed"):
                 if res.get(extra):
                     one[extra] = res[extra]
+            if res.get("grade_meta"):
+                one["grade_meta"] = res["grade_meta"]   # C1
             if review:
                 one["needs_review"] = True
             else:

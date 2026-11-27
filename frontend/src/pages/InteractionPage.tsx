@@ -40,6 +40,7 @@ const { Title, Text } = Typography
 const GRADED_BY_KEYS: Record<string, string> = {
   ai: 'ipGradedByAi', keyword: 'ipGradedByKeyword', exact: 'ipGradedByExact',
   none: 'ipGradedByNone', teacher: 'ipGradedByTeacher', queued: 'ipGradedByQueued',
+  empty: 'ipGradedByEmpty',
 }
 const isQuizPending = (r: any) => r?.grading === 'pending' || r?.graded_by === 'queued'
 
@@ -404,6 +405,45 @@ const InteractionPage: React.FC = () => {
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('ipGradingFailed'))
     } finally { setQuizGradingNow(false) }
+  }
+
+  // S-GRADING(B5): 教师逐人复核随堂测验 —— 此前只能"重试 AI"，判错的题没有人工定分通道
+  const [quizReview, setQuizReview] = useState<any | null>(null)
+  const [quizReviewSaving, setQuizReviewSaving] = useState(false)
+  const openQuizReview = async (student: string) => {
+    const qid = quizResultsView?.quiz?.id
+    if (!qid) return
+    try {
+      const { data } = await apiClient.get(`/api/interaction/quizzes/${qid}/student/${encodeURIComponent(student)}/detail`)
+      if ((data?.details || []).some((d: any) => d.type === 'short' || d.type === 'fill')) setQuizReview(data)
+      else message.info(t('ipReviewNoSubjective'))
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('ipReviewLoadFail'))
+    }
+  }
+  const saveQuizReview = async () => {
+    if (!quizReview?.quiz_id) return
+    const scores: Record<string, number> = {}
+    const comments: Record<string, string> = {}
+    for (const d of quizReview.details) {
+      if (d.type !== 'short' && d.type !== 'fill') continue
+      const v = Number(d._new_score ?? d.score ?? 0)
+      if (Number.isFinite(v)) scores[String(d.index)] = Math.max(0, Math.min(v, Number(d.max_score) || v))
+      const c = String(d._new_comment ?? '').trim()
+      if (c) comments[String(d.index)] = c
+    }
+    if (!Object.keys(scores).length && !Object.keys(comments).length) { setQuizReview(null); return }
+    setQuizReviewSaving(true)
+    try {
+      await apiClient.post(`/api/interaction/quizzes/${quizReview.quiz_id}/review`, {
+        student_username: quizReview.student, question_scores: scores, question_comments: comments,
+      })
+      message.success(t('ipReviewSaved'))
+      setQuizReview(null)
+      await handleViewQuizResults(quizReview.quiz_id)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('ipReviewLoadFail'))
+    } finally { setQuizReviewSaving(false) }
   }
 
   /** 关闭结果弹窗: 同时停掉后台批改轮询(否则关掉后又被回调"复活") */
@@ -852,6 +892,41 @@ const InteractionPage: React.FC = () => {
         )}
       </Modal>
 
+      {/* S-GRADING(B5): 教师复核改判测验答卷(主观题逐题定分/评语) */}
+      <Modal title={t('ipReviewTitle', { name: quizReview?.student_name || quizReview?.student || '' })}
+        open={!!quizReview} onCancel={() => setQuizReview(null)} onOk={saveQuizReview}
+        okText={t('ipReviewSave')} confirmLoading={quizReviewSaving} width="min(760px, 94vw)">
+        {quizReview && (
+          <div style={{ maxHeight: '62vh', overflowY: 'auto', paddingRight: 4 }}>
+            {quizReview.details.filter((d: any) => d.type === 'short' || d.type === 'fill').length === 0 && (
+              <Empty description={t('ipReviewNoSubjective')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            )}
+            {quizReview.details.filter((d: any) => d.type === 'short' || d.type === 'fill').map((d: any) => (
+              <Card key={d.index} size="small" style={{ marginBottom: 8 }}
+                title={t('ipQNo', { no: d.index + 1 })}
+                extra={<Text type="secondary">{t('ipReviewAiRef')}: {d.score ?? 0}/{d.max_score}{d.needs_review ? ` · ${t('ipNeedsReview')}` : ''}</Text>}>
+                <div style={{ marginBottom: 6 }}><FormulaRenderer content={d.question} /></div>
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--bg-layout)', borderRadius: 4, padding: 6, marginBottom: 6 }}>
+                  {d.user_answer || t('ipUnanswered')}
+                </div>
+                {!!d.comment && <div style={{ marginBottom: 6 }}><Text type="secondary">{t('ipAiComment')}{d.comment}</Text></div>}
+                <Space wrap size={8}>
+                  <Text>{t('ipReviewScore')}</Text>
+                  <InputNumber min={0} max={Number(d.max_score) || undefined} step={0.5} style={{ width: 96 }}
+                    value={d._new_score ?? d.score}
+                    onChange={(v) => setQuizReview((p: any) => p && ({ ...p, details: p.details.map((x: any) => x.index === d.index ? { ...x, _new_score: v } : x) }))} />
+                  <Text type="secondary">/ {d.max_score}</Text>
+                </Space>
+                <div style={{ marginTop: 6 }}>
+                  <Input.TextArea rows={2} placeholder={t('ipReviewComment')} value={d._new_comment ?? d.teacher_comment ?? ''}
+                    onChange={(e) => setQuizReview((p: any) => p && ({ ...p, details: p.details.map((x: any) => x.index === d.index ? { ...x, _new_comment: e.target.value } : x) }))} />
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </Modal>
+
       {/* ── 测验结果统计弹窗 ── */}
       <Modal title={<Space wrap>{quizResultsView?.quiz_title ? t('ipMyScore', { title: quizResultsView.quiz_title }) : t('ipQuizResult')}
         {quizResultsReadonly && <Tag color="orange">{t('readonlyPreview')}</Tag>}</Space>}
@@ -1101,6 +1176,11 @@ const InteractionPage: React.FC = () => {
                           ),
                         },
                         { title: t('ipSubmitted'), dataIndex: 'submitted_at', width: 130, ellipsis: true },
+                        { title: '', key: 'review_op', width: 72,
+                          render: (_: any, r: any) => quizResultsReadonly ? null : (
+                            <Button size="small" type="link" style={{ paddingInline: 4 }}
+                              onClick={() => openQuizReview(r.student)}>{t('ipReviewBtn')}</Button>
+                          ) },
                       ]} />
                   </Card>
                 )}

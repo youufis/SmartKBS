@@ -75,6 +75,12 @@ def init_question_db():
                 except sqlite3.OperationalError:
                     pass  # 字段已存在
 
+            # ── S-GRADING(C4): 每题"评分要点/给分分配"(可选), 批改 prompt 优先按它逐条计分 ──
+            try:
+                c.execute("ALTER TABLE question_bank ADD COLUMN rubric TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # 字段已存在
+
             # ── 考试表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS exams (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

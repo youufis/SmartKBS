@@ -218,14 +218,17 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
   const ongoing = (todo?.active_quizzes ?? 0) + (todo?.active_quick_quiz_rooms ?? 0)
     + (todo?.active_discussions ?? 0) + (todo?.active_polls ?? 0) + (todo?.active_tasks ?? 0)
     + (todo?.in_progress_exam_count ?? 0)
-  const pendingTotal = (todo?.pending_exam_grading ?? 0) + (todo?.pending_task_grades ?? 0)
+  const pendingTotal = (todo?.pending_exam_grading ?? 0) + (todo?.pending_practice_grading ?? 0)
+    + (todo?.pending_quiz_grading ?? 0) + (todo?.pending_task_grades ?? 0)
     + (todo?.pending_questions ?? 0) + (todo?.pending_answer_reviews ?? 0)
 
   const examStats = summary.exam_stats
 
   // 聚合卡的数字含多类待办，跳转要落到“当前确实有事可做”的那一类，不能永远只去考试中心
   const pendingTarget = (todo?.pending_exam_grading ?? 0) > 0 ? '/exam?grading=pending'
-    : (todo?.pending_task_grades ?? 0) > 0 ? '/tasks?grading=pending'
+    : (todo?.pending_practice_grading ?? 0) > 0 ? '/practice'
+      : (todo?.pending_quiz_grading ?? 0) > 0 ? '/interaction'
+        : (todo?.pending_task_grades ?? 0) > 0 ? '/tasks?grading=pending'
     : (todo?.pending_questions ?? 0) + (todo?.pending_answer_reviews ?? 0) > 0 ? '/student-questions'
     : '/exam?grading=pending'
   // 「进行中的活动」是聚合概念（测验/讨论/投票/作业/考试都算），不能挑一个类别跳：
@@ -256,6 +259,8 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           icon={<AuditOutlined />} onGo={() => navigate(pendingTarget)}
           parts={[
             (todo?.pending_exam_grading ?? 0) > 0 && t('statsT.unitPapers', { n: todo?.pending_exam_grading ?? 0 }),
+            (todo?.pending_practice_grading ?? 0) > 0 && t('statsT.unitPracticePapers', { n: todo?.pending_practice_grading ?? 0 }),
+            (todo?.pending_quiz_grading ?? 0) > 0 && t('statsT.unitQuizPapers', { n: todo?.pending_quiz_grading ?? 0 }),
             (todo?.pending_exam_grading_exams ?? 0) > 0 && t('statsT.unitExams', { n: todo?.pending_exam_grading_exams ?? 0 }),
             (todo?.pending_task_grades ?? 0) > 0 && t('statsT.unitTasks', { n: todo?.pending_task_grades ?? 0 }),
             ((todo?.pending_questions ?? 0) + (todo?.pending_answer_reviews ?? 0)) > 0

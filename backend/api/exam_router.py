@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 
-from backend.grading_state import pending_grading_by_exam
+from backend.grading_state import pending_grading_by_exam, review_suffix
 from backend.question_db import (
     execute_query,
     execute_query_one,
@@ -33,7 +33,12 @@ from backend.prompts import apply_skills, build_ai_role
 from backend.async_utils import spawn_bg
 from backend.permission_service import check_activity_visibility
 # S-GRADING(P2): 主观题后台批量批改引擎(与同步练习/随堂测验共用)
-from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
+from backend.ai_grading import (GradingJob, SourceAdapter, register_source, pending_keys,
+                                clip_answer, SINGLE_TOKENS_SHORT, SINGLE_TOKENS_ESSAY,
+                                grading_model, GRADING_TEMPERATURE, grading_reference)
+# S-GRADING(A2): 考试现场兜底与练习/测验共用 grading_rules 口径(按要点比例给分+待复核)
+from backend.grading_rules import (grade_fill_by_rule as _fill_rule,
+                                keyword_fallback as _keyword_rule, blank_zero_entry)
 from backend.question_db import get_connection
 # E1: 考试成绩口径的唯一实现（结果页 / 学情分析 / Excel 导出三处共用）
 from backend.exam_stats import (
@@ -1645,12 +1650,14 @@ async def _grade_short_with_ai(q: dict[str, Any], student_answer: str, api_key: 
                 half_score=str(q_score * 0.5),
                 near_full=str(q_score * 0.8),
                 half_minus=str(q_score * 0.4),
-                student_answer=str(student_answer or "").replace('{', '{{').replace('}', '}}'),
+                student_answer=clip_answer(student_answer, "short").replace('{', '{{').replace('}', '}}'),
             )
             # S-GRADING: 评分 prompt 不注入技能 —— 技能段会多塞约 1900 字教学指令
             # (「禁止直接给出最终答案、要展示推导过程」等), 与「只输出 JSON」冲突,
             # 返回变成散文 → 解析失败 → 静默退回关键词判 0 分。与练习侧同一结论。
-            ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False)
+            ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False,
+                                          max_tokens=SINGLE_TOKENS_SHORT,
+                                          model=grading_model(), temperature=GRADING_TEMPERATURE)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
                 ai_score = float(result.get("score", 0))
@@ -1703,9 +1710,11 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
                 question_text=question_text.replace('{', '{{').replace('}', '}}'),
                 correct_answer=str(correct_answer or "").replace('{', '{{').replace('}', '}}'),
                 max_score=str(q_score),
-                student_answer=str(student_answer or "").replace('{', '{{').replace('}', '}}'),
+                student_answer=clip_answer(student_answer, "essay").replace('{', '{{').replace('}', '}}'),
             )
-            ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False)
+            ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False,
+                                          max_tokens=SINGLE_TOKENS_ESSAY,
+                                          model=grading_model(), temperature=GRADING_TEMPERATURE)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
                 ai_score = float(result.get("score", 0))
@@ -1804,7 +1813,7 @@ def _settle_exam_attempt(attempt: dict, exam: dict | None = None) -> dict:
         passed_str = "通过" if earned >= (exam.get("pass_score") or 0) else "未通过"
         create_notification(
             username, "exam", f"考试「{title}」成绩已出",
-            f"得分 {earned}/{total}（{passed_str}）", "/exam",
+            f"得分 {earned}/{total}（{passed_str}）{review_suffix(graded)}", "/exam",
             source_type="exam", source_id=str(exam_id),
         )
     except Exception as notify_err:
@@ -1819,7 +1828,7 @@ def _settle_exam_attempt(attempt: dict, exam: dict | None = None) -> dict:
             student_display = name_rows[0][0] if name_rows and name_rows[0][0] else username
             create_notification(
                 teacher_username, "exam", f"学生提交答卷: {student_display}",
-                f"已提交考试「{title}」，得分 {earned}/{total}",
+                f"已提交考试「{title}」，得分 {earned}/{total}{review_suffix(graded)}",
                 f"/exam/{exam_id}/results",
                 source_type="exam", source_id=str(exam_id),
             )
@@ -1831,9 +1840,17 @@ def _settle_exam_attempt(attempt: dict, exam: dict | None = None) -> dict:
         from backend.api.wrong_book_router import (
             record_wrong_answers, mark_wrong_mastered, check_and_auto_generate_wrong_practice,
         )
-        record_wrong_answers(username, exam_id, graded)
+        # B4: 判不准(needs_review)的题不算定稿, 不先进错题本 —— 教师复核判定后再回写,
+        # 避免"AI 没把握 → 学生先背一条错账"
+        # R3: teacher_adjusted 的题由复核端点记账(_upsert_wrong 对已 pending 行会
+        # wrong_count+1, 两处都记=同一次判错数两次), 结算统一跳过。
+        recordable = {k: v for k, v in graded.items()
+                      if isinstance(v, dict) and not v.get("needs_review")
+                      and not v.get("teacher_adjusted")}
+        record_wrong_answers(username, exam_id, recordable)
         correct_graded = {k: v for k, v in graded.items()
-                          if isinstance(v, dict) and v.get("is_correct", False)}
+                          if isinstance(v, dict) and v.get("is_correct", False)
+                          and not v.get("needs_review")}
         if correct_graded:
             mark_wrong_mastered(username, correct_graded)
         # W10: 阈值检查与练习生成放后台线程, 不拖慢请求
@@ -1903,6 +1920,58 @@ def _submitted_receipt(attempt_row: dict, exam: dict) -> dict:
         "details": graded if exam.get("show_result_immediately") else None,
         "pending_ai": 0,
     }
+
+
+
+def _exam_blank_entry(q: dict[str, Any], q_max: float, mode: str) -> dict[str, Any]:
+    """C6: 空白主观题当场定 0 分(结构字段齐全, 学生端/复核端点都能直接渲染)。"""
+    one = blank_zero_entry(q.get("correct_answer"), q_max, "")
+    one.update({"comment": "", "key_points_hit": [], "key_points_missed": []})
+    if mode == "essay":
+        one.update({"grading_type": "essay", "dimensions": {},
+                    "overall_comment": "", "improvement_suggestions": []})
+    return one
+
+
+# ── S-GRADING(A2): 考试现场判分/兜底的两个可测单元 ──
+def _exam_fill_rule_entry(q: dict[str, Any], student_answer: str) -> dict[str, Any] | None:
+    """填空题当场规则判分（与同步练习 S-FILL 同一口径：逐空比对、按命中空数比例给分）。
+
+    返回 None = 参考答案切不出可比对要点 → 交回调用方走 AI 队列。
+    """
+    one = _fill_rule(q, str(student_answer or ""))
+    if one is None:
+        return None
+    one.setdefault("comment", "")
+    one.setdefault("feedback", "")
+    one["key_points_hit"] = []
+    one["key_points_missed"] = []
+    return one
+
+
+def _exam_nokey_entry(q: dict[str, Any], mode: str, student_answer: str) -> dict[str, Any]:
+    """没配 API Key 时的当场兜底 —— 与练习/测验同一口径(grading_rules.keyword_fallback)。
+
+    旧实现走 _check_short_answer：逗号切词、任一命中即给满分，且不打任何待复核标记；
+    这正是练习侧实测误判后退役掉的旧口径。现在 fill 先逐空规则，其余按要点命中比例给分，
+    切不出要点给 0 分并标 needs_review（判不准 ≠ 判错，进"待批改"待办而不是定稿成错卷）。
+    """
+    one: dict[str, Any] | None = _fill_rule(q, student_answer) if q.get("type") == "fill" else None
+    if one is None:
+        one = _keyword_rule(q.get("correct_answer"), float(q.get("score") or 10), student_answer)
+    one.setdefault("comment", "")
+    one.setdefault("key_points_hit", [])
+    one.setdefault("key_points_missed", [])
+    if one.get("needs_review"):
+        one["grading"] = "review"
+    if mode == "essay":
+        one.update({
+            "grading_type": "essay",
+            "dimensions": {},
+            "overall_comment": "当前为要点规则兜底评分，配置 API Key 后开启 AI 多维评分",
+            "improvement_suggestions": [],
+        })
+    return one
 
 
 @router.post("/{exam_id}/submit")
@@ -2045,12 +2114,25 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     # 合并多份答案批量评分，判完再补成绩通知/错题本/等级积分/学伴推送。
     pending_ai = 0
     subjective = [(q, "short") for q in short_qs] + [(q, "essay") for q in essay_qs]
+    # [S-GRADING(A2)] fill 先逐空规则当场判(与练习同口径)，判不准才入队；判不准的兜底
+    # 统一走 grading_rules（要点比例给分 + needs_review），不再是"任一关键词命中即满分"。
     if subjective and api_key:
         for q, mode in subjective:
             qid = str(q["id"])
             q_max = float(q["score"] or (total_score / max(len(questions), 1)))
+            student_answer = req.answers.get(qid, "")
+            if not str(student_answer or "").strip():
+                # C6: 空白=确定 0 分, 不占后台额度也不劳教师复核
+                graded_answers[qid] = _exam_blank_entry(q, q_max, mode)
+                continue
+            if mode == "short" and q["type"] == "fill":
+                rule = _exam_fill_rule_entry({**q, "score": q_max}, student_answer)
+                if rule is not None:      # 规则判得准 → 当场定稿，不占后台额度
+                    graded_answers[qid] = rule
+                    earned_score += float(rule.get("score") or 0)
+                    continue
             one = {
-                "student_answer": req.answers.get(qid, ""),
+                "student_answer": student_answer,
                 "correct_answer": q["correct_answer"] or "",
                 "score": 0,
                 "max_score": q_max,
@@ -2076,35 +2158,24 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
             graded_answers[qid] = one
             pending_ai += 1
 
-    # 没配 API Key 时才走当场关键词兜底(不占后台队列), 与同步练习同一口径
+    # 没配 API Key 时才走当场兜底(不占后台队列), 与同步练习/随堂测验同一口径
     if subjective and not api_key:
         for q, mode in subjective:
             qid = str(q["id"])
-            student_answer = req.answers.get(qid, "")
-            correct_answer = q["correct_answer"]
             q_max = float(q["score"] or (total_score / max(len(questions), 1)))
-            is_correct = _check_short_answer(student_answer, correct_answer)
-            if is_correct:
-                earned_score += q_max
-            one = {
-                "student_answer": student_answer,
-                "correct_answer": correct_answer,
-                "score": q_max if is_correct else 0,
-                "max_score": q_max,
-                "is_correct": is_correct,
-                "comment": "",
-                "feedback": "",
-                "key_points_hit": [],
-                "key_points_missed": [],
-            }
-            if mode == "essay":
-                one.update({
-                    "grading_type": "essay",
-                    "dimensions": {},
-                    "overall_comment": "当前为关键词匹配评分，建议配置 API Key 开启 AI 多维评分",
-                    "improvement_suggestions": [],
-                })
+            if not str(req.answers.get(qid, "") or "").strip():
+                graded_answers[qid] = _exam_blank_entry(q, q_max, mode)   # C6
+                continue
+            one = _exam_nokey_entry({**q, "score": q_max}, mode, req.answers.get(qid, ""))
             graded_answers[qid] = one
+            earned_score += float(one.get("score") or 0)
+            if one.get("needs_review"):
+                # 判不准 ≠ 判错：同步标进 grading_details，让首页/考试中心"待批改"能数到这份卷子
+                grading_details[qid] = {
+                    "needs_review": True,
+                    "graded_by": one.get("graded_by") or "keyword",
+                    "note": str(one.get("feedback") or "")[:200],
+                }
 
     earned_score = round(earned_score, 1)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2238,6 +2309,8 @@ async def teacher_review_grading(req: TeacherReviewRequest, request: Request):
                 answers_data = {}
         if not isinstance(answers_data, dict):
             answers_data = {}
+        from copy import deepcopy
+        before_answers = deepcopy(answers_data)   # B4: 错题本回滚以复核前判定为基准
 
         modified = False
         for qid, new_score in (req.question_scores or {}).items():
@@ -2289,6 +2362,33 @@ async def teacher_review_grading(req: TeacherReviewRequest, request: Request):
                 _settle_exam_attempt(again, exam)
         except Exception as settle_err:
             logger.warning(f"考试结算失败 attempt={req.attempt_id}: {settle_err}")
+
+    # S-GRADING(B4/R3): 复核改分要落账 —— 判定翻转的题回写错题本(改对→标掌握, 改错→入本),
+    # 并按终评分补档。教师定过的题只由这里记账(_settle_exam_attempt 跳过 teacher_adjusted),
+    # 所以无论收尾分支是否跑过都不会重复计数, 这里不再按 was_pending 跳过。
+    if answers_data:
+        try:
+            from backend.grading_state import diff_bookkeeping
+            from backend.api.wrong_book_router import record_wrong_answers, mark_wrong_mastered
+            newly_correct, newly_wrong = diff_bookkeeping(before_answers, answers_data)
+            if newly_correct:
+                mark_wrong_mastered(attempt["student_username"], newly_correct)
+            if newly_wrong:
+                record_wrong_answers(attempt["student_username"], attempt["exam_id"], newly_wrong)
+        except Exception as bk_err:
+            logger.warning(f"考试复核账目回写失败 attempt={req.attempt_id}: {bk_err}")
+
+    # S2: 补档不只发生在"改了逐题"时 —— 只改总分同样要按新分补高档;
+    # was_pending 分支刚整体收尾过(结算内含发档)则不重复。
+    if not was_pending and (answers_data or req.teacher_score is not None):
+        try:
+            if not pending_keys(answers_data):
+                from backend.reward_engine import award_grade
+                award_grade(attempt["student_username"], "exam", str(attempt["exam_id"]),
+                            float(final_score or 0), float(attempt.get("total_score") or 0),
+                            exam.get("title") or "")
+        except Exception as rw_err:
+            logger.warning(f"考试复核补档失败 attempt={req.attempt_id}: {rw_err}")
 
     logger.info(f"教师 {username} 复核批改 attempt_id={req.attempt_id}, score={final_score}")
     return {
@@ -3446,11 +3546,13 @@ def _exam_force_review(attempt_id: int, keys: list[str], reason: str) -> None:
     with get_connection() as conn:
         conn.isolation_level = None
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT answers FROM exam_attempts WHERE id=?", (attempt_id,)).fetchone()
+        row = conn.execute("SELECT answers, grading_details FROM exam_attempts WHERE id=?",
+                           (attempt_id,)).fetchone()
         if not row:
             conn.execute("COMMIT")
             return
         graded = _exam_json_dict(row["answers"])
+        details = _exam_json_dict(row["grading_details"])   # T1: 与 _exam_save_batch 同口径
         for k in keys:
             one = graded.get(str(k))
             if isinstance(one, dict):
@@ -3459,9 +3561,19 @@ def _exam_force_review(attempt_id: int, keys: list[str], reason: str) -> None:
                 one["graded_by"] = "none"
                 one["comment"] = ""
                 one["feedback"] = reason
+            # T1: 考试"待批改"统计(首页待办/考试中心筛选)只看 grading_details 列 ——
+            # 这条旁路只写 answers 的话, 卷子会清掉 ai_pending 又进不了待办, 彻底隐身。
+            details[str(k)] = {
+                **(details.get(str(k)) or {}),
+                "needs_review": True,
+                "graded_by": "none",
+                "note": reason[:200],
+            }
         still = pending_keys(graded)
-        conn.execute("UPDATE exam_attempts SET answers=?, ai_pending=? WHERE id=?",
-                     (json.dumps(graded, ensure_ascii=False), 1 if still else 0, attempt_id))
+        conn.execute("UPDATE exam_attempts SET answers=?, grading_details=?, ai_pending=? WHERE id=?",
+                     (json.dumps(graded, ensure_ascii=False),
+                      json.dumps(details, ensure_ascii=False) if details else "",
+                      1 if still else 0, attempt_id))
         conn.execute("COMMIT")
 
 
@@ -3485,7 +3597,8 @@ def _exam_fetch_jobs(limit: int) -> list[GradingJob]:
         if eid not in qcache:
             qcache[eid] = {
                 str(q["id"]): q for q in execute_query(
-                    """SELECT q.id, q.type, q.question_text, q.correct_answer, q.options, eq.score
+                    """SELECT q.id, q.type, q.question_text, q.correct_answer, q.options,
+                              q.rubric, eq.score
                        FROM exam_questions eq
                        JOIN question_bank q ON q.id = eq.question_id
                        WHERE eq.exam_id=?""",
@@ -3509,6 +3622,7 @@ def _exam_fetch_jobs(limit: int) -> list[GradingJob]:
                 max_score=float(one.get("max_score") or q.get("score") or 10),
                 answer_text=str(one.get("student_answer") or ""),
                 mode="essay" if q.get("type") in _ESSAY_TYPES else "short",
+                rubric=str(q.get("rubric") or ""),   # C4: 评分细则(可空)
                 meta={"subject": subj_cache.get(eid, ""), "type": str(q.get("type") or "")},
             ))
         if len(jobs) >= limit:
@@ -3523,7 +3637,8 @@ async def _exam_grade_single(job: GradingJob, api_key: str) -> dict[str, Any]:
         "id": job.entry_key,
         "type": str(job.meta.get("type") or "short"),
         "question_text": job.question_text,
-        "correct_answer": job.ref_answer,
+        # C4: 有评分细则时并入批改依据, 单条路径同样按细则逐条给分
+        "correct_answer": grading_reference(job),
         "score": job.max_score,
     }
     sem = asyncio.Semaphore(1)
@@ -3589,11 +3704,24 @@ def _exam_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str, An
                 one["feedback"] = note
             if review:
                 one["needs_review"] = True
+                # B4: needs_review 同步进 grading_details —— grading_state 的"待批改"份数
+                # 只看这列, 只写在 answers 里的话首页待办/筛选会漏掉这些卷子
+                # R3: 合并而非覆写 —— 作文题这条上挂着提交时种的多维占位
+                # (dimensions/overall_comment/improvement_suggestions), 前端按那套形状渲染。
+                details[str(job.entry_key)] = {
+                    **(details.get(str(job.entry_key)) or {}),
+                    "needs_review": True,
+                    "graded_by": str(res.get("graded_by") or "none"),
+                    "note": str(res.get("feedback") or "")[:200],
+                }
             else:
                 one.pop("needs_review", None)
+                details.pop(str(job.entry_key), None)   # 清掉上一轮的转人工镜像
             for k in ("key_points_hit", "key_points_missed"):
                 if res.get(k):
                     one[k] = res[k]
+            if res.get("grade_meta"):
+                one["grade_meta"] = res["grade_meta"]   # C1: 模型/prompt 版本/时间留痕
             if job.mode == "essay":
                 one["grading_type"] = "essay"
                 one["dimensions"] = res.get("dimensions") or {}

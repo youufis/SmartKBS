@@ -31,6 +31,8 @@ interface ChipDef {
 
 const CHIPS: ChipDef[] = [
   { key: 'pending_exam_grading', labelKey: 'teacherTodo.grading', icon: <FormOutlined />, color: 'danger', route: '/exam?grading=pending', actionable: true },
+  { key: 'pending_practice_grading', labelKey: 'teacherTodo.practiceGrading', icon: <FormOutlined />, color: 'danger', route: '/practice', actionable: true },
+  { key: 'pending_quiz_grading', labelKey: 'teacherTodo.quizGrading', icon: <FileDoneOutlined />, color: 'danger', route: '/interaction', actionable: true },
   { key: 'pending_task_grades', labelKey: 'teacherTodo.taskGrades', icon: <FileDoneOutlined />, color: 'warning', route: '/tasks?grading=pending', actionable: true },
   { key: 'pending_questions', labelKey: 'teacherTodo.questions', icon: <QuestionCircleOutlined />, color: 'purple', route: '/student-questions', actionable: true },
   { key: 'pending_answer_reviews', labelKey: 'teacherTodo.answers', icon: <MessageOutlined />, color: 'magenta', route: '/student-questions', actionable: true },
@@ -71,7 +73,8 @@ const TeacherTodoBar: React.FC<{ data: TeacherTodo | null }> = ({ data }) => {
   if (!data) return null
 
   const pendingCount =
-    data.pending_exam_grading + data.pending_task_grades + data.pending_questions + data.pending_answer_reviews
+    data.pending_exam_grading + (data.pending_practice_grading ?? 0) + (data.pending_quiz_grading ?? 0)
+    + data.pending_task_grades + data.pending_questions + data.pending_answer_reviews
   const ongoingCount =
     data.active_quizzes + data.active_quick_quiz_rooms + data.active_discussions + data.active_polls + data.active_tasks + data.in_progress_exam_count
 
@@ -81,7 +84,9 @@ const TeacherTodoBar: React.FC<{ data: TeacherTodo | null }> = ({ data }) => {
 
   // 点"待处理"要落到当前确实有事的那一类，不能永远去考试中心
   const pendingRoute = data.pending_exam_grading > 0 ? '/exam?grading=pending'
-    : data.pending_task_grades > 0 ? '/tasks?grading=pending'
+    : (data.pending_practice_grading ?? 0) > 0 ? '/practice'
+      : (data.pending_quiz_grading ?? 0) > 0 ? '/interaction'
+        : data.pending_task_grades > 0 ? '/tasks?grading=pending'
       : (data.pending_questions + data.pending_answer_reviews) > 0 ? '/student-questions'
         : '/exam?grading=pending'
 

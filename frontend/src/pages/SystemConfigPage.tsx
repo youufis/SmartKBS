@@ -437,6 +437,8 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 模型与端点
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'model_select', optionsKind: 'chat', group: 'models', level: 'basic' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'model_select', optionsKind: 'vl', group: 'models', level: 'basic' },
+    { key: 'MODEL_GRADING', labelKey: 'field_MODEL_GRADING', descKey: 'field_MODEL_GRADING_desc', type: 'model_select', optionsKind: 'chat', group: 'models' },
+    { key: 'GRADING_SPOT_CHECK_PERCENT', labelKey: 'field_GRADING_SPOT_CHECK_PERCENT', descKey: 'field_GRADING_SPOT_CHECK_PERCENT_desc', type: 'number', group: 'models', required: false },
   // ── 图像理解：默认用对话模型看图（快、省），解题类交视觉模型 ──
   { key: 'MODEL_IMAGE_VIA_CHAT', labelKey: 'field_MODEL_IMAGE_VIA_CHAT', descKey: 'field_MODEL_IMAGE_VIA_CHAT_desc', longDescKey: 'field_MODEL_IMAGE_VIA_CHAT_tip', type: 'boolean', group: 'models', level: 'basic', required: false },
   { key: 'MODEL_IMAGE_SOLVE_VL', labelKey: 'field_MODEL_IMAGE_SOLVE_VL', descKey: 'field_MODEL_IMAGE_SOLVE_VL_desc', type: 'boolean', group: 'models', level: 'basic', required: false },

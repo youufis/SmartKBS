@@ -24,7 +24,7 @@ from backend.title_system import (
 from backend.reward_engine import get_student_total as get_reward_total
 from backend.permission_service import get_user_grade_class
 from backend.utils import week_range_str
-from backend.grading_state import pending_grading_by_exam
+from backend.grading_state import pending_grading_by_exam, pending_extra_grading
 
 router = APIRouter()
 
@@ -1231,6 +1231,14 @@ async def teacher_todo(request: Request):
         )
     next_exam = in_progress_exams[0] if in_progress_exams else None
 
+    # ── S-GRADING(C5): 同步练习 / 随堂测验的待批改并入今日待办(与考试同口径) ──
+    try:
+        pending_practice_grading, pending_quiz_grading = pending_extra_grading(
+            username=username, is_admin=is_admin)
+    except Exception as g_err:
+        logger.warning(f"[dashboard] 练习/测验待批改统计失败: {g_err}")
+        pending_practice_grading = pending_quiz_grading = 0
+
     # ── 课堂提问 / 待审核回答 ──
     if is_admin:
         pending_questions = _db_count(
@@ -1352,6 +1360,11 @@ async def teacher_todo(request: Request):
     result = {
         "pending_exam_grading": pending_exam_grading,
         "pending_exam_grading_exams": pending_exam_grading_exams,
+        # S-GRADING(C5)
+        "pending_practice_grading": pending_practice_grading,
+        "pending_quiz_grading": pending_quiz_grading,
+        "pending_grading_total": (pending_exam_grading + pending_practice_grading
+                                 + pending_quiz_grading),
         "pending_task_grades": pending_task_grades,
         "pending_questions": pending_questions,
         "pending_answer_reviews": pending_answer_reviews,

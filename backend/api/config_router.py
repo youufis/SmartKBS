@@ -103,6 +103,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "MODEL_LONG_NAME": DEFAULT_LONG_MODEL,
     "MODEL_VL_NAME": DEFAULT_VL_MODEL,
     "MODEL_NAME": DEFAULT_CHAT_MODEL,
+    # S-GRADING(B3): 主观题批改专用模型 —— 留空沿用对话模型；批改调用固定 temperature=0。
+    # 与对话/出题解耦：可以给批改单独换更强更稳的模型而不动聊天配置
+    "MODEL_GRADING": "",
+    # S-GRADING(C3, 拍板): 抽检双评比例 —— 默认 0=关闭; 打开后按比例复评, 分差>20%满分转人工
+    "GRADING_SPOT_CHECK_PERCENT": 0,
     # 图像理解走哪个模型：默认用对话模型看图（快、省），解题类仍交视觉模型
     "MODEL_IMAGE_VIA_CHAT": True,
     "MODEL_IMAGE_SOLVE_VL": True,
@@ -666,6 +671,8 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "EXPLORE_PAGE_TRASH_DAYS": (1, 365),
     "EXPLORE_ASSET_MAX_MB": (64, 10240), "EXPLORE_SWEEP_HOUR": (0, 23), "EXPLORE_TTS_CACHE_MB": (50, 4000),
     "EXPLORE_ASR_MINUTES": (1, 120),
+    # S-GRADING(C3): 抽检双评百分比(0~100)
+    "GRADING_SPOT_CHECK_PERCENT": (0, 100),
     "wrong_practice_threshold": (0, 500),
     "wrong_practice_per_set": (1, 20),
     "wrong_practice_interval_days": (0, 90),
@@ -779,7 +786,7 @@ _BOOL_KEYS = {
 _STR_LIMITS: dict[str, int] = {
     "EXPLORE_ASR_MODEL": 60,
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
-    "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80,
+    "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80, "MODEL_GRADING": 80,
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
     "SHOWCASE_RANK_MODE": 16,
     "CLASS_LADDER_DEFAULT_SKIN": 16,

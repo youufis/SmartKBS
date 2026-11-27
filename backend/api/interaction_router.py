@@ -25,7 +25,7 @@ from backend.database import (
 )
 # S-GRADING(P3): 主观题后台批量批改引擎 + 共用判分规则
 from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
-from backend.grading_rules import keyword_fallback
+from backend.grading_rules import keyword_fallback, blank_zero_entry
 # P0-2: 测验判分/统计口径收敛到 backend.quiz_stats (唯一实现), 本模块只保留别名
 from backend.question_labels import question_type_label
 from backend.quiz_stats import (
@@ -1252,6 +1252,10 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         mx = float(q.get("score", 1) or 0)
         user_ans = _ans_at(idx)
         correct_ans = str(q.get("answer", "")).strip()
+        if not user_ans.strip():
+            # C6: 空白=确定 0 分, 当场定稿(不占 AI 额度, 不进后台队列)
+            graded[str(idx)] = blank_zero_entry(correct_ans, mx, "")
+            continue
         if has_key:
             graded[str(idx)] = {
                 "student_answer": user_ans, "correct_answer": correct_ans,
@@ -1359,52 +1363,7 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
     # 旧实现这里"再精确匹配一遍"，简答题(AI 判的 8 分)被重算成 0 分并标成答错。
     graded_map = _quiz_graded(answers[0][3])
 
-    # 每题批改详情
-    details = []
-    for i, q in enumerate(questions):
-        user_ans = ""
-        for ua in user_answers:
-            if ua.get("question_index") == i:
-                user_ans = str(ua.get("answer", "")).strip()
-                break
-        correct_ans = str(q.get("answer", "")).strip()
-        q_type = q.get("type", "single")
-        mx = float(q.get("score", 1) or 0)
-        g = graded_map.get(str(i))
-        if isinstance(g, dict) and g:
-            is_correct = bool(g.get("is_correct"))
-            got_score = float(g.get("score") or 0)
-            mx = float(g.get("max_score") or mx)
-            grading = str(g.get("grading") or "")
-            graded_by = str(g.get("graded_by") or "")
-            needs_review = bool(g.get("needs_review"))
-            comment = str(g.get("comment") or "")
-            feedback = str(g.get("feedback") or "")
-        else:                       # 老数据没留痕: 只能沿用旧的精确匹配口径
-            is_correct = _answer_matches(user_ans, correct_ans, q_type)
-            got_score = mx if is_correct else 0
-            grading, graded_by, needs_review, comment, feedback = "", "", False, "", ""
-        details.append({
-            "index": i,
-            "question": q.get("question", q.get("question_text", "")),
-            "options": q.get("options", None),
-            "type": q_type,
-            "user_answer": user_ans,
-            "correct_answer": correct_ans,
-            "is_correct": is_correct,
-            "score": got_score,
-            "max_score": mx,
-            # S-GRADING(P3): 题态与判分来源, 前端据此显示「AI 批改中」而不是误显示答错
-            "grading": grading,
-            "graded_by": graded_by,
-            "needs_review": needs_review,
-            "comment": comment,
-            "feedback": feedback,
-            "explanation": q.get("explanation", ""),
-            "svg_content": q.get("svg_content") or q.get("svg_code", ""),
-            "has_svg": q.get("has_svg", 1 if q.get("svg_code") or q.get("svg_content") else 0),
-            "media_files": q.get("media_files", ""),
-        })
+    details = _build_quiz_details(questions, user_answers, graded_map)
 
     pending_ai = sum(1 for d in details if d.get("grading") == "pending")
     return {
@@ -1421,6 +1380,210 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
         "pending_ai": pending_ai,
         "pending_review": sum(1 for d in details if d.get("needs_review")),
     }
+
+
+def _build_quiz_details(questions: list[Any], user_answers: Any,
+                       graded_map: dict[str, Any]) -> list[dict[str, Any]]:
+    """逐题批改详情（学生 my-result 与教师复核共用一份口径）。
+
+    S-GRADING(P3) 口径：判分结果以写下的 graded 留痕为准，绝不"再精确匹配一遍"
+    (旧实现会把 AI 判了 8 分的简答题重算成 0 分)；老数据没留痕才回退精确匹配。
+    B5: 增加 teacher_comment 透传, 复核弹窗要显示教师已有的批注。
+    """
+    user_answers = user_answers if isinstance(user_answers, list) else []
+    details = []
+    for i, q in enumerate(questions):
+        user_ans = ""
+        for ua in user_answers:
+            if isinstance(ua, dict) and ua.get("question_index") == i:
+                user_ans = str(ua.get("answer", "")).strip()
+                break
+        correct_ans = str(q.get("answer", "")).strip()
+        q_type = q.get("type", "single")
+        mx = float(q.get("score", 1) or 0)
+        g = graded_map.get(str(i))
+        if isinstance(g, dict) and g:
+            is_correct = bool(g.get("is_correct"))
+            got_score = float(g.get("score") or 0)
+            mx = float(g.get("max_score") or mx)
+            grading = str(g.get("grading") or "")
+            graded_by = str(g.get("graded_by") or "")
+            needs_review = bool(g.get("needs_review"))
+            comment = str(g.get("comment") or "")
+            feedback = str(g.get("feedback") or "")
+            teacher_comment = str(g.get("teacher_comment") or "")
+        else:                       # 老数据没留痕: 只能沿用旧的精确匹配口径
+            is_correct = _answer_matches(user_ans, correct_ans, q_type)
+            got_score = mx if is_correct else 0
+            grading, graded_by, needs_review, comment, feedback = "", "", False, "", ""
+            teacher_comment = ""
+        details.append({
+            "index": i,
+            "question": q.get("question", q.get("question_text", "")),
+            "options": q.get("options", None),
+            "type": q_type,
+            "user_answer": user_ans,
+            "correct_answer": correct_ans,
+            "is_correct": is_correct,
+            "score": got_score,
+            "max_score": mx,
+            "grading": grading,
+            "graded_by": graded_by,
+            "needs_review": needs_review,
+            "comment": comment,
+            "feedback": feedback,
+            "teacher_comment": teacher_comment,
+            "explanation": q.get("explanation", ""),
+            "svg_content": q.get("svg_content") or q.get("svg_code", ""),
+            "has_svg": q.get("has_svg", 1 if q.get("svg_code") or q.get("svg_content") else 0),
+            "media_files": q.get("media_files", ""),
+        })
+    return details
+
+
+@router.get("/quizzes/{quiz_id}/student/{student}/detail", summary="教师查看单个学生答卷(复核用)")
+async def get_quiz_student_detail(quiz_id: int, student: str, request: Request):
+    """B5: 随堂测验教师逐人复核的数据源 —— 与 my-result 同一套留痕口径。
+
+    逐人明细比汇总敏感, 权限对齐 /results 的 student_answers 裁剪: 仅创建者/管理员。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
+    quiz_row = _get_quiz_row(quiz_id)
+    if not quiz_row:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    if role != 0 and (quiz_row.get("creator_username") or "") != user["username"]:
+        raise HTTPException(status_code=403, detail="仅测验创建者和管理员可逐人复核")
+
+    rows = execute_query(
+        """SELECT answers, score, submitted_at, graded, ai_pending
+           FROM interaction_quiz_answers WHERE quiz_id = ? AND student_username = ?""",
+        (quiz_id, student),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="未找到该学生的答题记录")
+    a = rows[0]
+    questions = _quiz_questions(quiz_row)
+    try:
+        user_answers = json.loads(a[0]) if isinstance(a[0], str) else (a[0] or [])
+    except (json.JSONDecodeError, TypeError):
+        user_answers = []
+    raw_score = float(a[1] or 0)
+    q_score = sum(float(q.get("score", 1) or 0) for q in questions)
+    cent = _centesimal(raw_score, q_score)
+    details = _build_quiz_details(questions, user_answers, _quiz_graded(a[3]))
+    pending_ai = sum(1 for d in details if d.get("grading") == "pending")
+    return {
+        "view": "teacher",
+        "quiz_id": quiz_id,
+        "student": student,
+        "submitted_at": a[2],
+        "score": cent if cent is not None else round(raw_score, 1),
+        "total_score": 100.0 if q_score > 0 else q_score,
+        "raw_score": round(raw_score, 1),
+        "raw_total_score": q_score,
+        "percentage": cent,
+        "details": details,
+        "pending_ai": pending_ai,
+        "pending_review": sum(1 for d in details if d.get("needs_review")),
+    }
+
+
+class QuizReviewRequest(BaseModel):
+    """B5: 教师改判随堂测验(逐题分数/评语)"""
+    student_username: str
+    question_scores: dict[str, float] | None = None
+    question_comments: dict[str, str] | None = None
+
+
+def apply_quiz_teacher_scores(gm: dict, scores: dict | None, comments: dict | None,
+                              teacher: str) -> tuple[dict, int]:
+    """把教师复核判定写进逐题批改字典 → (新 gm, 改动条数)。
+
+    口径对齐练习/考试的复核链路: 分数按该题满分封顶, is_correct 用同一 60% 阈值,
+    清 needs_review、grading=graded(退出待批改队列)、graded_by 记教师用户名留痕。
+    """
+    out = json.loads(json.dumps(gm or {}, ensure_ascii=False))
+    touched: set[str] = set()          # applied 按题号去重: 同一题改分+评语只算 1 处改动
+    for qid, val in (scores or {}).items():
+        one = out.get(str(qid))
+        if not isinstance(one, dict):
+            continue
+        try:
+            v = max(0.0, float(val))
+        except (TypeError, ValueError):
+            continue
+        mx = float(one.get("max_score") or 0)
+        if mx:
+            v = min(v, mx)
+        one["score"] = round(v, 1)
+        one["is_correct"] = bool(mx and one["score"] >= mx * 0.6)
+        one["grading"] = "graded"
+        one.pop("needs_review", None)
+        one["graded_by"] = "teacher"
+        one["teacher_adjusted"] = True
+        touched.add(str(qid))
+    for qid, cm in (comments or {}).items():
+        one = out.get(str(qid))
+        if isinstance(one, dict):
+            one["teacher_comment"] = str(cm or "").strip()[:1000]
+            touched.add(str(qid))
+    return out, len(touched)
+
+
+@router.post("/quizzes/{quiz_id}/review", summary="教师：复核/改判随堂测验主观题")
+async def quiz_teacher_review(quiz_id: int, req: QuizReviewRequest, request: Request):
+    """B5: 测验补齐教师人工定分通道 —— 此前只能 retry_review 再丢给 AI。
+
+    与考试/练习一致：改分即时生效、按新逐题分重算总分；全部定稿后按终评分补发
+    等级积分(award_grade 档位幂等)。测验不进错题本, 无需账目回滚。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可复核批改")
+    quiz_row = _get_quiz_row(quiz_id)
+    if not quiz_row:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    if role != 0 and (quiz_row.get("creator_username") or "") != user["username"]:
+        raise HTTPException(status_code=403, detail="仅测验创建者和管理员可改判成绩")
+    student = (req.student_username or "").strip()
+    if not student:
+        raise HTTPException(status_code=400, detail="缺少学生用户名")
+
+    rows = execute_query(
+        "SELECT id, graded FROM interaction_quiz_answers WHERE quiz_id=? AND student_username=?",
+        (quiz_id, student),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="未找到该学生的答题记录")
+    ans_id, gm_raw = rows[0]
+    gm = _quiz_graded(gm_raw)
+    new_gm, applied = apply_quiz_teacher_scores(gm, req.question_scores, req.question_comments,
+                                                user["username"])
+    if not applied:
+        raise HTTPException(status_code=400, detail="没有可保存的修改(题号需与该答卷对应)")
+
+    earned = round(sum(float(v.get("score") or 0) for v in new_gm.values()
+                       if isinstance(v, dict)), 1)
+    still = pending_keys(new_gm)
+    execute_insert_update(
+        "UPDATE interaction_quiz_answers SET graded=?, score=?, ai_pending=? WHERE id=?",
+        (json.dumps(new_gm, ensure_ascii=False), earned, 1 if still else 0, ans_id),
+    )
+    from backend.grading_state import count_needs_review
+    review_left = count_needs_review(new_gm)
+    if not still and not review_left:
+        try:
+            _settle_quiz_answer({"id": ans_id, "quiz_id": quiz_id, "student_username": student,
+                                 "score": earned}, quiz_title=quiz_row.get("title") or "")
+        except Exception as st_err:
+            logger.warning(f"测验复核结算失败 quiz={quiz_id} student={student}: {st_err}")
+    logger.info(f"教师 {user['username']} 改判测验 {quiz_id} 学生 {student}: {applied} 题 → {earned}")
+    return {"message": "已保存改判", "score": earned, "applied": applied,
+            "pending_review": review_left}
 
 
 def _calc_student_correct_count(answer_row: tuple[Any, ...], questions: list[Any],
@@ -3957,6 +4120,7 @@ def _quiz_fetch_jobs(limit: int) -> list[GradingJob]:
                 max_score=float(one.get("max_score") or q.get("score") or 1),
                 answer_text=str(one.get("student_answer") or ""),
                 mode="short",     # 测验主观题只有简答/填空, 全部可合并批量
+                rubric=str(q.get("rubric") or ""),   # C4: 从题库来的题可带评分细则
             ))
         if len(jobs) >= limit:
             break
@@ -3992,6 +4156,12 @@ def _quiz_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str, An
                 one["needs_review"] = True
             else:
                 one.pop("needs_review", None)
+            # B6: 批量/单条批改的要点命中直通写回, 与练习/考试一致
+            for k in ("key_points_hit", "key_points_missed"):
+                if res.get(k):
+                    one[k] = res[k]
+            if res.get("grade_meta"):
+                one["grade_meta"] = res["grade_meta"]   # C1
         earned = round(sum(float(v.get("score") or 0) for v in gm.values() if isinstance(v, dict)), 1)
         still = pending_keys(gm)
         conn.execute("UPDATE interaction_quiz_answers SET graded=?, score=?, ai_pending=? WHERE id=?",

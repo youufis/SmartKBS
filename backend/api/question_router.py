@@ -87,6 +87,7 @@ class QuestionUpdate(BaseModel):
     difficulty: str | None = Field(None, max_length=20)
     type: str | None = Field(None, max_length=20)          # Q8: 题型录错应可修正
     subject: str | None = Field(None, max_length=100)       # Q8: 学科挂错应可修正
+    rubric: str | None = Field(None, max_length=5000)       # S-GRADING(C4): 评分要点/给分分配
 
 
 class CreatorTransferRequest(BaseModel):
@@ -1459,7 +1460,7 @@ async def update_question(question_id: int, req: QuestionUpdate, request: Reques
 
     updates, params = [], []
     for field in ("question_text", "options", "correct_answer", "explanation",
-                  "knowledge_points", "difficulty", "type", "subject"):
+                  "knowledge_points", "difficulty", "type", "subject", "rubric"):
         if field not in provided:
             continue
         if field == "options":

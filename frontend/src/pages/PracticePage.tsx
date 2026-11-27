@@ -43,6 +43,7 @@ const { TextArea } = Input
 const GRADED_BY_KEYS: Record<string, string> = {
   ai: "gradedByAi", keyword: "gradedByKeyword", exact: "gradedByExact",
   none: "gradedByNone", teacher: "gradedByTeacher", queued: "gradedByQueued",
+  empty: "gradedByEmpty",
 }
 const gradedByKey = (v: unknown) => GRADED_BY_KEYS[String(v ?? "")] || "gradedByUnknown"
 

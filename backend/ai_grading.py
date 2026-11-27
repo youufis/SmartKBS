@@ -11,7 +11,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 import threading
 import time as _time
 from dataclasses import dataclass, field
@@ -25,7 +27,45 @@ _CFG_DEFAULTS: dict[str, int] = {
     "AI_GRADING_BATCH_SIZE": 8,              # 一次 AI 调用合并评几份答案
     "AI_GRADING_CONCURRENCY": 2,             # 同时进行中的 AI 调用数（避免挤占出题/对话）
     "AI_GRADING_MAX_ITEMS_PER_ROUND": 60,    # 单轮最多处理多少题（防一次跑太久）
+    "GRADING_SPOT_CHECK_PERCENT": 0,         # C3 抽检双评比例(0=关闭, 拍板默认关)
 }
+
+
+# ── B2: 送评预算 ── 长答案不截断会撑爆批量 prompt；调用不带 max_tokens 会吃服务商默认上限,
+# 输出被腰斩 → 整批 JSON 解析失败 → 逐条重试又失败 → 全班转人工。截断统一走 clip_answer。
+ANSWER_CLIP_SHORT = 1200       # 简答/填空答案送评前长度
+ANSWER_CLIP_ESSAY = 4000       # 作文/长主观答案送评前长度
+BATCH_TOKENS_PER_ITEM = 200    # 批量评分 max_tokens 按份数摊 (B6 起每条还要输出命中要点)
+BATCH_TOKENS_MARGIN = 200      # 批量调用固定余量
+SINGLE_TOKENS_SHORT = 900      # 单条简答批改输出预算 (B6 起含要点命中)
+SINGLE_TOKENS_ESSAY = 1600     # 单条作文多维批改输出预算
+GRADING_TEMPERATURE = 0.0      # B3: 批改固定 temperature=0 —— 同一答案多次重批要稳定可复现
+PROMPT_VERSION = "2026-11.3"   # C1: 批改 prompt 留痕版本号; 改任何评分 prompt 都要在这里 +1
+SPOT_CHECK_DIFF_RATIO = 0.2    # C3: 抽检双评分差超过满分的这个比例 → 转教师确认
+SPOT_RECHECK_NOTE = ("【独立复核】你是第二遍阅卷的教师。忽略任何已有评分结果，"
+                     "只根据题目、参考答案与评分细则独立评分；宁可给保守分也不要凑分。")
+
+
+def grading_model() -> str:
+    """B3: 批改专用模型（系统配置 MODEL_GRADING）；留空=沿用对话模型。"""
+    try:
+        from backend.api.config_router import get_config_value
+        return str(get_config_value("MODEL_GRADING", "") or "").strip()
+    except Exception:
+        return ""
+
+
+def clip_answer(text, mode: str = "short") -> str:
+    """把学生答案裁到送评预算：超长时留头 80% + 尾 20%（结尾也可能是得分点）并标注。"""
+    limit = ANSWER_CLIP_ESSAY if mode == "essay" else ANSWER_CLIP_SHORT
+    # C2: 剥控制字符(保留换行/制表) —— 零宽字符与转义戏法不该混进评分 prompt
+    s = re.sub(r"[\u200b-\u200f\u202a-\u202e\ufeff\x00-\x08\x0b\x0c\x0e-\x1f\x7f]",
+               " ", str(text or "")).strip()
+    if len(s) <= limit:
+        return s
+    keep = limit - 40
+    head, tail = int(keep * 0.8), int(keep * 0.2)
+    return s[:head] + f"…(原文 {len(s)} 字，中间已截断，只按可见内容评分)…" + s[-tail:]
 
 
 def _cfg(key: str) -> int:
@@ -50,6 +90,7 @@ class GradingJob:
     max_score: float
     answer_text: str
     mode: str = "short"     # short=可合并批量; essay=多维评分(逐条调用)
+    rubric: str = ""        # C4: 题目自带的"评分要点/给分分配"(可空), 拼进批改依据
     meta: dict[str, Any] = field(default_factory=dict)   # 源侧附加信息(学科/题型等)
     # 说明: 不做跨轮重试计数 —— 一轮里「批量→逐条→仍失败即转教师批改」，
     # 判不出的题当场就出队(grading=review)，不存在反复回炉的题目。
@@ -88,6 +129,27 @@ def pending_keys(graded: dict[str, Any]) -> list[str]:
             if isinstance(v, dict) and v.get("grading") == "pending"]
 
 
+def grading_reference(job: GradingJob) -> str:
+    """C4: 批改依据 = 参考答案 (+ 评分细则)。有 rubric 时逐条给分依据更硬, 评分更稳。"""
+    ref = str(job.ref_answer or "").strip()
+    rb = str(job.rubric or "").strip()
+    if rb:
+        return f"{ref}\n\n【评分细则(逐条给分, 分值以它为准)】\n{rb}" if ref else rb
+    return ref
+
+
+def _group_key(job: GradingJob) -> tuple:
+    """批量合并分组键：同来源 + 同活动 + 同题 + 同模式分值 + 同题面指纹，缺一不可。
+
+    A1(2026-11 走查): 随堂测验的 entry_key 是题目序号而不是题目 id，旧键不含 activity_id
+    时两场测验同序号同满值的题会被并成一批，_build_batch_prompt 拿第一份的题面评整批 →
+    跨卷串分。题面指纹再挡一种事故：老师中途改题干/参考答案，两个版本不能同批。
+    """
+    fp = hashlib.md5(
+        f"{job.question_text}\x1f{job.ref_answer}".encode("utf-8")).hexdigest()[:12]
+    return (job.source, job.activity_id, job.entry_key, job.mode, job.max_score, fp)
+
+
 def pending_summary() -> dict[str, int]:
     """各来源待批改题数（只数不写，供健康检查/教师端提示）"""
     out: dict[str, int] = {}
@@ -119,6 +181,15 @@ def review_result(reason: str) -> dict[str, Any]:
     return _review_result(reason)
 
 
+def _spot_picked(job: GradingJob, pct: int) -> bool:
+    """C3: 确定性抽样 —— 同一题每轮抽不抽中固定可复现(无随机数, 事后可审计)。"""
+    if pct <= 0:
+        return False
+    h = int(hashlib.md5(
+        f"spot:{job.source}:{job.attempt_id}:{job.entry_key}".encode("utf-8")).hexdigest()[:6], 16)
+    return h % 100 < pct
+
+
 def _review_result(reason: str) -> dict[str, Any]:
     """判不出来时的结果：不猜分，转教师批改"""
     return {"score": 0.0, "is_correct": False, "graded_by": "none",
@@ -130,11 +201,11 @@ def _build_batch_prompt(jobs: list[GradingJob]) -> str:
     base = jobs[0]
     blocks = []
     for n, j in enumerate(jobs, 1):
-        blocks.append(f"### 第 {n} 份\n{j.answer_text.strip() or '（空白）'}")
+        blocks.append(f"### 第 {n} 份\n{clip_answer(j.answer_text, j.mode) or '（空白）'}")
     return BATCH_SUBJECTIVE_GRADING_PROMPT.format(
         count=str(len(jobs)),
         question_text=str(base.question_text or "")[:1200].replace("{", "{{").replace("}", "}}"),
-        ref_answer=str(base.ref_answer or "")[:2000].replace("{", "{{").replace("}", "}}"),
+        ref_answer=grading_reference(base)[:2000].replace("{", "{{").replace("}", "}}"),
         max_score=str(base.max_score),
         items="\n\n".join(blocks),
     )
@@ -164,15 +235,32 @@ def _parse_batch_result(text: str, count: int) -> dict[int, dict[str, Any]]:
             "score": one.get("score", one.get("得分")),
             "comment": str(one.get("comment") or one.get("评语") or "")[:600],
             "feedback": str(one.get("feedback") or one.get("建议") or "")[:600],
+            # B6: 批量也回填命中要点(兼容 hit / key_points_hit 两种键名)，要点覆盖率统计不再只有单条路径有数
+            "key_points_hit": [str(x)[:80] for x in
+                               (one.get("key_points_hit") or one.get("hit") or [])
+                               if str(x).strip()][:12],
         }
     return out
 
 
-async def _grade_one(job: GradingJob, api_key: str,
-                     single: Optional[Callable[[GradingJob, str], Any]] = None) -> dict[str, Any]:
+async def _grade_one(job: GradingJob, api_key: str, sem: asyncio.Semaphore,
+                     single: Optional[Callable[[GradingJob, str], Any]] = None,
+                     spot: bool = False) -> dict[str, Any]:
+    """单条批改（B1: 与批量共用并发闸）。
+
+    旧实现里 sem 只罩住了批量调用，essay/逐条完全裸并发 —— 全班交作文的一轮能并发
+    几十个 AI 调用，触发限流后整批失败转人工。现在统一先占坑再评。
+    """
+    async with sem:
+        return await _grade_one_inner(job, api_key, single, spot=spot)
+
+
+async def _grade_one_inner(job: GradingJob, api_key: str,
+                           single: Optional[Callable[[GradingJob, str], Any]],
+                           spot: bool = False) -> dict[str, Any]:
     """单条批改：源侧自定义优先，否则用内置 prompt；异常一律转「待教师批改」，不猜分"""
-    if single is None:
-        return await _grade_single_fallback(job, api_key)
+    if single is None or spot:
+        return await _grade_single_fallback(job, api_key, spot=spot)
     try:
         res = single(job, api_key)
         if asyncio.iscoroutine(res):
@@ -185,8 +273,13 @@ async def _grade_one(job: GradingJob, api_key: str,
     return _review_result("AI 批改未成功，已转教师批改。")
 
 
-async def _grade_single_fallback(job: GradingJob, api_key: str) -> dict[str, Any]:
-    """逐条批改（批量解析失败时的降级），复用各自的单条评分 prompt"""
+async def _grade_single_fallback(job: GradingJob, api_key: str,
+                                 spot: bool = False) -> dict[str, Any]:
+    """逐条批改（批量解析失败时的降级），复用各自的单条评分 prompt。
+
+    spot=True 时为 C3 抽检复核：不取源侧自定义评分(那是同一判分口径, 复读没意义)，
+    改用"独立复核"前言 + 内置 prompt, 与首评形成对照。
+    """
     from backend.api.ai_service import call_ai_async
     from backend.utils import extract_json_from_text
     try:
@@ -196,14 +289,20 @@ async def _grade_single_fallback(job: GradingJob, api_key: str) -> dict[str, Any
             from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
             prompt = SHORT_ANSWER_GRADING_PROMPT.format(
                 question_text=str(job.question_text or "").replace("{", "{{").replace("}", "}}"),
-                correct_answer=str(job.ref_answer or "").replace("{", "{{").replace("}", "}}"),
+                correct_answer=grading_reference(job).replace("{", "{{").replace("}", "}}"),
                 max_score=str(job.max_score),
                 half_score=str(job.max_score * 0.5),
                 near_full=str(job.max_score * 0.8),
                 half_minus=str(job.max_score * 0.4),
-                student_answer=str(job.answer_text or "").replace("{", "{{").replace("}", "}}"),
+                student_answer=clip_answer(job.answer_text, "short").replace("{", "{{").replace("}", "}}"),
             )
-        result = extract_json_from_text(await call_ai_async(prompt, api_key, json_mode=True, use_kb=False))
+        max_tokens = SINGLE_TOKENS_ESSAY if job.mode == "essay" else SINGLE_TOKENS_SHORT
+        if spot:
+            prompt = SPOT_RECHECK_NOTE + "\n\n" + prompt
+        result = extract_json_from_text(await call_ai_async(prompt, api_key, json_mode=True,
+                                              use_kb=False, max_tokens=max_tokens,
+                                              model=grading_model(),
+                                              temperature=GRADING_TEMPERATURE))
         if isinstance(result, dict):
             score = _clamp(result.get("score"), job.max_score)
             if score is not None:
@@ -235,9 +334,9 @@ def _essay_prompt(job: GradingJob) -> str:
     return role + ESSAY_GRADING_PROMPT.format(
         subject="".replace("{", "{{"),
         question_text=str(job.question_text or "").replace("{", "{{").replace("}", "}}"),
-        correct_answer=str(job.ref_answer or "").replace("{", "{{").replace("}", "}}"),
+        correct_answer=grading_reference(job).replace("{", "{{").replace("}", "}}"),
         max_score=str(job.max_score),
-        student_answer=str(job.answer_text or "").replace("{", "{{").replace("}", "}}"),
+        student_answer=clip_answer(job.answer_text, "essay").replace("{", "{{").replace("}", "}}"),
     )
 
 
@@ -263,7 +362,7 @@ async def _grade_group(jobs: list[GradingJob], api_key: str, sem: asyncio.Semaph
         # mode=essay 必须逐条（多维评分输出结构不同），其余可批量
         singles = [c for c in chunk if c.mode == "essay"]
         batchable = [c for c in chunk if c.mode != "essay"]
-        tasks: list[Any] = [_grade_one(c, api_key, single) for c in singles]
+        tasks: list[Any] = [_grade_one(c, api_key, sem, single) for c in singles]
         if batchable:
             tasks.append(_grade_batch_call(batchable, api_key, sem, single))
         got = await asyncio.gather(*tasks) if tasks else []
@@ -293,7 +392,10 @@ async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.S
 
     async with sem:
         try:
-            text = await call_ai_async(_build_batch_prompt(jobs), api_key, json_mode=True, use_kb=False)
+            text = await call_ai_async(
+                _build_batch_prompt(jobs), api_key, json_mode=True, use_kb=False,
+                max_tokens=len(jobs) * BATCH_TOKENS_PER_ITEM + BATCH_TOKENS_MARGIN,
+                model=grading_model(), temperature=GRADING_TEMPERATURE)
             parsed = _parse_batch_result(text, len(jobs))
         except Exception as e:
             logger.warning(f"[ai_grading] 批量批改调用失败(题面 {str(jobs[0].question_text)[:24]!r}, {len(jobs)} 份): {e}")
@@ -308,7 +410,7 @@ async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.S
             missing.append(j)
             continue
         cm, fb = one.get("comment", ""), one.get("feedback", "")
-        out[id(j)] = {
+        entry = {
             "score": score,
             "is_correct": score >= j.max_score * 0.6,
             "graded_by": "ai",
@@ -316,9 +418,12 @@ async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.S
             "comment": cm[:600],
             "feedback": "\n".join(x for x in (cm, fb) if x and x != cm)[:600],
         }
+        if one.get("key_points_hit"):
+            entry["key_points_hit"] = one["key_points_hit"]   # B6
+        out[id(j)] = entry
     if missing:
         logger.info(f"[ai_grading] 批量返回缺 {len(missing)} 份，逐条重试")
-        retry = await asyncio.gather(*[_grade_one(j, api_key, single) for j in missing])
+        retry = await asyncio.gather(*[_grade_one(j, api_key, sem, single) for j in missing])
         for j, r in zip(missing, retry):
             out[id(j)] = r
     return out
@@ -379,7 +484,7 @@ async def drain_async(only_source: str = "", only_activity: str = "") -> dict[st
 
         groups: dict[tuple, list[GradingJob]] = {}
         for j in jobs:
-            groups.setdefault((j.source, j.entry_key, j.mode, j.max_score), []).append(j)
+            groups.setdefault(_group_key(j), []).append(j)
         sem = asyncio.Semaphore(max(1, _cfg("AI_GRADING_CONCURRENCY")))
         def _single_of(g: list[GradingJob]):
             ad = _ADAPTERS.get(g[0].source)
@@ -396,12 +501,53 @@ async def drain_async(only_source: str = "", only_activity: str = "") -> dict[st
                 continue
             results.update(oc or {})
 
+        # C1: 批改留痕 —— 什么模型、哪版 prompt、何时判的, 事后质询/回归对照都有据可查
+        meta = {"model": grading_model() or "default", "pver": PROMPT_VERSION,
+                "at": _time.strftime("%Y-%m-%d %H:%M:%S")}
         by_attempt: dict[tuple[str, int], list[tuple[GradingJob, dict[str, Any]]]] = {}
         for j in jobs:
             r = results.get(id(j))
             if r is None:
                 r = _review_result("AI 批改未完成，已转教师批改。")
+            r.setdefault("grade_meta", {}).update(meta)
             by_attempt.setdefault((j.source, j.attempt_id), []).append((j, r))
+
+        # C3(默认 0=关闭): 抽检双评 —— 复核 prompt 独立再判一次, 分差过大转教师
+        pct = _cfg("GRADING_SPOT_CHECK_PERCENT")
+        spot_n = 0
+        if pct > 0:
+            cands = [j for j in jobs
+                     if results.get(id(j)) is not None
+                     and not results[id(j)].get("needs_review") and _spot_picked(j, pct)]
+            # S1: 与首评同一套答案去重 —— 相同答案只复评一次, 结果写回所有同答案卷
+            reps: dict[tuple, list[GradingJob]] = {}
+            for j in cands:
+                reps.setdefault((j.question_text, j.ref_answer, j.answer_text), []).append(j)
+            if reps:
+                rep_jobs = [g[0] for g in reps.values()]
+                souts = await asyncio.gather(
+                    *[_grade_one(j, api_key, sem, None, spot=True) for j in rep_jobs],
+                    return_exceptions=True)
+                for j, r2 in zip(rep_jobs, souts):
+                    if not isinstance(r2, dict) or r2.get("needs_review"):
+                        continue
+                    s2 = _clamp(r2.get("score"), j.max_score)
+                    if s2 is None:
+                        continue
+                    for jj in reps[(j.question_text, j.ref_answer, j.answer_text)]:
+                        r1 = results[id(jj)]
+                        if r1.get("needs_review"):
+                            continue
+                        diff = abs(s2 - float(r1.get("score") or 0))
+                        r1["grade_meta"]["spot"] = {"score": s2, "diff": round(diff, 1)}
+                        if diff > max(1.0, j.max_score * SPOT_CHECK_DIFF_RATIO):
+                            r1["needs_review"] = True
+                            r1["is_correct"] = False
+                            r1["feedback"] = (str(r1.get("feedback") or "") + f"（抽检复评 {s2:g} 分，"
+                                              f"与原分差 {diff:g} 分，转教师确认）")[:600]
+                            spot_n += 1
+                logger.info(f"[ai_grading] 抽检双评 抽中{len(cands)}份/去重后复评{len(rep_jobs)}次, "
+                            f"分差过大转人工 {spot_n}")
 
         done_attempts: list[tuple[str, int]] = []
         for (src, attempt_id), items in by_attempt.items():
@@ -423,7 +569,7 @@ async def drain_async(only_source: str = "", only_activity: str = "") -> dict[st
                 logger.warning(f"[ai_grading] 收尾结算失败 source={src} attempt={attempt_id}: {e}")
 
         graded = len(jobs)
-        to_review = sum(1 for r in results.values() if r.get("needs_review"))
+        to_review = sum(1 for r in results.values() if r.get("needs_review"))  # 含 C3 抽检翻转
         logger.info(f"[ai_grading] 本轮批改 {graded} 题（转人工 {to_review}），"
                     f"合并为 {len(groups)} 组 / {len(by_attempt)} 份答卷，"
                     f"耗时 {round(_time.time() - started, 1)}s")

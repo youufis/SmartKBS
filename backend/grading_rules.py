@@ -98,6 +98,17 @@ def grade_fill_by_rule(q: dict, student_ans: str) -> dict[str, Any] | None:
     }
 
 
+def blank_zero_entry(correct_answer: Any, q_score: Any, student_ans: str = "") -> dict[str, Any]:
+    """[S-GRADING(C6)] 主观题空白答案：当场 0 分定稿。
+
+    空白是确定判定，不是"判不准"——不必烧 AI 额度，也不必占教师复核；
+    仍按答错进错题本（错就是错），教师复核可改。
+    """
+    return {"student_answer": student_ans, "correct_answer": str(correct_answer or ""),
+            "score": 0.0, "max_score": float(q_score or 10), "is_correct": False,
+            "graded_by": "empty", "feedback": "未作答。按题目要求写出内容即可得分。"}
+
+
 def keyword_fallback(correct_answer: Any, q_score: Any, student_ans: str) -> dict[str, Any]:
     """[S-GRADING] AI 不可用 / 调用失败时的兜底判分。
 

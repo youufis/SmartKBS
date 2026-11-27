@@ -196,6 +196,7 @@
   "gradedByUnknown": "Graded",
   "gradedDone": "Graded",
   "gradedByQueued": "Queued",
+  "gradedByEmpty": "Blank (unanswered)",
   "gradingPending": "AI grading",
   "pendingAiN": "{{count}} grading",
   "pendingAiHint": "{{count}} subjective answer(s) are still being graded in the background. Your score and points update automatically.",

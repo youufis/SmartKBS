@@ -788,7 +788,8 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
 
 async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = None,
                         max_tokens: Optional[int] = None, json_mode: bool = False,
-                        use_kb: bool = True, kb_query: str = "") -> str:
+                        use_kb: bool = True, kb_query: str = "",
+                        model: str = "", temperature: Optional[float] = None) -> str:
     """异步调用 AI，返回完整响应文本（不阻塞工作线程）。
 
     max_tokens：题目/课件这类长输出必须显式给，否则走服务商默认上限会被静默截断；
@@ -809,18 +810,22 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
         d = get_ai_config(use_agent=False)
         return await _call_model_async(prompt, api_key, d["model"], d["api_base"], history=history,
                                        max_tokens=max_tokens, json_mode=json_mode,
-                                       enable_thinking=False)
+                                       enable_thinking=False, temperature=temperature)
     else:
-        return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
+        # B3(S-GRADING): model 覆盖供批改等场景独立选模；temperature 固定评分时用 0 保证可复现
+        use_model = (model or "").strip() or cfg["model"]
+        return await _call_model_async(prompt, api_key, use_model, cfg["api_base"], history=history,
                                        max_tokens=max_tokens, json_mode=json_mode,
-                                       enable_thinking=False if not use_kb else None)
+                                       enable_thinking=False if not use_kb else None,
+                                       temperature=temperature)
 
 
 
 async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str,
                             history: Optional[list] = None,
                             max_tokens: Optional[int] = None, json_mode: bool = False,
-                            enable_thinking: Optional[bool] = None) -> str:
+                            enable_thinking: Optional[bool] = None,
+                            temperature: Optional[float] = None) -> str:
     """异步直接调用大模型（OpenAI 兼容接口）"""
     import httpx
 
@@ -844,6 +849,8 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
             }
             if max_tokens:
                 payload["max_tokens"] = int(max_tokens)
+            if temperature is not None:
+                payload["temperature"] = float(temperature)
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
             if enable_thinking is not None and "qwen" in model.lower():

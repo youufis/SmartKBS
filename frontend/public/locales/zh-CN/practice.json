@@ -197,6 +197,7 @@
   "gradedByUnknown": "已判分",
   "gradedDone": "已批改",
   "gradedByQueued": "等待批改",
+  "gradedByEmpty": "未作答",
   "gradingPending": "AI 批改中",
   "pendingAiN": "{{count}} 题批改中",
   "pendingAiHint": "还有 {{count}} 道主观题在后台批改，成绩与积分会自动更新，请稍候。",
