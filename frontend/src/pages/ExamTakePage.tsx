@@ -467,9 +467,10 @@ const ExamTakePage: React.FC = () => {
                             : detail.is_correct
                             ? <CheckCircleOutlined style={{ color: token.colorSuccess, fontSize: 18 }} />
                             : <CloseCircleOutlined style={{ color: token.colorError, fontSize: 18 }} />}
-                          <span>{t('yourAnsColon')}{detail.student_answer || t('unanswered')}</span>
+                          {/* E2: 学生端回看同款 —— 换行保真、长串断开 */}
+                          <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{t('yourAnsColon')}{detail.student_answer || t('unanswered')}</span>
                           {!detail.is_correct && !pendingItem && (
-                            <span style={{ color: token.colorTextTertiary }}>{t('correctAnsColon')}{detail.correct_answer}</span>
+                            <span style={{ color: token.colorTextTertiary, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{t('correctAnsColon')}{detail.correct_answer}</span>
                           )}
                           {pendingItem
                             ? <Tag color="blue">{t('exGradingPending')}</Tag>

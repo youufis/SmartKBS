@@ -2142,7 +2142,15 @@ const ExamPage: React.FC = () => {
                                 </div>
                               )}
                               <Space size={8} wrap>
-                                <Tag color="blue">{t('correctAnsLabel')}: {r.correct_answer}</Tag>
+                                {String(r.correct_answer || '').length > 30 ? (
+                                  /* E2: 填空/作文的长答案塞 Tag 会撑爆一行 —— 超 30 字独立成行换行展示 */
+                                  <Typography.Paragraph style={{ margin: 0, maxWidth: 640, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                    <Typography.Text type="secondary">{t('correctAnsLabel')}：</Typography.Text>
+                                    <FormulaRenderer content={String(r.correct_answer || '')} />
+                                  </Typography.Paragraph>
+                                ) : (
+                                  <Tag color="blue">{t('correctAnsLabel')}: {r.correct_answer}</Tag>
+                                )}
                                 {r.knowledge_points && <Tag>{r.knowledge_points}</Tag>}
                                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                                   {t('exQuestionScoreCol')}: {r.question_score}
@@ -2447,16 +2455,23 @@ const ExamPage: React.FC = () => {
                         })}
                       </div>
                     )}
+                    {/* E2: 学生答案保留换行并断开长串（essay 不再拉成一行）；参考答案过公式渲染 */}
                     <Space orientation="vertical" style={{ width: '100%' }} size={4}>
-                      <Typography.Text><strong>{t('yourAnsColon')}</strong>{ans.student_answer || t('unanswered')}</Typography.Text>
-                      <Typography.Text><strong>{t('correctAnsColon')}</strong>{q.correct_answer}</Typography.Text>
+                      <Typography.Paragraph style={{ marginBottom: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        <strong>{t('yourAnsColon')}</strong>{ans.student_answer || t('unanswered')}
+                      </Typography.Paragraph>
+                      <Typography.Paragraph style={{ marginBottom: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        <strong>{t('correctAnsColon')}</strong><FormulaRenderer content={String(q.correct_answer || '')} />
+                      </Typography.Paragraph>
                       <Typography.Text><strong>{t('scoreColon')}</strong>
                         <span style={{ color: pendingItem ? '#1677ff' : (isCorrect ? '#52c41a' : '#ff4d4f') }}>
                           {pendingItem ? t('exGradingPending') : `${ans.score || 0} / ${ans.max_score || q.question_score || 0}`}
                         </span>
                       </Typography.Text>
                       {q.explanation && (
-                        <Typography.Text><strong>{t('explanationColon')}</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
+                        <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          <strong>{t('explanationColon')}</strong><FormulaRenderer content={q.explanation} />
+                        </Typography.Paragraph>
                       )}
 
                       {/* AI 简答评语 */}
@@ -2542,7 +2557,7 @@ const ExamPage: React.FC = () => {
             </Space>
             {(linkedExam.questions || []).map((q: any, i: number) => (
               <Card key={q.id || i} size="small" style={{ marginBottom: 8 }}
-                title={<Space size={4}><Tag>{t('qLabelIdx', { no: i + 1 })}</Tag><Tag color="blue">{q.type}</Tag></Space>}>
+                title={<Space size={4}><Tag>{t('qLabelIdx', { no: i + 1 })}</Tag><Tag color="blue">{typeLabel(q.type)}</Tag></Space>}>
                 <FormulaRenderer content={q.question_text} />
                 {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
                   <div key={k} style={{ margin: '2px 0' }}>
@@ -2550,7 +2565,9 @@ const ExamPage: React.FC = () => {
                   </div>
                 ))}
                 <div style={{ marginTop: 4 }}>
-                  <Typography.Text type="secondary">{t('correctAnswerLbl')}：{q.correct_answer}</Typography.Text>
+                  <Typography.Text type="secondary" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {t('correctAnswerLbl')}：<FormulaRenderer content={String(q.correct_answer || '')} inline />
+                  </Typography.Text>
                 </div>
               </Card>
             ))}

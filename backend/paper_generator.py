@@ -82,14 +82,35 @@ COLOR_DARK = RGBColor(0x33, 0x33, 0x33)
 COLOR_ANSWER = RGBColor(0xCC, 0x00, 0x00)  # 答案卷用红色标注答案
 COLOR_EXPLANATION = RGBColor(0x00, 0x66, 0xCC)  # 解析用蓝色
 
-TYPE_LABELS = {
-    "single": "一、单选题",
-    "multiple": "二、多选题",
-    "true_false": "三、判断题",
-    "short": "四、简答题",
-}
-
+# 分节序号汉字表：按"卷面实际出现的题型"动态编号。
+# 旧实现把"一、二、三、四"硬编码进标签文本且只登记 4 类 —— fill/essay 导出成裸 key，
+# 题型不全时序号跳号，不在表里的题型还会整类静默漏出卷子（见 ordered_type_groups）。
 TYPE_ORDER = ["single", "multiple", "true_false", "fill", "short", "essay", "subjective"]
+
+_CN_ORDINALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+                "十一", "十二", "十三", "十四", "十五", "十六"]
+
+
+def ordered_type_groups(questions):
+    """按题型分组：TYPE_ORDER 优先，清单外的题型按卷面出现顺序追加。
+
+    分组题数之和恒等于输入题数 —— 任何题型都不会从试卷/答案卷/答题卡里消失；
+    清单漂移最坏只影响排序，不再丢题。
+    """
+    groups = {}
+    for q in questions:
+        tk = str(q.get("type") or "single")
+        groups.setdefault(tk, []).append(q)
+    known = [tk for tk in TYPE_ORDER if groups.get(tk)]
+    extra = [tk for tk in groups if tk not in TYPE_ORDER]
+    return [(tk, groups[tk]) for tk in known + extra]
+
+
+def section_label(type_key: str, index: int) -> str:
+    """分节标题 = 动态中文序号 + 配置化中文标签（与 Excel 导出同走 question_labels 口径）。"""
+    from backend.question_labels import question_type_label
+    num = _CN_ORDINALS[index] if index < len(_CN_ORDINALS) else str(index + 1)
+    return f"{num}、{question_type_label(type_key) or type_key}"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1068,31 +1089,15 @@ def generate_exam_paper(
         _add_paragraph(doc, notice, docx_font_body(), Pt(10), color=COLOR_LIGHT_GRAY,
                        space_before=4, space_after=6)
 
-    # ── 按题型分组 ──
-    type_groups: dict[str, list[dict[str, Any]]] = {}
-    for q in questions:
-        q_type = q.get("type", "single")
-        if q_type not in type_groups:
-            type_groups[q_type] = []
-        type_groups[q_type].append(q)
-
-    # ── 题型全局序号 ──
+    # ── 按题型分组遍历（E1: 不漏题型、序号动态、标签走配置） ──
     question_number = 0
 
-    # ── 遍历题型 ──
-    for type_key in TYPE_ORDER:
-        if type_key not in type_groups:
-            continue
-
-        group = type_groups[type_key]
-        if not group:
-            continue
-
+    for _gi, (type_key, group) in enumerate(ordered_type_groups(questions)):
         # 计算该题型总分
         type_total = sum(float(q.get("question_score", q.get("score", 5))) for q in group)
 
         # 题型标题
-        label = TYPE_LABELS.get(type_key, type_key)
+        label = section_label(type_key, _gi)
         _add_section_title(doc, title, label, type_total)
 
         # 逐题渲染
@@ -1272,24 +1277,11 @@ def generate_answer_sheet(
 
     _add_paragraph(doc, "", space_after=6)
 
-    # 按题型生成填涂区域
-    type_groups: dict[str, list[dict[str, Any]]] = {}
-    for q in questions:
-        q_type = q.get("type", "single")
-        if q_type not in type_groups:
-            type_groups[q_type] = []
-        type_groups[q_type].append(q)
-
+    # 按题型生成填涂区域（E1: 与试卷同一套分组/标签；未知题型走简答作答区，不再漏出答题卡）
     question_number = 0
 
-    for type_key in TYPE_ORDER:
-        if type_key not in type_groups:
-            continue
-        group = type_groups[type_key]
-        if not group:
-            continue
-
-        label = TYPE_LABELS.get(type_key, type_key)
+    for _gi, (type_key, group) in enumerate(ordered_type_groups(questions)):
+        label = section_label(type_key, _gi)
 
         if type_key in ("single", "multiple"):
             _add_paragraph(doc, label, docx_font_heading(), SIZE_SECTION, bold=True, space_before=6, space_after=4)
@@ -1343,6 +1335,26 @@ def generate_answer_sheet(
                 _add_paragraph(doc, f"{question_number}. {q_text}", docx_font_body(), Pt(10),
                                space_before=2, space_after=1)
                 _render_short_answer_lines(doc, 4)
+
+        else:
+            # E1(答题卡漏题实锤): 旧实现只认识单选/多选/判断/简答四个分支 ——
+            # 填空题、作文、主观题和任何新题型在这张答题卡上**整节消失**，学生无从作答。
+            # 兜底统一给作答区：填空 2 行；其余按分值给 4~8 行。
+            _add_paragraph(doc, label, docx_font_heading(), SIZE_SECTION, bold=True, space_before=6, space_after=4)
+            for q in group:
+                question_number += 1
+                q_text = _plain_text(q.get("question_text", ""))[:40]
+                _add_paragraph(doc, f"{question_number}. {q_text}", docx_font_body(), Pt(10),
+                               space_before=2, space_after=1)
+                try:
+                    _score = float(q.get("question_score", q.get("score", 5)))
+                except (TypeError, ValueError):
+                    _score = 5.0
+                if type_key == "fill":
+                    _lines = 2
+                else:
+                    _lines = min(8, max(4, int(_score / 2)))
+                _render_short_answer_lines(doc, _lines)
 
     _add_page_number(doc)
 
