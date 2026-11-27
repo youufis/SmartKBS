@@ -450,5 +450,6 @@
   "aiRuntimeLocalNoBase": "Local engine address not set",
   "aiRuntimeConflictTip": "Local mode is on but no local engine address is configured, so requests are still served by the cloud.",
   "aiRuntimeModelFootNote": "When the knowledge base is used, this model generates the answer on top of the retrieved passages.",
-  "aiRuntimeKbFootNote": "The local library takes over automatically when cloud retrieval is unavailable — no reconfiguration needed."
+  "aiRuntimeKbFootNote": "The local library takes over automatically when cloud retrieval is unavailable — no reconfiguration needed.",
+  "mdImageMissing": "Image file is missing — ask the teacher to regenerate it"
 }

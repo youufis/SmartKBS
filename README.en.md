@@ -8,8 +8,8 @@
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
 > - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot), smart question bank (generate / extract / manual entry / id link), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams (pre-publish checklist · zero-attempt unpublish), paper composing with Word export (native formulas, no dropped questions), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
-> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion (profile · memory · care), explore canvas (AI-powered infinite canvas), course exercises, targeted practice (AI-graded subjective answers), wrong-answer review, daily picks and trending news, code practice
-> - 🎪 **Practise · Classroom Activities** — class quiz (AI-graded subjective answers · manual re-grading), classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
+> - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion (profile · memory · care), explore canvas (AI-powered infinite canvas), course exercises, targeted practice (AI-graded subjective answers · roster reminders), wrong-answer review, daily picks and trending news, code practice
+> - 🎪 **Practise · Classroom Activities** — class quiz (AI-graded subjective answers · manual re-grading · pick from question bank), classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
 > - ⚙️ **Manage · System Management** — users and permissions (CSV import in seconds), announcements, notification centre, AI skill management, system configuration (cloud/local dual engine + briefing policy + log rotation), online incremental upgrade, multi-theme appearance
 >
@@ -56,6 +56,12 @@
 > - 🎛 **Composing**: two compose cards merged into one with a rule / AI engine switch
 > - 📊 **Loop**: clickable pending-grading badge, unified to-do counts, manual quiz re-grading
 > - 🔧 **Settings**: new Subjective-Question Grading section (dedicated model, spot-check rate, engine throttling)
+> - 🧪 **Quiz answering**: draft restore now matches the screen; a confirmation step guards against submitting blanks
+> - 📋 **Rosters & reminders**: quiz/practice rosters, participation rates and "remind pending" now follow the teacher's assigned classes
+> - ✏️ **Quiz building**: edit questions before any answers arrive, pick questions from the bank, drop unwanted AI-generated ones
+> - 🔒 **Grading guard**: quizzes with submissions lock their questions; option letters are unified and legacy answers still grade correctly
+> - 🖼 **Figures**: a readable placeholder replaces the broken image when a file is gone; regeneration supported
+> - 📜 **Licence**: LICENSE now carries a bilingual (ZH/EN) copyright notice — the English text is a convenience translation
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
@@ -1282,6 +1288,12 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🎛 **Composing**: the two compose cards merged into one with a rule / AI engine switch; knowledge points multi-select with subject linkage
 - 📊 **Loop**: pending-grading badge clicks straight to the result sheet, practice / quiz counts join the daily to-do, teachers can manually re-grade quiz answers
 - 🔧 **Settings**: new Subjective-Question Grading section holds the grading model, spot-check rate and engine throttling
+- 🧪 **Quiz answering**: draft restore matches what you see; unanswered confirmation prevents silent blank submissions
+- 📋 **Rosters & reminders**: quiz / practice rosters, participation rates and "remind pending" resolved against the teacher's assigned classes
+- ✏️ **Quiz building**: questions editable while no answers exist, pick-from-bank supported, individual AI questions can be dropped
+- 🔒 **Grading guard**: quizzes with submissions refuse question edits/deletion; option letters unified, legacy answers still grade
+- 🖼 **Figures**: readable placeholder when an image file is missing, with regeneration support
+- 📜 **Licence**: bilingual (ZH/EN) copyright notice added to LICENSE; the Chinese text prevails
 
 ### v7.x – v9.2.0
 
