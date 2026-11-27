@@ -803,12 +803,16 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
         cfg = get_ai_config(use_agent=False)
     if (api_key or "").strip() and not llm_provider.is_placeholder_key(api_key):
         os.environ["DASHSCOPE_API_KEY"] = api_key
-    if cfg["mode"] == "kb_direct":
+    if cfg["mode"] in ("kb_direct", "kb_local"):
+        # 与 call_ai_sync/call_ai_stream 同一口径：两路知识库都先检索再直连生成。
+        # 以前只判 kb_direct，本地文库接管时既漏掉检索，又会拿 kb_local 那份只有 mode
+        # 的字典去取 cfg["model"] —— 出题/课件这类异步调用当场 KeyError。
         import asyncio
         loop = asyncio.get_running_loop()
         prompt = await loop.run_in_executor(_ai_thread_pool, _augment_with_kb, prompt, kb_query)
         d = get_ai_config(use_agent=False)
-        return await _call_model_async(prompt, api_key, d["model"], d["api_base"], history=history,
+        return await _call_model_async(prompt, api_key, (model or "").strip() or d["model"],
+                                       d["api_base"], history=history,
                                        max_tokens=max_tokens, json_mode=json_mode,
                                        enable_thinking=False, temperature=temperature)
     else:

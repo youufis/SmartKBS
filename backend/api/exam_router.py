@@ -35,7 +35,7 @@ from backend.permission_service import check_activity_visibility
 # S-GRADING(P2): 主观题后台批量批改引擎(与同步练习/随堂测验共用)
 from backend.ai_grading import (GradingJob, SourceAdapter, register_source, pending_keys,
                                 clip_answer, SINGLE_TOKENS_SHORT, SINGLE_TOKENS_ESSAY,
-                                grading_model, GRADING_TEMPERATURE, grading_reference)
+                                GRADING_TEMPERATURE, grading_reference)
 # S-GRADING(A2): 考试现场兜底与练习/测验共用 grading_rules 口径(按要点比例给分+待复核)
 from backend.grading_rules import (grade_fill_by_rule as _fill_rule,
                                 keyword_fallback as _keyword_rule, blank_zero_entry)
@@ -1828,7 +1828,7 @@ async def _grade_short_with_ai(q: dict[str, Any], student_answer: str, api_key: 
             # 返回变成散文 → 解析失败 → 静默退回关键词判 0 分。与练习侧同一结论。
             ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False,
                                           max_tokens=SINGLE_TOKENS_SHORT,
-                                          model=grading_model(), temperature=GRADING_TEMPERATURE)
+                                          temperature=GRADING_TEMPERATURE)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
                 ai_score = float(result.get("score", 0))
@@ -1885,7 +1885,7 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
             )
             ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False,
                                           max_tokens=SINGLE_TOKENS_ESSAY,
-                                          model=grading_model(), temperature=GRADING_TEMPERATURE)
+                                          temperature=GRADING_TEMPERATURE)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
                 ai_score = float(result.get("score", 0))

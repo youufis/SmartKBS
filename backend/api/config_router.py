@@ -103,9 +103,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "MODEL_LONG_NAME": DEFAULT_LONG_MODEL,
     "MODEL_VL_NAME": DEFAULT_VL_MODEL,
     "MODEL_NAME": DEFAULT_CHAT_MODEL,
-    # S-GRADING(B3): 主观题批改专用模型 —— 留空沿用对话模型；批改调用固定 temperature=0。
-    # 与对话/出题解耦：可以给批改单独换更强更稳的模型而不动聊天配置
-    "MODEL_GRADING": "",
     # S-GRADING(C3, 拍板): 抽检双评比例 —— 默认 0=关闭; 打开后按比例复评, 分差>20%满分转人工
     "GRADING_SPOT_CHECK_PERCENT": 0,
     # 图像理解走哪个模型：默认用对话模型看图（快、省），解题类仍交视觉模型
@@ -384,7 +381,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 # 已下线的配置键：旧文件里可能还留着，读取时直接丢弃，免得出现在「未收录配置键」里误导管理员
-_RETIRED_KEYS = {"ENABLE_MULTIMODAL", "MODEL_NO_IMAGE_LIST", "APPID", "AGENT_ENABLED"}
+_RETIRED_KEYS = {"ENABLE_MULTIMODAL", "MODEL_NO_IMAGE_LIST", "APPID", "AGENT_ENABLED",
+                 "MODEL_GRADING"}
 
 _config_lock = threading.Lock()
 _cache_lock = threading.RLock()
@@ -786,7 +784,7 @@ _BOOL_KEYS = {
 _STR_LIMITS: dict[str, int] = {
     "EXPLORE_ASR_MODEL": 60,
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
-    "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80, "MODEL_GRADING": 80,
+    "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80,
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
     "SHOWCASE_RANK_MODE": 16,
     "CLASS_LADDER_DEFAULT_SKIN": 16,

@@ -47,10 +47,18 @@ SPOT_RECHECK_NOTE = ("【独立复核】你是第二遍阅卷的教师。忽略�
 
 
 def grading_model() -> str:
-    """B3: 批改专用模型（系统配置 MODEL_GRADING）；留空=沿用对话模型。"""
+    """批改用哪个模型 —— 不再单独配置，固定跟随当前对话模型。
+
+    调用侧一律不传 model：由 ai_service 按 AI 接入模式解析（云端档取 MODEL_NAME，
+    本地档落到 Ollama 对话模型），与教师端那颗 AI 状态胶囊同源。这里只负责把
+    "本次实际应答的模型名"写进判分留痕（grade_meta.model），供事后质询与回归对照。
+    """
     try:
+        from backend import llm_provider
+        if llm_provider.ollama_active():
+            return llm_provider.ollama_model_for("chat")
         from backend.api.config_router import get_config_value
-        return str(get_config_value("MODEL_GRADING", "") or "").strip()
+        return str(get_config_value("MODEL_NAME", "") or "").strip()
     except Exception:
         return ""
 
@@ -301,7 +309,6 @@ async def _grade_single_fallback(job: GradingJob, api_key: str,
             prompt = SPOT_RECHECK_NOTE + "\n\n" + prompt
         result = extract_json_from_text(await call_ai_async(prompt, api_key, json_mode=True,
                                               use_kb=False, max_tokens=max_tokens,
-                                              model=grading_model(),
                                               temperature=GRADING_TEMPERATURE))
         if isinstance(result, dict):
             score = _clamp(result.get("score"), job.max_score)
@@ -395,7 +402,7 @@ async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.S
             text = await call_ai_async(
                 _build_batch_prompt(jobs), api_key, json_mode=True, use_kb=False,
                 max_tokens=len(jobs) * BATCH_TOKENS_PER_ITEM + BATCH_TOKENS_MARGIN,
-                model=grading_model(), temperature=GRADING_TEMPERATURE)
+                temperature=GRADING_TEMPERATURE)
             parsed = _parse_batch_result(text, len(jobs))
         except Exception as e:
             logger.warning(f"[ai_grading] 批量批改调用失败(题面 {str(jobs[0].question_text)[:24]!r}, {len(jobs)} 份): {e}")

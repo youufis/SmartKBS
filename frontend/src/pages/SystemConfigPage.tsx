@@ -513,7 +513,6 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'CHAT_MEMORY_MAX_ROWS', labelKey: 'field_CHAT_MEMORY_MAX_ROWS', descKey: 'field_CHAT_MEMORY_MAX_ROWS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitRow' },
   { key: 'CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', labelKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', descKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitMinute', scope: 'nextRound' },
   // 主观题批改（练习/考试/测验共用；引擎参数见 backend/ai_grading.py）
-  { key: 'MODEL_GRADING', labelKey: 'field_MODEL_GRADING', descKey: 'field_MODEL_GRADING_desc', type: 'model_select', optionsKind: 'chat', group: 'grading' },
   { key: 'GRADING_SPOT_CHECK_PERCENT', labelKey: 'field_GRADING_SPOT_CHECK_PERCENT', descKey: 'field_GRADING_SPOT_CHECK_PERCENT_desc', type: 'number', group: 'grading', required: false },
   { key: 'AI_GRADING_INTERVAL_SEC', labelKey: 'field_AI_GRADING_INTERVAL_SEC', descKey: 'field_AI_GRADING_INTERVAL_SEC_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitSecond', scope: 'nextRound' },
   { key: 'AI_GRADING_BATCH_SIZE', labelKey: 'field_AI_GRADING_BATCH_SIZE', descKey: 'field_AI_GRADING_BATCH_SIZE_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitAnswer', scope: 'nextRound' },
@@ -2693,8 +2692,19 @@ const SystemConfigPage: React.FC = () => {
       // 用 getFieldsValue(true) 而不是 validateFields 的返回值：确保搜索过滤掉、
       // 或收在「高级参数」里没挂载的字段也一并提交，否则一次搜索后保存会把它们清空。
       values = toApiValues(form.getFieldsValue(true) as Record<string, unknown>)
-    } catch {
-      return // 表单校验未通过，错误已就地标红
+    } catch (err: unknown) {
+      // 校验没过必须说清“卡在哪一项”：这页把 180+ 项摊在 32 个小节里，红字标在管理员根本没
+      // 往下看的那一节，点保存就只剩“没反应”——v9.3 的批改模型空值就是这么把整页保存卡死的
+      // （后端连请求都没收到）。所以：报出字段名，再把视口滚到第一个标红项上。
+      const fields = (err as { errorFields?: { name?: (string | number)[] }[] }).errorFields || []
+      const badKey = String(fields[0]?.name?.[0] ?? '')
+      const badField = GLOBAL_CONFIG_FIELDS.find((f) => f.key === badKey)
+      message.warning(badField
+        ? t('saveBlockedByField', { label: t(badField.labelKey), n: fields.length })
+        : t('formValidationFailed'))
+      document.querySelector('.ant-form-item-has-error')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
     }
     // 提交形态自检：类型/上限不符就地拦下，不发请求（后端对这些只会 400 或整键丢弃）
     const problems = checkValueShapes(values, meta)
@@ -3032,7 +3042,16 @@ const SystemConfigPage: React.FC = () => {
                   }
                   extra={descNode(field)}
                 >
-                  <Input.Password placeholder={apikeyStatus?.configured ? t('placeholder_notCover') : t('placeholder_enterApiKey')} />
+                  // autoComplete=new-password 是唯一各家浏览器都认的“别替我填”信号，lp/1p 标记
+                  // 管密码管理器扩展。缺这层时 Edge 会把登录页存过的账号密码填进 API Key 框，
+                  // 一进页面就挂「1 项未保存」，管理员顺手点保存就把密钥写成登录密码（实测踩过）。
+                  <Input.Password
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    placeholder={apikeyStatus?.configured ? t('placeholder_notCover') : t('placeholder_enterApiKey')}
+                  />
                 </Form.Item>
               ) : field.type === 'tags' ? (
                 <Form.Item
