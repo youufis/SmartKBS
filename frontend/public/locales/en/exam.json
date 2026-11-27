@@ -585,6 +585,8 @@
   "exPendingOnly": "Only pending grading",
   "exPendingCol": "To grade",
   "exPendingN": "{{count}}",
+  "exWindowExpired": "Window expired",
+  "exWindowExpiredTip": "The end time has passed and students cannot enter. Adjust the schedule in Edit Exam, or end this exam.",
   "exPendingTip": "{{count}} answer sheets still awaiting grading",
   "exPendingHint": "{{count}} exams awaiting grading",
   "fillByAi": "Let AI fill the gap when the bank falls short",

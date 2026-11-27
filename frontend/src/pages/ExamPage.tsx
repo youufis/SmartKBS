@@ -992,7 +992,17 @@ const ExamPage: React.FC = () => {
               <Tag color={STATUS_COLORS[record.status]}>{STATUS_LABELS[record.status]}</Tag>
               {pending > 0 && (
                 <Tooltip title={t('exPendingTip', { count: pending })}>
-                  <Tag color="orange">{t('exPendingN', { count: pending })}</Tag>
+                  {/* S-EXAM(P2): 徽标可点，直达该场成绩弹窗，不用再从操作列找「查看成绩」 */}
+                  <Tag color="orange" style={{ cursor: 'pointer' }}
+                    onClick={() => handleViewResults(record)}>{t('exPendingN', { count: pending })}</Tag>
+                </Tooltip>
+              )}
+              {/* S-EXAM(P2): 截止已过而考试还在(草稿/已发布) —— 学生根本进不来，
+                  旧界面只有学生端卡片有红标，教师端要到发布确认单才发现，前置到列表 */}
+              {record.status !== 'ended' && record.end_time
+                && new Date(String(record.end_time).replace(' ', 'T')) < new Date() && (
+                <Tooltip title={t('exWindowExpiredTip')}>
+                  <Tag color="red">{t('exWindowExpired')}</Tag>
                 </Tooltip>
               )}
             </Space>

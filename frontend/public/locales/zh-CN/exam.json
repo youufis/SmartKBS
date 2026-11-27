@@ -585,6 +585,8 @@
   "exPendingOnly": "仅看待批改",
   "exPendingCol": "待批改",
   "exPendingN": "{{count}} 份",
+  "exWindowExpired": "时间窗已过",
+  "exWindowExpiredTip": "截止时间已过，学生无法进入作答；请在「编辑考试」调整时间，或结束该考试",
   "exPendingTip": "本场还有 {{count}} 份答卷待批改",
   "exPendingHint": "{{count}} 场考试有待批改答卷",
   "fillByAi": "题库不足时用 AI 补差",
