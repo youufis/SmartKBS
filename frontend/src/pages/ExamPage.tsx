@@ -1860,7 +1860,7 @@ const ExamPage: React.FC = () => {
 
           <Divider />
 
-          {/* ── 智能选题卡片 ── */}
+          {/* ── 智能组卷卡片（合并后：一套条件，规则/AI 双引擎） ── */}
           <Card
             size="small"
             title={<Space><FileAddOutlined />{t('smartSelect')}</Space>}
