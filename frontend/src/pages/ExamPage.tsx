@@ -1871,7 +1871,10 @@ const ExamPage: React.FC = () => {
               <Space size={8}>
                 {/* S-EXAM(合并): 原先两张卡共用同一条 召回→配额→入卷→配平 流水线，
                     只差最后一步谁挑题，拆两卡是历史冗余 —— 合并为一卡，引擎就地切换 */}
-                <Segmented size="small" value={composeEngine}
+                {/* W1: 任务在跑时禁切引擎 —— AI 组卷是后台任务+轮询，跑到一半切到规则
+                    再点「自动选题」会两个选题并发写同一份卷（入卷有事务去重不会坏数据，
+                    但提示交错、分值配平互相覆盖，教师看不出到底哪步干了什么） */}
+                <Segmented size="small" value={composeEngine} disabled={aiComposing || autoSelecting}
                   onChange={(v) => setComposeEngine(v as 'rules' | 'ai')}
                   options={[{ value: 'rules', label: t('engineRules') },
                             { value: 'ai', label: t('engineAi') }]} />
