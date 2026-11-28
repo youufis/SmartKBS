@@ -1191,7 +1191,7 @@
   "sceneMapFollow": "Global default",
   "sceneMapCustom": "Customized",
   "sceneMapReset": "Reset this scene",
-  "sceneMapOrphanTitle": "These mappings use scene keys that are not wired up (no effect); click × to remove:",
+  "sceneMapOrphanTitle": "These scenes have no AI injection call sites yet, so their rules are dormant (no effect). Click × then save to remove; keep them if you plan to wire these scenes up later",
   "sceneMapIncompatible": "Not applicable to this scene (never injected anyway)",
   "field_LOGIN_BLOCK_STUDENT": "Disable student sign-in",
   "field_LOGIN_BLOCK_TEACHER": "Disable teacher sign-in",

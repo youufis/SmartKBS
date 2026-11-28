@@ -1191,7 +1191,7 @@
   "sceneMapFollow": "跟随全局",
   "sceneMapCustom": "已自定义",
   "sceneMapReset": "恢复该场景默认",
-  "sceneMapOrphanTitle": "以下映射项的场景当前未接入（不会生效），可点 × 删除：",
+  "sceneMapOrphanTitle": "以下场景暂无 AI 注入调用点，映射规则处于休眠（不会生效）；如需移除请点 × 后保存。若计划将来接入该场景，建议保留以延续排除意图",
   "sceneMapIncompatible": "该技能不适用于此场景（本来就不会注入）",
   "field_LOGIN_BLOCK_STUDENT": "暂停学生登录",
   "field_LOGIN_BLOCK_TEACHER": "暂停教师登录",
