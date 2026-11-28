@@ -218,17 +218,25 @@ async def preview_scene_skills(scene: str, request: Request, mode: str = "curren
     from backend.skill_engine import get_enabled_skill_names
     enabled = get_enabled_skill_names()
     config = _load_global_config()
-    from backend.prompts import resolve_scene_skills
-    effective = resolve_scene_skills(scene, enabled, config.get("skill_scene_map", {}))
 
-    seg = engine.compose(effective, context={"type": scene}, enabled_names=enabled)
-    fired = re.findall(r"<!--\s*(.+?)\s*v[\d.]+\s*-->", seg)
+    # A2: current 预览与真实注入完全同源 —— 走 prompts.compose_scene_segment
+    # （含对话白名单兜底 + 护栏头 + compose_detail 的精确 fired），
+    # 不再自带第二套场景解析 + 正则反推注释（旧实现与管理层删掉
+    # chat 规则后的实际行为不一致：预览显示全量、实际走代码兜底白名单）。
+    from backend.prompts import compose_scene_segment, resolve_dialogue_fallback
+    guarded, fired_names = compose_scene_segment(scene)
+    effective, used_fallback = resolve_dialogue_fallback(
+        scene, enabled, config.get("skill_scene_map", {}))
     result: dict[str, Any] = {
         "scene": scene,
         "mode": "current",
-        "length": len(seg),
-        "fired_skills": [x.strip() for x in fired],
-        "segment": seg,
+        "length": len(guarded),
+        "fired_skills": fired_names,
+        "fired_display_names": [engine.get(n).display_name if engine.get(n) else n
+                                for n in fired_names],
+        "effective_skills": effective,
+        "dialogue_fallback": used_fallback,
+        "segment": guarded,
     }
 
     if mode == "full":
