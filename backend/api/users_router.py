@@ -337,6 +337,7 @@ def _delete_user_completely(username: str):
         ("DELETE FROM quest_question_records WHERE quest_id IN (SELECT id FROM quest_records WHERE student_username=?)", (username,)),
         ("DELETE FROM quest_records WHERE student_username=?", (username,)),
         ("DELETE FROM quest_badge_counts WHERE student_username=?", (username,)),
+        ("DELETE FROM quest_wrong_book WHERE student_username=?", (username,)),
         # quest_question_bank 没有 creator_username 列，创建题目时不追踪创建者，故不删除
         # 知识抢答（quick_quiz）
         ("DELETE FROM quick_quiz_answers WHERE student_username=?", (username,)),

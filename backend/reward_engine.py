@@ -41,6 +41,7 @@ def _skip_non_student(username: str, scene: str) -> bool:
 POOL_ACADEMIC = "academic"
 POOL_CLASS = "class"
 POOL_FUN = "fun"
+POOL_QUEST = "quest"   # 知识闯关专属池：百科课外活动，不占学术/课堂额度，也不与抢答互挤
 
 REWARD_CONFIG: dict[str, dict[str, Any]] = {
     # ── 学术：教师布置、耗时、有标准答案 ──
@@ -50,7 +51,7 @@ REWARD_CONFIG: dict[str, dict[str, Any]] = {
     "course_practice": {"name": "课程练习", "participation": 2, "weight": 0.6, "pool": POOL_ACADEMIC},
     "task":            {"name": "任务",     "participation": 3, "weight": 0.6, "pool": POOL_ACADEMIC},
     "code":            {"name": "代码练习", "participation": 2, "weight": 0.6, "pool": POOL_ACADEMIC},
-    "quest":           {"name": "知识闯关", "participation": 1, "weight": 0.4, "pool": POOL_ACADEMIC},
+    "quest":           {"name": "知识闯关", "participation": 1, "weight": 0.4, "pool": POOL_QUEST, "session_cap": 3},
 
     # ── 课堂参与：现场发生、量大，单次价值有限 ──
     "rollcall":        {"name": "点名签到", "participation": 1, "weight": 0.4, "pool": POOL_CLASS},
@@ -87,17 +88,19 @@ LEGACY_TYPE_NAMES = {"share": "资源分享", "showcase": "作品上墙"}
 #: 一场试，+15 会被总上限静默吞掉——防刷规则反过来惩罚认真学习的人。现在按池走：
 #: 刷得再狠也只冲得满娱乐池，学术与课堂参与各有自己的额度，互不挤占。
 DAILY_POOL_CAPS: dict[str, int] = {
-    POOL_ACADEMIC: 80,   # ≈ 考试/测验/练习/作业/代码/课程练习/闯关各做满一次
-    POOL_CLASS: 40,      # 点名+抽问+闯关+提问+讨论的正常一天课堂用量
+    POOL_ACADEMIC: 80,   # ≈ 考试/测验/练习/作业/代码/课程练习各做满一次（知识闯关已移出学术池，见 POOL_QUEST）
+    POOL_CLASS: 40,      # 点名+抽问+课堂闯关+提问+讨论的正常一天课堂用量
     POOL_FUN: 30,        # 必须高于"抢答刷满 3 场"(3×8=24)，否则又变成遮蔽场次规则的旧问题
+    POOL_QUEST: 20,      # 百科闯关专属额度：三场封顶，刷满分不了别的活动
 }
 #: 池 → 系统配置键（管理员可调，0=不限）
 POOL_CAP_CONFIG_KEYS = {
     POOL_ACADEMIC: "REWARD_DAILY_ACADEMIC_POINTS",
     POOL_CLASS: "REWARD_DAILY_CLASS_POINTS",
     POOL_FUN: "REWARD_DAILY_FUN_POINTS",
+    POOL_QUEST: "REWARD_DAILY_QUEST_POINTS",
 }
-POOL_NAMES = {POOL_ACADEMIC: "学术", POOL_CLASS: "课堂参与", POOL_FUN: "轻量娱乐"}
+POOL_NAMES = {POOL_ACADEMIC: "学术", POOL_CLASS: "课堂参与", POOL_FUN: "轻量娱乐", POOL_QUEST: "知识闯关"}
 
 #: 兼容旧引用与既有测试：由 REWARD_CONFIG 派生，不再手维护第二份表
 DAILY_POINTS_CAPS: dict[str, int] = {t: c["points_cap"] for t, c in REWARD_CONFIG.items() if c.get("points_cap")}
@@ -701,7 +704,7 @@ def rules_payload() -> dict[str, Any]:
         "grade_thresholds": GRADE_THRESHOLDS,
         "pools": [
             {"key": p, "name": POOL_NAMES[p], "cap": _pool_cap_of(p)}
-            for p in (POOL_ACADEMIC, POOL_CLASS, POOL_FUN)
+            for p in (POOL_ACADEMIC, POOL_CLASS, POOL_FUN, POOL_QUEST)
         ],
         "total_cap": _cap_int(TOTAL_CAP_CONFIG_KEY, DAILY_TOTAL_POINTS_CAP),
         "session_caps": {t: _session_cap_of(t) for t in REWARD_CONFIG if _session_cap_of(t) > 0},
@@ -735,7 +738,7 @@ def my_daily_status(student_username: str) -> dict[str, Any]:
         "pools": [
             {"key": p, "name": POOL_NAMES[p], "cap": _pool_cap_of(p),
              "used": per_pool.get(p, 0)}
-            for p in (POOL_ACADEMIC, POOL_CLASS, POOL_FUN)
+            for p in (POOL_ACADEMIC, POOL_CLASS, POOL_FUN, POOL_QUEST)
         ],
         "activities": [
             {"type": k, "name": ACTIVITY_TYPE_NAMES.get(k, k), "used": v,

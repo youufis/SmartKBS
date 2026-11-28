@@ -4,6 +4,7 @@
 教师端：闯关记录查看 + 闯关题库管理
 """
 import asyncio
+import hashlib
 import json
 import random
 import re
@@ -59,10 +60,10 @@ def _schedule_bg(coro) -> asyncio.Task:
 
 
 # ── 常量 ──
-MAX_QUEST_QUESTIONS = 15
+DEFAULT_MAX_QUESTIONS = 15
 
 #: 每题限时（秒）：计时真值改由服务端维护（旧版只在浏览器里倒数，刷新即续命）
-QUEST_TIME_LIMIT = 30
+DEFAULT_TIME_LIMIT = 30
 LIFELINE_TYPES = {"remove_one", "phone_friend", "audience_vote"}
 
 # 各题号基础分
@@ -80,6 +81,34 @@ LIFELINE_DISCOUNT = {
     "phone_friend": 0.70,
     "audience_vote": 0.70,
 }
+
+DEFAULT_LIVES = 3  # 三命制默认生命数（系统配置 QUEST_LIVES 可覆盖）
+
+
+def _cfg_int(key: str, default: int) -> int:
+    """读整型系统配置，非法/缺失回退默认值"""
+    from backend.api.config_router import get_config_value
+    try:
+        v = int(get_config_value(key, default))
+        return v if v > 0 else default
+    except Exception:
+        return default
+
+
+def _time_limit() -> int:
+    """每题限时（秒）：对战页经 /quest/config 消费同一真值（M2/E8）"""
+    return _cfg_int("QUEST_TIME_LIMIT", DEFAULT_TIME_LIMIT)
+
+
+def _max_questions() -> int:
+    """每局总题数"""
+    return _cfg_int("QUEST_MAX_QUESTIONS", DEFAULT_MAX_QUESTIONS)
+
+
+def _lives() -> int:
+    """每局生命数"""
+    return _cfg_int("QUEST_LIVES", DEFAULT_LIVES)
+
 
 # 里程碑徽章配置（按累计成功闯关次数）
 MILESTONE_BADGES = [
@@ -318,7 +347,7 @@ async def _async_refill_buffer(quest_id: int, api_key: str,
                                 start_index: int, use_bank: int = 0):
     """后台异步补充题目缓存（答对后触发，不阻塞用户）"""
     try:
-        count = min(BATCH_SIZE, MAX_QUEST_QUESTIONS - start_index + 1)
+        count = min(BATCH_SIZE, _max_questions() - start_index + 1)
         if count <= 0:
             return
         questions = await _batch_generate(api_key, count, used_categories, start_index, use_bank)
@@ -546,14 +575,18 @@ async def start_quest(request: Request):
     from backend.api.config_router import get_config_value
     use_bank = 1 if get_config_value("QUEST_USE_BANK", False) else 0
 
+    # B3：先清掉本人超时未结算的僵尸局，再检查"未完成"（避免被旧局顶掉新状态）
+    sweep_stale_quests(username)
+
     # 检查是否有未完成的闯关
     existing = execute_query_one(
         "SELECT id FROM quest_records WHERE student_username=? AND completed=0",
         (username,),
     )
     if existing:
+        # B4：开新局顶掉旧局＝"放弃"（-2），不再与"答错失败"（-1）混用同一状态
         execute_insert_update(
-            "UPDATE quest_records SET completed=-1, completed_at=? WHERE id=?",
+            "UPDATE quest_records SET completed=-2, completed_at=? WHERE id=?",
             (_now(), existing["id"]),
         )
 
@@ -568,9 +601,9 @@ async def start_quest(request: Request):
         """INSERT INTO quest_records
            (student_username, total_questions, answered_count, correct_count, score,
             wrong_question_index, lifelines_used, current_question_index, used_categories,
-            completed, created_at, completed_at, use_bank)
-           VALUES (?, ?, 0, 0, 0, 0, '[]', 0, '[]', 0, ?, NULL, ?)""",
-        (username, MAX_QUEST_QUESTIONS, now, use_bank),
+            completed, created_at, completed_at, use_bank, lives_left)
+           VALUES (?, ?, 0, 0, 0, 0, '[]', 0, '[]', 0, ?, NULL, ?, ?)""",
+        (username, _max_questions(), now, use_bank, _lives()),
     )
 
     # 只同步生成第 1 题即返回。旧实现要在一个请求里串行生成 3 题，
@@ -618,7 +651,7 @@ async def start_quest(request: Request):
             "category": first.get("category", "综合"),
             "question_text": first["question"],
             "options": first["options"],
-            "remaining": QUEST_TIME_LIMIT,
+            "remaining": _time_limit(),
             "svg_content": first.get("svg_content", ""),
             "has_svg": first.get("has_svg", 0),
             "media_files": first.get("media_files", ""),
@@ -629,9 +662,10 @@ async def start_quest(request: Request):
             "correct_count": 0,
             "score": 0,
             "current_question_index": 1,
-            "total_questions": MAX_QUEST_QUESTIONS,
+            "total_questions": _max_questions(),
             "lifelines_used": [],
             "completed": 0,
+            "lives_left": _lives(),
         }
     }
 
@@ -658,7 +692,7 @@ async def get_current_question(quest_id: int, request: Request):
     if not question:
         # 缓冲未命中（页面刷新时后台补题尚未写入该题）：按需生成后重取
         api_key, _ = get_api_keys(username)
-        if api_key and 1 <= current_idx <= MAX_QUEST_QUESTIONS:
+        if api_key and 1 <= current_idx <= _max_questions():
             use_bank = quest.get("use_bank", 0) or 0
             used_cats = json.loads(quest.get("used_categories") or "[]")
             q_data = await _generate_question_async(api_key, used_cats, current_idx, use_bank)
@@ -703,7 +737,7 @@ async def get_current_question(quest_id: int, request: Request):
         # 解析不再随题面下发（等于提前泄题）；作答后由 /answer 返回
         "lifeline_used": lifeline_used,
         "lifeline_data": None,
-        "remaining": max(0.0, round(QUEST_TIME_LIMIT - (time.time() - _served), 1)),
+        "remaining": max(0.0, round(_time_limit() - (time.time() - _served), 1)),
         "svg_content": question.get("svg_content", ""),
         "has_svg": question.get("has_svg", 0),
         "media_files": question.get("media_files", ""),
@@ -714,9 +748,10 @@ async def get_current_question(quest_id: int, request: Request):
             "correct_count": quest["correct_count"],
             "score": quest["score"],
             "current_question_index": quest["current_question_index"],
-            "total_questions": MAX_QUEST_QUESTIONS,
+            "total_questions": int(quest.get("total_questions") or _max_questions()),
             "lifelines_used": json.loads(quest["lifelines_used"] or "[]"),
             "completed": quest["completed"],
+            "lives_left": quest.get("lives_left") if quest.get("lives_left") is not None else _lives(),
         },
     }
 
@@ -728,6 +763,186 @@ async def get_current_question(quest_id: int, request: Request):
     return result
 
 
+# ════════════════════════════════════════════
+# M2 辅助：三命制 + 域内错题集（百科线专用，绝不触碰课程 wrong_book）
+# ════════════════════════════════════════════
+
+def _quest_wrong_key(question: dict) -> str:
+    """域内错题集去重键：优先题库 id，其次题干哈希"""
+    try:
+        bid = int(question.get("bank_question_id") or 0)
+    except (TypeError, ValueError):
+        bid = 0
+    if bid:
+        return f"b#{bid}"
+    text = (question.get("question_text") or "").strip()
+    return "t#" + hashlib.md5(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _record_quest_wrong(username: str, question: dict) -> None:
+    """答错的题进 quest 域内错题集（定位红线：不写课程错题本）"""
+    try:
+        key = _quest_wrong_key(question)
+        existing = execute_query_one(
+            "SELECT id FROM quest_wrong_book WHERE student_username=? AND question_key=?",
+            (username, key))
+        if existing:
+            execute_insert_update(
+                "UPDATE quest_wrong_book SET wrong_count=wrong_count+1, last_wrong_at=? WHERE id=?",
+                (_now(), existing["id"]))
+        else:
+            execute_insert_update(
+                """INSERT INTO quest_wrong_book
+                   (student_username, bank_question_id, question_key, category, question_text,
+                    options, correct_answer, explanation, wrong_count, last_wrong_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                (username, int(question.get("bank_question_id") or 0), key,
+                 question.get("category") or "", question.get("question_text") or "",
+                 json.dumps(_loads_options(question.get("options")), ensure_ascii=False),
+                 str(question.get("correct_answer") or ""),
+                 question.get("explanation") or "", _now()))
+    except Exception as e:
+        logger.warning(f"闯关错题入域内错题集失败: {e}")
+
+
+def _resolve_quest_wrong(username: str, question: dict) -> None:
+    """再次答对同一题＝自然订正：从域内错题集移除"""
+    try:
+        execute_insert_update(
+            "DELETE FROM quest_wrong_book WHERE student_username=? AND question_key=?",
+            (username, _quest_wrong_key(question)))
+    except Exception as e:
+        logger.debug(f"错题集订正失败: {e}")
+
+
+async def _prepare_next_question(quest_id: int, api_key: str, used_categories: list[str],
+                                 next_idx: int, use_bank: int,
+                                 total_q: int | None = None) -> dict[str, Any]:
+    """答错仍有命时推进下一题——与答对推进共用缓冲/生成链（M2/C1）"""
+    buffered = execute_query_one(
+        """SELECT id, sort_order, category, question_text, options,
+                  svg_content, has_svg, media_files, media_placeholders
+           FROM quest_question_records
+           WHERE quest_id=? AND sort_order=? AND is_correct=-1""",
+        (quest_id, next_idx),
+    )
+    new_category = ""
+    if buffered:
+        new_category = buffered["category"]
+        execute_insert_update("UPDATE quest_question_records SET served_at=? WHERE id=?",
+                              (time.time(), buffered["id"]))
+    else:
+        question_data = await _generate_question_async(api_key, list(used_categories), next_idx, use_bank)
+        new_category = question_data.get("category", "综合")
+        execute_insert_update(
+            """INSERT OR IGNORE INTO quest_question_records
+               (quest_id, sort_order, category, question_text, options, correct_answer,
+                student_answer, is_correct, lifeline_used, time_spent, score, explanation,
+                svg_content, has_svg, media_files, media_placeholders, served_at)
+               VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?, ?)""",
+            (quest_id, next_idx, new_category, question_data["question"],
+             json.dumps(question_data["options"], ensure_ascii=False), question_data["answer"],
+             question_data.get("explanation", ""), question_data.get("svg_content", ""),
+             question_data.get("has_svg", 0), question_data.get("media_files", ""),
+             question_data.get("media_placeholders", ""), time.time()))
+        buffered = execute_query_one(
+            """SELECT id, sort_order, category, question_text, options,
+                      svg_content, has_svg, media_files, media_placeholders
+               FROM quest_question_records WHERE quest_id=? AND sort_order=?""",
+            (quest_id, next_idx))
+        if not buffered:
+            return {}
+
+    if new_category and new_category not in used_categories:
+        used_categories.append(new_category)
+    execute_insert_update("UPDATE quest_records SET used_categories=? WHERE id=?",
+                          (json.dumps(used_categories, ensure_ascii=False), quest_id))
+
+    remaining = execute_query_one(
+        """SELECT COUNT(*) as cnt FROM quest_question_records
+           WHERE quest_id=? AND is_correct=-1 AND sort_order>?""",
+        (quest_id, next_idx))
+    if remaining and remaining["cnt"] <= 1 and next_idx < int(total_q or _max_questions()):
+        _schedule_bg(_async_refill_buffer(quest_id, api_key, list(used_categories),
+                                          next_idx + 1, use_bank))
+
+    return {
+        "sort_order": buffered["sort_order"],
+        "category": buffered["category"],
+        "question_text": buffered["question_text"],
+        "options": json.loads(buffered["options"]),
+        "svg_content": buffered.get("svg_content", "") or "",
+        "has_svg": buffered.get("has_svg", 0) or 0,
+        "media_files": buffered.get("media_files", "") or "",
+        "media_placeholders": buffered.get("media_placeholders", "") or "",
+    }
+
+
+async def _handle_wrong_answer(quest_id: int, quest: dict, username: str, api_key: str,
+                               current_idx: int, correct_answer: str, question: dict,
+                               is_timeout: bool = False) -> dict[str, Any]:
+    """M2/C1 三命制核心：答错/超时消耗一命。
+
+    - 命尽 → 终止（completed=-1，记终止题号）；
+    - 末题答完（仍有命）→ 通关（completed=1）；
+    - 其余 → 扣命推进下一题。错题一律进域内错题集（C2）。
+    """
+    answered_count = quest["answered_count"] + 1
+    _lv = quest.get("lives_left")
+    lives_now = int(_lv) if _lv is not None else _lives()
+    lives_left = max(0, lives_now - 1)
+    total_q = int(quest.get("total_questions") or _max_questions())
+
+    _record_quest_wrong(username, question)
+
+    options = _loads_options(question.get("options"))
+    payload: dict[str, Any] = {
+        "is_correct": False,
+        "lives_left": lives_left,
+        "correct_answer": correct_answer,
+        "correct_answer_text": options.get(correct_answer, "") if isinstance(options, dict) else "",
+        "explanation": question.get("explanation") or "",
+        "total_correct": quest["correct_count"],
+        "total_score": quest["score"],
+    }
+    if is_timeout:
+        payload["reason"] = "timeout"
+
+    if lives_left <= 0:
+        execute_insert_update(
+            """UPDATE quest_records SET answered_count=?, wrong_question_index=?,
+                      lives_left=0, completed=-1, completed_at=? WHERE id=?""",
+            (answered_count, current_idx, _now(), quest_id))
+        _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"],
+                             answered_count=answered_count, total_q=total_q)
+        payload["terminated"] = True
+        return payload
+
+    if current_idx >= total_q:
+        execute_insert_update(
+            """UPDATE quest_records SET answered_count=?, lives_left=?,
+                      completed=1, completed_at=? WHERE id=?""",
+            (answered_count, lives_left, _now(), quest_id))
+        _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"],
+                             answered_count=answered_count, success=True, total_q=total_q)
+        payload["terminated"] = True
+        payload["completed"] = True
+        return payload
+
+    execute_insert_update(
+        "UPDATE quest_records SET answered_count=?, lives_left=?, current_question_index=? WHERE id=?",
+        (answered_count, lives_left, current_idx + 1, quest_id))
+    next_payload = await _prepare_next_question(
+        quest_id, api_key,
+        json.loads(quest["used_categories"]) if quest["used_categories"] else [],
+        current_idx + 1, quest.get("use_bank", 0) or 0, total_q)
+    payload["terminated"] = False
+    payload["completed"] = False
+    payload["remaining"] = _time_limit()
+    payload["next_question"] = next_payload
+    return payload
+
+
 @router.post("/quest/{quest_id}/answer", summary="提交答案")
 async def submit_answer(quest_id: int, request: Request):
     """提交当前题目的答案"""
@@ -735,23 +950,54 @@ async def submit_answer(quest_id: int, request: Request):
     username = user["username"]
     body = await request.json()
     answer = body.get("answer", "").strip().upper()
+    submitted_order = body.get("sort_order")
 
     quest = _get_quest(quest_id, username)
     if quest["completed"] != 0:
         raise HTTPException(status_code=400, detail="该闯关已结束")
 
     current_idx = quest["current_question_index"]
+    # 二轮审查修：通关判定统一用本局题数（局中途改配置不分裂两条路径）
+    total_q = int(quest.get("total_questions") or _max_questions())
+    # A1 防重放：客户端必须声明所答题号。题号与服务端当前题不一致＝重复提交/错序请求，
+    # 直接拒绝——旧版双击/弱网重发会把同一个字母"顺手"答到下一题上，一次误杀整局。
+    if submitted_order is not None:
+        try:
+            _so = int(submitted_order)
+        except (TypeError, ValueError):
+            _so = -1
+        if _so != int(current_idx):
+            raise HTTPException(status_code=409, detail="题目已更新，请作答当前题目")
+
     api_key, _ = get_api_keys(username)
 
     # 获取当前题目
     question = execute_query_one(
-        """SELECT id, correct_answer, lifeline_used, options, explanation, served_at
+        """SELECT id, category, question_text, correct_answer, lifeline_used, options,
+                  explanation, served_at, student_answer, is_correct, score
            FROM quest_question_records
            WHERE quest_id=? AND sort_order=?""",
         (quest_id, current_idx),
     )
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
+
+    # A1 幂等回放：该题已有作答（上一请求已结算但响应丢失/重发）→ 返回首次判定，绝不推进
+    if (question["student_answer"] or "") != "":
+        _rp_ca = str(question["correct_answer"] or "")
+        _rp_opts = _loads_options(question["options"])
+        return {
+            "is_correct": bool(question["is_correct"] == 1),
+            "score": question["score"],
+            "replay": True,
+            "terminated": quest["completed"] != 0,
+            "completed": quest["completed"] == 1,
+            "correct_answer": _rp_ca,
+            "correct_answer_text": _rp_opts.get(_rp_ca, ""),
+            "explanation": question.get("explanation") or "",
+            "total_correct": quest["correct_count"],
+            "total_score": quest["score"],
+        }
 
     correct_answer = str(question["correct_answer"] or "").strip()
     from backend.answer_norm import answers_equal  # 统一判分口径（判断题/字母/大小写）
@@ -763,25 +1009,15 @@ async def submit_answer(quest_id: int, request: Request):
     # 服务端计时已截止：迟到答案直接按超时结算（旧版刷新即可无限续命）
     _served = float(question.get("served_at") or 0)
     _elapsed = round(max(0.0, time.time() - _served), 1) if _served > 0 else 0.0
-    if _served > 0 and _elapsed > QUEST_TIME_LIMIT + 3:
+    if _served > 0 and _elapsed > _time_limit() + 3:
         execute_insert_update(
             "UPDATE quest_question_records SET student_answer='__timeout__', is_correct=0, "
             "time_spent=?, score=0 WHERE id=?",
-            (min(_elapsed, float(QUEST_TIME_LIMIT)), question["id"]))
-        execute_insert_update(
-            "UPDATE quest_records SET answered_count=?, wrong_question_index=?, completed=-1, "
-            "completed_at=? WHERE id=?",
-            (quest["answered_count"] + 1, current_idx, _now(), quest_id))
-        _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"])
-        return {
-            "is_correct": False, "terminated": True, "reason": "timeout",
-            "correct_answer": correct_answer,
-            "correct_answer_text": (_q_opts.get(correct_answer, "") if isinstance(_q_opts, dict) else ""),
-            "explanation": question.get("explanation") or "",
-            "total_correct": quest["correct_count"],
-            "total_score": quest["score"],
-        }
-    time_spent = round(min(_elapsed, QUEST_TIME_LIMIT), 1) if _served > 0 else 0
+            (min(_elapsed, float(_time_limit())), question["id"]))
+        # M2/C1：迟到答案按超时消耗一命处理，命未尽仍可继续
+        return await _handle_wrong_answer(quest_id, quest, username, api_key, current_idx,
+                                          correct_answer, question, is_timeout=True)
+    time_spent = round(min(_elapsed, _time_limit()), 1) if _served > 0 else 0
     lifeline_used = question["lifeline_used"] or ""
     lifelines_on_this = [l.strip() for l in lifeline_used.split(",") if l.strip()]
 
@@ -797,12 +1033,13 @@ async def submit_answer(quest_id: int, request: Request):
     )
 
     if is_correct:
-        # 答对：更新闯关记录
+        # 答对：更新闯关记录；该题若在域内错题集则视为已订正（C2）
+        _resolve_quest_wrong(username, question)
         correct_count = quest["correct_count"] + 1
         answered_count = quest["answered_count"] + 1
         total_score = quest["score"] + score
 
-        if current_idx >= MAX_QUEST_QUESTIONS:
+        if current_idx >= total_q:
             # 已答完所有题，闯关成功
             execute_insert_update(
                 """UPDATE quest_records
@@ -812,8 +1049,9 @@ async def submit_answer(quest_id: int, request: Request):
                 (answered_count, correct_count, total_score,
                  current_idx, _now(), quest_id),
             )
-            # 发放奖励
-            _award_quest_rewards(username, quest_id, correct_count, total_score)
+            # 发放奖励（通关局：success=True 才累计闯关徽章，见 B2 口径统一）
+            _award_quest_rewards(username, quest_id, correct_count, total_score,
+                                 answered_count=answered_count, success=True, total_q=total_q)
             return {
                 "is_correct": True,
                 "score": score,
@@ -822,7 +1060,7 @@ async def submit_answer(quest_id: int, request: Request):
                 "completed": True,
                 "correct_answer": correct_answer,
                 "explanation": question.get("explanation") or "",
-                "message": "🎉 恭喜你完成了全部 15 题！通关成功！",
+                "message": f"🎉 恭喜你完成了全部 {total_q} 题！通关成功！",
             }
         else:
             next_idx = current_idx + 1
@@ -858,7 +1096,7 @@ async def submit_answer(quest_id: int, request: Request):
                        WHERE quest_id=? AND is_correct=-1 AND sort_order>?""",
                     (quest_id, next_idx),
                 )
-                if remaining and remaining["cnt"] <= 1 and next_idx < MAX_QUEST_QUESTIONS:
+                if remaining and remaining["cnt"] <= 1 and next_idx < total_q:
                     _schedule_bg(_async_refill_buffer(
                         quest_id, api_key, used_categories, next_idx + 1, use_bank
                     ))
@@ -868,12 +1106,13 @@ async def submit_answer(quest_id: int, request: Request):
                     (time.time(), buffered["id"]))
                 return {
                     "is_correct": True, "score": score, "total_score": total_score,
+                    "lives_left": quest.get("lives_left") if quest.get("lives_left") is not None else _lives(),
                     "terminated": False, "completed": False,
                     # 只返回刚答这题的讲解；下一题解析不再提前下发
                     "correct_answer": correct_answer,
                     "correct_answer_text": (_q_opts.get(correct_answer, "") if isinstance(_q_opts, dict) else ""),
                     "explanation": question.get("explanation") or "",
-                    "remaining": QUEST_TIME_LIMIT,
+                    "remaining": _time_limit(),
                     "next_question": {
                         "sort_order": buffered["sort_order"],
                         "category": buffered["category"],
@@ -936,11 +1175,12 @@ async def submit_answer(quest_id: int, request: Request):
 
                 return {
                     "is_correct": True, "score": score, "total_score": total_score,
+                    "lives_left": quest.get("lives_left") if quest.get("lives_left") is not None else _lives(),
                     "terminated": False, "completed": False,
                     "correct_answer": correct_answer,
                     "correct_answer_text": (_q_opts.get(correct_answer, "") if isinstance(_q_opts, dict) else ""),
                     "explanation": question.get("explanation") or "",
-                    "remaining": QUEST_TIME_LIMIT,
+                    "remaining": _time_limit(),
                     "next_question": {
                         "sort_order": next_idx,
                         "category": new_category,
@@ -953,29 +1193,9 @@ async def submit_answer(quest_id: int, request: Request):
                     },
                 }
     else:
-        # 答错：闯关终止
-        answered_count = quest["answered_count"] + 1
-        execute_insert_update(
-            """UPDATE quest_records
-               SET answered_count=?, wrong_question_index=?, completed=-1, completed_at=?
-               WHERE id=?""",
-            (answered_count, current_idx, _now(), quest_id),
-        )
-        # 发放奖励（即使答错第一题，也尝试给参与分）
-        _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"])
-
-        # 获取正确答案对应的选项文本
-        options = json.loads(question["options"]) if isinstance(question["options"], str) else question.get("options", {})
-
-        return {
-            "is_correct": False,
-            "terminated": True,
-            "correct_answer": correct_answer,
-            "correct_answer_text": options.get(correct_answer, ""),
-            "explanation": question.get("explanation") or "",
-            "total_correct": quest["correct_count"],
-            "total_score": quest["score"],
-        }
+        # M2/C1 三命制：答错扣一命，有命继续，命尽才终止
+        return await _handle_wrong_answer(quest_id, quest, username, api_key, current_idx,
+                                          correct_answer, question)
 
 
 @router.post("/quest/{quest_id}/timeout", summary="超时提交")
@@ -992,45 +1212,36 @@ async def timeout_question(quest_id: int, request: Request):
 
     # 用时按服务端计时（旧版写死 20 秒，和 30 秒规则对不上）
     _row = execute_query_one(
-        "SELECT explanation, correct_answer, options, served_at FROM quest_question_records "
-        "WHERE quest_id=? AND sort_order=?", (quest_id, current_idx))
-    _spent = float(QUEST_TIME_LIMIT)
-    if _row and float(_row.get("served_at") or 0) > 0:
-        _spent = round(min(float(QUEST_TIME_LIMIT),
-                           max(0.0, time.time() - float(_row["served_at"]))), 1)
+        "SELECT id, category, question_text, explanation, correct_answer, options, served_at, "
+        "student_answer FROM quest_question_records WHERE quest_id=? AND sort_order=?",
+        (quest_id, current_idx))
+    if not _row:
+        raise HTTPException(status_code=404, detail="题目不存在")
+    # 审查修 A：该题已作答（提交成功后响应丢失、倒计时又归零上报）→ 绝不二次扣命
+    if (_row.get("student_answer") or "") != "":
+        return {"ignored": True, "answered": True, "remaining": 0}
+    _served = float(_row.get("served_at") or 0)
+    _elapsed = round(max(0.0, time.time() - _served), 1) if _served > 0 else 0.0
+    # 审查修 A：题面从未下发（served_at=0）→ 只起表，不算超时（防"没打开题就被扣命"）
+    if _served <= 0:
+        execute_insert_update("UPDATE quest_question_records SET served_at=? WHERE id=?",
+                              (time.time(), _row["id"]))
+        return {"ignored": True, "remaining": float(_time_limit())}
+    # F1：未到时的"超时"上报无效（防提前交卷式操纵），忽略并回剩余时间
+    if _elapsed < _time_limit() - 5:
+        return {"ignored": True, "remaining": round(_time_limit() - _elapsed, 1)}
+    _spent = min(float(_time_limit()), _elapsed) if _served > 0 else float(_time_limit())
     execute_insert_update(
         """UPDATE quest_question_records
            SET student_answer='__timeout__', is_correct=0, time_spent=?, score=0
            WHERE quest_id=? AND sort_order=?""",
         (_spent, quest_id, current_idx),
     )
-
-    # 终止闯关
-    answered_count = quest["answered_count"] + 1
-    execute_insert_update(
-        """UPDATE quest_records
-           SET answered_count=?, wrong_question_index=?, completed=-1, completed_at=?
-           WHERE id=?""",
-        (answered_count, current_idx, _now(), quest_id),
-    )
-    _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"])
-
-    _topts = {}
-    try:
-        _topts = json.loads(_row["options"]) if _row and _row.get("options") else {}
-    except Exception:
-        _topts = {}
-    _tca = (_row.get("correct_answer") if _row else "") or ""
-    return {
-        "is_correct": False,
-        "terminated": True,
-        "reason": "timeout",
-        "correct_answer": _tca,
-        "correct_answer_text": _topts.get(_tca, "") if isinstance(_topts, dict) else "",
-        "explanation": (_row.get("explanation") if _row else "") or "",
-        "total_correct": quest["correct_count"],
-        "total_score": quest["score"],
-    }
+    # M2/C1：超时=答错，走三命制（命未尽则继续下一题）
+    api_key, _ = get_api_keys(username)
+    return await _handle_wrong_answer(quest_id, quest, username, api_key, current_idx,
+                                      str(_row.get("correct_answer") or ""), dict(_row),
+                                      is_timeout=True)
 
 
 @router.post("/quest/{quest_id}/lifeline", summary="使用锦囊")
@@ -1059,7 +1270,7 @@ async def use_lifeline(quest_id: int, request: Request):
 
     # 获取当前题目
     question = execute_query_one(
-        """SELECT id, question_text, options, lifeline_used
+        """SELECT id, question_text, options, lifeline_used, served_at
            FROM quest_question_records
            WHERE quest_id=? AND sort_order=?""",
         (quest_id, current_idx),
@@ -1069,6 +1280,11 @@ async def use_lifeline(quest_id: int, request: Request):
 
     options = json.loads(question["options"]) if isinstance(question["options"], str) else {}
     question_text = question["question_text"]
+
+    # F1：锦囊限时——本题计时已耗尽则不再发放（旧版超时可白嫖提示）
+    _sv = float(question.get("served_at") or 0)
+    if _sv > 0 and time.time() - _sv > _time_limit() + 3:
+        raise HTTPException(status_code=400, detail="本题时间已到，请先作答")
 
     # 记录锦囊使用
     lifelines_used.append(lifeline_type)
@@ -1099,18 +1315,79 @@ async def use_lifeline(quest_id: int, request: Request):
         if wrong_options:
             removed = random.choice(wrong_options)
             del options[removed]
+            # F1：删项持久化（旧版只改响应，刷新后被删项复活）
+            execute_insert_update(
+                "UPDATE quest_question_records SET options=? WHERE id=?",
+                (json.dumps(options, ensure_ascii=False), question["id"]))
             result["remaining_options"] = options
             result["removed_option"] = removed
 
     elif lifeline_type == "phone_friend":
-        advice = _call_ai_phone_friend(api_key, question_text, options)
+        # A3：同步 AI 调用挪出事件循环——旧版一次锦囊能把整个服务冻住最长 30s
+        advice = await asyncio.to_thread(_call_ai_phone_friend, api_key, question_text, options)
         result["advice"] = advice
 
     elif lifeline_type == "audience_vote":
-        votes = _call_ai_audience_vote(api_key, question_text, options)
+        votes = await asyncio.to_thread(_call_ai_audience_vote, api_key, question_text, options)
         result["votes"] = votes
 
     return result
+
+
+@router.post("/quest/{quest_id}/abandon", summary="[学生] 放弃本局")
+async def abandon_quest(quest_id: int, request: Request):
+    """M2/D1：显式放弃，替代"浏览器后退把局悬成进行中"。
+
+    放弃置 completed=-2（区别于答错失败 -1，B4）；已作答的局正常结算，
+    零作答的局不发参与分（B1）。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    quest = _get_quest(quest_id, username)
+    if quest["completed"] != 0:
+        return {"ok": True, "already": True, "completed": quest["completed"]}
+    execute_insert_update(
+        "UPDATE quest_records SET completed=-2, completed_at=? WHERE id=? AND completed=0",
+        (_now(), quest_id))
+    if (quest["answered_count"] or 0) > 0:
+        _award_quest_rewards(username, quest_id, quest["correct_count"], quest["score"],
+                             answered_count=quest["answered_count"],
+                             total_q=int(quest.get("total_questions") or _max_questions()))
+    return {"ok": True, "completed": -2}
+
+
+@router.get("/quest/wrong", summary="[学生] 闯关域内错题集")
+async def get_quest_wrong(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+):
+    """M2/C2（选项A）：只读回顾错过的百科题（含解析）。
+
+    域内集合，与课程错题本 wrong_book 无关；"重练模式"视数据表现再进 M3。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    total_row = execute_query_one(
+        "SELECT COUNT(*) as cnt FROM quest_wrong_book WHERE student_username=?", (username,))
+    total = int(total_row["cnt"] or 0) if total_row else 0
+    rows = execute_query_dict(
+        """SELECT id, category, question_text, options, correct_answer, explanation,
+                  wrong_count, last_wrong_at
+           FROM quest_wrong_book WHERE student_username=?
+           ORDER BY last_wrong_at DESC LIMIT ? OFFSET ?""",
+        (username, page_size, (page - 1) * page_size)) or []
+    items = [{
+        "id": r["id"],
+        "category": r["category"],
+        "question_text": r["question_text"],
+        "options": _loads_options(r["options"]),
+        "correct_answer": r["correct_answer"],
+        "explanation": r["explanation"],
+        "wrong_count": r["wrong_count"],
+        "last_wrong_at": r["last_wrong_at"],
+    } for r in rows]
+    return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
 @router.get("/quest/{quest_id}/result", summary="获取闯关结果")
@@ -1172,6 +1449,8 @@ async def get_quest_result(quest_id: int, request: Request):
         "total_score": quest["score"],
         "wrong_question_index": quest["wrong_question_index"],
         "lifelines_used": lifelines_used,
+        "lives_left": quest.get("lives_left") if quest.get("lives_left") is not None else _lives(),
+        "total_questions": int(quest.get("total_questions") or _max_questions()),
         "questions": questions_list,
         "badge_count": badge_count,
         "total_badges": total_badges,
@@ -1230,6 +1509,9 @@ async def get_quest_stats(request: Request):
     """获取个人闯关统计数据"""
     user = get_current_user(request)
     username = user["username"]
+
+    # B3：读统计前兜底清扫本人僵尸局，"进行中"不会再挂 4 周
+    sweep_stale_quests(username)
 
     # 总参与次数
     total_quests = execute_query_one(
@@ -1309,10 +1591,11 @@ async def get_quest_config():
     from backend.api.config_router import get_config_value
     return {
         "use_bank": bool(get_config_value("QUEST_USE_BANK", False)),
-        "time_limit_sec": QUEST_TIME_LIMIT,
-        "max_questions": MAX_QUEST_QUESTIONS,
-        "base_scores": [SCORE_TABLE.get(i, 10) for i in range(1, MAX_QUEST_QUESTIONS + 1)],
+        "time_limit_sec": _time_limit(),
+        "max_questions": _max_questions(),
+        "base_scores": [SCORE_TABLE.get(i, 10) for i in range(1, _max_questions() + 1)],
         "lifeline_discounts": LIFELINE_DISCOUNT,
+        "lives": _lives(),
     }
 
 
@@ -1380,6 +1663,9 @@ async def get_admin_quest_records(
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
 
+    # B3：教师打开记录页时全量兜底清扫，summary 的"进行中"只反映真实在玩的局
+    sweep_stale_quests()
+
     conditions = ["qr.student_username = u.username"]
     params: list[str] = []
 
@@ -1409,6 +1695,8 @@ async def get_admin_quest_records(
         conditions.append("qr.completed=1")
     elif status == "terminated":
         conditions.append("qr.completed=-1")
+    elif status == "abandoned":
+        conditions.append("qr.completed=-2")
     if date_from:
         conditions.append("qr.created_at>=?")
         params.append(f"{date_from} 00:00:00")
@@ -1430,7 +1718,7 @@ async def get_admin_quest_records(
         f"FROM quest_records qr, users u WHERE {where_clause} GROUP BY qr.completed",
         tuple(params),
     )
-    summary = {"total": total_count, "success": 0, "terminated": 0, "ongoing": 0, "avg_correct": 0}
+    summary = {"total": total_count, "success": 0, "terminated": 0, "ongoing": 0, "abandoned": 0, "avg_correct": 0}
     _wsum = 0.0
     for a in agg_rows:
         _c = int(a["cnt"] or 0)
@@ -1439,6 +1727,8 @@ async def get_admin_quest_records(
             summary["success"] += _c
         elif _k == -1:
             summary["terminated"] += _c
+        elif _k == -2:
+            summary["abandoned"] += _c
         else:
             summary["ongoing"] += _c
         _wsum += float(a.get("avg_correct") or 0) * _c
@@ -1542,6 +1832,58 @@ def _recompute_quest_badge_count(student_username: str) -> None:
             )
     except Exception as e:
         logger.warning(f"重算闯关徽章计数失败 user={student_username}: {e}")
+
+
+STALE_QUEST_HOURS = 24
+
+
+def sweep_stale_quests(username: str | None = None) -> int:
+    """B3：把超过 STALE_QUEST_HOURS 仍未结算的"进行中"局置为放弃/过期（completed=-2，B4 语义）。
+
+    超时结算原先只靠前端倒计时上报（/timeout）；页面崩溃、断网、后台标签被节流
+    都会让局永远悬在 completed=0（实测有挂了 4 周的僵尸局，教师端"进行中"口径被污染）。
+    已作答的局正常发奖（参与分按 quest_id 幂等，不会重复），零作答的局不发分。
+    """
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(hours=STALE_QUEST_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+    sql = ("SELECT id, student_username, answered_count, correct_count, score, total_questions "
+           "FROM quest_records WHERE completed=0 AND created_at<=?")
+    params: list[Any] = [cutoff]
+    if username:
+        sql += " AND student_username=?"
+        params.append(username)
+    rows = execute_query_dict(sql + " LIMIT 50", tuple(params)) or []
+    n = 0
+    for r in rows:
+        # B4：超时未结算=放弃/过期（-2），与"答错失败"（-1）分开统计
+        execute_insert_update(
+            "UPDATE quest_records SET completed=-2, completed_at=? WHERE id=? AND completed=0",
+            (_now(), r["id"]),
+        )
+        if (r["answered_count"] or 0) > 0:
+            try:
+                _award_quest_rewards(
+                    r["student_username"], r["id"], r["correct_count"] or 0,
+                    r["score"] or 0, answered_count=r["answered_count"],
+                    total_q=int(r.get("total_questions") or 0) or None,
+                )
+            except Exception as e:
+                logger.warning(f"清理僵尸局发奖失败 quest={r['id']}: {e}")
+        n += 1
+    if n:
+        logger.info(f"闯关僵尸局清理: {n} 局超时判负")
+    return n
+
+
+async def quest_stale_sweep_loop():
+    """B3：进程内每小时兜底清扫一次（与教学简报调度同模式）"""
+    import asyncio as _a
+    while True:
+        try:
+            await _a.to_thread(sweep_stale_quests)
+        except Exception as e:
+            logger.warning(f"闯关僵尸局定时清理失败: {e}")
+        await _a.sleep(3600)
 
 
 def _delete_quest_records(quest_ids: list[int]) -> tuple[int, set[str]]:
@@ -2356,22 +2698,30 @@ def _get_quest(quest_id: int, username: str) -> dict[str, Any]:
 
 
 def _award_quest_rewards(student_username: str, quest_id: int,
-                          correct_count: int, total_score: int):
-    """发放闯关奖励"""
+                          correct_count: int, total_score: int,
+                          answered_count: int = 1, success: bool = False,
+                          total_q: int | None = None):
+    """发放闯关奖励。
+
+    - answered_count=0 的局（开了题一题没答就放弃）不发参与分——"开局即走"不再是刷分路径；
+    - success=True（completed=1 通关）才累计闯关徽章计数，与 stats.success_count
+      和删除记录后的重算口径完全一致（B2：同一学生的徽章数不会再凭空变小）。
+    """
     quest_id_str = str(quest_id)
 
     # 1. 参与基础分：每轮一次，幂等键就是本轮 quest_id。
     # 旧口径"每天只发一次"与学生端公布的规则（每次闯关 +1）自相矛盾：
     # 学生做第二轮确实没有那 1 分，又没有任何提示。防刷改由每日额度池负责。
-    try:
-        award_participation(
-            student_username=student_username,
-            activity_type="quest",
-            activity_id=quest_id_str,
-            activity_title=f"知识闯关 #{quest_id}",
-        )
-    except Exception as e:
-        logger.warning(f"发放闯关参与分失败: {e}")
+    if answered_count > 0:
+        try:
+            award_participation(
+                student_username=student_username,
+                activity_type="quest",
+                activity_id=quest_id_str,
+                activity_title=f"知识闯关 #{quest_id}",
+            )
+        except Exception as e:
+            logger.warning(f"发放闯关参与分失败: {e}")
 
     # 2. 成绩等级奖励
     if correct_count > 0:
@@ -2381,7 +2731,7 @@ def _award_quest_rewards(student_username: str, quest_id: int,
                 activity_type="quest",
                 activity_id=quest_id_str,
                 score=float(correct_count),
-                total_score=float(MAX_QUEST_QUESTIONS),
+                total_score=float(total_q or _max_questions()),
                 activity_title=f"知识闯关 #{quest_id}",
             )
         except Exception as e:
@@ -2389,7 +2739,7 @@ def _award_quest_rewards(student_username: str, quest_id: int,
 
     # 3/4. 徽章检测：新解锁的记进本场明细，结算页直接展示"刚解锁了什么"
     unlocked: list[dict[str, Any]] = []
-    if correct_count >= 1:
+    if success and correct_count >= 1:
         try:
             new_count = _increment_badge_count(student_username)
             for b in _check_milestone_badges(student_username, new_count):

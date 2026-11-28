@@ -88,11 +88,11 @@ function buildStudentMenu(t: (k: string) => string) {
       { key: '/daily-discovery', icon: <StarOutlined />, label: g('dailyDiscovery') },
       { key: '/news-hub', icon: <GlobalOutlined />, label: g('newsHub') },
       { key: '/explore', icon: <EditOutlined />, label: g('exploreCanvas') },
+      { key: '/quest', icon: <ThunderboltOutlined />, label: g('questChallenge') },
     ]},
     { icon: <FileAddOutlined />, label: g('examPractice'), key: 'exam-practice', children: [
       { key: '/exam', icon: <FileAddOutlined />, label: g('examCenter') },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: g('taskCenter') },
-      { key: '/quest', icon: <ThunderboltOutlined />, label: g('questChallenge') },
       { key: '/practice', icon: <ThunderboltOutlined />, label: g('syncPractice') },
     ]},
     { icon: <FileAddOutlined />, label: g('coding'), key: 'coding', children: [

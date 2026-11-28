@@ -469,6 +469,26 @@ async def lifespan(app: FastAPI):
 
         print(f"[main] 启动教学简报定时生成失败: {e}", file=sys.stderr)
 
+    try:
+
+        # 知识闯关：超时未结算的僵尸局兜底清理（前端崩溃/断网不再留永久"进行中"）
+
+        from backend.api.quest_router import quest_stale_sweep_loop
+
+        import asyncio as _asyncio
+
+        _quest_sweep_task = _asyncio.create_task(quest_stale_sweep_loop())
+
+        _quest_sweep_task.set_name("quest-stale-sweep")
+
+        app.state.quest_stale_sweep_task = _quest_sweep_task
+
+    except Exception as e:
+
+        import sys
+
+        print(f"[main] 启动闯关僵尸局清理失败: {e}", file=sys.stderr)
+
     yield
 
     # ── shutdown ──
@@ -478,6 +498,12 @@ async def lifespan(app: FastAPI):
     if _task is not None:
 
         _task.cancel()
+
+    _quest_sweep = getattr(app.state, "quest_stale_sweep_task", None)
+
+    if _quest_sweep is not None:
+
+        _quest_sweep.cancel()
 
     _briefing_task = getattr(app.state, "briefing_auto_task", None)
 

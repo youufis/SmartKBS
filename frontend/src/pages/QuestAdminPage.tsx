@@ -100,7 +100,7 @@ const QuestRecordsTab: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [summary, setSummary] = useState<{ total: number; success: number; terminated: number; ongoing: number; avg_correct: number } | null>(null)
+  const [summary, setSummary] = useState<{ total: number; success: number; terminated: number; ongoing: number; abandoned: number; avg_correct: number } | null>(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   // 动态下拉选项
@@ -256,7 +256,8 @@ const QuestRecordsTab: React.FC = () => {
       render: (_: any, r: QuestRecord) => {
         if (r.completed === 0) return <Tag color="processing">{t('inProgress')}</Tag>
         if (r.completed === 1 && r.correct_count >= 1) return <Tag color="success">{t('success')}</Tag>
-        return <Tag color="error">{t('terminated')}</Tag>
+        if (r.completed === -2) return <Tag color="default">{t('quest.abandonedTag')}</Tag>
+        return <Tag color="warning">{t('terminated')}</Tag>
       },
     },
     {
@@ -355,7 +356,7 @@ const QuestRecordsTab: React.FC = () => {
               width: 280,
               render: (text: string) => (
                 <div style={{ maxWidth: 280, wordBreak: 'break-word' }}>
-                  <Text style={{ fontSize: 13 }}>{text}</Text>
+                  <FormulaRenderer content={text} inline />
                 </div>
               ),
             },
@@ -375,7 +376,7 @@ const QuestRecordsTab: React.FC = () => {
               key: 'ca',
               width: 100,
               render: (_: any, q: QuestionDetail) => (
-                <Tag color="green">{q.correct_answer}. {q.options[q.correct_answer]?.slice(0, 20) || ''}</Tag>
+                <Tag color="green">{q.correct_answer}. <FormulaRenderer content={q.options[q.correct_answer] || ''} inline /></Tag>
               ),
             },
             {
@@ -467,6 +468,7 @@ const QuestRecordsTab: React.FC = () => {
               { value: 'ongoing', label: t('ongoingFilter') },
               { value: 'success', label: t('successFilter') },
               { value: 'terminated', label: t('terminatedFilter') },
+              { value: 'abandoned', label: t('quest.abandonedFilter') },
             ]}
           />
           <DatePicker placeholder={t('dateFrom')} style={{ width: 132 }}
@@ -480,6 +482,7 @@ const QuestRecordsTab: React.FC = () => {
               <Tag color="green">{t('successFilter')} {summary.success}</Tag>
               <Tag color="red">{t('terminatedFilter')} {summary.terminated}</Tag>
               <Tag color="blue">{t('ongoingFilter')} {summary.ongoing}</Tag>
+              <Tag color="default">{t('quest.abandonedFilter')} {summary.abandoned}</Tag>
               <Tag>{t('avgCorrect', { n: summary.avg_correct })}</Tag>
             </Space>
           )}
@@ -904,8 +907,8 @@ const QuestBankTab: React.FC = () => {
       key: 'question_text',
       width: 220,
       render: (text: string) => (
-        <div style={{ maxWidth: 220, wordBreak: 'break-word' }}>
-          <Text>{text.length > 50 ? text.slice(0, 50) + '…' : text}</Text>
+        <div style={{ maxWidth: 220, wordBreak: 'break-word', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          <FormulaRenderer content={text} inline />
         </div>
       ),
     },
@@ -1057,6 +1060,18 @@ const QuestBankTab: React.FC = () => {
           </Form.Item>
           <Form.Item name="question_text" label={t('questionLabelForm')} rules={[{ required: true }]}>
             <TextArea rows={3} placeholder={t('questionPlaceholder')} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.question_text !== cur.question_text}>
+            {({ getFieldValue }) => {
+              const qt = String(getFieldValue('question_text') || '')
+              if (!qt.includes('$') && !qt.includes('\\(') && !qt.includes('$$')) return null
+              return (
+                <div style={{ margin: '-8px 0 16px', padding: '8px 12px', background: 'var(--bg-layout)', borderRadius: 6, fontSize: 13 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{t('preview')} </Text>
+                  <FormulaRenderer content={qt} inline />
+                </div>
+              )
+            }}
           </Form.Item>
           <Space style={{ width: '100%' }} align="start">
             <Form.Item name="option_a" label={t('optionALabel')} rules={[{ required: true }]} style={{ width: 240 }}>

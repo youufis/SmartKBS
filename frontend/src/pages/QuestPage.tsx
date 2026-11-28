@@ -3,13 +3,13 @@
  * 学生入口：开始闯关 + 历史记录 + 统计
  */
 import React, { useState, useEffect, startTransition, useRef } from 'react'
-import { Card, Button, Typography, Space, Statistic, Tag, Spin, Modal, Tooltip } from 'antd'
+import { Card, Button, Typography, Space, Statistic, Tag, Spin, Modal, Tooltip, Pagination } from 'antd'
 import { message } from '../utils/feedback'
 import {
   ThunderboltOutlined, HistoryOutlined,
   FireOutlined, CrownOutlined, StarOutlined,
   RobotOutlined, DatabaseOutlined, QuestionCircleOutlined,
-  ClockCircleOutlined,
+  ClockCircleOutlined, BookOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -17,6 +17,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { relativeTime, fullTime } from '../utils/relativeTime'
 import NarrowTable from '../components/NarrowTable'
+import FormulaRenderer from '../components/FormulaRenderer'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -59,18 +60,26 @@ const QuestPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [expandedQuestions, setExpandedQuestions] = useState<Record<number, any[]>>({})
+  // M2/C2（选项A）：域内错题集——百科线只读回顾，与课程错题本无关
+  const [wrongOpen, setWrongOpen] = useState(false)
+  const [wrongTotal, setWrongTotal] = useState(0)
+  const [wrongItems, setWrongItems] = useState<any[]>([])
+  const [wrongLoading, setWrongLoading] = useState(false)
+  const [wrongPage, setWrongPage] = useState(1)
   const recordsLoadedRef = useRef(false)
 
   const loadData = async (opts?: { tableOnly?: boolean }) => {
     if (opts?.tableOnly) setTableLoading(true)
     else setLoading(true)
     try {
-      const [statsRes, historyRes, bankRes, configRes] = await Promise.all([
+      const [statsRes, historyRes, bankRes, configRes, wrongRes] = await Promise.all([
         apiClient.get('/api/quest/stats'),
         apiClient.get('/api/quest/history', { params: { page, page_size: pageSize } }),
         apiClient.get('/api/quest/bank/stats'),
         apiClient.get('/api/quest/config'),
+        apiClient.get('/api/quest/wrong', { params: { page: 1, page_size: 1 } }).catch(() => ({ data: { total: 0 } })),
       ])
+      setWrongTotal(wrongRes.data.total || 0)
       setStats(statsRes.data)
       setRecords(historyRes.data.records || [])
       setTotal(historyRes.data.total || 0)
@@ -113,6 +122,8 @@ const QuestPage: React.FC = () => {
   }
 
   const SCORE_COLORS = ['#ff4d4f', '#fa8c16', '#fadb14', '#52c41a', '#1677ff', '#722ed1']
+  // 错题集弹窗每页条数（后端 /quest/wrong 原生分页）
+  const WRONG_PAGE_SIZE = 5
 
   const getScoreColor = (correct: number) => {
     if (correct >= 12) return SCORE_COLORS[5]
@@ -125,7 +136,27 @@ const QuestPage: React.FC = () => {
   const getStatusTag = (record: QuestRecord) => {
     if (record.completed === 0) return <Tag color="processing">{t('inProgress')}</Tag>
     if (record.completed === 1 && record.correct_count >= 1) return <Tag color="success">{t('success')}</Tag>
-    return <Tag color="error">{t('terminated')}</Tag>
+    if (record.completed === -2) return <Tag color="default">{t('quest.abandonedTag')}</Tag>
+    return <Tag color="warning">{t('terminated')}</Tag>
+  }
+
+  const loadWrong = async (p: number) => {
+    setWrongLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/quest/wrong', { params: { page: p, page_size: WRONG_PAGE_SIZE } })
+      setWrongItems(data.items || [])
+      setWrongTotal(data.total || 0)
+      setWrongPage(p)
+    } catch {
+      message.error(t('loadQuestDataFailed'))
+    } finally {
+      setWrongLoading(false)
+    }
+  }
+
+  const openWrongBook = () => {
+    setWrongOpen(true)
+    loadWrong(1)
   }
 
   const loadQuestions = async (questId: number) => {
@@ -163,7 +194,7 @@ const QuestPage: React.FC = () => {
           },
           {
             title: t('quest.question'), dataIndex: 'question_text', key: 'q', width: 240,
-            render: (qText: string) => <Text style={{ fontSize: 12 }}>{qText}</Text>,
+            render: (qText: string) => <FormulaRenderer content={qText} inline />,
           },
           {
             title: t('studentAnswer'), dataIndex: 'student_answer', key: 'sa', width: 80,
@@ -191,7 +222,7 @@ const QuestPage: React.FC = () => {
           },
           {
             title: t('quest.explanationCol'), dataIndex: 'explanation', key: 'exp', width: 200,
-            render: (exp: string) => <Text type="secondary" style={{ fontSize: 11 }}>{exp}</Text>,
+            render: (exp: string) => <Text type="secondary" style={{ fontSize: 11 }}><FormulaRenderer content={exp} inline /></Text>,
           },
         ]}
         scroll={{ x: 800 }}
@@ -357,22 +388,17 @@ const QuestPage: React.FC = () => {
             styles={{ content: { color: getScoreColor(stats?.best_correct || 0) } }}
           />
         </Card>
-        <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
+        {/* M2/D8：题库储备卡与顶部 chip 重复 → 换成"错过的题"入口（域内错题集，C2 选项A） */}
+        <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }} onClick={openWrongBook}>
           <Statistic
-            title={t('quest.bankQuestions')}
-              value={bankStats?.total_questions || 0}
-              prefix={<DatabaseOutlined style={{ color: '#722ed1' }} />}
-              suffix={t('quest.questions')}
-              styles={{ content: { color: '#722ed1', fontSize: 22 } }}
-            />
-            {bankStats?.by_category && bankStats.by_category.length > 0 && (
-              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)' }}>
-                {bankStats.by_category.slice(0, 3).map((c: any) =>
-                  `${c.category}${c.count}${t('quest.questions')}`
-                ).join(' · ')}
-              </div>
-            )}
-          </Card>
+            title={t('quest.wrongBookTitle')}
+            value={wrongTotal}
+            prefix={<BookOutlined style={{ color: '#fa8c16' }} />}
+            suffix={t('quest.questions')}
+            styles={{ content: { color: wrongTotal > 0 ? '#fa8c16' : undefined } }}
+          />
+          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)' }}>{t('quest.wrongBookHint')}</div>
+        </Card>
       </div>
 
       {/* ── 历史记录（分页 + 展开） ── */}
@@ -451,6 +477,67 @@ const QuestPage: React.FC = () => {
             </Paragraph>
           </div>
         </Space>
+      </Modal>
+
+      {/* ── M2/C2：域内错题集（只读回顾；再次答对自动移出） ── */}
+      <Modal
+        title={
+          <Space>
+            <BookOutlined style={{ color: '#fa8c16' }} />
+            {t('quest.wrongBookTitle')}
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('quest.wrongBookHint')}</Text>
+          </Space>
+        }
+        open={wrongOpen}
+        onCancel={() => setWrongOpen(false)}
+        footer={<Button onClick={() => setWrongOpen(false)}>{t('quest.wrongBookClose')}</Button>}
+        width={640}
+      >
+        {wrongLoading ? (
+          <Spin style={{ display: 'block', padding: 24 }} />
+        ) : wrongItems.length === 0 ? (
+          <Text type="secondary">{t('quest.wrongBookEmpty')}</Text>
+        ) : (
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+            {wrongItems.map((w: any) => (
+              <Card key={w.id} size="small" styles={{ body: { padding: '10px 14px' } }}>
+                <Space size={6} wrap style={{ marginBottom: 6 }}>
+                  <Tag style={{ fontSize: 11 }}>{w.category}</Tag>
+                  <Tag color="orange" style={{ fontSize: 11 }}>{t('quest.wrongTimes', { n: w.wrong_count })}</Tag>
+                </Space>
+                <div style={{ fontSize: 14, marginBottom: 6 }}><FormulaRenderer content={w.question_text} inline /></div>
+                {Object.entries(w.options || {}).map(([k, v]: any) => (
+                  <div key={k} style={{ fontSize: 13, color: k === w.correct_answer ? '#52c41a' : 'var(--text-secondary)' }}>
+                    <Text strong style={{ marginRight: 6 }}>{k}.</Text>
+                    <FormulaRenderer content={String(v)} inline />
+                    {k === w.correct_answer ? ' ✓' : ''}
+                  </div>
+                ))}
+                {w.explanation && (
+                  <div style={{ marginTop: 6, padding: '6px 10px', background: '#f6f8fa', borderRadius: 6, fontSize: 12 }}>
+                    💡 <FormulaRenderer content={w.explanation} inline />
+                  </div>
+                )}
+              </Card>
+            ))}
+          </Space>
+        )}
+        {/* 错题集分页：与记录表同一套 pageInfo 文案 */}
+        {!wrongLoading && wrongTotal > WRONG_PAGE_SIZE && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t('pageInfo', { start: (wrongPage - 1) * WRONG_PAGE_SIZE + 1, end: Math.min(wrongPage * WRONG_PAGE_SIZE, wrongTotal), total: wrongTotal })}
+            </Text>
+            <Pagination
+              size="small"
+              current={wrongPage}
+              pageSize={WRONG_PAGE_SIZE}
+              total={wrongTotal}
+              showSizeChanger={false}
+              onChange={(p) => loadWrong(p)}
+            />
+          </div>
+        )}
       </Modal>
     </Card>
   )

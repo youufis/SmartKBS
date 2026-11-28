@@ -263,6 +263,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ENABLE_SUBJECT_TITLES": True,
     # 闯关挑战出题模式：false=AI 出题（默认）, true=从题库出题
     "QUEST_USE_BANK": True,  # 闯关优先从题库取题(used_count 轮换)，题库取不到才调 AI 生成 —— 成本随题量而非人数增长；可在系统配置-激励与闯关改回
+    # ── M2/E8 闯关玩法参数（知识闯关=百科课外线，与课程无关）──
+    "QUEST_TIME_LIMIT": 30,      # 每题限时（秒）：服务端计时真值，对战页实时消费
+    "QUEST_MAX_QUESTIONS": 15,   # 每局总题数
+    "QUEST_LIVES": 3,            # 三命制：每局生命数（答错/超时 -1，归零终止）
     # ── 荣耀殿堂（backend/showcase_auto.py + api/showcase_router.py）──
     # 自动建卡总闸：打开后无需教师操作，达到积分门槛的学生自动上墙。
     "SHOWCASE_AUTO_ENABLED": True,
@@ -714,6 +718,8 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     # 图片题目提取的 token 预算：下限防呆，上限按住模型上下文（超出只会白等一次超时）
     "IMAGE_EXTRACT_MAX_TOKENS": (500, 32000),
     "EXAM_WA_MAX_QUESTIONS": (1, 30), "EXAM_WA_RATE_CEILING": (10, 100),
+    # 闯关玩法参数（M2/E8）
+    "QUEST_TIME_LIMIT": (5, 120), "QUEST_MAX_QUESTIONS": (3, 30), "QUEST_LIVES": (1, 5),
     "AI_MAX_CONCURRENCY": (1, 32),
     "CHAT_MEMORY_MAX_TURNS": (1, 30),
     "CHAT_MEMORY_TTL_MINUTES": (1, 1440),

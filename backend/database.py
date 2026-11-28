@@ -1886,6 +1886,8 @@ def init_db():
             # 每题下发时刻（服务端计时真值）与本场解锁的徽章
             _ensure_column(c, "quest_question_records", "served_at", "REAL DEFAULT 0")
             _ensure_column(c, "quest_records", "unlocked_json", "TEXT DEFAULT ''")
+            # M2/C1 三命制：答错/超时扣命，命尽终止；旧行默认 3
+            _ensure_column(c, "quest_records", "lives_left", "INTEGER DEFAULT 3")
 
             # ── 闯关徽章计数表（可重复收集） ──
             c.execute("""CREATE TABLE IF NOT EXISTS quest_badge_counts (
@@ -1917,6 +1919,26 @@ def init_db():
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qqb_category ON quest_question_bank(category)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qqb_used ON quest_question_bank(used_count)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── M2/C2 闯关域内错题集（百科，独立于课程 wrong_book，永不互写）──
+            try:
+                c.execute("""CREATE TABLE IF NOT EXISTS quest_wrong_book (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                bank_question_id INTEGER DEFAULT 0,
+                question_key TEXT NOT NULL,
+                category TEXT DEFAULT '',
+                question_text TEXT DEFAULT '',
+                options TEXT DEFAULT '{}',
+                correct_answer TEXT DEFAULT '',
+                explanation TEXT DEFAULT '',
+                wrong_count INTEGER DEFAULT 1,
+                last_wrong_at TEXT DEFAULT ''
+                )""")
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_qwb_student_key ON quest_wrong_book(student_username, question_key)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qwb_student_time ON quest_wrong_book(student_username, last_wrong_at)")
             except sqlite3.OperationalError:
                 pass
 

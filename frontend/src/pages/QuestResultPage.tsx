@@ -41,6 +41,7 @@ interface QuestionReview {
 interface QuestResult {
   quest_id: number
   completed: number
+  total_questions?: number
   correct_count: number
   answered_count: number
   total_score: number
@@ -86,11 +87,28 @@ const QuestResultPage: React.FC = () => {
   const navigate = useNavigate()
   const [result, setResult] = useState<QuestResult | null>(null)
   const [loading, setLoading] = useState(true)
+  // 三轮审查：判级以该局固化的题数为准（config 兜底）
   const [starting, setStarting] = useState(false)
+  // 题量以服务端配置为准（旧版硬编码 15，改配置后判级会失真）
+  const [maxQ, setMaxQ] = useState(15)
+  // M2/D6：再来一次冷却（配合服务端 session_cap，防秒点刷局）
+  const [cd, setCd] = useState(3)
 
   useEffect(() => {
     loadResult()
   }, [questId])
+
+  useEffect(() => {
+    if (cd <= 0) return
+    const t2 = setInterval(() => setCd((v) => Math.max(0, v - 1)), 1000)
+    return () => clearInterval(t2)
+  }, [cd])
+
+  useEffect(() => {
+    apiClient.get('/api/quest/config')
+      .then(({ data }) => { if (typeof data?.max_questions === 'number' && data.max_questions > 0) setMaxQ(data.max_questions) })
+      .catch(() => {})
+  }, [])
 
   const loadResult = async () => {
     setLoading(true)
@@ -131,16 +149,17 @@ const QuestResultPage: React.FC = () => {
     )
   }
 
-  const isAllCorrect = result.correct_count >= 15
-  // 闯关成功 = 后端标记 completed=1（完成全部 15 题）
+  // 闯关成功 = 后端标记 completed=1（完成全部题目）；-2 = 中途放弃（B4）
   const isSuccess = result.completed === 1
+  const isAbandoned = result.completed === -2
+  const qMax = result.total_questions && result.total_questions > 0 ? result.total_questions : maxQ
   const scoreColor = getScoreColor(result.correct_count)
 
   const getGradeTag = () => {
-    if (result.correct_count >= 15) return <Tag color="gold" style={{ fontSize: 16, padding: '4px 16px' }}>{t('quest.gradeStandTough')}</Tag>
-    if (result.correct_count >= 12) return <Tag color="purple" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeExcellent')}</Tag>
-    if (result.correct_count >= 8) return <Tag color="blue" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeGood')}</Tag>
-    if (result.correct_count >= 4) return <Tag color="green" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradePass')}</Tag>
+    if (result.correct_count >= qMax) return <Tag color="gold" style={{ fontSize: 16, padding: '4px 16px' }}>{t('quest.gradeStandTough')}</Tag>
+    if (result.correct_count >= Math.round(qMax * 0.8)) return <Tag color="purple" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeExcellent')}</Tag>
+    if (result.correct_count >= Math.round(qMax * 0.53)) return <Tag color="blue" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeGood')}</Tag>
+    if (result.correct_count >= Math.round(qMax * 0.27)) return <Tag color="green" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradePass')}</Tag>
     if (result.correct_count >= 1) return <Tag color="orange" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeFirstTry')}</Tag>
     return <Tag color="red" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeKeepTrying')}</Tag>
   }
@@ -192,9 +211,9 @@ const QuestResultPage: React.FC = () => {
             </div>
           )}
           <Title level={2} style={{ color: isSuccess ? '#fff' : '#666', margin: 0 }}>
-            {isSuccess ? t('quest.resultSuccess') : t('quest.resultEnd')}
+            {isSuccess ? t('quest.resultSuccess') : isAbandoned ? t('quest.resultAbandoned') : t('quest.resultEnd')}
           </Title>
-          {getGradeTag()}
+          {isAbandoned ? <Tag>{t('quest.abandonedTag')}</Tag> : getGradeTag()}
 
           <div style={{ marginTop: 8 }}>
             <Title level={1} style={{ color: isSuccess ? '#ffd700' : '#999', margin: 0, fontSize: 56 }}>
@@ -203,6 +222,12 @@ const QuestResultPage: React.FC = () => {
             <Text style={{ color: isSuccess ? 'rgba(255,255,255,0.8)' : '#999', fontSize: 18 }}>
               {t('quest.correctOf', { count: result.answered_count })}
             </Text>
+            {/* M2/D7：失败叙事——"止步第 N 题"比一个红色标签更有进度感 */}
+            {!isSuccess && !isAbandoned && result.wrong_question_index > 0 && (
+              <div style={{ marginTop: 2 }}>
+                <Text style={{ color: '#999', fontSize: 14 }}>{t('quest.stoppedAt', { n: result.wrong_question_index, max: qMax })}</Text>
+              </div>
+            )}
           </div>
 
           <Row gutter={[24, 16]} justify="center" style={{ marginTop: 8 }}>
@@ -257,10 +282,11 @@ const QuestResultPage: React.FC = () => {
             size="large"
             icon={<ReloadOutlined />}
             loading={starting}
+            disabled={cd > 0}
             onClick={handlePlayAgain}
             style={{ borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
           >
-            {t('quest.playAgain')}
+            {cd > 0 ? t('quest.playAgainIn', { s: cd }) : t('quest.playAgain')}
           </Button>
         </Col>
         <Col>
@@ -293,6 +319,9 @@ const QuestResultPage: React.FC = () => {
                     <Tag color="error" icon={<CloseCircleOutlined />}>{t('quest.wrong')}</Tag>
                   ) : (
                     <Tag color="default">{t('quest.notAnswered')}</Tag>
+                  )}
+                  {!!q.time_spent && (
+                    <Tag icon={<ClockCircleOutlined />}>{q.time_spent}s</Tag>
                   )}
                   {q.lifeline_used && (
                     <Tag color="orange">

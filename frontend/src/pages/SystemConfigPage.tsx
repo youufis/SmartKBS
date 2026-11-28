@@ -389,6 +389,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'ENABLE_BADGES', labelKey: 'field_ENABLE_BADGES', descKey: 'field_ENABLE_BADGES_desc', type: 'boolean', group: 'incentive', level: 'basic', required: false },
   { key: 'ENABLE_SUBJECT_TITLES', labelKey: 'field_ENABLE_SUBJECT_TITLES', descKey: 'field_ENABLE_SUBJECT_TITLES_desc', type: 'boolean', group: 'incentive', level: 'basic', required: false },
   { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'radio', group: 'incentive', level: 'basic', options: BANK_MODE_OPTIONS },
+  { key: 'QUEST_TIME_LIMIT', labelKey: 'field_QUEST_TIME_LIMIT', descKey: 'field_QUEST_TIME_LIMIT_desc', type: 'number', group: 'incentive', level: 'basic', required: false },
+  { key: 'QUEST_MAX_QUESTIONS', labelKey: 'field_QUEST_MAX_QUESTIONS', descKey: 'field_QUEST_MAX_QUESTIONS_desc', type: 'number', group: 'incentive', level: 'basic', required: false },
+  { key: 'QUEST_LIVES', labelKey: 'field_QUEST_LIVES', descKey: 'field_QUEST_LIVES_desc', type: 'number', group: 'incentive', level: 'basic', required: false },
   // 积分与每日上限：分池额度先给，总封顶与场次限制收进高级
   { key: 'REWARD_DAILY_CHAT_POINTS', labelKey: 'field_REWARD_DAILY_CHAT_POINTS', descKey: 'field_REWARD_DAILY_CHAT_POINTS_desc', type: 'number', group: 'reward', level: 'basic', required: false, unitKey: 'unitPoint' },
   { key: 'REWARD_DAILY_ACADEMIC_POINTS', labelKey: 'field_REWARD_DAILY_ACADEMIC_POINTS', descKey: 'field_REWARD_DAILY_ACADEMIC_POINTS_desc', type: 'number', group: 'reward', level: 'basic', required: false, unitKey: 'unitPoint' },
