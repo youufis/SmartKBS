@@ -7,7 +7,7 @@
 > It covers the five tracks **teach · learn · practise · assess · manage**, with one chapter per track across the 52 feature areas and 60+ capabilities:
 >
 > - 🏠 **Entry · Home and To-Dos** — role-aware dashboard, student task list (multi-facet filters · views · focus mode)
-> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot), smart question bank (generate / extract / manual entry / id link), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams (pre-publish checklist · zero-attempt unpublish), paper composing with Word export (native formulas, no dropped questions), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
+> - 🧑‍🏫 **Teach · Teaching and Resources** — course syllabus (five-level tree · three view modes), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot), smart question bank (generate / extract / manual entry / id link · cross-subject formula and chemical-equation rendering), deterministic figure rendering (function graphs / charts / geometry) with tag maintenance, online exams (pre-publish checklist · zero-attempt unpublish), paper composing with Word export (native formulas, no dropped questions), AI resource recommendations, AI-generated HTML resources, resource centre and management, file centre, local library (standalone knowledge base)
 > - 🎓 **Learn · Learning and Practice** — AI knowledge Q&A, AI learning companion (profile · memory · care), explore canvas (AI-powered infinite canvas), course exercises, targeted practice (AI-graded subjective answers · roster reminders), wrong-answer review, daily picks and trending news, code practice
 > - 🎪 **Practise · Classroom Activities** — class quiz (AI-graded subjective answers · manual re-grading · pick from question bank), classroom voting, question management, class drill, class ladder, buzzer rounds, group discussions, collaborative whiteboard, smart roll call and attendance, knowledge quests, assignments (chat / files, AI grading, expected roster & reminders)
 > - 📊 **Assess · Analytics and Motivation** — AI learning analytics, AI class summary, teaching briefing, progress and activity monitoring, data export, growth portfolio and the AI portrait, plus 12-level titles, achievement badges and the automatic points engine
@@ -131,7 +131,7 @@ The six chapters map one-to-one onto the tracks listed in the preface (🏠 Entr
 | Track | Chapter | Covers | Areas |
 | --- | --- | --- | :---: |
 | 🏠 Entry | [Home and To-Dos](#ch-home) | Role-aware dashboard, aggregated student to-dos | 2 |
-| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot · structured output), question bank management (generate / extract / manual entry / id link · deterministic figures) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre, local library | 13 |
+| 🧑‍🏫 Teach | [Teaching and Resources](#ch-teach) | Course syllabus (drag-to-order subjects and courses), AI lesson cast, AI podcast, AI teaching assistant (teaching snapshot · structured output), question bank management (generate / extract / manual entry / id link · cross-subject formulas · deterministic figures) and tag maintenance (with recycle bin), exam publishing, smart paper generation and Word export, AI teaching resource recommendations, AI-generated HTML resources, resource centre, resource management, file centre, local library | 13 |
 | 🎓 Learn | [Learning and Practice](#ch-learn) | AI chat, AI companion (profile · long-term memory · care), explore canvas, course exercises, targeted practice, wrong-answer review, daily picks and news, code practice | 8 |
 | 🎪 Practise | [Classroom Activities](#ch-practice) | Class quiz, voting, questions, class drill, class ladder, buzzer rounds, discussions, whiteboard, attendance and roll call, assignments (chat / files), knowledge quests | 9 |
 | 📊 Assess | [Analytics and Motivation](#ch-assess) | Learning analytics, class summary, teaching briefing, progress, activity monitoring, view tracking, exports, points, classroom points, hall of glory, growth portfolio, My portrait | 12 |
@@ -267,7 +267,13 @@ AI-powered smart question management system supporting manual entry, AI generati
 - **🎯 Direct question link**: from wrong-answer review, practice detail or class drill, click the question id to jump back to it; your own questions open editable, others open read-only, recycled ones switch to the recycle view
 - **🧱 One door into the bank**: AI generation, smart extraction and every practice / quiz backfill share the same entry point — validate, dedup, one transaction, link knowledge points after commit; ungradeable questions are turned away at the door with a reason. One write path per question, so grading, duplicate checks and question selection agree from the source onward, and a future gate only has to be added in one place
 - **📋 Supported Types**: built-in types (single choice, multiple choice, true/false, short answer, fill-in-the-blank, essay, subjective) cannot be edited or removed; custom types follow the enabled list and are protected while active questions exist
-- **📐 Formula Support**: Full support for LaTeX formula ($...$) rendering display
+- **📐 Formula Support**: rendering covers every subject, not just maths
+  - Maths / advanced maths: `\frac{1}{2}`, `\sqrt{x}`, `\partial`, `\binom{n}{k}`, `\oint`, matrices and piecewise functions
+  - Physics: `\hbar`, `\Omega`, `\varepsilon_0`, `\vec{F}`, `\Delta t`, `\rho = \frac{m}{V}`
+  - Chemistry: `\ce{2H2 + O2 -> 2H2O}`, `\rightleftharpoons` (KaTeX mhchem — wired up both in the app and in AI-generated interactive HTML pages)
+  - **Broken escapes repaired**: a single backslash inside AI-emitted JSON is a valid JSON escape, so `\frac` arrived as "form feed + rac"; every authoring path now restores it before saving, and over-doubled backslashes (`\\ge`, which KaTeX reads as a line break) are folded back
+  - **Bare commands get delimiters**: `[3, +\infty)` in an option or `m \ge 2` in an explanation is wrapped automatically; the `\(...\)` conversion no longer gives up as soon as a formula contains a closing parenthesis
+  - The 978-entry command whitelist is generated by probing KaTeX + mhchem and shared by front end and back end; existing records are repairable in place with `scripts/repair_math_escapes.py` (backs both databases up first, idempotent)
 - **🖼️ Image System**:
   - Parameterisable figures (function graphs / charts / geometry) are rendered deterministically by the backend
   - Circuits, flowcharts and apparatus are drawn by AI and screened by the same gate
@@ -1165,7 +1171,8 @@ Centralized management of all system configuration parameters:
 - **⚙️ System Limits**: File size limit, token validity, online timeout, IP protection and login gates
 - **🗂 Logs & Archives**: rotation mode (size / daily / daily + size fuse), archive retention days and count — takes effect on save
 - **🛡️ Classroom Guard**: question copy protection and answer-page watermark (off by default; only the question block is affected)
-- **🧪 AI Output & Parsing**: strict parsing, image extraction token budget, class error review question cap and accuracy threshold
+- **🧪 AI Output & Parsing**: strict parsing, image extraction token budget, class error review question cap and accuracy threshold; the section is now split into six collapsible groups that start closed and show their current values in the header
+- **💰 AI Output Budget**: every `max_tokens` decision consolidated into one table (`backend/ai_budget.py`) — a global ceiling `AI_MAX_OUTPUT_TOKENS` plus a fallback for calls that set none; authoring scales with the question count (1400 per question, floor 4000, cap 16000, doubled when figures are included), and lesson plans / courseware / resource pages / grading / podcasts / casts / briefings / companion are each configurable and take effect on the next run
 - **🔊 Speech Synthesis**: master switch, synthesis model (two generations), voice (grouped per model, follows the model switch), speech rate, volume, synthesis self-test; duration options plus length and page caps for both AI podcast and AI lesson cast live here too
 - **📚 Subjects & Question Types**: the subject list and the question-type list; display order is dragged in the Curriculum centre, and removal is protected by references
 - **🔔 Notifications**: Enabled notification types
@@ -1299,12 +1306,23 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🔧 **Settings**: new Subjective-Question Grading section (spot-check rate, engine throttling); blocked saves now name the offending field and scroll to it; secret inputs are protected from browser autofill
 - 🧹 **Backups**: read-only legacy assets no longer block backup deletion; backup and restore stop propagating the read-only flag, and a failed delete names the blocker and the next step
 - 📜 **Licence**: bilingual (ZH/EN) copyright notice added to LICENSE; the Chinese text prevails
+
 **🧩 Skill & scene governance**
 
 - 🧩 Scene mapping completed: wrong-answer explanations, quiz analysis and practice reports exclude Socratic guidance, so analysis output no longer withholds conclusions
 - 👥 Companion double-injection fixed: one skill segment per message, usage stats no longer doubled
 - 📊 Stats and preview share the live pipeline: only actually-injected content is counted, empty shells no longer register
 - 🗄 5 skills without call sites moved to `skills_archive/` (16 remain); unwired scenes shown inline in the mapping table
+
+**🧮 Formula rendering & AI output reliability**
+
+- 🧮 **Formula repair at the source**: LaTeX backslashes written into JSON were being swallowed by JSON escaping (`\frac` → form feed + "rac", `\times` → tab + "imes", `\rightarrow` → carriage return + "ightarrow") — the reason half the formulas in one explanation rendered and the other half showed `rac{2}{2}`. Every authoring path (question bank, with-figures, paper composing, targeted practice, class-ladder backfill, single-question fallback) now restores them before saving
+- 🧪 **All subjects covered**: the 978-command whitelist is produced by probing KaTeX + mhchem — physics `\hbar` `\Omega`, chemistry `\ce{}` `\rightleftharpoons`, advanced maths `\partial` `\binom`; mhchem is now actually loaded, so chemical equations no longer render as red raw text, in the app and in generated interactive pages alike
+- ✍️ **Bare commands wrapped**: options such as `[3, +\infty)` and inline `m \ge 2` are wrapped in `$...$` automatically; `\(...\)` conversion tolerates closing parentheses inside the formula
+- 🗂 **Existing data repaired**: `scripts/repair_math_escapes.py` fixes rows in place (JSON columns are parsed, only string leaves rewritten), backs both databases up first and is idempotent; the front-end fallback follows the same rules and was verified byte-for-byte against 1674 real records
+- 💰 **Output budget consolidated**: 12 hard-coded `max_tokens` values replaced by one budget table; when the gateway rejects a request for exceeding the model limit, the call retries once at half the budget and the log names the setting to adjust
+- 🧾 **Explanation style**: authoring prompts now require the formal solution only, with length caps — the "let me double-check… wait, the interval starts at 0… let me rebuild the question" monologue no longer lands in `explanation` (it was the real cause of truncated batches)
+- 🧩 **Settings page**: AI Output & Parsing split into six groups, closed by default with current values shown in each header; the 16 keys previously listed as "not covered by this form" became real form fields
 
 
 ### v7.x – v9.2.0
@@ -1470,6 +1488,7 @@ SmartKBS/
 │   ├── permission_service.py     # unified grade/class permissions
 │   ├── rag.py                    # retrieval over question bank and syllabus
 │   ├── bailian_kb.py             # Bailian knowledge-base search
+│   ├── ai_budget.py              # one table for every AI output budget (max_tokens)
 │   ├── ai_task_manager.py        # asynchronous AI jobs
 │   ├── question_fill.py          # filling policy (bank first, AI fills the gap)
 │   ├── question_select.py        # selection engine
