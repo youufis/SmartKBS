@@ -339,7 +339,8 @@ class SkillEngine:
             enabled_names: 全局已启用技能列表（None=不检查启用状态）
 
         Returns:
-            组合后的 Prompt 增强段（为空字符串表示无需增强）
+            (组合后的 Prompt 增强段, 实际注入内容的技能名列表)；
+            无内容可注入时返回 ("", [])
         """
         if not skill_names:
             return "", []
