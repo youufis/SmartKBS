@@ -45,9 +45,7 @@
 > - ⚔️ **Knowledge quest**: three lives with finish-to-win plus a quest-domain wrong-answer book; replay-proof grading, server-side clock, dedicated points pool capped at 3 runs/day, badges count completions only (counters recalculated); time limit / question count / lives configurable
 > - 🔧 **Settings, backups & licence**: new Subjective-Question Grading section (grading always uses the chat model); blocked saves name and scroll to the field, secret inputs resist autofill; read-only assets no longer block backups; bilingual ZH/EN licence notice
 >
-> - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
->
-> - ⚠️ **Breaking changes**: knowledge quest switched to three lives; its points moved to a dedicated daily-capped pool; quest badges count completions only (existing counters recalculated)
+> - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM; the knowledge quest switched to three lives with points in a dedicated daily-capped pool, and badges count completions only (existing counters recalculated)
 >
 > 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed; the grading, publishing and composing upgrades land silently, and the spot-check rate / engine throttling live under System Settings → Subjective-Question Grading; the knowledge quest now runs on three lives, with time limit / question count / lives under System Settings → Incentives & Quest, and badge counters already recalculated to the completion-only rule.
 
