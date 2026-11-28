@@ -1997,5 +1997,8 @@
   "skillReservedTip": "This skill has no scene call site yet; enabling it injects nothing",
   "skillArchivedTag": "Archived",
   "skillArchivedFilter": "Archived",
-  "skillArchivedTip": "Value absorbed into scene prompt templates / grading engine; never injected into any scene"
+  "skillArchivedTip": "Value absorbed into scene prompt templates / grading engine; never injected into any scene",
+  "sceneMapNotWired": "Not wired",
+  "sceneMapNotWiredTip": "No AI injection call site for this scene; its rule is dormant. Save after removing; keep it if you plan to wire this scene later",
+  "sceneMapDelete": "Remove"
 }

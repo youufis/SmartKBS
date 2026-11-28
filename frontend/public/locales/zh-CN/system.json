@@ -1994,5 +1994,8 @@
   "skillReservedTip": "当前没有任何场景调用点，启用与否都不会实际注入",
   "skillArchivedTag": "已归档",
   "skillArchivedFilter": "已归档",
-  "skillArchivedTip": "内容已由业务模板/批改引擎承载，任何场景都不再注入（保留可查）"
+  "skillArchivedTip": "内容已由业务模板/批改引擎承载，任何场景都不再注入（保留可查）",
+  "sceneMapNotWired": "未接入",
+  "sceneMapNotWiredTip": "该场景暂无 AI 注入调用点，映射规则休眠（不会生效）；删除后记得保存。若计划将来接入，建议保留以延续排除意图",
+  "sceneMapDelete": "删除"
 }

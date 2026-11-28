@@ -1034,6 +1034,13 @@ const SceneMapEditor: React.FC<{
     fetchSkills().then(d => setSkills(d.skills)).catch(() => { /* 拉取失败不阻塞弹窗 */ })
   }, [])
 
+  // 与统计表格 tScene 同口径（那个定义在 SkillManagePanel 作用域，此处不可达）
+  const tScene = (scene: string): string => {
+    const key = `scene_${scene}`
+    const translated = t(key)
+    return translated !== key ? translated : scene
+  }
+
   const map = value ?? {}
   const enabledSkills = skills.filter(s => s.enabled)
   const enabledNames = enabledSkills.map(s => s.name)
@@ -1073,17 +1080,25 @@ const SceneMapEditor: React.FC<{
     onChange?.(obj)
   }
 
-  const rows = SCENE_SUGGESTIONS.map(scene => {
-    const compat = enabledSkills.filter(s => compatibleIn(s, scene))
-    const eff = effectiveOf(scene).filter(n => compat.some(s => s.name === n))
-    return {
-      scene,
-      eff,
-      compatCount: compat.length,
-      custom: Boolean(map[scene]?.include?.length || map[scene]?.exclude?.length),
-    }
-  })
+  // 未接入场景（映射里有键但无注入调用点）并入主表当普通行：注入列显示"—"、
+  // 模式列标"未接入"、行尾可删；不再单独放底部警示区（2026-11-28 用户建议）
   const orphanScenes = Object.keys(map).filter(s => !SCENE_SUGGESTIONS.includes(s))
+  const rows = [
+    ...SCENE_SUGGESTIONS.map(scene => {
+      const compat = enabledSkills.filter(s => compatibleIn(s, scene))
+      const eff = effectiveOf(scene).filter(n => compat.some(s => s.name === n))
+      return {
+        scene,
+        orphan: false,
+        eff,
+        compatCount: compat.length,
+        custom: Boolean(map[scene]?.include?.length || map[scene]?.exclude?.length),
+      }
+    }),
+    ...orphanScenes.map(scene => ({
+      scene, orphan: true, eff: [] as string[], compatCount: 0, custom: false,
+    })),
+  ]
 
   return (
     <div>
@@ -1092,12 +1107,20 @@ const SceneMapEditor: React.FC<{
         columns={[
           {
             title: t('skillStatsScene'), dataIndex: 'scene', width: 220,
-            render: (s: string) => (<span><Text strong>{t('scene_' + s)}</Text> <Text type="secondary" style={{ fontSize: 12 }}>{s}</Text></span>),
+            render: (s: string) => (<span><Text strong>{tScene(s)}</Text> <Text type="secondary" style={{ fontSize: 12 }}>{s}</Text></span>),
           },
-          { title: t('sceneMapColInject'), key: 'count', width: 110, render: (_: unknown, r) => `${r.eff.length} / ${r.compatCount}` },
-          { title: t('sceneMapColMode'), key: 'mode', width: 110, render: (_: unknown, r) => (r.custom ? <Tag color="blue">{t('sceneMapCustom')}</Tag> : <Tag>{t('sceneMapFollow')}</Tag>) },
+          { title: t('sceneMapColInject'), key: 'count', width: 110, render: (_: unknown, r) => (r.orphan ? <Text type="secondary">—</Text> : `${r.eff.length} / ${r.compatCount}`) },
+          { title: t('sceneMapColMode'), key: 'mode', width: 130, render: (_: unknown, r) => (
+            r.orphan
+              ? <Tooltip title={t('sceneMapNotWiredTip')}><Tag color="orange">{t('sceneMapNotWired')}</Tag></Tooltip>
+              : r.custom ? <Tag color="blue">{t('sceneMapCustom')}</Tag> : <Tag>{t('sceneMapFollow')}</Tag>
+          ) },
+          { title: '', key: 'ops', width: 70, render: (_: unknown, r) => (
+            r.orphan ? <Button type="link" size="small" danger onClick={() => removeScene(r.scene)}>{t('sceneMapDelete')}</Button> : null
+          ) },
         ]}
         expandable={{
+          rowExpandable: (r) => !r.orphan,
           expandedRowRender: (r) => (
             <div>
               {(['core', 'domain'] as const).map(tp => {
@@ -1130,14 +1153,6 @@ const SceneMapEditor: React.FC<{
           ),
         }}
       />
-      {orphanScenes.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <Text type="secondary">{t('sceneMapOrphanTitle')}</Text>
-          {orphanScenes.map(s => (
-            <Tag key={s} color="orange" closable onClose={() => removeScene(s)} style={{ marginLeft: 8 }}>{s}</Tag>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
