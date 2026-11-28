@@ -3,12 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Alert, Button, Card, Col, Descriptions, Drawer, Dropdown, Empty, Grid, Input, Modal,
-  Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Tooltip, Typography, message,
+  Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, theme, Tooltip, Typography, message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   CloudUploadOutlined, DatabaseOutlined, DeleteOutlined, FolderOpenOutlined, FolderOutlined, PlusOutlined,
-  MoreOutlined, ReloadOutlined, SearchOutlined, SettingOutlined,
+  ExclamationCircleOutlined, InfoCircleOutlined, MoreOutlined, ReloadOutlined, SearchOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { kbApi } from '../api/kb'
 import type { KbDoc, KbStats } from '../api/kb'
@@ -86,6 +86,7 @@ export default function KnowledgeBasePage() {
     try { return JSON.parse(localStorage.getItem('smartkb_user') || 'null') } catch { return null }
   }, [])
   const isAdmin = me?.role === 'admin'
+  const { token } = theme.useToken()
 
   // 限制来自后端配置（stats.caps），前端不再写死格式/大小
   const caps = stats?.caps
@@ -93,6 +94,19 @@ export default function KnowledgeBasePage() {
   const maxMb = caps?.max_file_mb || MAX_MB_FALLBACK
   const acceptAttr = extOkList.map((e) => (e.startsWith('.') ? e : `.${e}`)).join(',')
   const extsText = extOkList.map((e) => e.replace(/^\./, '')).join(' / ')
+
+  // 双通道索引开着、但本地那一路还没就绪（Ollama 未启动或未拉取嵌入模型）。
+  // 云端向量照常可用、检索链路并没有降级，所以只在卡头留一行低干扰提示，处置步骤收进 Tooltip：
+  // 原先那块整幅 Alert 占两行高，把文档列表整体下推，而它既不需要教师处理，也不说明系统出了问题。
+  const localVecPending = !!stats?.dual_index && !stats?.local_ready?.model_present
+  const localEmbedModel = stats?.local_ready?.model || 'bge-m3'
+
+  // 向量缺口：已就绪、但在当前嵌入签名下没有向量记录的文档数。原先是一条整幅黄色 Alert，
+  // 和上面那条同罪同判 —— 它只影响语义召回的覆盖面（关键词检索照常），不是页面故障，
+  // 所以同样降成卡头一行小字，动作（立即补齐）留在旁边，不额外占高度。
+  const vecGap = stats && stats.ready > 0 && stats.vec_coverage < 1
+    ? Math.max(0, stats.ready - (stats.vec_docs || 0))
+    : 0
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -767,7 +781,33 @@ export default function KnowledgeBasePage() {
 
       <Card
         style={{ marginTop: 12 }}
-        title={<Space wrap><DatabaseOutlined />{t('title')}<AiRuntimeChips density="compact" /></Space>}
+        title={
+          <Space wrap>
+            <DatabaseOutlined />{t('title')}
+            <AiRuntimeChips density="compact" />
+            {localVecPending && (
+              <Tooltip title={t('localChannelHint', { model: localEmbedModel })} styles={{ root: { maxWidth: 380, lineHeight: 1.7 } }}>
+                {/* 可聚焦：键盘 Tab 到它也能看到同一份说明 */}
+                <span tabIndex={0} style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'default', whiteSpace: 'nowrap' }}>
+                  <InfoCircleOutlined style={{ marginInlineEnd: 4 }} />{t('localChannelPending')}
+                </span>
+              </Tooltip>
+            )}
+            {vecGap > 0 && (
+              <Tooltip title={t('vecGapAlert', { n: vecGap })} styles={{ root: { maxWidth: 380, lineHeight: 1.7 } }}>
+                <span tabIndex={0} style={{ fontSize: 12, color: token.colorWarningText, cursor: 'default', whiteSpace: 'nowrap' }}>
+                  <ExclamationCircleOutlined style={{ marginInlineEnd: 4 }} />{t('vecGapInline', { n: vecGap })}
+                </span>
+              </Tooltip>
+            )}
+            {vecGap > 0 && isAdmin && (
+              <Button size="small" type="link" loading={refillBusy} onClick={doRefill}
+                style={{ paddingInline: 2, fontSize: 12, color: token.colorWarningText }}>
+                {t('vecGapAction')}
+              </Button>
+            )}
+          </Space>
+        }
         extra={
           <Space>
             <Button type="primary" icon={<CloudUploadOutlined />}
@@ -798,25 +838,6 @@ export default function KnowledgeBasePage() {
           </Space>
         }
       >
-        {stats?.dual_index && !stats?.local_ready?.model_present && (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 12 }}
-            title={t('localChannelHint', { model: stats?.local_ready?.model || 'bge-m3' })}
-          />
-        )}
-        {!!stats && stats.ready > 0 && stats.vec_coverage < 1 && (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginBottom: 12 }}
-            title={t('vecGapAlert', { n: Math.max(0, stats.ready - (stats.vec_docs || 0)) })}
-            action={isAdmin ? (
-              <Button size="small" danger loading={refillBusy} onClick={doRefill}>{t('vecGapAction')}</Button>
-            ) : undefined}
-          />
-        )}
         <Tabs
           activeKey={tab}
           onChange={setTab}
