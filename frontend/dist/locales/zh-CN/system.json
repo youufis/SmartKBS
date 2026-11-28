@@ -1191,7 +1191,7 @@
   "sceneMapFollow": "跟随全局",
   "sceneMapCustom": "已自定义",
   "sceneMapReset": "恢复该场景默认",
-  "sceneMapOrphanTitle": "以下映射项的场景当前未接入（不会生效），可点 × 删除：",
+  "sceneMapOrphanTitle": "以下场景暂无 AI 注入调用点，映射规则处于休眠（不会生效）；如需移除请点 × 后保存。若计划将来接入该场景，建议保留以延续排除意图",
   "sceneMapIncompatible": "该技能不适用于此场景（本来就不会注入）",
   "field_LOGIN_BLOCK_STUDENT": "暂停学生登录",
   "field_LOGIN_BLOCK_TEACHER": "暂停教师登录",
@@ -1988,5 +1988,16 @@
   "localKbEmbedChangeTitle": "向量模型/维度已修改",
   "localKbEmbedChangeBody": "保存后请到「本地文库 → 维护 → 重建向量索引」，否则新向量不会写入；重建期间检索自动使用关键词。只改维度也需要重建。",
   "field_LOCAL_KB_AUDIT_KEEP_DAYS": "本地文库审计保留天数",
-  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "默认 365 天，到期自动清理操作审计日志"
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "默认 365 天，到期自动清理操作审计日志",
+  "scene_practice": "练习分析",
+  "skillReservedTag": "未接入",
+  "skillReservedTip": "当前没有任何场景调用点，启用与否都不会实际注入",
+  "skillArchivedTag": "已归档",
+  "skillArchivedFilter": "已归档",
+  "skillArchivedTip": "内容已由业务模板/批改引擎承载，任何场景都不再注入（保留可查）",
+  "sceneMapNotWired": "未接入",
+  "sceneMapNotWiredTip": "该场景暂无 AI 注入调用点，映射规则休眠（不会生效）；删除后记得保存。若计划将来接入，建议保留以延续排除意图",
+  "sceneMapDelete": "删除",
+  "sceneNotWiredHintDefault": "暂无 AI 注入调用点，规则休眠（不会生效）；接入该场景后自动启用",
+  "sceneNotWiredHint_analytics": "报告结构与质量要求已内置于业务模板，故未接技能注入；规则保留，将来接入时即生效"
 }
