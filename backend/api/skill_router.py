@@ -75,6 +75,15 @@ def _is_admin(user: dict[str, Any] | None) -> bool:
     return bool(user) and user.get("role") == 0
 
 
+def _check_rename_conflict(engine, name: str, new_name: str) -> str | None:
+    """A4: 编辑技能时把 YAML name 改成别的既有技能名 → 引擎按名去重会互相遮蔽，
+    且遮蔽方照样"加载成功"、自动回滚不会触发。返回 None=放行，否则给出拒因。"""
+    if new_name and new_name != name and engine.get(new_name) is not None:
+        return (f"YAML name「{new_name}」与既有技能重名，保存后两个文件会互相遮蔽，"
+                f"请改用唯一名称（显示名 display_name 可以重复）")
+    return None
+
+
 def _skill_dict(engine, skill, admin: bool) -> dict[str, Any]:
     """S2: 统一的技能输出净化（不含 file_path；parse_error 仅管理员）"""
     info = engine.to_dict(skill, include_private=admin)
@@ -343,6 +352,10 @@ async def update_skill_content(name: str, req: SkillUpdate, request: Request):
     skill = engine.get(name)
     if not skill:
         raise HTTPException(status_code=404, detail=f"技能不存在: {name}")
+
+    conflict = _check_rename_conflict(engine, name, str(_yaml.get("name") or "").strip())
+    if conflict:
+        raise HTTPException(status_code=400, detail=conflict)
 
     fpath = Path(skill.file_path)
     try:

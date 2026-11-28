@@ -1123,6 +1123,18 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                     raise HTTPException(
                         status_code=400,
                         detail="wrong_book_sources 必须包含 " + "、".join(missing) + "（考试是错题本的基本盘，不可关闭）")
+            # A4: 技能开关只认技能目录里登记过的名字。显式列表=完全按列表执行，
+            # 写错一个字母会让"以为还开着"的技能全部静默失效，必须当场拒。
+            if key == "enabled_skills":
+                from backend.skill_engine import ALL_SKILLS_MARKER, get_engine
+                known = {s.name for s in get_engine().list_skills()}
+                unknown = [x for x in value
+                           if x.strip() not in known and x.strip() != ALL_SKILLS_MARKER]
+                if unknown:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="enabled_skills 含未安装的技能: " + ", ".join(unknown)
+                               + f"（当前已安装 {len(known)} 个；「{ALL_SKILLS_MARKER}」表示全部启用）")
             # 学科：有课程的学科不能删（详见 _assert_subjects_keep_courses）
             if key == "SUBJECTS":
                 _assert_subjects_keep_courses([x.strip() for x in value])
