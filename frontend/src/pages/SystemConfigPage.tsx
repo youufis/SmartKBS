@@ -1357,7 +1357,9 @@ const SkillManagePanel: React.FC = () => {
             { value: 'core', label: `${t('skillCoreType')} (${typeCount.core || 0})` },
             { value: 'domain', label: `${t('skillDomainType')} (${typeCount.domain || 0})` },
             { value: 'adapter', label: `${t('skillAdapterType')} (${typeCount.adapter || 0})` },
-            { value: 'archived', label: `${t('skillArchivedFilter')} (${skills.filter(s => s.status === 'archived').length})` },
+            ...(skills.some(s => s.status === 'archived')
+              ? [{ value: 'archived', label: `${t('skillArchivedFilter')} (${skills.filter(s => s.status === 'archived').length})` }]
+              : []),
           ]}
         />
         <Button icon={<ReloadOutlined />} onClick={handleReload} loading={loading}>
