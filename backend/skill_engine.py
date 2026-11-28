@@ -64,6 +64,8 @@ class SkillDoc:
     file_mtime: float            # 文件修改时间戳
     parse_error: Optional[str] = None  # 解析错误信息
     recommended: bool = False          # 建议常开（关掉会掉底线约束，如内容安全）
+    # frontmatter status: "" 正常 | reserved 未接入 | archived 已归档（永不注入，见 2026-11-28 治理）
+    status: str = ""
 
 
 # ═══════════════════════════════════════════════
@@ -340,7 +342,7 @@ class SkillEngine:
             组合后的 Prompt 增强段（为空字符串表示无需增强）
         """
         if not skill_names:
-            return ""
+            return "", []
 
         self._ensure_loaded()
 
@@ -352,6 +354,9 @@ class SkillEngine:
             if not skill:
                 logger.debug(f"技能不存在: {name}，跳过")
                 continue
+            if skill.status == "archived":
+                logger.debug(f"技能已归档，永不注入: {name}")
+                continue
             if enabled_names is not None and name not in enabled_names:
                 logger.debug(f"技能未启用: {name}，跳过")
                 continue
@@ -362,7 +367,7 @@ class SkillEngine:
             available.append(skill)
 
         if not available:
-            return ""
+            return "", []
 
         # 按优先级排序
         available.sort(key=lambda s: s.compose.priority, reverse=True)
@@ -370,7 +375,7 @@ class SkillEngine:
         # 检查依赖
         resolved = self._resolve_dependencies(available)
         if not resolved:
-            return ""
+            return "", []
 
         # 检查冲突
         resolved = self._filter_conflicts(resolved)
@@ -515,6 +520,7 @@ class SkillEngine:
             file_mtime=mtime,
             recommended=str(yaml_dict.get("recommended", "")).strip().lower()
                         in ("1", "true", "yes"),
+            status=str(yaml_dict.get("status", "") or "").strip().lower(),
         )
 
     def _resolve_dependencies(self, skills: list[SkillDoc]) -> list[SkillDoc]:
@@ -623,8 +629,8 @@ class SkillEngine:
             "sections": list(skill.sections.keys()),
             # 管理页据此给"关掉就丢底线约束"的技能打标（如内容安全）
             "recommended": bool(skill.recommended),
-            # A5/C: frontmatter status=reserved → 该技能当前没有任何场景调用点，UI 明示
-            "status": str(skill.raw_yaml.get("status", "") or ""),
+            # "" 正常 | reserved 未接入 | archived 已归档（永不注入）
+            "status": skill.status,
             "parse_error": skill.parse_error if include_private else None,
         }
         return data
@@ -675,7 +681,10 @@ def get_enabled_skill_names() -> list[str]:
     except Exception:
         raw = None
     try:
-        available = [sk.name for sk in get_engine().list_skills()]
+        # 归档态技能不进入 available：resolve_enabled_names 对 "*" 与显式列表都在
+        # available 内取交集，因此两条路径都天然剔除归档技能。
+        available = [sk.name for sk in get_engine().list_skills()
+                     if sk.status != "archived"]
     except Exception:
         available = []
     return resolve_enabled_names(raw, available)

@@ -1994,5 +1994,8 @@
   "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "Default 365 days; old audit entries are purged automatically",
   "scene_practice": "Practice Analysis",
   "skillReservedTag": "Not wired",
-  "skillReservedTip": "This skill has no scene call site yet; enabling it injects nothing"
+  "skillReservedTip": "This skill has no scene call site yet; enabling it injects nothing",
+  "skillArchivedTag": "Archived",
+  "skillArchivedFilter": "Archived",
+  "skillArchivedTip": "Value absorbed into scene prompt templates / grading engine; never injected into any scene"
 }

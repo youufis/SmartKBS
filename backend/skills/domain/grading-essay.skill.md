@@ -4,8 +4,8 @@ version: 1.0.0
 display_name: "作文/主观题批改"
 description: "从内容、结构、语言、创新四个维度对主观题和作文进行多维评分"
 type: domain
-# 治理标注: S-GRADING 起评分链路不注入技能，暂无场景调用点
-status: reserved
+# 归档(S-GRADING 起评分链路不注入技能，暂无场景调用点)；价值已由业务模板/代码引擎承载，永不参与场景注入
+status: archived
 compatible_with: [exam-grading, practice-grading]
 tags: [grading, essay, subjective, evaluation]
 compose:

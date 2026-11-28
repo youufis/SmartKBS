@@ -1991,5 +1991,8 @@
   "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "默认 365 天，到期自动清理操作审计日志",
   "scene_practice": "练习分析",
   "skillReservedTag": "未接入",
-  "skillReservedTip": "当前没有任何场景调用点，启用与否都不会实际注入"
+  "skillReservedTip": "当前没有任何场景调用点，启用与否都不会实际注入",
+  "skillArchivedTag": "已归档",
+  "skillArchivedFilter": "已归档",
+  "skillArchivedTip": "内容已由业务模板/批改引擎承载，任何场景都不再注入（保留可查）"
 }

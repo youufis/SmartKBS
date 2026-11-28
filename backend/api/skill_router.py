@@ -157,8 +157,14 @@ async def update_enabled_skills(req: EnabledSkillsUpdate, request: Request):
     engine = _get_engine()
     engine.ensure_fresh(SKILL_CACHE_TTL)
     names = [str(n).strip() for n in req.enabled_skills if str(n).strip()]
+    # 归档技能不可启停（价值已由业务模板承载，永不注入）：先从提交里摘出来，
+    # 归一化只按"可选集合"（非归档技能）比较，避免全选被误存成固定名单。
+    archived_set = {s.name for s in engine.list_skills() if s.status == "archived"}
+    dropped_archived = [n for n in names if n in archived_set]
+    selectable = {s.name for s in engine.list_skills() if s.status != "archived"}
+    effective_submitted = [n for n in names if n not in archived_set]
     # 全选就存 "*"：当下语义等价，但以后新增技能会自动纳入，不必回头再勾一次
-    if ALL_SKILLS_MARKER in names or (names and set(names) == {s.name for s in engine.list_skills()}):
+    if ALL_SKILLS_MARKER in names or (effective_submitted and set(effective_submitted) >= selectable):
         names = [ALL_SKILLS_MARKER]
     not_found = [n for n in names if n != ALL_SKILLS_MARKER and not engine.get(n)]
 
@@ -174,6 +180,8 @@ async def update_enabled_skills(req: EnabledSkillsUpdate, request: Request):
     _save_global_config(config)
 
     effective = get_enabled_skill_names()
+    if dropped_archived:
+        logger.info(f"已启用技能列表更新: 忽略归档技能 {dropped_archived}")
     logger.info(f"已启用技能列表更新: {names}（实际生效 {len(effective)} 个）")
     return {
         "enabled_skills": effective,

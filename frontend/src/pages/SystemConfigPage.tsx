@@ -1285,11 +1285,13 @@ const SkillManagePanel: React.FC = () => {
   }
 
   // 全选/取消全选
-  const allEnabled = skills.length > 0 && skills.every(s => s.enabled)
+  // 归档技能永不参与启停：全选态与提交名单都以"非归档"为基数
+  const activeSkills = skills.filter(s => s.status !== 'archived')
+  const allEnabled = activeSkills.length > 0 && activeSkills.every(s => s.enabled)
   const handleToggleAll = async () => {
     setSaving(true)
     try {
-      const newList = allEnabled ? [] : filtered.map(s => s.name)
+      const newList = allEnabled ? [] : filtered.filter(x => x.status !== 'archived').map(s => s.name)
       await updateEnabledSkills(newList)
       message.success(allEnabled ? t('skillAllDisabled') : t('skillAllEnabled'))
       loadSkills()
@@ -1311,7 +1313,11 @@ const SkillManagePanel: React.FC = () => {
 
   // 筛选
   const filtered = skills.filter(s => {
-    if (typeFilter !== 'all' && s.type !== typeFilter) return false
+    if (typeFilter === 'archived') {
+      if (s.status !== 'archived') return false
+    } else if (typeFilter !== 'all') {
+      if (s.type !== typeFilter || s.status === 'archived') return false
+    }
     if (searchText) {
       const q = searchText.toLowerCase()
       return s.name.toLowerCase().includes(q) ||
@@ -1351,6 +1357,7 @@ const SkillManagePanel: React.FC = () => {
             { value: 'core', label: `${t('skillCoreType')} (${typeCount.core || 0})` },
             { value: 'domain', label: `${t('skillDomainType')} (${typeCount.domain || 0})` },
             { value: 'adapter', label: `${t('skillAdapterType')} (${typeCount.adapter || 0})` },
+            { value: 'archived', label: `${t('skillArchivedFilter')} (${skills.filter(s => s.status === 'archived').length})` },
           ]}
         />
         <Button icon={<ReloadOutlined />} onClick={handleReload} loading={loading}>
@@ -1427,6 +1434,11 @@ const SkillManagePanel: React.FC = () => {
                       <Tag style={{ fontSize: 11, marginInlineEnd: 0 }}>{t('skillReservedTag')}</Tag>
                     </Tooltip>
                   )}
+                  {record.status === 'archived' && (
+                    <Tooltip title={t('skillArchivedTip')}>
+                      <Tag color="default" style={{ fontSize: 11, marginInlineEnd: 0 }}>{t('skillArchivedTag')}</Tag>
+                    </Tooltip>
+                  )}
                 </Space>
               ),
             },
@@ -1452,10 +1464,12 @@ const SkillManagePanel: React.FC = () => {
               dataIndex: 'enabled',
               key: 'enabled',
               width: 100,
-              render: (enabled: boolean) => (
-                enabled
-                  ? <Tag color="success" icon={<CheckCircleOutlined />}>{t('skillEnabled')}</Tag>
-                  : <Tag color="default" icon={<CloseCircleOutlined />}>{t('skillDisabled')}</Tag>
+              render: (enabled: boolean, record: SkillInfo) => (
+                record.status === 'archived'
+                  ? <Tooltip title={t('skillArchivedTip')}><Tag color="default">{t('skillArchivedTag')}</Tag></Tooltip>
+                  : enabled
+                    ? <Tag color="success" icon={<CheckCircleOutlined />}>{t('skillEnabled')}</Tag>
+                    : <Tag color="default" icon={<CloseCircleOutlined />}>{t('skillDisabled')}</Tag>
               ),
             },
             {
@@ -1465,7 +1479,8 @@ const SkillManagePanel: React.FC = () => {
               render: (_: any, record: SkillInfo) => (
                 <Space>
                   <Switch
-                    checked={record.enabled}
+                    checked={record.enabled && record.status !== 'archived'}
+                    disabled={record.status === 'archived'}
                     onChange={() => toggleSkill(record.name, record.enabled)}
                     loading={saving}
                     size="small"

@@ -4,8 +4,8 @@ version: 1.0.0
 display_name: "代码审查增强"
 description: "从正确性、代码质量、效率、规范、安全六个维度深度审查学生代码"
 type: domain
-# 治理标注: code-review/code-generation 场景尚无注入调用点
-status: reserved
+# 归档(code-review/code-generation 场景尚无注入调用点)；价值已由业务模板/代码引擎承载，永不参与场景注入
+status: archived
 compatible_with: [code-review, code-generation]
 tags: [code, review, quality, security]
 compose:
