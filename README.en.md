@@ -65,10 +65,16 @@
 > - 🔒 **Grading guard**: quizzes with submissions lock their questions; option letters are unified and legacy answers still grade correctly
 > - 🖼 **Figures**: a readable placeholder replaces the broken image when a file is gone; regeneration supported
 > - 📜 **Licence**: LICENSE now carries a bilingual (ZH/EN) copyright notice — the English text is a convenience translation
+> - ⚔️ **Quest · gameplay**: three-lives mode (wrong or timed-out answers cost a life; finishing every question wins); lives and progress dots stay on screen, explicit quit added
+> - 🗂 **Quest · wrong-answer book**: quest-domain collection — missed questions are archived automatically, reviewed with paging, removed when answered right; never mixed with the course wrong-book
+> - 🚦 **Quest · fairness**: replay-proof grading, server-side clock first, dedicated points pool capped at 3 scoring runs/day, badges counted only on full completion
+> - 🎛 **Quest · ops**: time limit / question count / lives now configurable, stale runs auto-closed, entry moved under Knowledge Exploration
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
-> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed; the grading, publishing and composing upgrades land silently, and the spot-check rate / engine throttling live under System Settings → Subjective-Question Grading.
+> - ⚠️ **Breaking changes**: knowledge quest switched to three lives; its points moved to a dedicated daily-capped pool; quest badges count completions only (existing counters recalculated)
+>
+> 🔄 **Upgrade notes**: desktop builds **install over the top** (data stays); the local library is on by default — upload your materials there first; companion / assistant work out of the box, with history and memory saved automatically — no reconfiguration needed; the grading, publishing and composing upgrades land silently, and the spot-check rate / engine throttling live under System Settings → Subjective-Question Grading; the knowledge quest now runs on three lives, with time limit / question count / lives under System Settings → Incentives & Quest, and badge counters already recalculated to the completion-only rule.
 
 ---
 
@@ -858,14 +864,15 @@ One entry, two submission types: **chat transcript** (work it out with the AI, h
 
 AI instant-question knowledge challenge:
 
-- **🎯 Challenge Rules**: Timed answering (30s per question, server-side clock), game over on wrong answer, max 15 questions; explanations are only released after answering and a refresh can resume the run
+- **🎯 Challenge Rules**: Three lives — timed answering (30s per question by default, server-side clock); a wrong or timed-out answer costs one life, losing all ends the run, answering every question wins it (15 by default; time limit / count / lives configurable). Explanations are only released after answering, a refresh can resume the run, and the run can be quit explicitly at any time
 - **🤖 AI Questioning**: AI instantly generates encyclopedia questions (supports question bank mode)
 - **💡 Three Power-Ups** (one use per game):
   - 🎯 **Remove One**: Eliminates one wrong option
   - 📞 **Call for Help**: AI gives a hint
   - 👥 **Crowd Wisdom**: AI simulates voting results
 - **📊 Scoring Rules**: Tiered scoring (Q1: 10 pts → Q15: 50 pts), power-ups reduce score
-- **🏆 Achievement Badges**: Novice / Challenge Rookie / Challenge Adept / Challenge Master / Challenge Legend / Undefeated / 10-Streak
+- **🗂 Wrong-Answer Book**: missed questions are kept inside the quest domain (separate from the course wrong-book), paged review, auto-removed when answered right later
+- **🏆 Achievement Badges**: Novice / Challenge Rookie / Challenge Adept / Challenge Master / Challenge Legend / Undefeated / 10-Streak (counter only grows on full completion)
 - **📊 Teacher Management**: View student challenge records, manage challenge question bank, AI batch question generation
 - **📋 Challenge History**: Statistics on total attempts, max correct count, total score
 
@@ -1017,7 +1024,7 @@ delivered live by the backend and tunable in System settings — pages and rules
 | Synced / course practice | 2 | 9 / 6 / 3 | academic pool 80 |
 | Task (incl. file submissions) | 3 | 9 / 6 / 3 | academic pool 80 |
 | Code practice | 2 | 9 / 6 / 3 | academic pool 80 |
-| Knowledge challenge | 1 | 6 / 4 / 2 | academic pool 80 |
+| Knowledge challenge | 1 | 6 / 4 / 2 (max 3 scoring runs/day) | dedicated quest pool 20 |
 | Roll call | 1 | correct answer adds Good +4 | class pool 40 |
 | In-class pick | 1 | correct answer adds Good +4 | class pool 40 |
 | Class ladder | 2 | 6 / 4 / 2 (by **ladder score rate** = earned / 415) | class pool 40 |
@@ -1190,7 +1197,7 @@ Centralized management of all system configuration parameters:
 - **🔔 Notifications**: Enabled notification types
 - **📁 File Type Whitelist**: Image/document extensions
 - **🎨 Image Generation**: toggle, model (dropdown, endpoint dispatched automatically), size (defaults to auto, options follow the model), per-question auto-image cap, image self-test
-- **⚡ Knowledge Challenge**: Question mode (question bank/AI)
+- **⚡ Knowledge Challenge**: Question mode (question bank/AI), seconds per question, questions per run, lives per run
 - **📄 Document export fonts**: Chinese body/heading fonts for Word/Excel (Latin fonts auto-paired; CSV carries no font info; applies on re-export)
 
 > **Admin only**
@@ -1301,6 +1308,10 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🔒 **Grading guard**: quizzes with submissions refuse question edits/deletion; option letters unified, legacy answers still grade
 - 🖼 **Figures**: readable placeholder when an image file is missing, with regeneration support
 - 📜 **Licence**: bilingual (ZH/EN) copyright notice added to LICENSE; the Chinese text prevails
+- ⚔️ **Quest · gameplay**: three-lives mode — wrong or timed-out answers cost a life, finishing every question wins; lives and progress dots on screen, explicit quit, resilient sync
+- 🗂 **Quest · wrong-answer book**: quest-domain collection with paged review and answer-right removal, kept separate from the course wrong-book
+- 🚦 **Quest · fairness**: replay-proof grading, server-side clock, time-boxed power-ups with persisted option removal, dedicated points pool capped at 3 scoring runs/day, completion-only badge counting (existing counters recalculated)
+- 🎛 **Quest · ops**: time limit / question count / lives exposed in System Settings, stale runs auto-closed, entry moved under Knowledge Exploration, formula rendering unified across quest pages
 
 ### v7.x – v9.2.0
 
