@@ -1014,8 +1014,10 @@ const checkValueShapes = (
 
 // 当前有注入调用点的场景(与后端 apply_skills 调用一致)
 const SCENE_SUGGESTIONS = [
-  'chat', 'companion', 'analytics', 'portfolio', 'curriculum', 'discussion',
-  'exam', 'quiz', 'whiteboard', 'wrong-book', 'portrait', 'html-generation',
+  // 与后端 apply_skills/scene= 真实调用点一一对应（tests/test_skill_injection_governance 锁）
+  // practice 是 2026-11-28 补的漏；analytics 因无调用点移出（旧 map 键会以"孤立场景"标签提示删除）
+  'chat', 'companion', 'portfolio', 'curriculum', 'discussion',
+  'exam', 'quiz', 'practice', 'whiteboard', 'wrong-book', 'portrait', 'html-generation',
 ]
 
 interface SceneRule { include?: string[]; exclude?: string[] }
@@ -1418,6 +1420,11 @@ const SkillManagePanel: React.FC = () => {
                       <Tag color={record.enabled ? 'green' : 'orange'} style={{ fontSize: 11, marginInlineEnd: 0 }}>
                         {t('skillRecommendedTag')}
                       </Tag>
+                    </Tooltip>
+                  )}
+                  {record.status === 'reserved' && (
+                    <Tooltip title={t('skillReservedTip')}>
+                      <Tag style={{ fontSize: 11, marginInlineEnd: 0 }}>{t('skillReservedTag')}</Tag>
                     </Tooltip>
                   )}
                 </Space>

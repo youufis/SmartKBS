@@ -4,6 +4,8 @@ version: 1.0.0
 display_name: "简答题批改"
 description: "对简答题进行关键词匹配和语义理解结合的双重评分"
 type: domain
+# 治理标注: S-GRADING 起评分链路不注入技能，暂无场景调用点
+status: reserved
 compatible_with: [exam-grading, interaction-grading, practice-grading]
 tags: [grading, short-answer, keyword, semantic]
 compose:

@@ -623,6 +623,8 @@ class SkillEngine:
             "sections": list(skill.sections.keys()),
             # 管理页据此给"关掉就丢底线约束"的技能打标（如内容安全）
             "recommended": bool(skill.recommended),
+            # A5/C: frontmatter status=reserved → 该技能当前没有任何场景调用点，UI 明示
+            "status": str(skill.raw_yaml.get("status", "") or ""),
             "parse_error": skill.parse_error if include_private else None,
         }
         return data

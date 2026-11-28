@@ -1988,5 +1988,8 @@
   "localKbEmbedChangeTitle": "向量模型/维度已修改",
   "localKbEmbedChangeBody": "保存后请到「本地文库 → 维护 → 重建向量索引」，否则新向量不会写入；重建期间检索自动使用关键词。只改维度也需要重建。",
   "field_LOCAL_KB_AUDIT_KEEP_DAYS": "本地文库审计保留天数",
-  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "默认 365 天，到期自动清理操作审计日志"
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "默认 365 天，到期自动清理操作审计日志",
+  "scene_practice": "练习分析",
+  "skillReservedTag": "未接入",
+  "skillReservedTip": "当前没有任何场景调用点，启用与否都不会实际注入"
 }

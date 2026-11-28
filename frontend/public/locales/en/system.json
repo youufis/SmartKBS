@@ -1991,5 +1991,8 @@
   "localKbEmbedChangeTitle": "Embedding model/dimension changed",
   "localKbEmbedChangeBody": "After saving, rebuild the index in Local Library → Maintenance → Rebuild vector index; otherwise new vectors are not written (search uses keywords meanwhile). Changing only the dimension also requires a rebuild.",
   "field_LOCAL_KB_AUDIT_KEEP_DAYS": "Local library audit retention (days)",
-  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "Default 365 days; old audit entries are purged automatically"
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "Default 365 days; old audit entries are purged automatically",
+  "scene_practice": "Practice Analysis",
+  "skillReservedTag": "Not wired",
+  "skillReservedTip": "This skill has no scene call site yet; enabling it injects nothing"
 }

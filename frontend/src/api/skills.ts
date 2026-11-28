@@ -16,6 +16,8 @@ export interface SkillInfo {
   enabled: boolean
   // 关掉就丢底线约束的技能（如内容安全），管理页据此打标提示
   recommended?: boolean
+  // 'reserved' = 当前没有任何场景调用点（管理页打"未接入"标）
+  status?: string
   priority: number
   requires: string[]
   conflicts_with: string[]
