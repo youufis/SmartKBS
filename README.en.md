@@ -1312,17 +1312,15 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🧩 Scene mapping completed: wrong-answer explanations, quiz analysis and practice reports exclude Socratic guidance, so analysis output no longer withholds conclusions
 - 👥 Companion double-injection fixed: one skill segment per message, usage stats no longer doubled
 - 📊 Stats and preview share the live pipeline: only actually-injected content is counted, empty shells no longer register
-- 🗄 5 skills without call sites moved to `skills_archive/` (16 remain); unwired scenes shown inline in the mapping table
 
 **🧮 Formula rendering & AI output reliability**
 
-- 🧮 **Formula repair at the source**: LaTeX backslashes written into JSON were being swallowed by JSON escaping (`\frac` → form feed + "rac", `\times` → tab + "imes", `\rightarrow` → carriage return + "ightarrow") — the reason half the formulas in one explanation rendered and the other half showed `rac{2}{2}`. Every authoring path (question bank, with-figures, paper composing, targeted practice, class-ladder backfill, single-question fallback) now restores them before saving
-- 🧪 **All subjects covered**: the 978-command whitelist is produced by probing KaTeX + mhchem — physics `\hbar` `\Omega`, chemistry `\ce{}` `\rightleftharpoons`, advanced maths `\partial` `\binom`; mhchem is now actually loaded, so chemical equations no longer render as red raw text, in the app and in generated interactive pages alike
-- ✍️ **Bare commands wrapped**: options such as `[3, +\infty)` and inline `m \ge 2` are wrapped in `$...$` automatically; `\(...\)` conversion tolerates closing parentheses inside the formula
-- 🗂 **Existing data repaired**: `scripts/repair_math_escapes.py` fixes rows in place (JSON columns are parsed, only string leaves rewritten), backs both databases up first and is idempotent; the front-end fallback follows the same rules and was verified byte-for-byte against 1674 real records
-- 💰 **Output budget consolidated**: 12 hard-coded `max_tokens` values replaced by one budget table; when the gateway rejects a request for exceeding the model limit, the call retries once at half the budget and the log names the setting to adjust
-- 🧾 **Explanation style**: authoring prompts now require the formal solution only, with length caps — the "let me double-check… wait, the interval starts at 0… let me rebuild the question" monologue no longer lands in `explanation` (it was the real cause of truncated batches)
-- 🧩 **Settings page**: AI Output & Parsing split into six groups, closed by default with current values shown in each header; the 16 keys previously listed as "not covered by this form" became real form fields
+- 🧮 **Formula repair**: AI-generated questions no longer show half-rendered formulas — every authoring path restores them before saving, and bare symbols written into prose get their delimiters automatically
+- 🧪 **All subjects**: maths, physics, chemistry and advanced-maths notation all render, including chemical equations and reversible-reaction arrows, in the app and in AI-generated interactive pages
+- 🗂 **Existing data**: stored questions and materials can be repaired in one pass, with an automatic backup beforehand
+- 💰 **Output budget**: one place now governs how long AI output may be; authoring scales with the question count, each pipeline is configurable, and requests over the model limit retry at a smaller budget
+- 🧾 **Explanations**: answers now give the worked solution only, with length kept under control — no more self-correction monologue shown to students
+- 🧩 **Settings**: AI Output & Parsing is grouped by purpose and collapsed by default; the keys previously listed as "not covered by this form" became real settings
 
 
 ### v7.x – v9.2.0
