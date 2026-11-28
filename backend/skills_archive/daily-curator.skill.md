@@ -4,6 +4,8 @@ version: 1.0.0
 display_name: "内容策展"
 description: "从科技、人文、自然等多领域精选知识内容，确保趣味性、教育性和多样性"
 type: domain
+# 归档(daily-discovery/news 链路尚无 apply_skills 调用点)；价值已由业务模板/代码引擎承载，永不参与场景注入
+status: archived
 compatible_with: [daily-discovery, news]
 tags: [curation, discovery, news, diversity]
 compose:

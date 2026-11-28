@@ -168,6 +168,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # 三阶增强/分步推理/可视化表达留给出题、教案、报告这类生成物场景
         "chat": {"include": ["chat-conversation", "language-control", "safety-guard", "example-driven"]},
         "companion": {"include": ["chat-conversation", "language-control", "safety-guard", "socratic-tutor"]},
+        # 治理补口（2026-11-28）：错题讲解/测验分析/练习报告都是"要直接给结论"的任务，
+        # socratic-tutor 的「禁止直接给出答案」尾巴注入后与任务目标正面对抗。
+        # 与 exam（错题讲解）既有口径对齐；quiz 场景现挂在测验分析与课堂总结两条链路。
+        "exam": {"exclude": ["socratic-tutor"]},
+        "wrong-book": {"exclude": ["socratic-tutor"]},
+        "quiz": {"exclude": ["socratic-tutor"]},
+        "practice": {"exclude": ["socratic-tutor"]},
     },
     # 学科列表（顶层学科，不是 courses 表的课程）
     "SUBJECTS": list(DEFAULT_SUBJECTS),
@@ -1116,6 +1123,18 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                     raise HTTPException(
                         status_code=400,
                         detail="wrong_book_sources 必须包含 " + "、".join(missing) + "（考试是错题本的基本盘，不可关闭）")
+            # A4: 技能开关只认技能目录里登记过的名字。显式列表=完全按列表执行，
+            # 写错一个字母会让"以为还开着"的技能全部静默失效，必须当场拒。
+            if key == "enabled_skills":
+                from backend.skill_engine import ALL_SKILLS_MARKER, get_engine
+                known = {s.name for s in get_engine().list_skills()}
+                unknown = [x for x in value
+                           if x.strip() not in known and x.strip() != ALL_SKILLS_MARKER]
+                if unknown:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="enabled_skills 含未安装的技能: " + ", ".join(unknown)
+                               + f"（当前已安装 {len(known)} 个；「{ALL_SKILLS_MARKER}」表示全部启用）")
             # 学科：有课程的学科不能删（详见 _assert_subjects_keep_courses）
             if key == "SUBJECTS":
                 _assert_subjects_keep_courses([x.strip() for x in value])

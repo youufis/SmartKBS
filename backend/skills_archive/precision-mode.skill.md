@@ -4,6 +4,8 @@ version: 1.0.0
 display_name: "精准评分"
 description: "在 AI 批改和评分场景中严格遵循评分标准，确保评分一致性和可解释性"
 type: core
+# 归档(S-GRADING 起评分链路不注入技能，暂无场景调用点)；价值已由业务模板/代码引擎承载，永不参与场景注入
+status: archived
 compatible_with: [exam-grading, practice-grading, interaction-grading]
 tags: [grading, scoring, precision, standards]
 compose:

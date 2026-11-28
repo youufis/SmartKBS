@@ -1191,7 +1191,7 @@
   "sceneMapFollow": "Global default",
   "sceneMapCustom": "Customized",
   "sceneMapReset": "Reset this scene",
-  "sceneMapOrphanTitle": "These mappings use scene keys that are not wired up (no effect); click × to remove:",
+  "sceneMapOrphanTitle": "These scenes have no AI injection call sites yet, so their rules are dormant (no effect). Click × then save to remove; keep them if you plan to wire these scenes up later",
   "sceneMapIncompatible": "Not applicable to this scene (never injected anyway)",
   "field_LOGIN_BLOCK_STUDENT": "Disable student sign-in",
   "field_LOGIN_BLOCK_TEACHER": "Disable teacher sign-in",
@@ -1991,5 +1991,16 @@
   "localKbEmbedChangeTitle": "Embedding model/dimension changed",
   "localKbEmbedChangeBody": "After saving, rebuild the index in Local Library → Maintenance → Rebuild vector index; otherwise new vectors are not written (search uses keywords meanwhile). Changing only the dimension also requires a rebuild.",
   "field_LOCAL_KB_AUDIT_KEEP_DAYS": "Local library audit retention (days)",
-  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "Default 365 days; old audit entries are purged automatically"
+  "field_LOCAL_KB_AUDIT_KEEP_DAYS_desc": "Default 365 days; old audit entries are purged automatically",
+  "scene_practice": "Practice Analysis",
+  "skillReservedTag": "Not wired",
+  "skillReservedTip": "This skill has no scene call site yet; enabling it injects nothing",
+  "skillArchivedTag": "Archived",
+  "skillArchivedFilter": "Archived",
+  "skillArchivedTip": "Value absorbed into scene prompt templates / grading engine; never injected into any scene",
+  "sceneMapNotWired": "Not wired",
+  "sceneMapNotWiredTip": "No AI injection call site for this scene; its rule is dormant. Save after removing; keep it if you plan to wire this scene later",
+  "sceneMapDelete": "Remove",
+  "sceneNotWiredHintDefault": "No AI injection call site yet; the rule is dormant and will apply once the scene is wired up",
+  "sceneNotWiredHint_analytics": "Report structure and quality rules are built into the analytics prompt templates; the mapping is kept and takes effect if this scene is wired later"
 }

@@ -186,7 +186,7 @@ def compose_scene_segment(scene_type: str) -> tuple[str, list[str]]:
     - chat_router：对话场景，段文本放进 system，不再与用户原话混在一条消息里
     """
     from backend.api.config_router import get_config_value
-    from backend.skill_engine import build_skill_prompt_segment, get_engine
+    from backend.skill_engine import get_engine
 
     # 生效技能统一走解析器：缺省或 "*" = 全部启用，显式列表（含空）= 按列表
     from backend.skill_engine import get_enabled_skill_names
@@ -199,19 +199,23 @@ def compose_scene_segment(scene_type: str) -> tuple[str, list[str]]:
         from backend.logger import logger
         logger.info(f"技能场景映射未配置 {scene_type}，启用对话白名单兜底: {effective}")
 
-    raw = build_skill_prompt_segment(
-        skill_names=effective,
-        context={"type": scene_type},
-        enabled_names=enabled,
-    )
+    try:
+        raw, fired = get_engine().compose_detail(
+            skill_names=effective,
+            context={"type": scene_type},
+            enabled_names=enabled,
+        )
+    except Exception as e:
+        from backend.logger import logger
+        logger.error(f"构建技能增强段失败，已跳过注入: {e}", exc_info=True)
+        return "", []
     if not raw:
         return "", []
 
-    eng = get_engine()
-    fired = [n for n in effective
-             if (lambda s: bool(s) and f"<!-- {s.display_name} v" in raw)(eng.get(n))]
+    # A3: fired 由 compose_detail 直接给出（"确实注入了内容"的技能名），
+    # 不再扫描注释反推——旧口径会把空壳技能也算成命中。
     guarded = f"{_SKILL_SEGMENT_GUARD_HEAD}\n\n{raw}"
-    return guarded, (fired or effective)
+    return guarded, fired
 
 
 def build_skills_segment(scene_type: str) -> str:

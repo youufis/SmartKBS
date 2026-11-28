@@ -75,6 +75,15 @@ def _is_admin(user: dict[str, Any] | None) -> bool:
     return bool(user) and user.get("role") == 0
 
 
+def _check_rename_conflict(engine, name: str, new_name: str) -> str | None:
+    """A4: 编辑技能时把 YAML name 改成别的既有技能名 → 引擎按名去重会互相遮蔽，
+    且遮蔽方照样"加载成功"、自动回滚不会触发。返回 None=放行，否则给出拒因。"""
+    if new_name and new_name != name and engine.get(new_name) is not None:
+        return (f"YAML name「{new_name}」与既有技能重名，保存后两个文件会互相遮蔽，"
+                f"请改用唯一名称（显示名 display_name 可以重复）")
+    return None
+
+
 def _skill_dict(engine, skill, admin: bool) -> dict[str, Any]:
     """S2: 统一的技能输出净化（不含 file_path；parse_error 仅管理员）"""
     info = engine.to_dict(skill, include_private=admin)
@@ -148,8 +157,14 @@ async def update_enabled_skills(req: EnabledSkillsUpdate, request: Request):
     engine = _get_engine()
     engine.ensure_fresh(SKILL_CACHE_TTL)
     names = [str(n).strip() for n in req.enabled_skills if str(n).strip()]
+    # 归档技能不可启停（价值已由业务模板承载，永不注入）：先从提交里摘出来，
+    # 归一化只按"可选集合"（非归档技能）比较，避免全选被误存成固定名单。
+    archived_set = {s.name for s in engine.list_skills() if s.status == "archived"}
+    dropped_archived = [n for n in names if n in archived_set]
+    selectable = {s.name for s in engine.list_skills() if s.status != "archived"}
+    effective_submitted = [n for n in names if n not in archived_set]
     # 全选就存 "*"：当下语义等价，但以后新增技能会自动纳入，不必回头再勾一次
-    if ALL_SKILLS_MARKER in names or (names and set(names) == {s.name for s in engine.list_skills()}):
+    if ALL_SKILLS_MARKER in names or (effective_submitted and set(effective_submitted) >= selectable):
         names = [ALL_SKILLS_MARKER]
     not_found = [n for n in names if n != ALL_SKILLS_MARKER and not engine.get(n)]
 
@@ -165,6 +180,8 @@ async def update_enabled_skills(req: EnabledSkillsUpdate, request: Request):
     _save_global_config(config)
 
     effective = get_enabled_skill_names()
+    if dropped_archived:
+        logger.info(f"已启用技能列表更新: 忽略归档技能 {dropped_archived}")
     logger.info(f"已启用技能列表更新: {names}（实际生效 {len(effective)} 个）")
     return {
         "enabled_skills": effective,
@@ -218,17 +235,25 @@ async def preview_scene_skills(scene: str, request: Request, mode: str = "curren
     from backend.skill_engine import get_enabled_skill_names
     enabled = get_enabled_skill_names()
     config = _load_global_config()
-    from backend.prompts import resolve_scene_skills
-    effective = resolve_scene_skills(scene, enabled, config.get("skill_scene_map", {}))
 
-    seg = engine.compose(effective, context={"type": scene}, enabled_names=enabled)
-    fired = re.findall(r"<!--\s*(.+?)\s*v[\d.]+\s*-->", seg)
+    # A2: current 预览与真实注入完全同源 —— 走 prompts.compose_scene_segment
+    # （含对话白名单兜底 + 护栏头 + compose_detail 的精确 fired），
+    # 不再自带第二套场景解析 + 正则反推注释（旧实现与管理层删掉
+    # chat 规则后的实际行为不一致：预览显示全量、实际走代码兜底白名单）。
+    from backend.prompts import compose_scene_segment, resolve_dialogue_fallback
+    guarded, fired_names = compose_scene_segment(scene)
+    effective, used_fallback = resolve_dialogue_fallback(
+        scene, enabled, config.get("skill_scene_map", {}))
     result: dict[str, Any] = {
         "scene": scene,
         "mode": "current",
-        "length": len(seg),
-        "fired_skills": [x.strip() for x in fired],
-        "segment": seg,
+        "length": len(guarded),
+        "fired_skills": fired_names,
+        "fired_display_names": [engine.get(n).display_name if engine.get(n) else n
+                                for n in fired_names],
+        "effective_skills": effective,
+        "dialogue_fallback": used_fallback,
+        "segment": guarded,
     }
 
     if mode == "full":
@@ -335,6 +360,10 @@ async def update_skill_content(name: str, req: SkillUpdate, request: Request):
     skill = engine.get(name)
     if not skill:
         raise HTTPException(status_code=404, detail=f"技能不存在: {name}")
+
+    conflict = _check_rename_conflict(engine, name, str(_yaml.get("name") or "").strip())
+    if conflict:
+        raise HTTPException(status_code=400, detail=conflict)
 
     fpath = Path(skill.file_path)
     try:

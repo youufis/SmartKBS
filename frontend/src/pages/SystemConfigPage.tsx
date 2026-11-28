@@ -1014,8 +1014,10 @@ const checkValueShapes = (
 
 // 当前有注入调用点的场景(与后端 apply_skills 调用一致)
 const SCENE_SUGGESTIONS = [
-  'chat', 'companion', 'analytics', 'portfolio', 'curriculum', 'discussion',
-  'exam', 'quiz', 'whiteboard', 'wrong-book', 'portrait', 'html-generation',
+  // 与后端 apply_skills/scene= 真实调用点一一对应（tests/test_skill_injection_governance 锁）
+  // practice 是 2026-11-28 补的漏；analytics 因无调用点移出（map 里的旧键会以"未接入"行并入主表展示）
+  'chat', 'companion', 'portfolio', 'curriculum', 'discussion',
+  'exam', 'quiz', 'practice', 'whiteboard', 'wrong-book', 'portrait', 'html-generation',
 ]
 
 interface SceneRule { include?: string[]; exclude?: string[] }
@@ -1031,6 +1033,13 @@ const SceneMapEditor: React.FC<{
   useEffect(() => {
     fetchSkills().then(d => setSkills(d.skills)).catch(() => { /* 拉取失败不阻塞弹窗 */ })
   }, [])
+
+  // 与统计表格 tScene 同口径（那个定义在 SkillManagePanel 作用域，此处不可达）
+  const tScene = (scene: string): string => {
+    const key = `scene_${scene}`
+    const translated = t(key)
+    return translated !== key ? translated : scene
+  }
 
   const map = value ?? {}
   const enabledSkills = skills.filter(s => s.enabled)
@@ -1071,17 +1080,25 @@ const SceneMapEditor: React.FC<{
     onChange?.(obj)
   }
 
-  const rows = SCENE_SUGGESTIONS.map(scene => {
-    const compat = enabledSkills.filter(s => compatibleIn(s, scene))
-    const eff = effectiveOf(scene).filter(n => compat.some(s => s.name === n))
-    return {
-      scene,
-      eff,
-      compatCount: compat.length,
-      custom: Boolean(map[scene]?.include?.length || map[scene]?.exclude?.length),
-    }
-  })
+  // 未接入场景（映射里有键但无注入调用点）并入主表当普通行：注入列显示"—"、
+  // 模式列标"未接入"、行尾可删；不再单独放底部警示区（2026-11-28 用户建议）
   const orphanScenes = Object.keys(map).filter(s => !SCENE_SUGGESTIONS.includes(s))
+  const rows = [
+    ...SCENE_SUGGESTIONS.map(scene => {
+      const compat = enabledSkills.filter(s => compatibleIn(s, scene))
+      const eff = effectiveOf(scene).filter(n => compat.some(s => s.name === n))
+      return {
+        scene,
+        orphan: false,
+        eff,
+        compatCount: compat.length,
+        custom: Boolean(map[scene]?.include?.length || map[scene]?.exclude?.length),
+      }
+    }),
+    ...orphanScenes.map(scene => ({
+      scene, orphan: true, eff: [] as string[], compatCount: 0, custom: false,
+    })),
+  ]
 
   return (
     <div>
@@ -1089,13 +1106,34 @@ const SceneMapEditor: React.FC<{
         size="small" rowKey="scene" pagination={false} dataSource={rows}
         columns={[
           {
-            title: t('skillStatsScene'), dataIndex: 'scene', width: 220,
-            render: (s: string) => (<span><Text strong>{t('scene_' + s)}</Text> <Text type="secondary" style={{ fontSize: 12 }}>{s}</Text></span>),
+            title: t('skillStatsScene'), dataIndex: 'scene', width: 260,
+            render: (s: string, r) => (
+              <span>
+                <Text strong>{tScene(s)}</Text> <Text type="secondary" style={{ fontSize: 12 }}>{s}</Text>
+                {r.orphan && (
+                  <div>
+                    {/* 未接入原因直接写在行内（悬浮"未接入"标签另有完整说明）；
+                        有专属解释用专属键，否则用通用键，免得管理员疑惑 */}
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t(`sceneNotWiredHint_${s}`, { defaultValue: t('sceneNotWiredHintDefault') })}
+                    </Text>
+                  </div>
+                )}
+              </span>
+            ),
           },
-          { title: t('sceneMapColInject'), key: 'count', width: 110, render: (_: unknown, r) => `${r.eff.length} / ${r.compatCount}` },
-          { title: t('sceneMapColMode'), key: 'mode', width: 110, render: (_: unknown, r) => (r.custom ? <Tag color="blue">{t('sceneMapCustom')}</Tag> : <Tag>{t('sceneMapFollow')}</Tag>) },
+          { title: t('sceneMapColInject'), key: 'count', width: 110, render: (_: unknown, r) => (r.orphan ? <Text type="secondary">—</Text> : `${r.eff.length} / ${r.compatCount}`) },
+          { title: t('sceneMapColMode'), key: 'mode', width: 130, render: (_: unknown, r) => (
+            r.orphan
+              ? <Tooltip title={t('sceneMapNotWiredTip')}><Tag color="orange">{t('sceneMapNotWired')}</Tag></Tooltip>
+              : r.custom ? <Tag color="blue">{t('sceneMapCustom')}</Tag> : <Tag>{t('sceneMapFollow')}</Tag>
+          ) },
+          { title: '', key: 'ops', width: 70, render: (_: unknown, r) => (
+            r.orphan ? <Button type="link" size="small" danger onClick={() => removeScene(r.scene)}>{t('sceneMapDelete')}</Button> : null
+          ) },
         ]}
         expandable={{
+          rowExpandable: (r) => !r.orphan,
           expandedRowRender: (r) => (
             <div>
               {(['core', 'domain'] as const).map(tp => {
@@ -1128,14 +1166,6 @@ const SceneMapEditor: React.FC<{
           ),
         }}
       />
-      {orphanScenes.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <Text type="secondary">{t('sceneMapOrphanTitle')}</Text>
-          {orphanScenes.map(s => (
-            <Tag key={s} color="orange" closable onClose={() => removeScene(s)} style={{ marginLeft: 8 }}>{s}</Tag>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -1283,11 +1313,13 @@ const SkillManagePanel: React.FC = () => {
   }
 
   // 全选/取消全选
-  const allEnabled = skills.length > 0 && skills.every(s => s.enabled)
+  // 归档技能永不参与启停：全选态与提交名单都以"非归档"为基数
+  const activeSkills = skills.filter(s => s.status !== 'archived')
+  const allEnabled = activeSkills.length > 0 && activeSkills.every(s => s.enabled)
   const handleToggleAll = async () => {
     setSaving(true)
     try {
-      const newList = allEnabled ? [] : filtered.map(s => s.name)
+      const newList = allEnabled ? [] : filtered.filter(x => x.status !== 'archived').map(s => s.name)
       await updateEnabledSkills(newList)
       message.success(allEnabled ? t('skillAllDisabled') : t('skillAllEnabled'))
       loadSkills()
@@ -1309,7 +1341,11 @@ const SkillManagePanel: React.FC = () => {
 
   // 筛选
   const filtered = skills.filter(s => {
-    if (typeFilter !== 'all' && s.type !== typeFilter) return false
+    if (typeFilter === 'archived') {
+      if (s.status !== 'archived') return false
+    } else if (typeFilter !== 'all') {
+      if (s.type !== typeFilter || s.status === 'archived') return false
+    }
     if (searchText) {
       const q = searchText.toLowerCase()
       return s.name.toLowerCase().includes(q) ||
@@ -1320,8 +1356,9 @@ const SkillManagePanel: React.FC = () => {
     return true
   })
 
+  // 计数口径与筛选一致：归档技能不计入 core/domain/adapter 总数
   const typeCount = skills.reduce((acc, s) => {
-    acc[s.type] = (acc[s.type] || 0) + 1
+    if (s.status !== 'archived') acc[s.type] = (acc[s.type] || 0) + 1
     return acc
   }, {} as Record<string, number>)
 
@@ -1349,6 +1386,9 @@ const SkillManagePanel: React.FC = () => {
             { value: 'core', label: `${t('skillCoreType')} (${typeCount.core || 0})` },
             { value: 'domain', label: `${t('skillDomainType')} (${typeCount.domain || 0})` },
             { value: 'adapter', label: `${t('skillAdapterType')} (${typeCount.adapter || 0})` },
+            ...(skills.some(s => s.status === 'archived')
+              ? [{ value: 'archived', label: `${t('skillArchivedFilter')} (${skills.filter(s => s.status === 'archived').length})` }]
+              : []),
           ]}
         />
         <Button icon={<ReloadOutlined />} onClick={handleReload} loading={loading}>
@@ -1420,6 +1460,16 @@ const SkillManagePanel: React.FC = () => {
                       </Tag>
                     </Tooltip>
                   )}
+                  {record.status === 'reserved' && (
+                    <Tooltip title={t('skillReservedTip')}>
+                      <Tag style={{ fontSize: 11, marginInlineEnd: 0 }}>{t('skillReservedTag')}</Tag>
+                    </Tooltip>
+                  )}
+                  {record.status === 'archived' && (
+                    <Tooltip title={t('skillArchivedTip')}>
+                      <Tag color="default" style={{ fontSize: 11, marginInlineEnd: 0 }}>{t('skillArchivedTag')}</Tag>
+                    </Tooltip>
+                  )}
                 </Space>
               ),
             },
@@ -1445,10 +1495,12 @@ const SkillManagePanel: React.FC = () => {
               dataIndex: 'enabled',
               key: 'enabled',
               width: 100,
-              render: (enabled: boolean) => (
-                enabled
-                  ? <Tag color="success" icon={<CheckCircleOutlined />}>{t('skillEnabled')}</Tag>
-                  : <Tag color="default" icon={<CloseCircleOutlined />}>{t('skillDisabled')}</Tag>
+              render: (enabled: boolean, record: SkillInfo) => (
+                record.status === 'archived'
+                  ? <Tooltip title={t('skillArchivedTip')}><Tag color="default">{t('skillArchivedTag')}</Tag></Tooltip>
+                  : enabled
+                    ? <Tag color="success" icon={<CheckCircleOutlined />}>{t('skillEnabled')}</Tag>
+                    : <Tag color="default" icon={<CloseCircleOutlined />}>{t('skillDisabled')}</Tag>
               ),
             },
             {
@@ -1458,7 +1510,8 @@ const SkillManagePanel: React.FC = () => {
               render: (_: any, record: SkillInfo) => (
                 <Space>
                   <Switch
-                    checked={record.enabled}
+                    checked={record.enabled && record.status !== 'archived'}
+                    disabled={record.status === 'archived'}
                     onChange={() => toggleSkill(record.name, record.enabled)}
                     loading={saving}
                     size="small"

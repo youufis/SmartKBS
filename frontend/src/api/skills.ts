@@ -16,6 +16,8 @@ export interface SkillInfo {
   enabled: boolean
   // 关掉就丢底线约束的技能（如内容安全），管理页据此打标提示
   recommended?: boolean
+  // 'reserved' 未接入 | 'archived' 已归档（永不注入；归档文件已移出技能目录，此值仅作恢复后的兜底标）
+  status?: string
   priority: number
   requires: string[]
   conflicts_with: string[]
