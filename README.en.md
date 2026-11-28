@@ -44,6 +44,7 @@
 > - 🧮 **Grading & exam loop**: unified batch grading / fallback / review for subjective questions with audit trail, spot-check re-grading and rubrics; pre-publish checklist plus zero-attempt unpublish; export labels unified with complete answer sheets; building, answering, grading guards, rosters and to-dos aligned to teaching scope
 > - ⚔️ **Knowledge quest**: three lives with finish-to-win plus a quest-domain wrong-answer book; replay-proof grading, server-side clock, dedicated points pool capped at 3 runs/day, badges count completions only (counters recalculated); time limit / question count / lives configurable
 > - 🔧 **Settings, backups & licence**: new Subjective-Question Grading section (grading always uses the chat model); blocked saves name and scroll to the field, secret inputs resist autofill; read-only assets no longer block backups; bilingual ZH/EN licence notice
+> - 🧩 **Skill & scene governance**: scene mapping completed (wrong-answer explanations, quiz analysis and practice reports no longer get "guide without answering" interference); companion chat double skill-segment fixed; injection stats count only what is actually injected and the preview endpoint now matches the live pipeline; 5 skills without call sites archived out of the library (16 remain); unwired scenes merged into the mapping table with an inline reason
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM; the knowledge quest switched to three lives with points in a dedicated daily-capped pool, and badges count completions only (existing counters recalculated)
 >
@@ -1181,12 +1182,12 @@ Centralized management of all system configuration parameters:
 
 Modular AI Skill Document System — each skill is defined via YAML + Markdown, automatically injected into AI calls by scene:
 
-- **🧩 20 Pre-installed Skills**: 8 core + 12 domain-specific
-- **🎯 Scene-Aware Injection**: controls which scenes each skill applies to
-- **⚡ Three-Stage Quality Enhancement**: Deep Analysis → Structured Output → Self-Review
-- **📋 Visual Management**: Search, filter by type, pagination, toggle all on/off
-- **🔍 Detail Preview**: View raw skill document, version, tags, priority
-- **🛡️ Safe Degradation**: Skills silently skip on error, zero impact on existing features
+- **🧩 16 Pre-installed Skills**: 8 core + 8 domain-specific (historical skills without call sites are archived under `skills_archive/` and never loaded)
+- **🎯 Scene Mapping Matrix**: tick which skills each scene injects; unwired scenes appear as regular rows with an inline reason (e.g. Learning Analytics: structure already carried by prompt templates)
+- **⚡ Three-Stage Quality Enhancement**: Deep Analysis → Structured Output → Self-Review; structured-output pipelines (question authoring / grading) never receive skill injection
+- **📋 Visual Management**: search, filter by type, pagination, toggle all on/off, usage stats (counted per actual injection)
+- **🔍 Detail & Injection Preview**: view raw skill documents and the exact prompt segment each scene will inject (same source as the live pipeline)
+- **🛡️ Safe Degradation**: skills silently skip on error, zero impact on existing features
 
 > **Admin only**
 
@@ -1298,6 +1299,13 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 - 🔧 **Settings**: new Subjective-Question Grading section (spot-check rate, engine throttling); blocked saves now name the offending field and scroll to it; secret inputs are protected from browser autofill
 - 🧹 **Backups**: read-only legacy assets no longer block backup deletion; backup and restore stop propagating the read-only flag, and a failed delete names the blocker and the next step
 - 📜 **Licence**: bilingual (ZH/EN) copyright notice added to LICENSE; the Chinese text prevails
+**🧩 Skill & scene governance**
+
+- 🧩 Scene mapping completed: wrong-answer explanations, quiz analysis and practice reports exclude Socratic guidance, so analysis output no longer withholds conclusions
+- 👥 Companion double-injection fixed: one skill segment per message, usage stats no longer doubled
+- 📊 Stats and preview share the live pipeline: only actually-injected content is counted, empty shells no longer register
+- 🗄 5 skills without call sites moved to `skills_archive/` (16 remain); unwired scenes shown inline in the mapping table
+
 
 ### v7.x – v9.2.0
 
@@ -1483,7 +1491,8 @@ SmartKBS/
 │   │   ├── image_gen_service.py  # Wanxiang image generation
 │   │   └── *_router.py           # exams / bank / interaction / analytics / whiteboard …
 │   ├── prompts/                  # prompt templates grouped by scene
-│   ├── skills/                   # 20 skills: 8 core + 12 domain (*.skill.md)
+│   ├── skills/                   # 16 skills: 8 core + 8 domain (*.skill.md)
+│   ├── skills_archive/           # archived skills (no call sites; never loaded or injected, kept as design history)
 │   ├── locales/                  # backend messages zh-CN / en
 │   └── migrations/               # database migrations
 ├── frontend/                     # React + Vite + TypeScript frontend
