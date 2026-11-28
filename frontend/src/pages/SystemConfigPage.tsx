@@ -1106,8 +1106,21 @@ const SceneMapEditor: React.FC<{
         size="small" rowKey="scene" pagination={false} dataSource={rows}
         columns={[
           {
-            title: t('skillStatsScene'), dataIndex: 'scene', width: 220,
-            render: (s: string) => (<span><Text strong>{tScene(s)}</Text> <Text type="secondary" style={{ fontSize: 12 }}>{s}</Text></span>),
+            title: t('skillStatsScene'), dataIndex: 'scene', width: 260,
+            render: (s: string, r) => (
+              <span>
+                <Text strong>{tScene(s)}</Text> <Text type="secondary" style={{ fontSize: 12 }}>{s}</Text>
+                {r.orphan && (
+                  <div>
+                    {/* 未接入原因直接写在行内（悬浮"未接入"标签另有完整说明）；
+                        有专属解释用专属键，否则用通用键，免得管理员疑惑 */}
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t(`sceneNotWiredHint_${s}`, { defaultValue: t('sceneNotWiredHintDefault') })}
+                    </Text>
+                  </div>
+                )}
+              </span>
+            ),
           },
           { title: t('sceneMapColInject'), key: 'count', width: 110, render: (_: unknown, r) => (r.orphan ? <Text type="secondary">—</Text> : `${r.eff.length} / ${r.compatCount}`) },
           { title: t('sceneMapColMode'), key: 'mode', width: 130, render: (_: unknown, r) => (

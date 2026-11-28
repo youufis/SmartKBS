@@ -1997,5 +1997,7 @@
   "skillArchivedTip": "内容已由业务模板/批改引擎承载，任何场景都不再注入（保留可查）",
   "sceneMapNotWired": "未接入",
   "sceneMapNotWiredTip": "该场景暂无 AI 注入调用点，映射规则休眠（不会生效）；删除后记得保存。若计划将来接入，建议保留以延续排除意图",
-  "sceneMapDelete": "删除"
+  "sceneMapDelete": "删除",
+  "sceneNotWiredHintDefault": "暂无 AI 注入调用点，规则休眠（不会生效）；接入该场景后自动启用",
+  "sceneNotWiredHint_analytics": "报告结构与质量要求已内置于业务模板，故未接技能注入；规则保留，将来接入时即生效"
 }

@@ -2000,5 +2000,7 @@
   "skillArchivedTip": "Value absorbed into scene prompt templates / grading engine; never injected into any scene",
   "sceneMapNotWired": "Not wired",
   "sceneMapNotWiredTip": "No AI injection call site for this scene; its rule is dormant. Save after removing; keep it if you plan to wire this scene later",
-  "sceneMapDelete": "Remove"
+  "sceneMapDelete": "Remove",
+  "sceneNotWiredHintDefault": "No AI injection call site yet; the rule is dormant and will apply once the scene is wired up",
+  "sceneNotWiredHint_analytics": "Report structure and quality rules are built into the analytics prompt templates; the mapping is kept and takes effect if this scene is wired later"
 }
