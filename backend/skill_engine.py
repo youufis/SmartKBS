@@ -318,7 +318,18 @@ class SkillEngine:
     def compose(self, skill_names: list[str],
                 context: Optional[dict] = None,
                 enabled_names: Optional[list[str]] = None) -> str:
-        """将多个技能组合为 Prompt 增强段
+        """将多个技能组合为 Prompt 增强段（兼容入口，只要文本时用这个）"""
+        return self.compose_detail(skill_names, context, enabled_names)[0]
+
+    def compose_detail(self, skill_names: list[str],
+                       context: Optional[dict] = None,
+                       enabled_names: Optional[list[str]] = None
+                       ) -> tuple[str, list[str]]:
+        """compose 的结构化版本：返回 (增强段文本, 实际注入了内容的技能名列表)。
+
+        fired 以"该技能确实产出了内容段"为准（A3 治理）：过去调用方靠扫描
+        HTML 注释标记反推命中，把只含注释、没有正文的空壳技能也计成了命中，
+        统计口径虚高。空壳判定已下沉到 _build_skill_segment，这里直接收集。
 
         Args:
             skill_names: 请求的技能列表
@@ -364,17 +375,16 @@ class SkillEngine:
         # 检查冲突
         resolved = self._filter_conflicts(resolved)
 
-        # 构建增强段
+        # 构建增强段（A3: 同步收集"真正注入了内容"的技能名，供统计/预览复用）
         segments = []
+        fired: list[str] = []
         for skill in resolved:
             segment = self._build_skill_segment(skill, context)
             if segment:
                 segments.append(segment)
+                fired.append(skill.name)
 
-        if not segments:
-            return ""
-
-        return "\n\n".join(segments)
+        return "\n\n".join(segments), fired
 
     def validate(self, skill_names: list[str]) -> dict[str, Any]:
         """验证技能组合是否合法
@@ -547,8 +557,11 @@ class SkillEngine:
 
     def _build_skill_segment(self, skill: SkillDoc,
                               context: Optional[dict] = None) -> str:
-        """构建单个技能的 Prompt 增强段"""
-        parts = [f"<!-- {skill.display_name} v{skill.version} -->"]
+        """构建单个技能的 Prompt 增强段。
+
+        A3: 只含注释头、没有任何正文时返回 ""——过去会输出"只有 <!-- x v1.0.0 -->"
+        的空壳段：白占 token、还会被 fired 统计计为命中。"""
+        parts: list[str] = []
 
         # 章节白名单模式：声明了 inject_sections 的技能只注入指定章节（按声明顺序）
         if skill.compose.inject_sections:
@@ -558,7 +571,9 @@ class SkillEngine:
                     parts.append(f"## {want}\n\n{content}")
                 else:
                     logger.warning(f"技能 {skill.name} 声明注入章节「{want}」未找到或为空，跳过")
-            return "\n\n".join(parts)
+            if not parts:
+                return ""
+            return f"<!-- {skill.display_name} v{skill.version} -->" + "\n\n" + "\n\n".join(parts)
 
         # 添加 Overview
         overview = self._get_section(skill, "_overview")
@@ -583,7 +598,9 @@ class SkillEngine:
         if instructions:
             parts.append(f"## 指令\n\n{instructions}")
 
-        return "\n\n".join(parts)
+        if not parts:
+            return ""
+        return f"<!-- {skill.display_name} v{skill.version} -->" + "\n\n" + "\n\n".join(parts)
 
     def to_dict(self, skill: SkillDoc, include_private: bool = False) -> dict[str, Any]:
         """将技能文档转为字典（用于 API 输出）
