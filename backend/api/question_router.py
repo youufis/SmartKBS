@@ -28,6 +28,8 @@ from backend.question_db import (
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files
 from backend.logger import logger
+from backend.ai_budget import budget
+
 # 出题入库统一走 question_factory（校验 → 查重 → 事务插入 → 连边）
 from backend import question_factory
 from backend.question_media import (
@@ -708,12 +710,9 @@ async def _call_dashscope_agent(prompt: str, api_key: str, json_mode: bool = Fal
 
 
 def _estimate_generate_max_tokens(count: int, with_media: bool = False) -> int:
-    """按题量估输出上限：普通题 ~800/题，含配图（整段 svg_code 内嵌）~1600/题。
-
-    下限 2000 防"1 道题也被截断"，上限 16000 与课件/资源抽取那几条链路同口径。
-    """
-    per = 1600 if with_media else 800
-    return int(min(16000, max(2000, (int(count or 1)) * per)))
+    """按题量估输出上限（统一实现见 ai_service.estimate_question_tokens，参数在系统配置里调）。"""
+    from backend.api.ai_service import estimate_question_tokens
+    return estimate_question_tokens(count, with_media=with_media)
 
 
 def _ai_fail_detail(exc: Exception, prefix: str = "AI 生成失败") -> str:
@@ -2602,7 +2601,7 @@ async def _call_vision_extract(image_bytes: bytes, mime_type: str, prompt_text: 
                 {"type": "text", "text": prompt_text},
             ],
         }],
-        "max_tokens": int(get_config_value("IMAGE_EXTRACT_MAX_TOKENS", 8000) or 8000),
+        "max_tokens": budget("image_extract"),
         "stream": False,
     }
     api_base, _pl = llm_provider.decorate(api_base, _pl)

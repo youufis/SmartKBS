@@ -25,6 +25,8 @@ from typing import Any
 from backend import podcast_service as podcast
 from backend.api.config_router import get_config_value
 from backend.logger import logger
+from backend.ai_budget import budget
+
 from backend.prompts.teaching import CAST_SCRIPT_PROMPT, CAST_STYLE_BLOCKS
 from backend.tts_service import MAX_TEXT_CHARS, current_params, synthesize, tts_enabled
 
@@ -529,8 +531,8 @@ def render_prompt(**kw: Any) -> str:
 
 
 def script_max_tokens(minutes: int) -> int:
-    """输出上限：每页约 180 token，给足余量避免 JSON 被截断。"""
-    return max(2000, min(8000, plan_pages(minutes) * 260 + 600))
+    """输出上限：按页数估（口径与配置键 AI_TOKENS_CAST_SCRIPT 同源，见 backend/ai_budget.py）。"""
+    return budget("cast_script", units=plan_pages(minutes))
 
 
 # ══════════════════════════ 指纹 ══════════════════════════

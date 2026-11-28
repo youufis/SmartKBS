@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
+from backend.ai_budget import budget
+
 
 # ── 推送类型 ──
 
@@ -240,7 +242,8 @@ def _llm_morning_content(student_username: str, student_name: str,
             today_courses="未提供",
             streak_days=streak_days,
         )
-        text = (call_ai_sync(prompt, api_key, max_tokens=160, use_kb=False) or "").strip()
+        text = (call_ai_sync(prompt, api_key, max_tokens=budget("companion_push"),
+                         use_kb=False) or "").strip()
         text = text.strip('"“”\'')
         if 8 <= len(text) <= 120:
             return text

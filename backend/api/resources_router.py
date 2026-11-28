@@ -29,6 +29,8 @@ from backend.utils import (
     ensure_teacher_html_files,
 )
 from backend.logger import logger
+from backend.ai_budget import budget
+
 
 router = APIRouter()
 
@@ -1547,8 +1549,9 @@ async def ai_preview_html(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         logger.info(f"开始 AI 生成 HTML, 类型={gen_type}, 主题={topic}, prompt长度={len(prompt)}")
-        raw_output = await call_ai_sync_with_timeout(prompt, api_key, timeout=300, max_tokens=16000,
-                                                             kb_query=topic) or ""
+        raw_output = await call_ai_sync_with_timeout(prompt, api_key, timeout=300,
+                                             max_tokens=budget("resource_html"),
+                                             kb_query=topic) or ""
         logger.info(f"AI 生成完成, 内容长度={len(raw_output)}")
     except TimeoutError as e:
         logger.error(f"AI 生成超时: {e}")

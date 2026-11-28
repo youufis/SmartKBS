@@ -54,6 +54,8 @@ _SECRET_KEYS = ("dashscope_api_key",)                          # C3: 不回显�
 _MASK_PREFIX = "****"
 
 # ── 默认配置（与 config.py 保持一致） ──
+from backend import ai_budget   # AI 输出预算表：默认值与取值范围都由它生成，避免两处漂移
+
 DEFAULT_CONFIG: dict[str, Any] = {
     # 品牌信息（AGENT_NAME 由 "智慧教学平台-" + AGENT_EDITION 自动拼接，不再单独保存）
     "AGENT_EDITION": "通用版",
@@ -311,6 +313,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "AI_JSON_OBJECT_MODE": False,          # 强制 response_format=json_object（个别网关不支持，失败会自动降级）
     "AI_STRICT_PARSE": True,               # 严格解析：不接受截断救回的残缺结果，并逐题做字段体检
     "IMAGE_EXTRACT_MAX_TOKENS": 8000,      # 单次图片识别（题目提取）的 token 预算，长图/多图可上调
+    # 出题链路（试题管理 / 同步练习 / 课堂闯关 / AI 补全）的输出 token 预算：
+    # 每道题按 PER_ITEM 估，整批不低于 MIN、不高于 MAX；含配图自动 x2。改完下一轮出题生效。
+    # 腰斩的典型症状：整批缺答案、解析里的公式只剩半截 rac{2}{2}。
+    "QUESTION_GEN_TOKENS_PER_ITEM": 1400,   # 单题预算（含整段解析）
+    "QUESTION_GEN_TOKENS_MIN": 4000,        # 单次下限（只出 1 题也不该被截断）
+    "QUESTION_GEN_TOKENS_MAX": 16000,       # 单次上限（再高会被服务商拒或白等一次超时）
     # 学生作答页防泄题（默认全关：关掉时前端不挂监听、不注入水印，作答链路与改动前一致）
     "EXAM_ANTI_COPY": False,             # 题目区禁止选中/复制/剪切/右键/打印快捷键，输入区始终豁免
     "EXAM_WATERMARK": False,             # 作答页平铺个人水印（姓名 + 学号 + 时间），用于事后追溯
@@ -389,6 +397,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "CHAT_SKILL_SEGMENT_MODE": "system",  # 技能段位置：system=放进系统消息；inline=退回拼进正文
     "CHAT_META_MAX_TOKENS": 600,          # 元问题回答的输出上限（闲聊不必长）
 }
+
+
+# ── AI 输出预算（backend/ai_budget.py 一张表统管）──────────────────────────
+# 为什么用合并而不是逐条写死在上面那张字面量里：预算表会随链路增加，配置页的键、
+# 取值范围、说明必须跟着同一张表走，否则又是一处改三处、第二处忘登记就静默丢弃。
+DEFAULT_CONFIG.setdefault(ai_budget.KEY_MAX, 16000)   # 全站硬上限（对齐所用模型的最大输出）
+DEFAULT_CONFIG.setdefault(ai_budget.KEY_DEFAULT, 0)   # 0 = 调用方没写时沿用服务商默认上限
+for _spec in ai_budget.BUDGETS.values():
+    _k = _spec.get("key")
+    if not _k:
+        continue
+    DEFAULT_CONFIG.setdefault(_k, _spec.get("default", _spec.get("per_unit", 1000)))
+    if "per_unit" in _spec:          # 按量估算的预算，下限/上限也登记成可保存的键
+        DEFAULT_CONFIG.setdefault(_k + "_MIN", _spec.get("floor", _spec["per_unit"]))
+        DEFAULT_CONFIG.setdefault(_k + "_MAX", _spec.get("cap", _spec.get("default", 16000)))
 
 
 # 已下线的配置键：旧文件里可能还留着，读取时直接丢弃，免得出现在「未收录配置键」里误导管理员
@@ -724,6 +747,10 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "AI_REQUEST_TIMEOUT": (5, 900),
     # 图片题目提取的 token 预算：下限防呆，上限按住模型上下文（超出只会白等一次超时）
     "IMAGE_EXTRACT_MAX_TOKENS": (500, 32000),
+    # 出题 token 预算：必须在此登记，否则配置页改了保存不生效（未知键会被丢弃）
+    "QUESTION_GEN_TOKENS_PER_ITEM": (200, 8000),
+    "QUESTION_GEN_TOKENS_MIN": (500, 32000),
+    "QUESTION_GEN_TOKENS_MAX": (2000, 32000),
     "EXAM_WA_MAX_QUESTIONS": (1, 30), "EXAM_WA_RATE_CEILING": (10, 100),
     # 闯关玩法参数（M2/E8）
     "QUEST_TIME_LIMIT": (5, 120), "QUEST_MAX_QUESTIONS": (3, 30), "QUEST_LIVES": (1, 5),
@@ -761,6 +788,19 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     # ── 语音合成（backend/tts_service.py）──
     "TTS_VOLUME": (0, 100),
 }
+# AI 输出预算的取值范围同样跟着预算表走（未登记的键保存时会被静默丢弃，必须补齐）
+_NUM_RANGES.setdefault(ai_budget.KEY_MAX, (2000, 32000))
+_NUM_RANGES.setdefault(ai_budget.KEY_DEFAULT, (0, 32000))
+for _spec in ai_budget.BUDGETS.values():
+    _k = _spec.get("key")
+    if not _k:
+        continue
+    _NUM_RANGES.setdefault(_k, (64, 32000))
+    if "per_unit" in _spec:
+        _NUM_RANGES.setdefault(_k + "_MIN", (64, 32000))
+        _NUM_RANGES.setdefault(_k + "_MAX", (256, 32000))
+
+
 # 浮点范围校验（_NUM_RANGES 会取整，0.01~1.00 的阈值必须走这里）
 _FLOAT_RANGES: dict[str, tuple[float, float]] = {
     "KB_MIN_SCORE": (0.01, 1.00),

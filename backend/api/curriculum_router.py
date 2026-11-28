@@ -37,6 +37,8 @@ from backend.permission_service import (
 )
 from backend.auth import is_admin, is_teacher
 from backend.logger import logger
+from backend.ai_budget import budget
+
 from backend.api.chat_router import get_api_keys
 from backend.prompts import apply_skills, build_ai_role
 
@@ -2942,7 +2944,7 @@ async def ai_lesson_plan(
         try:
             from backend import ai_json
 
-            result = await call_ai_async(prompt, api_key, max_tokens=8000,
+            result = await call_ai_async(prompt, api_key, max_tokens=budget("lesson_plan"),
                                       kb_query=f"{kp['course_name']} {kp['chapter_name']} {kp['name']}")
             if ai_json.looks_like_refusal(result):
                 # 推脱话/半截内容一旦缓存，之后导出 Word 会一直复用这份废稿
@@ -3039,7 +3041,7 @@ async def export_lesson_plan_docx(
         try:
             from backend import ai_json
 
-            lesson_plan_text = await call_ai_async(prompt, api_key, max_tokens=8000,
+            lesson_plan_text = await call_ai_async(prompt, api_key, max_tokens=budget("lesson_plan"),
                                              kb_query=f"{kp['course_name']} {kp['chapter_name']} {kp['name']}")
             if ai_json.looks_like_refusal(lesson_plan_text):
                 ai_json.dump_failed_raw("lesson-plan-export", lesson_plan_text or "")
@@ -3176,7 +3178,7 @@ async def ai_generate_courseware(kp_id: int, request: Request):
             logger.info(f"AI 课件开始生成: kp_id={kp_id}, kp_name={kp['name']}")
             from backend import ai_json
 
-            result = await call_ai_async(prompt, api_key, max_tokens=16000)
+            result = await call_ai_async(prompt, api_key, max_tokens=budget("courseware_html"))
             logger.info(f"AI 响应已收到，长度={len(result)}")
 
             # 剥掉客套话与 ```fence（模型经常在 HTML 前面先说一句话，
@@ -3343,7 +3345,8 @@ async def ai_podcast_topics(kp_id: int, request: Request):
         learning_objectives=_fmt_safe(kp.get("learning_objectives")),
     )
     try:
-        text = await call_ai_async(prompt, api_key, json_mode=True, max_tokens=1200,
+        text = await call_ai_async(prompt, api_key, json_mode=True,
+                                 max_tokens=budget("podcast_topics"),
                                    kb_query=f"{kp.get('course_name') or ''} {kp.get('name') or ''}")
     except Exception as e:
         logger.warning(f"[podcast] 候选话题生成失败 kp={kp_id}: {e}")
@@ -3539,7 +3542,10 @@ def _parse_ai_questions2(text: str, scene: str = "practice",
 
     got, meta = ai_json.extract_json_array2(text, salvage=salvage)
     if got:
-        return got, meta
+        # 这条链路不经过 question_parse.parse_question_array，还原必须自己过一遍，
+        # 否则闯关/练习补全出来的题照样带着被 JSON 吃掉的 \frac（2026-11-28 审查发现）
+        from backend.question_parse import repair_questions
+        return repair_questions(got), meta
     ai_json.dump_failed_raw(scene, text or "")
     return None, meta
 
@@ -3679,7 +3685,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
     from backend.prompts.teaching import PRACTICE_SINGLE_CHOICE_PROMPT
     from backend.prompts.question_schema import (SINGLE_CHOICE_RULES, schema_block,
                                                   render_question_prompt)
-    from backend.api.ai_service import call_ai_async
+    from backend.api.ai_service import call_ai_async, estimate_question_tokens
     from backend.utils import get_account_html_dir
     from backend.config import STORAGE_DIR
 
@@ -3795,7 +3801,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
                     logger.info(f"AI 生成第{round_idx+1}轮: 已有题库{bank_count}道+AI{len(ai_question_ids)}道, 还需{remaining}道, 本轮请求{ask}道")
                     result_text = await call_ai_async(
                         round_prompt, api_key,
-                        max_tokens=min(16000, 900 * ask + 1500),
+                        max_tokens=estimate_question_tokens(ask),
                         json_mode=_ai_json_object_mode(),
                     )
                     logger.info(f"AI 第{round_idx+1}轮响应长度={len(result_text)}")
@@ -4743,7 +4749,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 
     if bank_count < 10:
         try:
-            from backend.api.ai_service import call_ai_async
+            from backend.api.ai_service import call_ai_async, estimate_question_tokens
 
             difficulty_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
             difficulty_desc = difficulty_map.get(kp.get("difficulty", "medium"), "中等")
@@ -4775,7 +4781,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 2. 题目要覆盖知识点的核心概念、原理和应用
 3. 选项要有区分度，干扰项要合理
 4. 正确答案唯一且明确
-5. 每道题都要有详细的解析
+5. 每题都要有 explanation：正式解法 + 排除理由，不写试错独白（长度见下方「解析怎么写」）
 6. 涉及公式使用 $...$ LaTeX 语法
 
 {_schema_block("single", answer_rules=_SCR)}
@@ -4787,7 +4793,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
                 try:
                     result_text = await call_ai_async(
                         smart_prompt, api_key,
-                        max_tokens=min(16000, 900 * gap + 1500),
+                        max_tokens=estimate_question_tokens(gap),
                         json_mode=_ai_json_object_mode(),
                     )
                     parsed = _parse_ai_questions(result_text)

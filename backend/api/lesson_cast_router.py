@@ -27,6 +27,8 @@ from backend.database import (
     execute_query_one,
 )
 from backend.logger import logger
+from backend.ai_budget import budget
+
 
 router = APIRouter()
 
@@ -281,7 +283,7 @@ async def suggest_description(kp_id: int, request: Request):
               .replace("{grade_hint}", str(kp.get("course_grade") or "中学")))
 
     try:
-        raw = await call_ai_async(prompt, api_key, max_tokens=300,
+        raw = await call_ai_async(prompt, api_key, max_tokens=budget("cast_description"),
                                   kb_query=str(kp.get("name") or ""))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[cast] 帮写描述失败 kp={kp_id}: {e}")

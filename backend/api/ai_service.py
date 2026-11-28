@@ -129,6 +129,55 @@ def ai_error_brief(exc: BaseException, max_len: int = 200) -> str:
     return first if len(first) <= max_len else first[:max_len] + "…"
 
 
+def estimate_question_tokens(count: int, with_media: bool = False) -> int:
+    """出题链路的输出 token 预算：按题量估，三个参数都在系统配置里可调。
+
+    2026-11-28 实测：一道带详细解析的数学题，模型把「分析—试错—重构」整段推理写进
+    explanation，单题就 3300+ 字符；旧口径（800/题、下限 2000）在第二题中途就被
+    max_tokens 腰斩 —— 表现为整批缺答案、或解析里公式只剩半截 \rac。
+    含配图（svg_code 整段内嵌）按 2 倍计。上限默认 16000，与课件/资源抽取同口径，
+    再高会被服务商拒或白等一次超时。
+    """
+    from backend import ai_budget
+    per = ai_budget.budget("question_per_item") * (2 if with_media else 1)
+    floor = ai_budget.budget("question_min")
+    cap = ai_budget.budget("question_max")
+    return int(min(cap, max(floor, int(count or 1) * per)))
+
+
+def _resolve_max_tokens(max_tokens) -> Optional[int]:
+    """统一口径：调用方给了就按给的（夹全局上限），没给则看 AI_TOKENS_DEFAULT。
+
+    AI_TOKENS_DEFAULT 默认 0 = 不发 max_tokens，沿用服务商上限 —— 聊天这类
+    "越长越好"的链路不会被我们凭空砍一刀；批量结构化生成想兜底时再调成非 0。
+    """
+    from backend import ai_budget
+    try:
+        n = int(max_tokens) if max_tokens else int(ai_budget.default_output_tokens() or 0)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    return ai_budget.clamp_output_tokens(n)
+
+
+def _shrink_after_token_400(err_text: str, mt) -> Optional[int]:
+    """400 报文在抱怨 max_tokens 超模型上限时，返回折半后的预算；否则 None。
+
+    为什么要自动折半：这个 400 的代价是整单失败（学生看到"生成失败"），
+    而正确的值多半就在 1/2 到 1/4 之间；先降一级重试一次，比让管理员
+    去猜哪个模型支持多少输出划算。只降一次，避免来回震荡。
+    """
+    if not mt:
+        return None
+    t = (err_text or "").lower()
+    hit = any(k in t for k in ("max_tokens", "max_output_tokens", "range of max", "maximum output"))
+    bad = any(k in t for k in ("range", "exceed", "must be", "invalid", "larger than", "too large"))
+    if not (hit and bad):
+        return None
+    return max(512, int(mt) // 2)
+
+
 def _est_generation_seconds(max_tokens) -> float:
     try:
         return _QUEUE_ALLOWANCE_SECONDS + float(max_tokens) / _TOKENS_PER_SECOND
@@ -574,7 +623,8 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                      history: Optional[list] = None,
                      max_tokens: Optional[int] = None,
                      json_mode: bool = False,
-                     system: Optional[str] = None) -> str:
+                     system: Optional[str] = None,
+                     _budget_retry: bool = False) -> str:
     """直接调用大模型（同步，OpenAI 兼容接口）
 
     enable_thinking=None 保持现状（由模型默认决定）；传 False 关闭思考链。
@@ -588,6 +638,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
     messages = _hist_messages(history, content, system) if history else _user_pair(content, system)
     fmts = ["hist"] if history else ["str", "array"]
     last_error = None
+    _mt = _resolve_max_tokens(max_tokens)
     payload: dict = {}
     for fmt in fmts:
         t0 = time.monotonic()
@@ -600,8 +651,8 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                 "messages": messages,
                 "stream": False,
             }
-            if max_tokens:
-                payload["max_tokens"] = int(max_tokens)
+            if _mt:
+                payload["max_tokens"] = int(_mt)
             if enable_thinking is not None and "qwen" in model.lower():
                 payload["enable_thinking"] = bool(enable_thinking)
             if json_mode:
@@ -625,13 +676,26 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                             f"turns={len(messages)}, head={content_out[:200]}")
                 if _finish == "length":
                     logger.warning(
-                        "AI 输出被 max_tokens=%s 截断（len=%d）：结果可能不完整，请调大 max_tokens 或缩小单次生成量",
+                        "AI 输出被 max_tokens=%s 截断（len=%d）：结果可能不完整。出题调 "
+                        "QUESTION_GEN_TOKENS_*，其它链路调 AI_TOKENS_*（backend/ai_budget.py），"
+                        "全站硬上限 AI_MAX_OUTPUT_TOKENS；或缩小单次生成量",
                         payload.get("max_tokens", "默认"), len(content_out),
                     )
                 return content_out
             # 400 错误可能是格式问题，尝试下一种格式
             if resp.status_code == 400:
                 last_error = resp.text[:300]
+                if not _budget_retry:
+                    nxt = _shrink_after_token_400(last_error, _mt)
+                    if nxt:
+                        logger.warning("AI 网关按 max_tokens=%s 拒绝，折半到 %s 重试一次"
+                                       "（想固定就调小系统配置 AI_MAX_OUTPUT_TOKENS）: %s",
+                                       _mt, nxt, last_error[:160])
+                        return _call_model_sync(prompt, api_key, model, api_base,
+                                                history=history, max_tokens=nxt,
+                                                json_mode=json_mode, system=system,
+                                                enable_thinking=enable_thinking,
+                                                _budget_retry=True)
                 continue
             logger.error(f"大模型调用失败: status={resp.status_code}, {resp.text[:300]}")
             raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
@@ -718,6 +782,7 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
     content = prompt if prompt else ""
     # 带历史时直接走多轮 messages；否则先试字符串格式，失败再降级数组格式
     fmts = ["hist"] if history else ["str", "array"]
+    _mt = _resolve_max_tokens(max_tokens)
     for fmt in fmts:
         if fmt == "hist":
             messages = _hist_messages(history, content, system)
@@ -731,8 +796,8 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
                 "messages": messages,
                 "stream": True,
             }
-            if max_tokens:
-                payload["max_tokens"] = int(max_tokens)
+            if _mt:
+                payload["max_tokens"] = int(_mt)
             if enable_thinking is not None and "qwen" in model.lower():
                 # 仅 qwen 系列支持 enable_thinking；其他模型传了会被网关拒 400
                 payload["enable_thinking"] = bool(enable_thinking)
@@ -752,6 +817,18 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
                                             max_tokens=max_tokens, system=system)
                 yield {"text": fallback, "session_id": None}
                 return
+            if resp.status_code == 400:
+                nxt = _shrink_after_token_400(resp.text[:300], _mt)
+                if nxt:
+                    logger.warning("AI 网关按 max_tokens=%s 拒绝流式请求，折半到 %s 重试一次"
+                                   "（系统配置 AI_MAX_OUTPUT_TOKENS 可固定下来）: %s",
+                                   _mt, nxt, resp.text[:160])
+                    fallback = _call_model_sync(prompt, api_key, model, api_base,
+                                                enable_thinking=enable_thinking, history=history,
+                                                max_tokens=nxt, system=system, json_mode=json_mode,
+                                                _budget_retry=True)
+                    yield {"text": fallback, "session_id": None}
+                    return
             if resp.status_code == 400 and fmt == "str":
                 continue  # 尝试数组格式
             if resp.status_code != 200:
@@ -829,13 +906,15 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                             history: Optional[list] = None,
                             max_tokens: Optional[int] = None, json_mode: bool = False,
                             enable_thinking: Optional[bool] = None,
-                            temperature: Optional[float] = None) -> str:
+                            temperature: Optional[float] = None,
+                            _budget_retry: bool = False) -> str:
     """异步直接调用大模型（OpenAI 兼容接口）"""
     import httpx
 
     content = prompt if prompt else ""
     fmts = ["hist"] if history else ["str", "array"]
     last_error = None
+    _mt = _resolve_max_tokens(max_tokens)
     payload: dict = {}
     for fmt in fmts:
         t0 = time.monotonic()
@@ -851,8 +930,8 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                 "messages": messages,
                 "stream": False,
             }
-            if max_tokens:
-                payload["max_tokens"] = int(max_tokens)
+            if _mt:
+                payload["max_tokens"] = int(_mt)
             if temperature is not None:
                 payload["temperature"] = float(temperature)
             if json_mode:
@@ -881,7 +960,9 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                     )
                     if finish == "length":
                         logger.warning(
-                            "AI 输出被 max_tokens=%s 截断（len=%d），结果可能不完整：请调大 max_tokens 或减少单次题量",
+                            "AI 输出被 max_tokens=%s 截断（len=%d），结果可能不完整。出题调 "
+                            "QUESTION_GEN_TOKENS_*，其它链路调 AI_TOKENS_*（backend/ai_budget.py），"
+                            "全站硬上限 AI_MAX_OUTPUT_TOKENS；或减少单次生成量",
                             payload.get("max_tokens", "默认"), len(content_out),
                         )
                     return content_out
@@ -904,6 +985,18 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                         return content_out
                 if resp.status_code == 400:
                     last_error = resp.text[:300]
+                    if not _budget_retry:
+                        nxt = _shrink_after_token_400(last_error, _mt)
+                        if nxt:
+                            logger.warning("AI 网关按 max_tokens=%s 拒绝，折半到 %s 重试一次"
+                                           "（想固定就调小 AI_MAX_OUTPUT_TOKENS）: %s",
+                                           _mt, nxt, last_error[:160])
+                            return await _call_model_async(prompt, api_key, model, api_base,
+                                                           history=history, max_tokens=nxt,
+                                                           json_mode=json_mode,
+                                                           enable_thinking=enable_thinking,
+                                                           temperature=temperature,
+                                                           _budget_retry=True)
                     continue
                 logger.error(f"大模型异步调用失败: status={resp.status_code}, {resp.text[:300]}")
                 raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")

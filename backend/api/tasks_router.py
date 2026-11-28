@@ -37,6 +37,8 @@ from backend.database import (
 )
 from backend import homework
 from backend.logger import logger
+from backend.ai_budget import budget
+
 
 # K4: 任务字段上限与目标范围白名单
 TASK_NAME_MAX = 60
@@ -902,7 +904,8 @@ async def ai_create_homework_draft(request: Request):
         prompt = FILE_DRAFT_PROMPT.format(idea=idea, audience=audience, duration=duration,
                                           total_score=f"{total_score:g}")
     try:
-        ai_text = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False, max_tokens=1500)
+        ai_text = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False,
+                                    max_tokens=budget("task_draft"))
     except Exception as e:
         logger.error(f"[作业起草] AI 调用失败 by={username}: {e}")
         raise HTTPException(status_code=502, detail=f"AI 起草失败: {str(e)}")

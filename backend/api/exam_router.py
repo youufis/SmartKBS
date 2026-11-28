@@ -26,6 +26,8 @@ from backend.api.config_router import get_config_value
 from backend.auth import is_admin
 from backend.database import execute_query as user_query, execute_insert_update as db_update
 from backend.logger import logger
+from backend.ai_budget import budget
+
 from backend.ai_report_cache import save_report
 from backend.question_labels import question_type_label
 from backend.api.ai_service import call_ai_async
@@ -34,7 +36,7 @@ from backend.async_utils import spawn_bg
 from backend.permission_service import check_activity_visibility
 # S-GRADING(P2): 主观题后台批量批改引擎(与同步练习/随堂测验共用)
 from backend.ai_grading import (GradingJob, SourceAdapter, register_source, pending_keys,
-                                clip_answer, SINGLE_TOKENS_SHORT, SINGLE_TOKENS_ESSAY,
+                                clip_answer,
                                 GRADING_TEMPERATURE, grading_reference)
 # S-GRADING(A2): 考试现场兜底与练习/测验共用 grading_rules 口径(按要点比例给分+待复核)
 from backend.grading_rules import (grade_fill_by_rule as _fill_rule,
@@ -1827,7 +1829,7 @@ async def _grade_short_with_ai(q: dict[str, Any], student_answer: str, api_key: 
             # (「禁止直接给出最终答案、要展示推导过程」等), 与「只输出 JSON」冲突,
             # 返回变成散文 → 解析失败 → 静默退回关键词判 0 分。与练习侧同一结论。
             ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False,
-                                          max_tokens=SINGLE_TOKENS_SHORT,
+                                          max_tokens=budget("grading_short"),
                                           temperature=GRADING_TEMPERATURE)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
@@ -1884,7 +1886,7 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
                 student_answer=clip_answer(student_answer, "essay").replace('{', '{{').replace('}', '}}'),
             )
             ai_resp = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False,
-                                          max_tokens=SINGLE_TOKENS_ESSAY,
+                                          max_tokens=budget("grading_essay"),
                                           temperature=GRADING_TEMPERATURE)
             result = _extract_json_from_ai_response(ai_resp)
             if result:

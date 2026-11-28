@@ -9,6 +9,8 @@ from typing import Any, Optional
 from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
+from backend.ai_budget import budget
+
 from backend.companion_profile import get_config as get_companion_config, get_companion_name
 from backend.prompts.companion import build_companion_prompt
 
@@ -476,7 +478,8 @@ def extract_and_save_memories(student_username: str, user_text: str, ai_text: st
 
         existing = {str(m.get("content")) for m in get_memories(student_username)}
         prompt = MEMORY_EXTRACT_PROMPT.format(user=user_text[:600], ai=ai_text[:900])
-        raw = call_ai_sync(prompt, api_key, max_tokens=400, json_mode=True, use_kb=False)
+        raw = call_ai_sync(prompt, api_key, max_tokens=budget("companion_memory"),
+                       json_mode=True, use_kb=False)
         data = try_parse_repaired(raw or "") if raw else None
         if isinstance(data, dict):
             data = data.get("memories") or []

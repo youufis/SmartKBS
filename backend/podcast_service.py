@@ -26,6 +26,8 @@ from typing import Any
 
 from backend.api.config_router import get_config_value
 from backend.logger import logger
+from backend.ai_budget import budget
+
 from backend.prompts.teaching import PODCAST_SCRIPT_PROMPT
 from backend.tts_service import MAX_TEXT_CHARS, current_params, synthesize, tts_enabled
 from backend.tts_voices import catalog_of, resolve_voice, voices_for_ui
@@ -221,10 +223,11 @@ def script_max_tokens(minutes: int) -> int:
     """按档位估输出上限。
 
     不给上限会走服务商默认值 —— 5 分钟档的稿子（约 1250 字 + JSON 结构）会被静默截断，
-    表现为"脚本解析失败"，白烧一次调用。口径与 question_router._estimate_generate_max_tokens 一致：
-    每分钟约 900 token（中文 + 字段名），下限 2000 防小额被截，上限 8000 防异常放大。
+    表现为"脚本解析失败"，白烧一次调用。每分钟约 900 token（中文 + 字段名），下限 2000 防小额
+    被截，上限 8000 防异常放大 —— 三个数都在 backend/ai_budget.py 的预算表里，配置键
+    AI_TOKENS_PODCAST_SCRIPT / _MIN / _MAX 可现场调，不必改代码发版。
     """
-    return int(min(8000, max(2000, max(1, int(minutes)) * 900)))
+    return budget("podcast_script", units=max(1, int(minutes)))
 
 
 _MD_JUNK = re.compile(r"(\*\*|__|`{1,3}|^#{1,6}\s*)", re.M)

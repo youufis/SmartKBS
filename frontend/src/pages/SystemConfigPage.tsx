@@ -71,6 +71,12 @@ interface ConfigField {
   /** 面向管理员的常用项，默认可见；未标注 = advanced */
   level?: 'basic' | 'advanced'
   /**
+   * 小节内的二级分类（i18n key）。同一小节参数太多时（AI 输出与解析有 30+ 项）
+   * 按用途归组、**默认收起**，标题行直接显示当前取值，不用点开就能核对。
+   * 归了组的项不再进 basic/advanced 两个列表，避免重复渲染。
+   */
+  bucket?: string
+  /**
    * 存储形态（提交给后端的 JSON 类型）。**与控件无关**：
    * list = string[]，csv = "3,4,5"，其余按 type 推导成纯量。
    * 换控件只改渲染，提交形态由这里决定 —— 后端读取/校验不用跟着改。
@@ -504,7 +510,46 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 解析出脏题时也无处降级。默认值与代码里的 fallback 完全一致。
   { key: 'AI_JSON_OBJECT_MODE', labelKey: 'field_AI_JSON_OBJECT_MODE', descKey: 'field_AI_JSON_OBJECT_MODE_desc', longDescKey: 'field_AI_JSON_OBJECT_MODE_tip', type: 'boolean', group: 'aioutput', required: false },
   { key: 'AI_STRICT_PARSE', labelKey: 'field_AI_STRICT_PARSE', descKey: 'field_AI_STRICT_PARSE_desc', longDescKey: 'field_AI_STRICT_PARSE_tip', type: 'boolean', group: 'aioutput', required: false },
-  { key: 'IMAGE_EXTRACT_MAX_TOKENS', labelKey: 'field_IMAGE_EXTRACT_MAX_TOKENS', descKey: 'field_IMAGE_EXTRACT_MAX_TOKENS_desc', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  // AI 输出预算（backend/ai_budget.py 一张表统管全站链路）
+  // 这一节参数多，按用途分成 6 类、默认收起；收起时标题行直接显示当前取值，核对不用点开。
+  // 症状对不上时最容易误判：解析里公式只剩半截 \rac、整批缺答案 —— 那是被 max_tokens 腰斩
+  // ── aiBucketCommon ──
+  { key: 'AI_MAX_OUTPUT_TOKENS', labelKey: 'field_AI_MAX_OUTPUT_TOKENS', descKey: 'field_AI_MAX_OUTPUT_TOKENS_desc', longDescKey: 'field_AI_MAX_OUTPUT_TOKENS_tip', bucket: 'aiBucketCommon', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_DEFAULT', labelKey: 'field_AI_TOKENS_DEFAULT', descKey: 'field_AI_TOKENS_DEFAULT_desc', bucket: 'aiBucketCommon', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  // ── aiBucketQuestion ──
+  { key: 'QUESTION_GEN_TOKENS_PER_ITEM', labelKey: 'field_QUESTION_GEN_TOKENS_PER_ITEM', descKey: 'field_QUESTION_GEN_TOKENS_PER_ITEM_desc', bucket: 'aiBucketQuestion', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'QUESTION_GEN_TOKENS_MIN', labelKey: 'field_QUESTION_GEN_TOKENS_MIN', descKey: 'field_QUESTION_GEN_TOKENS_MIN_desc', bucket: 'aiBucketQuestion', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'QUESTION_GEN_TOKENS_MAX', labelKey: 'field_QUESTION_GEN_TOKENS_MAX', descKey: 'field_QUESTION_GEN_TOKENS_MAX_desc', longDescKey: 'field_QUESTION_GEN_TOKENS_MAX_tip', bucket: 'aiBucketQuestion', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'IMAGE_EXTRACT_MAX_TOKENS', labelKey: 'field_IMAGE_EXTRACT_MAX_TOKENS', descKey: 'field_IMAGE_EXTRACT_MAX_TOKENS_desc', bucket: 'aiBucketQuestion', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  // ── aiBucketLongtext ──
+  { key: 'AI_TOKENS_LESSON_PLAN', labelKey: 'field_AI_TOKENS_LESSON_PLAN', descKey: 'field_AI_TOKENS_LESSON_PLAN_desc', bucket: 'aiBucketLongtext', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_COURSEWARE_HTML', labelKey: 'field_AI_TOKENS_COURSEWARE_HTML', descKey: 'field_AI_TOKENS_COURSEWARE_HTML_desc', bucket: 'aiBucketLongtext', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_RESOURCE_HTML', labelKey: 'field_AI_TOKENS_RESOURCE_HTML', descKey: 'field_AI_TOKENS_RESOURCE_HTML_desc', bucket: 'aiBucketLongtext', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_TASK_DRAFT', labelKey: 'field_AI_TOKENS_TASK_DRAFT', descKey: 'field_AI_TOKENS_TASK_DRAFT_desc', bucket: 'aiBucketLongtext', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  // ── aiBucketGrading ──
+  { key: 'AI_TOKENS_GRADING_SHORT', labelKey: 'field_AI_TOKENS_GRADING_SHORT', descKey: 'field_AI_TOKENS_GRADING_SHORT_desc', bucket: 'aiBucketGrading', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_GRADING_ESSAY', labelKey: 'field_AI_TOKENS_GRADING_ESSAY', descKey: 'field_AI_TOKENS_GRADING_ESSAY_desc', bucket: 'aiBucketGrading', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_GRADING_BATCH', labelKey: 'field_AI_TOKENS_GRADING_BATCH', descKey: 'field_AI_TOKENS_GRADING_BATCH_desc', bucket: 'aiBucketGrading', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_GRADING_BATCH_PER_ITEM', labelKey: 'field_AI_TOKENS_GRADING_BATCH_PER_ITEM', descKey: 'field_AI_TOKENS_GRADING_BATCH_PER_ITEM_desc', bucket: 'aiBucketGrading', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_GRADING_BATCH_MARGIN', labelKey: 'field_AI_TOKENS_GRADING_BATCH_MARGIN', descKey: 'field_AI_TOKENS_GRADING_BATCH_MARGIN_desc', bucket: 'aiBucketGrading', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_GRADING_BATCH_MIN', labelKey: 'field_AI_TOKENS_GRADING_BATCH_MIN', descKey: 'field_AI_TOKENS_GRADING_BATCH_MIN_desc', bucket: 'aiBucketGrading', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_GRADING_BATCH_MAX', labelKey: 'field_AI_TOKENS_GRADING_BATCH_MAX', descKey: 'field_AI_TOKENS_GRADING_BATCH_MAX_desc', bucket: 'aiBucketGrading', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  // ── aiBucketAudio ──
+  { key: 'AI_TOKENS_PODCAST_SCRIPT', labelKey: 'field_AI_TOKENS_PODCAST_SCRIPT', descKey: 'field_AI_TOKENS_PODCAST_SCRIPT_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_PODCAST_SCRIPT_MIN', labelKey: 'field_AI_TOKENS_PODCAST_SCRIPT_MIN', descKey: 'field_AI_TOKENS_PODCAST_SCRIPT_MIN_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_PODCAST_SCRIPT_MAX', labelKey: 'field_AI_TOKENS_PODCAST_SCRIPT_MAX', descKey: 'field_AI_TOKENS_PODCAST_SCRIPT_MAX_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_PODCAST_TOPICS', labelKey: 'field_AI_TOKENS_PODCAST_TOPICS', descKey: 'field_AI_TOKENS_PODCAST_TOPICS_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_CAST_SCRIPT', labelKey: 'field_AI_TOKENS_CAST_SCRIPT', descKey: 'field_AI_TOKENS_CAST_SCRIPT_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_CAST_SCRIPT_MIN', labelKey: 'field_AI_TOKENS_CAST_SCRIPT_MIN', descKey: 'field_AI_TOKENS_CAST_SCRIPT_MIN_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_CAST_SCRIPT_MAX', labelKey: 'field_AI_TOKENS_CAST_SCRIPT_MAX', descKey: 'field_AI_TOKENS_CAST_SCRIPT_MAX_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_CAST_DESCRIPTION', labelKey: 'field_AI_TOKENS_CAST_DESCRIPTION', descKey: 'field_AI_TOKENS_CAST_DESCRIPTION_desc', bucket: 'aiBucketAudio', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  // ── aiBucketMisc ──
+  { key: 'AI_TOKENS_BRIEFING_DAY', labelKey: 'field_AI_TOKENS_BRIEFING_DAY', descKey: 'field_AI_TOKENS_BRIEFING_DAY_desc', bucket: 'aiBucketMisc', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_BRIEFING_WEEK', labelKey: 'field_AI_TOKENS_BRIEFING_WEEK', descKey: 'field_AI_TOKENS_BRIEFING_WEEK_desc', bucket: 'aiBucketMisc', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_BRIEFING_MONTH', labelKey: 'field_AI_TOKENS_BRIEFING_MONTH', descKey: 'field_AI_TOKENS_BRIEFING_MONTH_desc', bucket: 'aiBucketMisc', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_BRIEFING_YEAR', labelKey: 'field_AI_TOKENS_BRIEFING_YEAR', descKey: 'field_AI_TOKENS_BRIEFING_YEAR_desc', bucket: 'aiBucketMisc', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_COMPANION_MEMORY', labelKey: 'field_AI_TOKENS_COMPANION_MEMORY', descKey: 'field_AI_TOKENS_COMPANION_MEMORY_desc', bucket: 'aiBucketMisc', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
+  { key: 'AI_TOKENS_COMPANION_PUSH', labelKey: 'field_AI_TOKENS_COMPANION_PUSH', descKey: 'field_AI_TOKENS_COMPANION_PUSH_desc', bucket: 'aiBucketMisc', type: 'number', group: 'aioutput', level: 'advanced', required: false, unitKey: 'unitToken' },
   { key: 'EXAM_WA_MAX_QUESTIONS', labelKey: 'field_EXAM_WA_MAX_QUESTIONS', descKey: 'field_EXAM_WA_MAX_QUESTIONS_desc', type: 'number', group: 'aioutput', required: false, unitKey: 'unitItem' },
   { key: 'EXAM_WA_RATE_CEILING', labelKey: 'field_EXAM_WA_RATE_CEILING', descKey: 'field_EXAM_WA_RATE_CEILING_desc', type: 'number', group: 'aioutput', required: false },
   // 直连模式多轮记忆（backend/chat_memory.py；知识库接管的生成步骤同样生效）
@@ -2489,6 +2534,7 @@ const SystemConfigPage: React.FC = () => {
   const [advPanel, setAdvPanel] = useState<Record<string, boolean>>({}) // 手动展开「高级参数」的小节
   const [showAdvanced, setShowAdvanced] = useState(false)               // 全局显示高级参数（默认收起，降低首屏噪音）
   const [advOpen, setAdvOpen] = useState(false)                     // 「未收录配置键」兜底面板
+  const [bucketPanel, setBucketPanel] = useState<Record<string, boolean>>({}) // 小节内二级分类的展开状态（默认收起）
 
   // ── 加载 API Key 状态 ──
   const loadApikeyStatus = useCallback(async () => {
@@ -3002,10 +3048,30 @@ const SystemConfigPage: React.FC = () => {
     )
     const getRule = (field: ConfigField) =>
       field.required !== false ? [{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }] : undefined
-    const basicFields = fields.filter((f) => f.level === 'basic' && f.type !== 'login_gate')
-    const advFields = fields.filter((f) => f.level !== 'basic' && f.type !== 'login_gate')
+    const inBucket = (f: ConfigField) => !!f.bucket && f.type !== 'login_gate'
+    const basicFields = fields.filter((f) => f.level === 'basic' && f.type !== 'login_gate' && !inBucket(f))
+    const advFields = fields.filter((f) => f.level !== 'basic' && f.type !== 'login_gate' && !inBucket(f))
     // 登录闸门三项合成一张卡片，共用一条说明（原先后两个开关没有任何解释）
     const gateFields = fields.filter((f) => f.type === 'login_gate')
+    // 二级分类：按字段声明顺序出现，默认全部收起；搜索命中时自动展开
+    const bucketOrder: string[] = []
+    const bucketMap: Record<string, ConfigField[]> = {}
+    fields.forEach((f) => {
+      if (!inBucket(f)) return
+      const b = f.bucket as string
+      if (!bucketMap[b]) {
+        bucketMap[b] = []
+        bucketOrder.push(b)
+      }
+      bucketMap[b].push(f)
+    })
+    const bucketOpen = (b: string) => !!q || !!bucketPanel[group + ':' + b]
+    // 收起状态也要能核对数值：标题行直接列出当前取值
+    const bucketSummary = (list: ConfigField[]) =>
+      list
+        .map((f) => (typeof config[f.key] === 'number' ? (config[f.key] as number).toLocaleString() : null))
+        .filter(Boolean)
+        .join(' / ')
     // 搜索时一律展开；整节都是高级项时也展开，否则点进来是一片空白
     const advShown = !!q || showAdvanced || !!advPanel[group] || basicFields.length === 0
     const renderFieldBox = (field: ConfigField) => (
@@ -3379,6 +3445,39 @@ const SystemConfigPage: React.FC = () => {
               <div style={{ display: advShown ? 'block' : 'none' }}>{advFields.map(renderFieldBox)}</div>
             </>
           )}
+          {bucketOrder.map((b) => {
+            const list = bucketMap[b]
+            const open = bucketOpen(b)
+            const summary = bucketSummary(list)
+            return (
+              <div key={b} style={{ marginBottom: 12 }}>
+                <div
+                  onClick={() => setBucketPanel((prev) => ({ ...prev, [group + ':' + b]: !open }))}
+                  style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12, color: 'var(--text-secondary)' }}
+                >
+                  <DownOutlined style={{ fontSize: 10, transition: 'transform .2s', transform: open ? 'none' : 'rotate(-90deg)' }} />
+                  <span style={{ fontWeight: 500 }}>{t(b)}</span>
+                  <Text style={{ fontSize: 12 }}>{t('sectionFieldCount', { n: list.length })}</Text>
+                  {!open && summary && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {summary}
+                    </Text>
+                  )}
+                </div>
+                {/* 同样只藏视觉、不卸载，否则收起的分类里的值会在保存时丢掉 */}
+                <div
+                  style={{
+                    display: open ? 'block' : 'none',
+                    padding: '12px 14px 0',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 8,
+                  }}
+                >
+                  {list.map(renderFieldBox)}
+                </div>
+              </div>
+            )
+          })}
           {group === 'explore' && (
             <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>{t('assetPanelTitle')}</div>

@@ -35,6 +35,8 @@ from backend.briefing_service import (
     resolve_scope,
 )
 from backend.logger import logger
+from backend.ai_budget import BUDGETS, budget
+
 
 router = APIRouter()
 _BG_TASKS: set[asyncio.Task] = set()
@@ -171,7 +173,9 @@ async def _call_ai(m: dict[str, Any], scope: dict[str, Any], period: dict[str, A
         return None
 
     prompt = build_prompt(m, scope, period)
-    max_tokens = {"day": 800, "week": 1400, "month": 2000, "year": 2600}.get(period["type"], 1400)
+    # 各周期预算见 backend/ai_budget.py（AI_TOKENS_BRIEFING_DAY/WEEK/MONTH/YEAR）
+    _bk = "briefing_%s" % period["type"]
+    max_tokens = budget(_bk if _bk in BUDGETS else "briefing_week")
     try:
         from backend.api.ai_service import call_ai_async
         text = await asyncio.wait_for(

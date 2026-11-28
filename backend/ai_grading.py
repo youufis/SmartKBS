@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from backend.logger import logger
+from backend.ai_budget import budget
+
 
 # ── 可调参数（系统配置里同名键可覆盖）──
 _CFG_DEFAULTS: dict[str, int] = {
@@ -35,10 +37,11 @@ _CFG_DEFAULTS: dict[str, int] = {
 # 输出被腰斩 → 整批 JSON 解析失败 → 逐条重试又失败 → 全班转人工。截断统一走 clip_answer。
 ANSWER_CLIP_SHORT = 1200       # 简答/填空答案送评前长度
 ANSWER_CLIP_ESSAY = 4000       # 作文/长主观答案送评前长度
-BATCH_TOKENS_PER_ITEM = 200    # 批量评分 max_tokens 按份数摊 (B6 起每条还要输出命中要点)
-BATCH_TOKENS_MARGIN = 200      # 批量调用固定余量
-SINGLE_TOKENS_SHORT = 900      # 单条简答批改输出预算 (B6 起含要点命中)
-SINGLE_TOKENS_ESSAY = 1600     # 单条作文多维批改输出预算
+# 批改输出预算统一走 backend/ai_budget.py（grading_short / grading_essay / grading_batch，
+# 配置键 AI_TOKENS_GRADING_*）：以前这里是四个硬编码常量，改一次要发一版，而「批改 JSON
+# 被腰斩 → 整班转人工」恰恰是最需要现场调大的一档。
+_DEFAULT_TOKENS_SHORT = 900
+_DEFAULT_TOKENS_ESSAY = 1600
 GRADING_TEMPERATURE = 0.0      # B3: 批改固定 temperature=0 —— 同一答案多次重批要稳定可复现
 PROMPT_VERSION = "2026-11.3"   # C1: 批改 prompt 留痕版本号; 改任何评分 prompt 都要在这里 +1
 SPOT_CHECK_DIFF_RATIO = 0.2    # C3: 抽检双评分差超过满分的这个比例 → 转教师确认
@@ -304,7 +307,7 @@ async def _grade_single_fallback(job: GradingJob, api_key: str,
                 half_minus=str(job.max_score * 0.4),
                 student_answer=clip_answer(job.answer_text, "short").replace("{", "{{").replace("}", "}}"),
             )
-        max_tokens = SINGLE_TOKENS_ESSAY if job.mode == "essay" else SINGLE_TOKENS_SHORT
+        max_tokens = budget("grading_essay" if job.mode == "essay" else "grading_short")
         if spot:
             prompt = SPOT_RECHECK_NOTE + "\n\n" + prompt
         result = extract_json_from_text(await call_ai_async(prompt, api_key, json_mode=True,
@@ -401,7 +404,7 @@ async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.S
         try:
             text = await call_ai_async(
                 _build_batch_prompt(jobs), api_key, json_mode=True, use_kb=False,
-                max_tokens=len(jobs) * BATCH_TOKENS_PER_ITEM + BATCH_TOKENS_MARGIN,
+                max_tokens=budget("grading_batch", units=len(jobs)),
                 temperature=GRADING_TEMPERATURE)
             parsed = _parse_batch_result(text, len(jobs))
         except Exception as e:
