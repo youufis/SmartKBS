@@ -1015,7 +1015,7 @@ const checkValueShapes = (
 // 当前有注入调用点的场景(与后端 apply_skills 调用一致)
 const SCENE_SUGGESTIONS = [
   // 与后端 apply_skills/scene= 真实调用点一一对应（tests/test_skill_injection_governance 锁）
-  // practice 是 2026-11-28 补的漏；analytics 因无调用点移出（旧 map 键会以"孤立场景"标签提示删除）
+  // practice 是 2026-11-28 补的漏；analytics 因无调用点移出（map 里的旧键会以"未接入"行并入主表展示）
   'chat', 'companion', 'portfolio', 'curriculum', 'discussion',
   'exam', 'quiz', 'practice', 'whiteboard', 'wrong-book', 'portrait', 'html-generation',
 ]
@@ -1356,8 +1356,9 @@ const SkillManagePanel: React.FC = () => {
     return true
   })
 
+  // 计数口径与筛选一致：归档技能不计入 core/domain/adapter 总数
   const typeCount = skills.reduce((acc, s) => {
-    acc[s.type] = (acc[s.type] || 0) + 1
+    if (s.status !== 'archived') acc[s.type] = (acc[s.type] || 0) + 1
     return acc
   }, {} as Record<string, number>)
 
