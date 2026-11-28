@@ -46,6 +46,17 @@ LATEX_RULE = r"""━━━━ 公式标记规则 ━━━━
 少叠一层等于把整份 JSON 打废 —— 一批题一道都进不了题库。
 普通文字内容里不要出现 $ 符号。"""
 
+EXPLANATION_RULE = """━━━━ 解析（explanation）怎么写 ━━━━
+只写**正式解法**，按「抓什么条件 → 思路 → 关键步骤 → 结论（为什么选它、其它选项错在哪）」的顺序写。
+- **禁止把思考过程原样倒进来**。不得出现「让我检查一下」「难道我看错题了」「不对，区间是从0开始的」
+  「等等」「我们重新审视」「重构题目」「通常这类题目可能是…」这类自我纠错与试错独白；
+  题目本身出错了就改对再输出干净解法，不要在解析里向读者解释你为什么改题。
+- 不复述题干原文；「本题考查…」这类套话最多一句，直接进正题。
+- 长度上限：单选/判断 ≤ 300 字，多选 ≤ 350 字，简答/主观题 ≤ 500 字。
+  评分要点写在 answer 里，不要塞进 explanation 重复一遍。
+- 每一步的公式一律用 $...$ 包裹；分点用 "- " 起行，不要把整段推演压成一行。
+- 解析被 max_tokens 截断 = 这道题作废。宁可写短写清，也不要铺陈。"""
+
 CODE_KEEP_RULE = """━━━━ 提取时的代码处理（做错一批题就全废）━━━━
 原文里出现程序代码（Python / C / 伪代码 / 命令行输出）时：
 - **逐行原样照抄**：换行、行首空格、缩进一个都不能改，也不要合并成一行 ——
@@ -118,13 +129,13 @@ ANSWER_RULES_LIST = """━━━━ 答案与选项写法（与题库入库校�
 - single 单选：options 是 4 个字符串的数组，形如 ["A. 选项内容", "B. …", "C. …", "D. …"]；
   answer 只写 **1 个字母**（"A"），必须与数组里的字母前缀对得上
 - true_false 判断：options 固定写 ["对", "错"]，answer 写 "对" 或 "错"
-- 每道题都要给 explanation（详细解析，说明为什么选这个以及常见错误）"""
+- 每道题都要给 explanation（正式解法 + 为什么选它/其它选项错在哪，写法见上面「解析怎么写」，不要铺陈）"""
 
 SINGLE_CHOICE_RULES = """━━━━ 单选题写法（与题库入库校验一致，不符的题目会被直接拒收） ━━━━
 - type 一律写 "single"；options 必须是 {"A":…,"B":…,"C":…,"D":…} 四个字母键
 - answer 只写 **1 个字母**（如 "A"），不要写选项文字，也不要写多个字母
 - 选项文字里不要再写 "A." 前缀（键名已经是字母，前端会自动拼）
-- explanation 详细说明为什么选这个以及常见错误
+- explanation 写正式解法与排除理由（不写试错过程，长度见「解析怎么写」）
 - difficulty 只能是 easy / medium / hard"""
 
 
@@ -144,7 +155,7 @@ def question_example(types_line: str = BANK_TYPE_VOCAB, options_shape: str = "di
         '    "question": "题目内容（含 $...$ LaTeX 公式）",\n'
         f'    {options},\n'
         f'    {ans},\n'
-        '    "explanation": "详细解析，说明为什么选这个以及常见错误",\n'
+        '    "explanation": "正式解析：思路→关键步骤→结论（不写试错过程）",\n'
         '    "knowledge_point": "所属知识点",\n'
         '    "difficulty": "easy/medium/hard",\n'
         '    "figure_spec": null,\n'
@@ -170,7 +181,7 @@ def schema_block(types_line: str = BANK_TYPE_VOCAB, options_shape: str = "dict",
     answer_rules 不给时按选项形状挑默认版：dict 形状讲 A/B/C/D 键，
     list 形状（随堂测验）讲 ["A. 文本"] 数组 —— 两处都必须与 question_factory 的入库门槛一致。
     """
-    parts = [LATEX_RULE, CODE_RULE]
+    parts = [LATEX_RULE, EXPLANATION_RULE, CODE_RULE]
     if with_media:
         parts.append(MEDIA_RULE)
     parts += [FIELD_NAME_RULE, JSON_ONLY_RULE, question_example(types_line, options_shape)]
@@ -196,7 +207,7 @@ def render_question_prompt(template: str, *, schema: str = "", **kw) -> str:
 # 所以字段口径必须和上面那份一致，否则页面能显示、题库却进不去。
 QUESTION_DATA_CONTRACT = """- 页面脚本里的题目数组，每个元素必须包含：
   question（题干）、options（{"A":…,"B":…,"C":…,"D":…} 四个字母键；判断题写 {"A":"对","B":"错"}）、
-  answer（单选只写 1 个字母；判断题写「对」或「错」）、explanation（解析）、type（single/true_false）
+  answer（单选只写 1 个字母；判断题写「对」或「错」）、explanation（正式解法，不写试错独白）、type（single/true_false）
 - answer 用的字母必须真是 options 里的键，不能写选项文字、不能写下标 0/1
 - 题干里不要把选项文字也抄一遍
 - 题干里的代码用三个反引号围栏包住并保留缩进 —— 页面会把围栏渲染成等宽代码块，
