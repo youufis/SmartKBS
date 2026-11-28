@@ -168,6 +168,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # 三阶增强/分步推理/可视化表达留给出题、教案、报告这类生成物场景
         "chat": {"include": ["chat-conversation", "language-control", "safety-guard", "example-driven"]},
         "companion": {"include": ["chat-conversation", "language-control", "safety-guard", "socratic-tutor"]},
+        # 治理补口（2026-11-28）：错题讲解/测验分析/练习报告都是"要直接给结论"的任务，
+        # socratic-tutor 的「禁止直接给出答案」尾巴注入后与任务目标正面对抗。
+        # 与 exam（错题讲解）既有口径对齐；quiz 场景现挂在测验分析与课堂总结两条链路。
+        "exam": {"exclude": ["socratic-tutor"]},
+        "wrong-book": {"exclude": ["socratic-tutor"]},
+        "quiz": {"exclude": ["socratic-tutor"]},
+        "practice": {"exclude": ["socratic-tutor"]},
     },
     # 学科列表（顶层学科，不是 courses 表的课程）
     "SUBJECTS": list(DEFAULT_SUBJECTS),
