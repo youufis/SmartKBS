@@ -410,3 +410,523 @@ def latex_leftovers(svg: str) -> list[str]:
         if raw and has_math(raw):
             found.append(raw[:60])
     return found
+
+
+# ════════════════════════ 四、AI 输出里公式转义损坏的还原 ════════════════════════
+
+"""把模型写坏的 LaTeX 转义还原成 KaTeX 认得的形态。
+
+模型把 LaTeX 塞进 JSON 字符串时，反斜杠的数量几乎从来不对，落库后就是用户看到的
+「公式解析不全面」——同一道解析里一半公式正常、一半显示成 ``rac{2}{2}``、``imes``、
+或换行后孤零零一个斜体 ``ge 2``。2026-11-28 抽查 questions.db（id 2545 / 1632 / 1367）
+实测到两种损坏形态：
+
+1. **单反斜杠被 JSON 吃掉**：``\\frac`` 里的 ``\\f`` 本身是合法 JSON 转义（换页符），
+   ``json.loads`` 不报错，直接把它变成 ``\\x0c`` + ``rac``；同理 ``\\times``→TAB+imes、
+   ``\\bar``→BS+ar、``\\rightarrow``→CR+ightarrow、``\\neq``→LF+eq。只有首字母是
+   b/f/n/r/t 的命令中招，``\\geq``/``\\infty``/``\\le`` 反而完好 —— 这正是"有的正常
+   有的乱码"的原因，也解释了为什么整段公式退化成纯文本。
+2. **反斜杠叠多了**：提示词要求"JSON 里多叠一层"，模型有时叠两层，解出来是
+   ``\\\\ge``；KaTeX 把 ``\\\\`` 当换行命令，于是公式在中间断行、命令名掉到下一行。
+
+修复边界（宁可少改，不可改坏）：
+- 控制字符还原：全文做，但**只在"控制字符 + 尾缀 = 已知 LaTeX 命令"时**才动手，
+  围栏代码块整段跳过；还原不了的 FF/BS/VT 只在公式段内丢弃（代码块外的 TAB 不动）。
+- 多余反斜杠折叠：只在公式段（``$...$`` / ``$$...$$`` / ``\\(..\\)`` / ``\\[..\\]``）内做，
+  正文里的 ``\\\\``（Markdown 转义反斜杠）原样保留。
+- ``\\n`` 换行是合法 JSON 转义，只有当尾缀长度 ≥2 且拼出来是已知命令时才当作 ``\\n*``
+  命令还原（``\\neq`` 救得回，正文换行后接英文单词不会被误伤）。
+"""
+
+#: 首字母会被 JSON 转义吃掉的 LaTeX 命令全集（b/f/n/r/t 开头）
+_CTRL_FIRST = {0x08: "b", 0x09: "t", 0x0a: "n", 0x0c: "f", 0x0d: "r"}
+
+#: 认得的 LaTeX 命令名：只有在这个表里才敢还原，避免把正文改成公式。
+#: 表内容由 KaTeX + mhchem 实测导出（node 里逐个 \command 试渲染，凡不是
+#: "Undefined control sequence" 的都算认识），覆盖数学/物理/化学/生物/高数记号：
+#: \frac \ce \rightleftharpoons \hbar \Omega \varepsilon \xrightarrow \binom \partial …
+#: 升级 KaTeX 后重新生成：node frontend/katex_probe2.cjs && python scripts/sync_katex_cmds.py
+_LATEX_CMD_NAMES = (
+    # \a…
+    "aa AA above acute alef alefsym aleph allowbreak alpha Alpha amalg And angl angle angln approx "
+    "approxcolon approxcoloncolon approxeq arccos arcctg arcsin arctan arctg arg argmax argmin ast "
+    "asymp atop "
+    # \b…
+    "backepsilon backprime backsim backsimeq backslash bar barwedge Bbb Bbbk bcancel because begin "
+    "begingroup beta Beta beth between bf bgroup big Big bigcap bigcirc bigcup bigg Bigg biggl Biggl "
+    "Biggm biggm biggr Biggr bigl Bigl Bigm bigm bigodot bigoplus bigotimes Bigr bigr bigsqcup "
+    "bigstar bigtriangledown bigtriangleup biguplus bigvee bigwedge binom blacklozenge blacksquare "
+    "blacktriangle blacktriangledown blacktriangleleft blacktriangleright blue blueA blueB blueC "
+    "blueD blueE bm bmod bold boldsymbol bot bowtie Box boxdot boxed boxminus boxplus boxtimes Bra "
+    "bra bra@ket bra@set brace brack braket Braket breve bull bullet Bumpeq bumpeq "
+    # \c…
+    "cal cancel cap Cap cdot cdotp cdots ce centerdot cfrac ch char check checkmark chi Chi choose "
+    "circ circeq circlearrowleft circlearrowright circledast circledcirc circleddash circledR "
+    "circledS clap clubs clubsuit cnums colon Colonapprox colonapprox coloncolon coloncolonapprox "
+    "coloncolonequals coloncolonminus coloncolonsim Coloneq coloneq Coloneqq coloneqq colonequals "
+    "colonminus Colonsim colonsim color colorbox complement Complex cong coprod copyright cos cosec "
+    "cosh cot cotg coth csc ctg cth cup Cup curlyeqprec curlyeqsucc curlyvee curlywedge "
+    "curvearrowleft curvearrowright "
+    # \d…
+    "dag Dagger dagger daleth darr Darr dArr dashleftarrow dashrightarrow dashv dbinom dblcolon ddag "
+    "ddagger ddddot dddot ddot ddots def deg degree delta Delta det dfrac diagdown diagup diamond "
+    "Diamond diamonds diamondsuit digamma dim displaystyle div divideontimes dot doteq Doteq "
+    "doteqdot dotplus dots dotsb DOTSB dotsc dotsi DOTSI dotsm dotso DOTSX dotsx doublebarwedge "
+    "doublecap doublecup downarrow Downarrow downdownarrows downharpoonleft downharpoonright "
+    # \e…
+    "edef egroup ell emph empty emptyset end endgroup enskip enspace Epsilon epsilon eqcirc Eqcolon "
+    "eqcolon eqqcolon Eqqcolon eqsim eqslantgtr eqslantless equalscolon equalscoloncolon equiv "
+    "errmessage Eta eta eth exist exists exp expandafter "
+    # \f…
+    "fallingdotseq fbox fcolorbox Finv flat footnotesize forall frac frak frown futurelet "
+    # \g…
+    "Game Gamma gamma gcd gdef ge genfrac geq geqq geqslant gets gg ggg gggtr gimel global gnapprox "
+    "gneq gneqq gnsim goldA goldB goldC goldD goldE grave gray grayA grayB grayC grayD grayE grayF "
+    "grayG grayH grayI green greenA greenB greenC greenD greenE gt gtrapprox gtrdot gtreqless "
+    "gtreqqless gtrless gtrsim gvertneqq "
+    # \h…
+    "harr Harr hArr hat hbar hbox hdashline hearts heartsuit hline hom hookleftarrow hookrightarrow "
+    "hphantom href hskip hslash hspace html@mathml htmlClass htmlData htmlId htmlStyle Huge huge "
+    # \i…
+    "iff iiint iint Im image imageof imath impliedby implies in includegraphics inf infin infty "
+    "injlim int intercal intop Iota iota isin it "
+    # \j…
+    "jmath Join "
+    # \k…
+    "kaBlue kaGreen kappa Kappa KaTeX ker kern ket Ket "
+    # \l…
+    "Lambda lambda land lang langle Large large LARGE larr Larr lArr LaTeX lbrace lBrace lbrack "
+    "lceil ldotp ldots le leadsto left Leftarrow leftarrow leftarrowtail leftharpoondown "
+    "leftharpoonup leftleftarrows Leftrightarrow leftrightarrow leftrightarrows leftrightharpoons "
+    "leftrightsquigarrow leftthreetimes leq leqq leqslant lessapprox lessdot lesseqgtr lesseqqgtr "
+    "lessgtr lesssim let lfloor lg lgroup lhd lim liminf limits limsup ll llap llbracket llcorner "
+    "Lleftarrow lll llless lmoustache ln lnapprox lneq lneqq lnot lnsim log long longleftarrow "
+    "Longleftarrow Longleftrightarrow longleftrightarrow longmapsto longrightarrow Longrightarrow "
+    "looparrowleft looparrowright lor lozenge lparen lq Lrarr lrarr lrArr lrcorner Lsh lt ltimes "
+    "lVert lvert lvertneqq "
+    # \m…
+    "maltese mapsto maroonA maroonB maroonC maroonD maroonE mathbb mathbf mathbin mathcal mathchoice "
+    "mathclap mathclose mathellipsis mathfrak mathinner mathit mathllap mathnormal mathop mathopen "
+    "mathord mathpunct mathrel mathring mathrlap mathrm mathscr mathsf mathsfit mathsterling "
+    "mathstrut mathtt max measuredangle medspace message mho mid middle min mintA mintB mintC "
+    "minuscolon minuscoloncolon minuso mkern mod models mp mskip mu Mu multimap "
+    # \n…
+    "nabla natnums natural ncong ne nearrow neg negmedspace negthickspace negthinspace neq "
+    "newcommand newline nexists ngeq ngeqq ngeqslant ngtr ni nleftarrow nLeftarrow nLeftrightarrow "
+    "nleftrightarrow nleq nleqq nleqslant nless nmid nobreak nobreakspace noexpand nolimits nonumber "
+    "normalsize not notag notin notni nparallel nprec npreceq nrightarrow nRightarrow nshortmid "
+    "nshortparallel nsim nsubseteq nsubseteqq nsucc nsucceq nsupseteq nsupseteqq ntriangleleft "
+    "ntrianglelefteq ntriangleright ntrianglerighteq Nu nu nvDash nVdash nvdash nVDash nwarrow "
+    # \o…
+    "odot oiiint oiint oint Omega omega Omicron omicron ominus operatorname operatorname* "
+    "operatorname@ operatornamewithlimits oplus orange ordinarycolon origof oslash otimes over "
+    "overbrace overbracket overgroup overleftarrow overleftharpoon overleftrightarrow overline "
+    "overlinesegment Overrightarrow overrightarrow overrightharpoon overset owns "
+    # \p…
+    "parallel partial perp phantom phase phi Phi pi Pi pink pitchfork plim plusmn pm pmb pmod pod "
+    "pounds Pr prec precapprox preccurlyeq preceq precnapprox precneqq precnsim precsim prime prod "
+    "projlim propto providecommand providecommand* Psi psi pu purple purpleA purpleB purpleC purpleD "
+    "purpleE "
+    # \q…
+    "qquad quad "
+    # \r…
+    "raisebox rang rangle Rarr rarr rArr ratio rBrace rbrace rbrack rceil Re real reals Reals red "
+    "redA redB redC redD redE relax renewcommand restriction rfloor rgroup rhd rho Rho right "
+    "rightarrow Rightarrow rightarrowtail rightharpoondown rightharpoonup rightleftarrows "
+    "rightleftharpoons rightrightarrows rightsquigarrow rightthreetimes risingdotseq rlap rm "
+    "rmoustache rparen rq rrbracket Rrightarrow Rsh rtimes rule rVert rvert "
+    # \s…
+    "scriptscriptstyle scriptsize scriptstyle sdot searrow sec sect Set set setminus sf sh sharp "
+    "shortmid shortparallel show Sigma sigma sim simcolon simcoloncolon simeq sin sinh sixptsize "
+    "small smallfrown smallint smallsetminus smallsmile smash smile sout space spades spadesuit "
+    "sphericalangle sqcap sqcup sqrt sqsubset sqsubseteq sqsupset sqsupseteq square stackrel star "
+    "sub sube Subset subset subseteq subseteqq subsetneq subsetneqq substack succ succapprox "
+    "succcurlyeq succeq succnapprox succneqq succnsim succsim sum sup supe supset Supset supseteq "
+    "supseteqq supsetneq supsetneqq surd swarrow "
+    # \t…
+    "tag tag@literal tag@paren tan tanh Tau tau tbinom tealA tealB tealC tealD tealE TeX text textbf "
+    "textcircled textcolor textcopyright textit textmd textnormal TextOrMath textregistered textrm "
+    "textsf textstyle texttt textup tfrac tg th therefore theta Theta thetasym thickapprox thicksim "
+    "thickspace thinspace tilde times tiny tmspace to top triangle triangledown triangleleft "
+    "trianglelefteq triangleq triangleright trianglerighteq tripledash tt twoheadleftarrow "
+    "twoheadrightarrow "
+    # \u…
+    "uarr uArr Uarr ulcorner underbar underbrace underbracket undergroup underleftarrow "
+    "underleftrightarrow underline underlinesegment underrightarrow underset unlhd unrhd uparrow "
+    "Uparrow updownarrow Updownarrow upharpoonleft upharpoonright uplus Upsilon upsilon upuparrows "
+    "urcorner url utilde "
+    # \v…
+    "varDelta varepsilon varGamma varinjlim varkappa varLambda varliminf varlimsup varnothing "
+    "varOmega varphi varPhi varPi varpi varprojlim varpropto varPsi varrho varsigma varSigma "
+    "varsubsetneq varsubsetneqq varsupsetneq varsupsetneqq vartheta varTheta vartriangle "
+    "vartriangleleft vartriangleright varUpsilon varvdots varXi vcentcolon vcenter Vdash vDash vdash "
+    "vdots vec vee veebar verb verb* Vert vert vphantom Vvdash "
+    # \w…
+    "wedge weierp widecheck widehat widetilde wp wr "
+    # \x…
+    "xcancel xdef xhookleftarrow xhookrightarrow xi Xi xLeftarrow xleftarrow xleftequilibrium "
+    "xleftharpoondown xleftharpoonup xLeftrightarrow xleftrightarrow xleftrightharpoons xlongequal "
+    "xmapsto xRightarrow xrightarrow xrightequilibrium xrightharpoondown xrightharpoonup "
+    "xrightleftarrows xrightleftharpoons xtofrom xtwoheadleftarrow xtwoheadrightarrow "
+    # \y…
+    "yen "
+    # \z…
+    "zeta Zeta "
+)
+_LATEX_CMDS = frozenset(_LATEX_CMD_NAMES.split())
+
+#: 公式段内容（不含定界符）
+#: 叠多了的反斜杠 + 命令名（``\\\\ge`` / ``\\\\frac``）
+_OVER_ESCAPED_RE = re.compile(r"(\\{2,})([A-Za-z]+)")
+#: 换行/回车后只有紧跟"数学记号"才敢认单字母尾缀：$\nu$ 救得回，
+#: 代码行首的 i, j = 0 不会被当成 \ni（逗号/分号故意不在此列）
+_MATHISH = "{}^_\\$0123456789"
+
+#: 紧跟控制字符的 ASCII 字母串
+_TAIL_RE = re.compile(r"[A-Za-z]+")
+_FENCE_RE = re.compile(r"(^[ \t]*(```|~~~)[\s\S]*?^\s*\2[ \t]*$)", re.M)
+
+
+def is_latex_command(name: str) -> bool:
+    """公开判定：这个字母串是不是我们认得的 LaTeX 命令名（供 ai_json 复用）"""
+    return name in _LATEX_CMDS
+
+
+def _known_cmd(name: str) -> bool:
+    """命令名是否认识（容忍尾部多带的括号/花括号已被正则切掉）"""
+    return name in _LATEX_CMDS
+
+
+def _next_char(text: str, k: int, n: int, after: str) -> str:
+    """切片内第 k 个字符；越界时取切片后的第一个字符（公式段的收尾定界符）"""
+    if k < n:
+        return text[k]
+    return after[0] if after else ""
+
+
+def _is_indent(text: str, i: int, ctx: str = "") -> bool:
+    """位置 i 是否处在行首缩进位（到行首只有空白）。
+
+    ctx 是这段切片**前面**的字符：公式段体从定界符后切出来时，切片开头并不是
+    真正的行首 —— 不带 ctx 会把 "$ar{v}" 的退格符当成"行首缩进的制表符"漏掉。
+    """
+    j = i - 1
+    while j >= -len(ctx):
+        ch = text[j] if j >= 0 else ctx[j]
+        if ch in " \t":
+            j -= 1
+            continue
+        return ch == "\n"
+    return True
+
+
+def _restore_ctrl(text: str, *, drop_unknown: bool, ctx: str = "", after: str = "") -> str:
+    """控制字符 + 尾缀 -> 还原成 ``\\命令``；还原不了时是否丢弃控制字符"""
+    if not any(chr(c) in text for c in _CTRL_FIRST):
+        return text
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        o = ord(text[i])
+        first = _CTRL_FIRST.get(o)
+        if first:
+            m = _TAIL_RE.match(text, i + 1)
+            tail = m.group(0) if m else ""
+            cand = first + tail if tail else ""
+            # \n / \r 本身是合法换行：只有尾缀够长（≥2）且拼出来是命令才还原，
+            # 否则 "……说明：\nnext" 这类正文会被改成公式。
+            # 位于行首缩进位（到行首只有空格/制表符）的控制字符不动：那是缩进，不是被吃掉的反斜杠。
+            if (tail and cand in _LATEX_CMDS
+                    and (o not in (0x0a, 0x0d) or len(tail) >= 2
+                         or _next_char(text, i + 1 + len(tail), n, after) in _MATHISH)
+                    and not _is_indent(text, i, ctx)):
+                out.append("\\" + cand)
+                i += 1 + len(tail)
+                continue
+            if o == 0x0d and i + 1 < n and text[i + 1] == "\n":
+                i += 1                       # CRLF：正常换行，原样交给下一轮
+                continue
+            if drop_unknown and o in (0x08, 0x09, 0x0b, 0x0c, 0x0d):
+                i += 1                       # 公式段里的裸控制字符只会渲染成方块/断行
+                continue                     # （\n 不动：$$ 块里的换行是合法排版）
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def _math_spans(text: str) -> list[tuple[int, int]]:
+    """公式段正文的 [start, end) 区间；定界符不配对时保守地跳过这一段"""
+    spans: list[tuple[int, int]] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            nxt = text[i + 1] if i + 1 < n else ""
+            if nxt in "()[]":
+                close = "\\)" if nxt == "(" else "\\]"
+                j = text.find(close, i + 2)
+                if j < 0:
+                    i += 2
+                    continue
+                spans.append((i + 2, j))
+                i = j + 2
+                continue
+            if nxt == "$":                   # \$ 是字面美元符
+                i += 2
+                continue
+            i += 1
+            continue
+        if ch == "$":
+            two = text.startswith("$$", i)
+            marker = "$$" if two else "$"
+            j = text.find(marker, i + len(marker))
+            body = text[i + len(marker):j] if j >= 0 else ""
+            if j < 0 or (not two and "\n\n" in body):
+                i += len(marker)
+                continue
+            spans.append((i + len(marker), j))
+            i = j + len(marker)
+            continue
+        i += 1
+    return spans
+
+
+def _repair_region(text: str) -> str:
+    """一段非代码文本：先还原控制字符，再在公式段内折叠多余反斜杠"""
+    spans = _math_spans(text)
+    if not spans:
+        return _restore_ctrl(text, drop_unknown=False)
+    pieces: list[str] = []
+    pos = 0
+    for a, b in spans:
+        if a < pos:                          # 定界符重叠（模型写飞了），跳过
+            continue
+        ctx = text[max(0, pos - 2):pos]
+        pieces.append(_restore_ctrl(text[pos:a], drop_unknown=False, ctx=ctx))
+        body = _restore_ctrl(text[a:b], drop_unknown=True, ctx=text[max(0, a - 2):a],
+                             after=text[b:b + 1])
+        if _OVER_ESCAPED_RE.search(body):
+            body = _OVER_ESCAPED_RE.sub(
+                lambda m: "\\" + m.group(2) if _known_cmd(m.group(2)) else m.group(0),
+                body)
+        pieces.append(body)
+        pos = b
+    pieces.append(_restore_ctrl(text[pos:], drop_unknown=False, ctx=text[max(0, pos - 2):pos]))
+    return "".join(pieces)
+
+
+# ════════════════════════ 五、正文里"裸 LaTeX 命令"补上 $ 定界符 ════════════════════════
+
+"""模型经常把公式写进正文却不套 ``$``：选项 ``[3, +\\infty)``、解析里的 ``m \\ge 2``。
+没有定界符，remark-math / KaTeX 一律不接管，页面就把 ``\\infty`` 当普通文字显示
+（Markdown 还会把 ``\\i`` 的反斜杠当转义吃掉，最后看到的是 "infty"）。这里在**公式段
+之外**把"命令 + 紧邻的数学片段"包进 ``$...$``，让各学科行文里裸写的记号也能渲染。
+
+边界（宁可漏包，不可包错）：
+- 代码围栏、行内代码、已经在 ``$`` / ``\\(\\)`` 里的内容整段跳过；
+- 只认 KaTeX 认识的命令名（``\\%`` ``\\_`` 这类转义标点、Windows 路径 ``C:\\Users`` 不动）；
+- 片段以 CJK 为硬边界，两端剥掉空白、句末标点、"A." 这类选项标签，以及没有配对开符的收尾括号；
+- 命令不是强记号（\\infty \\ge \\frac \\ce…）且片段里没有数字/运算符时不包。
+"""
+
+_ALLOWED_RUN = frozenset(
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    " +-*/=<>^_{}()[]|!.,;:%~&\"'\\"
+)
+#: 这些命令可以"孤身"被包进公式；其它命令必须旁边还有数字/运算符才包
+_STRONG_CMDS = frozenset({
+    "infty", "times", "div", "cdot", "pm", "mp", "leq", "le", "geq", "ge", "neq", "ne",
+    "approx", "equiv", "sim", "simeq", "propto", "sqrt", "frac", "dfrac", "tfrac", "binom",
+    "ce", "pu", "rightarrow", "Rightarrow", "to", "leftarrow", "leftrightarrow", "sum",
+    "prod", "int", "lim", "partial", "nabla", "cup", "cap", "in", "notin", "subset",
+    "subseteq", "supset", "supseteq", "perp", "parallel", "angle", "triangle", "degree",
+    "alpha", "beta", "gamma", "delta", "Delta", "theta", "lambda", "mu", "rho", "sigma",
+    "tau", "phi", "Omega", "omega", "pi", "epsilon", "varepsilon", "vec", "hat", "bar",
+    "overline", "overrightarrow", "hbar", "therefore", "because", "cong",
+})
+_CMD_ANCHOR = re.compile(r"\\([A-Za-z]+)")
+_TRIM_CHARS = " \t.,;:!?"
+_LEAD_LABEL = re.compile(r"^[A-Za-z][.)]\s+")
+_MATH_SIGNAL = re.compile(r"[0-9=+\-*/<>^_{}|]")
+#: 收尾括号只在自己没有配对开符时才剥掉；[3, +∞) 这种半开区间的右括号是配对的
+_CLOSER_OPENER = {")": "([", "]": "([", "}": "{"}
+#: 行首的列表/编号标记（"- "、"* "、"2."、"1)）"）——绝不能被吞进公式，否则列表项
+#: 会整条变成 $- x \ge 2$，Markdown 的列表结构当场没了
+_LINE_MARK = re.compile(r"^(?:[-*+]|\d+[.)])[ \t]+")
+#: 向左看到"选项标签 + 空格"（"B. "）或连续空格（并列选项的分隔）就收手
+_OPT_TAIL = re.compile(r"[A-Za-z][.)][ \t]*$")
+_DOUBLE_SP = re.compile(r"[ \t]{2,}$")
+_OPT_HEAD = re.compile(r"[ \t]*[A-Za-z][.)][ \t]")
+
+
+def _expand_left(text: str, pos: int) -> int:
+    while pos > 0 and text[pos - 1] in _ALLOWED_RUN:
+        if text[pos - 1] in " \t":
+            before = text[:pos - 1]
+            if _OPT_TAIL.search(before) or _DOUBLE_SP.search(before):
+                break
+        pos -= 1
+    return pos
+
+
+def _expand_right(text: str, pos: int) -> int:
+    n = len(text)
+    while pos < n and text[pos] in _ALLOWED_RUN:
+        if text[pos] in " \t":
+            if _DOUBLE_SP.match(text[max(0, pos - 1):pos + 1]) or _OPT_HEAD.match(text[pos:]):
+                break
+        pos += 1
+    return pos
+
+
+def _trim_indices(text: str, a: int, b: int) -> tuple[int, int]:
+    """把 [a,b) 两端能安全剥掉的字符剥掉，返回收紧后的下标（不返回切片，避免再找位置）"""
+    # 行首列表/编号标记不吃进公式："- x \ge 2" 只包 "x \ge 2"，
+    # 否则 Markdown 的列表结构会被整条吞掉（解析里这种行很多）
+    if a == 0 or text[a - 1] == "\n":
+        m = _LINE_MARK.match(text[a:b])
+        if m:
+            a += m.end()
+    while a < b and text[a] in _TRIM_CHARS:
+        a += 1
+    m = _LEAD_LABEL.match(text[a:b])
+    if m:
+        a += m.end()
+    while a < b and text[b - 1] in _TRIM_CHARS:
+        b -= 1
+    while a < b and text[b - 1] in ")]}" and not any(
+            text.count(op, a, b - 1) for op in _CLOSER_OPENER[text[b - 1]]):
+        b -= 1
+        while a < b and text[b - 1] in _TRIM_CHARS:
+            b -= 1
+    return a, b
+
+
+def _wrap_plain(text: str) -> str:
+    """一段公式段之外的纯文本：把裸命令所在的数学片段包进 $…$"""
+    if "\\" not in text:
+        return text
+    ranges: list[list[int]] = []
+    for m in _CMD_ANCHOR.finditer(text):
+        cmd = m.group(1)
+        if not _known_cmd(cmd):
+            continue
+        a, b = _expand_left(text, m.start()), _expand_right(text, m.end())
+        a, b = _trim_indices(text, a, b)
+        seg = text[a:b]
+        if not seg or len(seg) > 80 or "$" in seg or "`" in seg:
+            continue
+        if cmd not in _STRONG_CMDS and not _MATH_SIGNAL.search(seg.replace("\\" + cmd, "")):
+            continue
+        ranges.append([a, b])
+    if not ranges:
+        return text
+    ranges.sort()
+    merged: list[list[int]] = []
+    for a, b in ranges:
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    out: list[str] = []
+    pos = 0
+    for a, b in merged:
+        if a < pos:
+            continue
+        out.append(text[pos:a])
+        out.append("$" + text[a:b] + "$")
+        pos = b
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _split_math_regions(text: str):
+    """-> [(是否公式段, 片段)]：公式段（含定界符）整段原样，段外才做裸命令包裹"""
+    spans = _math_spans(text)
+    if not spans:
+        return [(False, text)]
+    out: list[tuple[bool, str]] = []
+    pos = 0
+    for a, b in spans:
+        if a < pos:
+            continue
+        # 起始定界符：$$ / \[ / \( 占 2 个字符，$ 占 1 个
+        open_len = 2 if text[max(0, a - 2):a] in ("$$", "\\(", "\\[") else 1
+        if a - open_len < pos:                 # 定界符重叠，保守起见整段不动
+            continue
+        out.append((False, text[pos:a - open_len]))
+        out.append((True, text[a - open_len:b + open_len]))
+        pos = b + open_len
+    if pos < len(text):
+        out.append((False, text[pos:]))
+    return out
+
+
+def _wrap_inline_code_aware(chunk: str) -> str:
+    """行内代码 `…` 里不包公式（反引号成对切分，奇数段是代码本体）"""
+    if "`" not in chunk:
+        return _wrap_plain(chunk)
+    parts = chunk.split("`")
+    for i in range(0, len(parts), 2):
+        parts[i] = _wrap_plain(parts[i])
+    return "`".join(parts)
+
+
+def wrap_bare_math(text: str) -> str:
+    """把正文里裸写的 LaTeX 命令补成 $…$（幂等；代码围栏与已有公式段不动）"""
+    if not text or "\\" not in text:
+        return text
+    out: list[str] = []
+    pos = 0
+    for m in _FENCE_RE.finditer(text):
+        for is_math, seg in _split_math_regions(text[pos:m.start()]):
+            out.append(seg if is_math else _wrap_inline_code_aware(seg))
+        out.append(m.group(0))
+        pos = m.end()
+    for is_math, seg in _split_math_regions(text[pos:]):
+        out.append(seg if is_math else _wrap_inline_code_aware(seg))
+    return "".join(out)
+
+
+def needs_math_repair(text: str) -> bool:
+    """这段文本有没有可能被上述两种损坏影响（用来避免对每条正常文本空跑一遍）"""
+    if not text:
+        return False
+    if any(chr(c) in text for c in _CTRL_FIRST):
+        return True
+    return bool(_OVER_ESCAPED_RE.search(text))
+
+
+def _looks_like_json_blob(text: str) -> bool:
+    """整段是一个 JSON 对象/数组？这类文本要先解析再逐字段修，不能就地折反斜杠"""
+    if text[:1] not in ("{", "["):
+        return False
+    try:
+        import json
+        json.loads(text)
+        return True
+    except Exception:
+        return False
+
+
+def repair_math_text(text: str) -> str:
+    """还原 AI 输出里被 JSON 转义吃掉的 LaTeX 命令（幂等，正常文本原样返回）。
+
+    **整坨 JSON 直接跳过**：序列化后的文本里 ``\\\\div`` 是 ``\\div`` 的合法转义，按公式段
+    规则把它折成单个反斜杠，等于把 ``\\d`` 塞进 JSON —— 整坨当场解析失败。要修 JSON 列
+    必须先解析、只改字符串叶子、再回写（见 scripts/repair_math_escapes.py 的 repair_value
+    与 question_parse.repair_questions）。
+    """
+    if not isinstance(text, str) or not needs_math_repair(text):
+        return text
+    if _looks_like_json_blob(text):
+        return text
+    out: list[str] = []
+    pos = 0
+    for m in _FENCE_RE.finditer(text):       # 围栏代码块整段保护
+        out.append(_repair_region(text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(_repair_region(text[pos:]))
+    return "".join(out)
+

@@ -1780,7 +1780,8 @@ def _parse_ai_result(text: str) -> list[dict[str, Any]]:
         # 兼容模型只回单个题目对象（统一解析只认数组 / {"questions": [...]} 包装）
         raw = extract_json_from_text(text)
         if isinstance(raw, dict) and "question" in raw:
-            data = [raw]
+            from backend.question_parse import repair_questions
+            data = repair_questions([raw])   # 这条兜底路径同样要过公式还原
     valid: list[dict[str, Any]] = []
     for q in data:
         if not isinstance(q, dict):

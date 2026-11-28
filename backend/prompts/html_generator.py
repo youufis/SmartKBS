@@ -243,6 +243,7 @@ QUIZ_HTML_PROMPT = """你是一位专业的教育游戏 HTML 设计师。请根�
 <!-- KaTeX（可选：加载失败不影响使用，代码中已有 safeRenderMath 保护） -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 <style>
 /* ═════ 主题变量（只改值，换成所选主题配色，见下方主题章节） ═════ */
@@ -934,7 +935,7 @@ const questions = [
       {text: "D. 选项D", value: "D"}
     ],
     correctAnswer: "B",
-    explanation: "详细解析文本"
+    explanation: "解析文本（正式解法，简洁）"
   }
 ];
 // 可包含判断（true_false）题：options 只有两项 {text:"A. 正确", value:"A"}, {text:"B. 错误", value:"B"}

@@ -62,8 +62,43 @@ def parse_question_array(text: str, *, scene: str = "question") -> list[dict[str
         q, changed, why = ai_json.strip_options_from_stem(q)
         if changed:
             logger.info(f"[AI题解析] 已剥离题干内嵌选项 scene={scene}（{why}）")
-        out.append(q)
+        out.append(repair_question_math(q))
     return out
+
+
+#: 这些字段的值是代码/标记/路径，反斜杠有别的语义，一律不碰
+_CODE_KEYS = {"svg_code", "svg", "html", "htm", "css", "js", "script", "code",
+              "url", "image_url", "path", "file", "filename", "base64", "data"}
+
+
+def repair_questions(items: Any) -> Any:
+    """题目 dict 列表统一过一遍公式还原 + 裸命令补 $。
+
+    parse_question_array 内部已经调用；**不走那个函数的入口必须显式过一遍**
+    （组卷 paper_compose、课堂闯关/同步练习补全 curriculum_router、单题兜底
+    practice_router），否则同一份模型输出会因为入口不同而一半修好一半带病入库。
+    """
+    if isinstance(items, list):
+        return [repair_question_math(q) for q in items]
+    return repair_question_math(items)
+
+
+def repair_question_math(node: Any) -> Any:
+    """把一道题里所有文字字段被 JSON 转义吃掉的 LaTeX 命令还原，并给裸写的命令补 $ 定界符。
+
+    必须放在解析这一步：损坏发生在 json.loads 里（``\\frac`` 的 ``\\f`` 是合法
+    JSON 转义 → 换页符 + "rac"），等到前端渲染时反斜杠早就没了，只能靠这里补回。
+    """
+    from backend.math_text import repair_math_text, wrap_bare_math
+
+    if isinstance(node, str):
+        return wrap_bare_math(repair_math_text(node))
+    if isinstance(node, list):
+        return [repair_question_math(v) for v in node]
+    if isinstance(node, dict):
+        return {k: (v if isinstance(k, str) and k.strip().lower() in _CODE_KEYS
+                    else repair_question_math(v)) for k, v in node.items()}
+    return node
 
 
 def _fast_parse(text: str) -> list[dict[str, Any]]:

@@ -409,6 +409,8 @@ async def ai_fill_gap(need_by_type: dict[str, int], *, subject: str, difficulty:
             if not got:
                 ai_json.dump_failed_raw(scene, text or "")
                 raise RuntimeError(f"AI 未返回可用题目（{meta.get('reason') or '解析失败'}）")
+            from backend.question_parse import repair_questions
+            got = repair_questions(got)      # 组卷直接入库，同样要还原被 JSON 吃掉的公式
             for it in got:
                 if isinstance(it, dict):
                     it["type"] = _t          # 题型由缺口决定，不让模型自由发挥

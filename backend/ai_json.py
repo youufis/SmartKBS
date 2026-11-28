@@ -39,7 +39,13 @@ def dump_failed_raw(scene: str, text: str) -> str:
 
 
 def _fix_escapes(s: str) -> str:
-    """把 JSON 里非法的裸反斜杠（LaTeX \\rightarrow、SVG 路径等）补成合法转义。"""
+    """把 JSON 里非法的裸反斜杠（LaTeX \\rightarrow、SVG 路径等）补成合法转义。
+
+    \\b \\f \\n \\r \\t 是**合法**的 JSON 转义，却正好是 \\bar \\frac \\neq
+    \\rightarrow \\times 的首字母 —— 直接放过就会把 LaTeX 命令解成控制字符 +
+    "ar/rac/eq/ightarrow/imes"（题目里公式显示不全的根因）。所以先认命令名：
+    命中白名单的按"字面反斜杠"补成 \\\\，其余仍按 JSON 转义原样交给解析器。
+    """
     out = []
     i = 0
     n = len(s)
@@ -47,6 +53,10 @@ def _fix_escapes(s: str) -> str:
         ch = s[i]
         if ch == "\\":
             nxt = s[i + 1] if i + 1 < n else ""
+            if nxt and nxt in _ESC_OK and _is_latex_seq(s, i, nxt):
+                out.append("\\\\")
+                i += 1
+                continue
             if nxt and nxt in _ESC_OK:
                 out.append(ch)
                 out.append(nxt)
@@ -58,6 +68,39 @@ def _fix_escapes(s: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+def _is_latex_seq(s: str, i: int, letter: str) -> bool:
+    """s[i] 是反斜杠、s[i+1]==letter：这段是不是被写漏一层转义的 LaTeX 命令？"""
+    if letter not in "bnrtf":
+        return False
+    j = i + 2
+    k = j
+    while k < len(s) and (s[k].isascii() and s[k].isalpha()):
+        k += 1
+    tail = s[i + 1:k]                     # 含首字母，如 "frac" / "times"
+    if not tail[1:]:
+        return False
+    if letter == "n" and len(tail) < 3:   # \n 换行太常见，\neq 起才动手
+        return False
+    if _is_indent_pos(s, i):
+        return False
+    return _latex_cmd(tail)
+
+
+def _latex_cmd(name: str) -> bool:
+    try:
+        from backend.math_text import is_latex_command
+        return is_latex_command(name)
+    except Exception:                     # 兜底：白名单模块不可用时宁可不改
+        return False
+
+
+def _is_indent_pos(s: str, i: int) -> bool:
+    j = i - 1
+    while j >= 0 and s[j] in " \t":
+        j -= 1
+    return j < 0 or s[j] in "\n\r"
 
 
 def _drop_trailing_commas(s: str) -> str:
