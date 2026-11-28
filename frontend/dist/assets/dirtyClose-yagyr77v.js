@@ -1,0 +1,1 @@
+import{wn as e}from"./index-CbCgs_G6.js";function t(t,n,r){if(!t){r();return}e.confirm({title:n(`dirtyCloseTitle`),content:n(`dirtyCloseContent`),okText:n(`dirtyCloseOk`),cancelText:n(`dirtyCloseStay`),okButtonProps:{danger:!0},onOk:r})}export{t};
