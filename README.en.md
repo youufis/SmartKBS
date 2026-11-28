@@ -35,40 +35,15 @@
 
 ---
 
-> 📌 **Highlights of V9.3.0** (outline)
+> 📌 **Highlights of V9.3.0** (outline · grouped by feature)
 >
-> - 📚 **Local library**: standalone knowledge base (upload / folders / trash; keyword + vector hybrid retrieval)
-> - 🔌 **Embedding channel**: cloud or local, cloud by default; dimension checks and switch hints
-> - 🔗 **AI chain**: fixed as cloud KB → local library → LLM, one retrieval funnel for every feature
-> - 🔀 **Decoupled tiers**: the AI tier only picks the generation engine; knowledge-base retrieval works independently
-> - 🧭 **Visible wiring**: teacher pages show the active model and knowledge-base path
-> - 🧠 **Learning companion**: multi-turn context fixed; long-term memory settles as you chat
-> - 🎓 **Teaching assistant**: teaching snapshot injected automatically — class questions answered with real data
-> - 📖 **Citations**: knowledge-base sources visible in companion / assistant answers
-> - 🛡 **Care**: sensitive signals comforted immediately and surfaced to administrators
-> - 💌 **Notifications**: delivered at login, personalised copy, milestone & weak-point reminders, auto-archived
-> - 🧾 **Question authoring**: structured output imported into the bank in one click
-> - 📐 **Figures**: one quality gate for every image request; function / statistic / geometry charts rendered deterministically
-> - ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
-> - 🧮 **Grading**: unified batch-grading / fallback / review rules for subjective questions across exams, practice and quizzes; audit trail, spot-check re-grading, per-point rubrics
-> - ✅ **Publishing**: pre-publish checklist (paper audit, time-window blocking, audience estimate) plus zero-attempt unpublish
-> - 📤 **Export**: unified Chinese type labels with no question dropped; answer sheets cover every subjective type
-> - 🎛 **Composing**: two compose cards merged into one with a rule / AI engine switch
-> - 📊 **Loop**: clickable pending-grading badge, unified to-do counts, manual quiz re-grading
-> - 🔧 **Settings**: new Subjective-Question Grading section (spot-check rate, engine throttling; grading always uses the current chat model)
-> - 🧰 **Settings page**: a blocked save now names the offending field and scrolls to it; secret inputs resist browser autofill
-> - 🩹 **Chain**: with the local library in charge, async AI calls retrieve first too — same behaviour as the sync / streaming paths
-> - 🧹 **Backups**: read-only legacy assets no longer block backup deletion; neither backup nor restore propagates the read-only flag
-> - 🧪 **Quiz answering**: draft restore now matches the screen; a confirmation step guards against submitting blanks
-> - 📋 **Rosters & reminders**: quiz/practice rosters, participation rates and "remind pending" now follow the teacher's assigned classes
-> - ✏️ **Quiz building**: edit questions before any answers arrive, pick questions from the bank, drop unwanted AI-generated ones
-> - 🔒 **Grading guard**: quizzes with submissions lock their questions; option letters are unified and legacy answers still grade correctly
-> - 🖼 **Figures**: a readable placeholder replaces the broken image when a file is gone; regeneration supported
-> - 📜 **Licence**: LICENSE now carries a bilingual (ZH/EN) copyright notice — the English text is a convenience translation
-> - ⚔️ **Quest · gameplay**: three-lives mode (wrong or timed-out answers cost a life; finishing every question wins); lives and progress dots stay on screen, explicit quit added
-> - 🗂 **Quest · wrong-answer book**: quest-domain collection — missed questions are archived automatically, reviewed with paging, removed when answered right; never mixed with the course wrong-book
-> - 🚦 **Quest · fairness**: replay-proof grading, server-side clock first, dedicated points pool capped at 3 scoring runs/day, badges counted only on full completion
-> - 🎛 **Quest · ops**: time limit / question count / lives now configurable, stale runs auto-closed, entry moved under Knowledge Exploration
+> - 📚 **Knowledge base & AI chain**: new standalone local library (upload / folders / trash; keyword + vector hybrid retrieval with citations); one fixed chain for every feature — cloud KB → local library → LLM, identical across sync / streaming / async; tiers decoupled (the AI tier only picks the generation engine, a local model still uses the cloud KB); embedding channel cloud or local; unified status chips on teacher pages
+> - 🧠 **Companion, assistant & chat UX**: multi-turn context fixed, long-term memory settles as you chat; teaching snapshot injected automatically; per-message copy / regenerate, mobile sidebar drawer, multi-theme support
+> - 🛡 **Care & notifications**: sensitive signals comforted immediately and surfaced to administrators; notifications delivered at login, personalised copy, milestone & weak-point reminders, auto-archived
+> - 🧾 **Authoring, composing & figures**: structured output imported into the bank in one click; compose cards merged with a rule / AI engine switch; one quality gate for images with deterministic charts and readable placeholders you can regenerate
+> - 🧮 **Grading & exam loop**: unified batch grading / fallback / review for subjective questions with audit trail, spot-check re-grading and rubrics; pre-publish checklist plus zero-attempt unpublish; export labels unified with complete answer sheets; building, answering, grading guards, rosters and to-dos aligned to teaching scope
+> - ⚔️ **Knowledge quest**: three lives with finish-to-win plus a quest-domain wrong-answer book; replay-proof grading, server-side clock, dedicated points pool capped at 3 runs/day, badges count completions only (counters recalculated); time limit / question count / lives configurable
+> - 🔧 **Settings, backups & licence**: new Subjective-Question Grading section (grading always uses the chat model); blocked saves name and scroll to the field, secret inputs resist autofill; read-only assets no longer block backups; bilingual ZH/EN licence notice
 >
 > - ⚠️ **Breaking changes**: the AI chain is now fixed as cloud KB → local library → LLM
 >
@@ -1280,38 +1255,51 @@ Current version **9.3.0**. Only changes a reader can notice are listed; per-comm
 
 ### v9.3.0
 
-- 📚 **Local library**: standalone knowledge-base module (upload / folders / 30-day trash; keyword + vector hybrid retrieval with source citations)
-- 🔌 **Embedding channel**: cloud or local, cloud by default; dimension checks, switch hints, optional dual index
-- 🔗 **AI chain**: fixed as cloud KB → local library → LLM; question authoring, lesson prep and whiteboards share one retrieval funnel
+**📚 Knowledge base & AI chain**
+
+- 📚 **Local library (new module)**: standalone knowledge base — upload / folders / trash; keyword + vector hybrid retrieval with source citations; storage and quota kept separate from the file / resource centres
+- 🔌 **Embedding channel**: cloud or local (cloud by default); dimension checks, switch hints, optional dual index
+- 🔗 **One chain**: fixed as cloud KB → local library → LLM; authoring, lesson prep, whiteboards and every other feature share the same retrieval funnel, with async calls matching sync / streaming
 - 🔀 **Decoupled tiers**: the AI tier no longer bypasses retrieval, so a local model still uses the cloud and local knowledge bases
-- 🧭 **Visible wiring**: unified status chips on teacher pages show the active model name and knowledge-base path (including degradation reasons)
+- 🧭 **Visible wiring & citations**: unified status chips on teacher pages show the active model, path and degradation reason; KB sources shown in companion / assistant answers
+
+**🧠 Companion, assistant & chat UX**
+
 - 🧠 **Learning companion**: multi-turn context fixed; long-term memory (preferences / goals / difficulties) captured and injected
-- 🎓 **Teaching assistant**: teaching snapshot injected automatically (scope, recent exams, pending grading, class weak points)
-- 📖 **Citations**: knowledge-base sources shown in companion / assistant answers
+- 🎓 **Teaching assistant**: teaching snapshot injected automatically (scope, recent exams, pending grading, class weak points), class questions answered with real data
+- ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
+
+**🛡 Care & notifications**
+
 - 🛡 **Care**: sensitive signals comforted immediately (real help channels), administrators notified
 - 💌 **Notifications**: delivered at login, personalised copy, milestone / weak-point reminders, auto-archived
+
+**🧾 Authoring, composing & figures**
+
 - 🧾 **Question authoring**: structured output imported into the bank in one click (types and answers normalised)
-- 📐 **Figures**: one quality gate for every image request; deterministic function / statistic / geometry charts with formulas inside the image
-- ✨ **Interaction**: per-message copy / regenerate, mobile sidebar drawer, multi-theme support
-- 🧮 **Grading**: subjective-question batch grading, fallback and review now share one rule set across exams / practice / quizzes; grading audit trail, optional spot-check re-grading, per-point rubrics, with grading always on the current chat model
-- ✅ **Publishing**: pre-publish checklist — paper audit, time-window blocking, audience estimate, Word preview; zero-attempt exams can be unpublished to draft
-- 📤 **Export**: section labels unified in Chinese with dynamic numbering; no question type can silently drop; answer sheets now include fill / essay / subjective areas
 - 🎛 **Composing**: the two compose cards merged into one with a rule / AI engine switch; knowledge points multi-select with subject linkage
-- 📊 **Loop**: pending-grading badge clicks straight to the result sheet, practice / quiz counts join the daily to-do, teachers can manually re-grade quiz answers
-- 🔧 **Settings**: new Subjective-Question Grading section holds the spot-check rate and engine throttling
-- 🧰 **Settings page**: blocked saves now report which required field is missing and jump to it; secret inputs are protected from browser autofill
-- 🩹 **Chain**: when the local library takes over (cloud retrieval off), async AI calls also retrieve before generating, matching the sync / streaming paths
-- 🧹 **Backups**: read-only legacy assets no longer block backup deletion; backup and restore both stop propagating the read-only flag, and a failed delete now names the file and the next step
-- 🧪 **Quiz answering**: draft restore matches what you see; unanswered confirmation prevents silent blank submissions
-- 📋 **Rosters & reminders**: quiz / practice rosters, participation rates and "remind pending" resolved against the teacher's assigned classes
-- ✏️ **Quiz building**: questions editable while no answers exist, pick-from-bank supported, individual AI questions can be dropped
-- 🔒 **Grading guard**: quizzes with submissions refuse question edits/deletion; option letters unified, legacy answers still grade
-- 🖼 **Figures**: readable placeholder when an image file is missing, with regeneration support
+- 📐 **Figures**: one quality gate for every image request; deterministic function / statistic / geometry charts with in-image formulas; a readable placeholder replaces broken images, with regeneration support
+
+**🧮 Grading & exam loop**
+
+- 🧮 **Grading**: subjective-question batch grading, fallback and review share one rule set across exams / practice / quizzes; audit trail, optional spot-check re-grading, per-point rubrics; grading always on the current chat model
+- ✅ **Publishing**: pre-publish checklist — paper audit, time-window blocking, audience estimate, Word preview; zero-attempt exams can be unpublished to draft
+- ✏️ **Building & answering**: questions editable while no answers exist, pick-from-bank supported, unwanted AI questions droppable; draft restore matches the screen and a confirmation guards against blank submissions; quizzes with submissions lock their questions, option letters unified, legacy answers still grade
+- 📤 **Export**: section labels unified in Chinese with dynamic numbering — no question type can silently drop; answer sheets now include fill / essay / subjective areas
+- 📊 **To-dos & rosters**: pending-grading badge clicks straight to the result sheet, practice / quiz counts join the daily to-do, teachers can manually re-grade quiz answers; rosters, participation rates and “remind pending” follow the teacher’s assigned classes
+
+**⚔️ Knowledge quest**
+
+- ⚔️ **Gameplay**: three-lives mode — wrong or timed-out answers cost a life, finishing every question wins; lives and progress dots stay on screen, explicit quit, resilient sync
+- 🗂 **Wrong-answer book**: quest-domain collection — missed questions archived automatically, paged review, removed when answered right; never mixed with the course wrong-book
+- 🚦 **Fairness**: replay-proof grading, server-side clock first, time-boxed power-ups with persisted option removal; dedicated points pool capped at 3 scoring runs/day; badges counted only on completion (existing counters recalculated)
+- 🎛 **Ops & polish**: time limit / question count / lives exposed in System Settings, stale runs auto-closed, entry moved under Knowledge Exploration; power-ups tucked away on mobile, formula rendering unified across quest pages
+
+**🔧 Settings, backups & licence**
+
+- 🔧 **Settings**: new Subjective-Question Grading section (spot-check rate, engine throttling); blocked saves now name the offending field and scroll to it; secret inputs are protected from browser autofill
+- 🧹 **Backups**: read-only legacy assets no longer block backup deletion; backup and restore stop propagating the read-only flag, and a failed delete names the blocker and the next step
 - 📜 **Licence**: bilingual (ZH/EN) copyright notice added to LICENSE; the Chinese text prevails
-- ⚔️ **Quest · gameplay**: three-lives mode — wrong or timed-out answers cost a life, finishing every question wins; lives and progress dots on screen, explicit quit, resilient sync
-- 🗂 **Quest · wrong-answer book**: quest-domain collection with paged review and answer-right removal, kept separate from the course wrong-book
-- 🚦 **Quest · fairness**: replay-proof grading, server-side clock, time-boxed power-ups with persisted option removal, dedicated points pool capped at 3 scoring runs/day, completion-only badge counting (existing counters recalculated)
-- 🎛 **Quest · ops**: time limit / question count / lives exposed in System Settings, stale runs auto-closed, entry moved under Knowledge Exploration, formula rendering unified across quest pages
 
 ### v7.x – v9.2.0
 
